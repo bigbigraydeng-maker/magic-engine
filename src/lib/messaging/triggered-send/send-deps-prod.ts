@@ -13,11 +13,11 @@ import { revokeAsSystem } from './authorization-core'
 import { createAuthorizationDeps } from './authorization-deps-prod'
 import { loadOpenAuthorizations } from './authorization-store'
 import { cancelSendTouchpoint, writeSendTouchpoint } from './send-touchpoint'
-import { loadSendContact } from './send-contact'
+import { findContactIdsByAddresses, loadSendContact } from './send-contact'
 import { createSendLedger, createSendLocks, replayStoredReceipts } from './send-store'
 import type { SendDeps } from './send-types'
 import { createShadowGatePorts } from './shadow-ports-prod'
-import { checkRequiredMailboxes, loadLeadContacts } from './shadow-reads-prod'
+import { checkRequiredMailboxes } from './shadow-reads-prod'
 
 const CANCELLED_SUMMARY = 'ME 自动发信没有发出：欢迎信'
 
@@ -48,7 +48,7 @@ export function createProdSendDeps(): SendDeps {
         return 'failed'
       }
     },
-    loadContacts: (args) => loadLeadContacts(db, args),
+    findContactIdsByAddresses: (clientId, addresses) => findContactIdsByAddresses(db, clientId, addresses),
     loadContact: (args) => loadSendContact(db, args),
     checkMailboxes: (clientId, required) => checkRequiredMailboxes(store.listActiveMailboxes, clientId, required),
     createPorts: ({ clientId, rule, now }) =>

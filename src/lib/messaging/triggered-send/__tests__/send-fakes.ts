@@ -25,10 +25,13 @@ export const LIVE_ENV: Record<string, string> = {
   RESEND_API_KEY_CTS: `re_${'k'.repeat(30)}`,
   UNSUBSCRIBE_SIGNING_SECRET: 's'.repeat(40),
   APP_URL: 'https://app.example.com',
-  TRIGGERED_SEND_TRIAL_DOMAINS: 'example.com',
+  TRIGGERED_SEND_TRIAL_DOMAINS: 'example.org,example.com',
 }
 
-export function authorizedRecord(rule: SendableRule = sendableRule(), t: EmailTemplateVersion = template(), over: Partial<AuthorizationRecord> = {}): AuthorizationRecord {
+/** This version sends trials only: the default authorization is one, to the guest's own (internal) address. */
+export const TRIAL_RULE: SendableRule = sendableRule({ recipient_allowlist: ['lead@example.org'] })
+
+export function authorizedRecord(rule: SendableRule = TRIAL_RULE, t: EmailTemplateVersion = template(), over: Partial<AuthorizationRecord> = {}): AuthorizationRecord {
   return {
     id: AUTH_ID,
     requestId: 'r0000000-0000-4000-8000-000000000001',
@@ -77,6 +80,9 @@ export class FakeLedger {
   fail: { claim?: boolean; markSent?: boolean; decision?: boolean } = {}
   decisions: Array<{ contactId: string; status: string; reasonCode: string }> = []
   notes: Array<{ id: string; reasonCode: string }> = []
+  unknowns: string[] = []
+  /** Make the next compare-and-set write answer "changed" this many times while the row stays pending (a note moved it). */
+  changedTimes = 0
   private n = 0
 
   seed(over: Partial<LifetimeRow>): LifetimeRow {
@@ -111,12 +117,22 @@ export class FakeLedger {
       claim: async (input) => this.claim(input),
       markSent: async (row, input) => this.cas(row, () => ({ status: 'sent', providerMessageId: input.messageId }), this.fail.markSent),
       markFailed: async (row, input) => this.cas(row, () => ({ status: 'failed', reasonCode: input.reasonCode })),
+      markUnknown: async (row) => {
+        const w = await this.cas(row, () => ({}))
+        if (w.ok && w.result === 'updated') this.unknowns.push(row.id)
+        return w
+      },
     }
   }
 
   private cas(row: LifetimeRow, patch: () => Partial<LifetimeRow>, fails = false) {
     if (fails) return Promise.resolve({ ok: false as const, error: 'down' })
     const current = this.rows.get(row.id)
+    if (current !== undefined && this.changedTimes > 0) {
+      this.changedTimes -= 1
+      current.updatedAt = stamp()
+      return Promise.resolve({ ok: true as const, result: 'changed' as const })
+    }
     if (current === undefined || current.status !== 'pending' || current.updatedAt !== row.updatedAt) return Promise.resolve({ ok: true as const, result: 'changed' as const })
     Object.assign(current, patch(), { updatedAt: stamp() })
     return Promise.resolve({ ok: true as const, result: 'updated' as const })
@@ -159,6 +175,10 @@ export interface SendWorld {
     ports(over: Partial<ShadowGatePorts>): void
   }
   exemptSeen: Array<string | undefined>
+  /** Other contacts the address lookup also finds (e.g. a real guest with an internal identity). */
+  extraContacts: SendContact[]
+  lookups: string[][]
+  contactReads: string[]
 }
 
 export function sendWorld(): SendWorld {
@@ -181,6 +201,9 @@ export function sendWorld(): SendWorld {
     revokes: [],
     env,
     exemptSeen: [],
+    extraContacts: [],
+    lookups: [],
+    contactReads: [],
     set: {
       record: (r) => { record = r },
       template: (t) => { tmpl = t },
@@ -190,15 +213,14 @@ export function sendWorld(): SendWorld {
     },
   }
   let msg = 0
-  let evidenceCalls = 0
-  const ports = (): ShadowGatePorts => ({
+  let portsMade = 0
+  const ports = (inside: boolean): ShadowGatePorts => ({
     consent: async () => ({ ok: true, bases: ['form_disclosure_attested'], sourceRef: 'lead-1' }),
     dnc: async () => ({ ok: true, blocked: false }),
     member: async () => ({ ok: true, state: 'active', tags: [] }),
     evidence: async (_c, opts) => {
       w.exemptSeen.push(opts?.exemptSendId)
-      evidenceCalls += 1
-      return evidenceCalls > 1 && evidenceInside !== null ? evidenceInside : evidenceOutside
+      return inside && evidenceInside !== null ? evidenceInside : evidenceOutside
     },
     unsubscribed: async (): Promise<UnsubscribeRead> => ({ ok: true, unsubscribed: false }),
     addressHistory: async (): Promise<AddressHistoryRead> => ({ ok: true, complained: false, hardBounced: false }),
@@ -213,13 +235,18 @@ export function sendWorld(): SendWorld {
       w.revokes.push(code)
       return 'revoked'
     },
-    loadContacts: async () => ({ ok: true, contacts: contact === null ? [] : [contact] }),
-    loadContact: async () => ({ ok: true, contact }),
-    checkMailboxes: async () => ({ ok: true }),
-    createPorts: () => {
-      evidenceCalls = 0
-      return ports()
+    findContactIdsByAddresses: async (_clientId, addresses) => {
+      w.lookups.push([...addresses])
+      return { ok: true, contactIds: contact === null ? [] : [contact.contactId, ...w.extraContacts.map((x) => x.contactId)] }
     },
+    loadContact: async (a) => {
+      w.contactReads.push(a.contactId)
+      const extra = w.extraContacts.find((x) => x.contactId === a.contactId)
+      return { ok: true, contact: extra ?? (contact !== null && a.contactId === contact.contactId ? contact : null) }
+    },
+    checkMailboxes: async () => ({ ok: true }),
+    // The first ports of a step are the gates' ones; any later ones are the fresh ports read inside the locks.
+    createPorts: () => ports(++portsMade > 1),
     createLocks: () => ({
       take: async () => {
         if (w.locks.throws) return { ok: false, error: 'lock: Error' }

@@ -290,15 +290,33 @@ export async function runSweepOrder(
  */
 export function sweepFinishOpts(receipt: SweepReceipt, send: SendReceipt | null = null): CronRunFinishOpts {
   const isNormal = receipt.status === 'swept' || receipt.status === 'no_open_proposal'
+  // The top-level `no_send` / `provider_impact` describe the whole run: false / the send's impact once a letter may have gone out.
+  const impact = send?.provider_impact ?? 'NONE'
   const opts: CronRunFinishOpts = {
     processed: receipt.to_decide,
     // Contacts that are stored now: decided by this run, or already holding a row from an earlier attempt.
     completed: receipt.decided + receipt.already_decided,
     failed: receipt.deferred,
-    summary: { ...receipt, send },
+    summary: { ...receipt, no_send: impact === 'NONE', provider_impact: impact, send },
   }
   if (!isNormal) opts.error = receipt.error ?? `sweep status: ${receipt.status}`
+  const problem = sendProblem(send)
+  if (problem !== null) opts.error = opts.error === undefined ? problem : `${opts.error}; ${problem}`
   return opts
+}
+
+/** Send stops that mean "switched on, but something is wrong" — not "nothing to do" (the run log must show them). */
+const SEND_PROBLEMS: ReadonlySet<string> = new Set([
+  'read_failed', 'template_unreadable', 'trial_domains_not_configured', 'trial_recipient_not_internal', 'no_account_key',
+  'no_unsubscribe_secret', 'no_app_url', 'mailbox_unreadable', 'authorization_self_revoked', 'formal_sending_not_enabled',
+])
+
+function sendProblem(send: SendReceipt | null): string | null {
+  if (send === null) return null
+  if (SEND_PROBLEMS.has(send.status)) return `send: ${send.status}${send.error === null ? '' : ` (${send.error})`}`
+  // The day's cap is the rule working as meant; any other stop is a problem.
+  if (send.stopped !== null && !send.stopped.startsWith('blocked:cap_reached')) return `send stopped: ${send.stopped}`
+  return null
 }
 
 /** The onFailure of both functions: close exactly this run's run-log row. Never throws. */

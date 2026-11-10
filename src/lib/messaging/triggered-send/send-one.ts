@@ -30,6 +30,12 @@ export const TERMINAL_STATUSES: ReadonlySet<string> = new Set([
 
 const TIMELINE_SUMMARY = 'ME 自动发出：欢迎信'
 
+/** The judgements on the e-mail evidence: on a takeover the cap is checked separately (exempting the letter itself). */
+const EVIDENCE_REASONS: ReadonlySet<string> = new Set(['sales_email_exists', 'frequency_full'])
+
+/** How often a compare-and-set write is tried again on a row that is still pending (a note or a lease moved it on). */
+const CAS_TRIES = 3
+
 interface Ctx {
   plan: SendPlan
   deps: SendDeps
@@ -97,11 +103,14 @@ async function sendFresh(c: Ctx): Promise<SendOneResult> {
   const email = c.contact.primaryEmail
   if (email === null) return decide(c, 'skipped', 'bad_email', decision)
   const rendered = renderWelcomeLetter(c.armed.template, c.contact.displayName, c.plan.sweepDay)
-  if (!rendered.ok) return decide(c, rendered.reason === 'missing_first_name' ? 'skipped' : 'blocked', rendered.reason, decision)
+  // A missing name can still be filled in by a person: the guest waits (and is skipped as stale once too old).
+  if (!rendered.ok) return decide(c, 'blocked', rendered.reason, decision)
   const problem = precheck(c, rendered.letter, email)
   if (problem !== null) return problem.stop ? result('stopped', problem.code, null, { stopRun: true }) : decide(c, 'blocked', problem.code, decision)
   return withLocks(c, email, null, async () => {
-    const evidence = await ports.evidence(c.contact)
+    // Read again with FRESH ports: the first ones keep the mailbox pages and batch lists they already fetched.
+    const inside = c.deps.createPorts({ clientId: c.plan.clientId, rule: c.armed.rule, now: c.deps.now() })
+    const evidence = await inside.evidence(c.contact)
     if (!evidence.ok) return decide(c, 'blocked', 'frequency_unverifiable', decision)
     const late = evidenceReason(c.contact, c.armed.rule, evidence.items)
     if (late !== null) return decide(c, 'skipped', late, decision)
@@ -154,8 +163,13 @@ async function takeOver(c: Ctx, row: LifetimeRow): Promise<SendOneResult> {
   if (!rendered.ok || rendered.letter.renderedSha256 !== row.renderedSha256) return result('in_flight', 'content_changed', row.id)
   const idempotencyKey = row.idempotencyKey
   return withLocks(c, email, row, async () => {
-    const ports = c.deps.createPorts({ clientId: c.plan.clientId, rule: c.armed.rule, now: c.now })
-    // Only the cap is checked again on a takeover; whether a person wrote first was decided at the claim (§4.2).
+    const ports = c.deps.createPorts({ clientId: c.plan.clientId, rule: c.armed.rule, now: c.deps.now() })
+    // The first attempt may never have reached the provider, so a replay can be the first letter: the guest's own state
+    // (do not contact, unsubscribed, complained, bounced, suppressed, a skipped tag) is read again. Only "a person wrote
+    // first" is not judged again (§4.2); the cap is, below, without counting this letter itself.
+    const person = await decideShadow({ contact: c.contact, rule: c.armed.rule, ports, mode: 'send' })
+    if (person.kind === 'defer') return noted(c, row, person.reasonCode)
+    if (person.status === 'skipped' && person.reasonCode !== null && !EVIDENCE_REASONS.has(person.reasonCode)) return noted(c, row, person.reasonCode)
     const evidence = await ports.evidence(c.contact, { exemptSendId: row.id })
     if (!evidence.ok) return noted(c, row, 'frequency_unverifiable')
     if (evidence.items.length >= c.armed.rule.frequency_cap.max) return noted(c, row, 'frequency_full')
@@ -204,8 +218,12 @@ async function afterClaim(c: Ctx, claim: ClaimRead, letter: RenderedLetter, emai
     case 'cap_reached':
       // The day's cap is shared by every guest: nobody else can be claimed today either.
       return { ...(await decide(c, 'blocked', 'cap_reached', null)), stopRun: true }
+    case 'rule_invalid':
+      // The database cannot read the rule (its time zone): like the judgement's RULE_INVALID, the authorization goes.
+      await c.deps.revokeAsSystem(c.armed.record, 'RULE_INVALID')
+      return result('stopped', claim.outcome, id, { stopRun: true })
     default:
-      // auth_inactive, rule_invalid, template_mismatch: the authorization no longer holds (checked inside the lock).
+      // auth_inactive, template_mismatch: the authorization no longer holds (checked inside the lock).
       return result('stopped', claim.outcome, id, { stopRun: true })
   }
 }
@@ -224,6 +242,8 @@ async function deliver(c: Ctx, sendId: string, idempotencyKey: string, letter: R
   const read = await c.deps.ledger.rowById(c.plan.clientId, sendId)
   if (!read.ok || read.row === null) return result('read_failed', 'ledger_unreadable', sendId)
   const row = read.row
+  // A takeover answered on a row claimed for another address (the guest's address changed in between): never send.
+  if (row.toAddressSha256 !== addressSha256(email)) return result('in_flight', 'address_changed', sendId)
   // The link's issue time is the row's first attempt (written by the claim, never changed): every replay has the same link.
   const firstAttemptAt = row.firstAttemptAt
   if (firstAttemptAt === null) return result('read_failed', 'ledger_unreadable', sendId)
@@ -247,27 +267,49 @@ async function recordOutcome(c: Ctx, row: LifetimeRow, outcome: ResendSendOutcom
   if (outcome.kind === 'not_attempted') return notAttempted(c, row, outcome.code, attempt)
   if (attempt === 'first' && outcome.kind === 'rejected') return failed(c, row, 'provider_rejected', 'rejected', false)
   if (attempt === 'first' && outcome.kind === 'account_error') return failed(c, row, 'provider_account_error', 'account_error', true)
-  // Anything else (and every refusal of a replay) may have gone out: keep it pending, never send a second letter.
-  return result('unknown_outcome', outcome.code, row.id, { providerImpact: 'PROVIDER_UNKNOWN' })
+  // Anything else (and every refusal of a replay) may have gone out: keep it pending, never send a second letter. The
+  // row says so, and the run stops: when the provider is in trouble, every further guest would end up the same way.
+  const marked = await onPending(c, row, (r) => c.deps.ledger.markUnknown(r))
+  return result('unknown_outcome', marked.kind === 'written' ? outcome.code : `${outcome.code}:not_marked`, row.id, { providerImpact: 'PROVIDER_UNKNOWN', stopRun: true })
+}
+
+type OnPending = { kind: 'written' } | { kind: 'moved'; row: LifetimeRow | null } | { kind: 'error' }
+
+/**
+ * A compare-and-set write on a row that should still be pending. "Changed" is read again: still pending (a note or a
+ * takeover touched it) = try again on the fresh row; anything else = it moved on (a receipt), and the caller decides.
+ */
+async function onPending(c: Ctx, row: LifetimeRow, write: (r: LifetimeRow) => Promise<{ ok: true; result: 'updated' | 'changed' } | { ok: false; error: string }>): Promise<OnPending> {
+  let current = row
+  for (let i = 0; i < CAS_TRIES; i += 1) {
+    const w = await write(current)
+    if (!w.ok) return { kind: 'error' }
+    if (w.result === 'updated') return { kind: 'written' }
+    const again = await c.deps.ledger.rowById(c.plan.clientId, current.id)
+    if (!again.ok) return { kind: 'error' }
+    if (again.row === null || again.row.status !== 'pending') return { kind: 'moved', row: again.row }
+    current = again.row
+  }
+  return { kind: 'error' }
 }
 
 async function recordSent(c: Ctx, row: LifetimeRow, messageId: string): Promise<SendOneResult> {
   const accepted = { providerImpact: 'PROVIDER_ACCEPTED' as const }
-  const written = await c.deps.ledger.markSent(row, { messageId, account: c.armed.record.account, sentAt: c.now.toISOString() })
-  if (!written.ok) return result('write_failed', 'mark_sent_failed', row.id, accepted)
-  if (written.result === 'changed') {
-    // A receipt was faster and already bound the row: fine if it carries the same message id (§16.10).
-    const again = await c.deps.ledger.rowById(c.plan.clientId, row.id)
-    if (!again.ok || again.row === null) return result('read_failed', 'ledger_unreadable', row.id, accepted)
-    if (again.row.providerMessageId !== messageId) return result('conflict', 'message_id_conflict', row.id, accepted)
-  }
+  const sentAt = c.deps.now().toISOString()
+  const written = await onPending(c, row, (r) => c.deps.ledger.markSent(r, { messageId, account: c.armed.record.account, sentAt }))
+  if (written.kind === 'error') return result('write_failed', 'mark_sent_failed', row.id, accepted)
+  // A receipt was faster and already moved the row on: fine if it carries the same message id (§16.10).
+  if (written.kind === 'moved' && written.row?.providerMessageId !== messageId) return result('conflict', 'message_id_conflict', row.id, accepted)
   const replayed = await c.deps.replayReceipts(messageId)
   return result('sent', replayed.error === null ? null : 'receipt_replay_failed', row.id, accepted)
 }
 
 async function failed(c: Ctx, row: LifetimeRow, reasonCode: string, outcome: 'rejected' | 'account_error' | 'not_attempted', stopRun: boolean): Promise<SendOneResult> {
-  const written = await c.deps.ledger.markFailed(row, { reasonCode, account: c.armed.record.account })
-  if (!written.ok) return result('write_failed', `failed:${reasonCode}`, row.id, { stopRun })
+  const written = await onPending(c, row, (r) => c.deps.ledger.markFailed(r, { reasonCode, account: c.armed.record.account }))
+  if (written.kind === 'error') return result('write_failed', `failed:${reasonCode}`, row.id, { stopRun })
+  // The row moved on before "failed" could be written (a receipt): the letter's state is not ours to call "not sent",
+  // so the timeline record stays as it is.
+  if (written.kind === 'moved') return result('conflict', `${reasonCode}:row_moved`, row.id, { stopRun })
   // Not sent for certain: the timeline record no longer counts toward "7 days, 2 e-mails" (§16.8 ②⑤).
   const cancelled = await c.deps.cancelTouchpoint(c.plan.clientId, row.id)
   return result(outcome, cancelled.ok ? reasonCode : `${reasonCode}:timeline_not_cancelled`, row.id, { stopRun })

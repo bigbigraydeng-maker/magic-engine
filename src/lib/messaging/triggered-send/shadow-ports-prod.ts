@@ -111,7 +111,8 @@ function codeOf(error: { code?: unknown }): string {
 export async function readAddressHistory(db: SupabaseClient, clientId: string, contact: ShadowContact): Promise<AddressHistoryRead> {
   if (!UUID_RE.test(contact.contactId)) return { ok: false, error: 'address history: contact id is not a uuid' }
   const hashes = [...new Set(contact.addresses.map(addressSha256))]
-  const live = () => db.from('triggered_sends').select('id').eq('client_id', clientId).eq('dedupe_scope', 'lifetime')
+  // Every non-rehearsal row, the same scope the frequency source counts (`neq shadow`, 子牙 P2-10).
+  const live = () => db.from('triggered_sends').select('id').eq('client_id', clientId).neq('dedupe_scope', 'shadow')
   const byGuest = hashes.length > 0 ? `contact_id.eq.${contact.contactId},to_address_sha256.in.(${hashes.join(',')})` : `contact_id.eq.${contact.contactId}`
   try {
     const [complaint, bounce] = await Promise.all([

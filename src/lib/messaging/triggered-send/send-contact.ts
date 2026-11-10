@@ -29,3 +29,23 @@ export async function loadSendContact(db: SupabaseClient, args: { clientId: stri
   if (error) return { ok: false, error: `contact name: ${codeOf(error)}` }
   return { ok: true, contact: { ...contact, displayName: nameOf(data) } }
 }
+
+/**
+ * The contacts of this client that carry one of these addresses: as a registered e-mail identity or as their primary
+ * e-mail (an address can be registered on one contact only, but another may still have it as its primary e-mail).
+ * Used for a trial's allow-list only (a handful of internal addresses). Exact, lower-case match.
+ */
+export async function findContactIdsByAddresses(db: SupabaseClient, clientId: string, addresses: readonly string[]): Promise<{ ok: true; contactIds: string[] } | { ok: false; error: string }> {
+  const wanted = [...new Set(addresses.map((a) => a.trim().toLowerCase()).filter((a) => a.length > 0))]
+  if (wanted.length === 0) return { ok: true, contactIds: [] }
+  const [identities, primaries] = await Promise.all([
+    db.from('contact_identities').select('contact_id').eq('client_id', clientId).eq('kind', 'email').in('value', wanted).limit(50),
+    db.from('contacts').select('id').eq('client_id', clientId).in('primary_email', wanted).limit(50),
+  ])
+  if (identities.error) return { ok: false, error: `trial contacts: ${codeOf(identities.error)}` }
+  if (primaries.error) return { ok: false, error: `trial contacts: ${codeOf(primaries.error)}` }
+  const ids = new Set<string>()
+  for (const row of (identities.data as Array<{ contact_id: unknown }> | null) ?? []) if (typeof row.contact_id === 'string') ids.add(row.contact_id)
+  for (const row of (primaries.data as Array<{ id: unknown }> | null) ?? []) if (typeof row.id === 'string') ids.add(row.id)
+  return { ok: true, contactIds: [...ids].sort() }
+}

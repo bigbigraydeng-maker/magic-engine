@@ -42,7 +42,7 @@ describe('readAddressHistory — ME’s own ledger of complaints and permanent b
     expect(queries).toHaveLength(2)
     for (const q of queries) {
       expect(has(q, 'eq', 'client_id', CLIENT)).toBe(true)
-      expect(has(q, 'eq', 'dedupe_scope', 'lifetime')).toBe(true)
+      expect(has(q, 'neq', 'dedupe_scope', 'shadow')).toBe(true)
       expect(has(q, 'limit', 1)).toBe(true)
     }
     const bounce = queries.find((q) => has(q, 'eq', 'status', 'bounced'))

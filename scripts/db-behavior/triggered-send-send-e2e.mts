@@ -26,6 +26,11 @@ const { insertProposal, authorizeProposal, activateAuthorization, revokeAuthoriz
 const { ruleSha256 } = await load('lib/messaging/triggered-send/rule.ts')
 const { templateContentSha256 } = await load('lib/messaging/triggered-send/welcome-template.ts')
 const { getCurrentTemplate } = await load('lib/crm/email-templates/template-store.ts')
+const { readEmailUnsubscribed, recordEmailUnsubscribe } = await load('lib/crm/email-unsubscribe.ts')
+const { readAddressHistory } = await load('lib/messaging/triggered-send/shadow-ports-prod.ts')
+const { runSweepOrder, createProdSweepDeps } = await load('lib/inngest/functions/triggered-send-welcome-sweep.ts')
+const { prepareSweep, decideChunk, finalizeSweep } = await load('lib/messaging/triggered-send/shadow-sweep.ts')
+const { recordStale, finalizeSend } = await load('lib/messaging/triggered-send/send-sweep.ts')
 
 let passed = 0
 const failures: string[] = []
@@ -43,11 +48,12 @@ const ENV: Record<string, string> = {
   RESEND_API_KEY_CTS: `re_${'e2e'.repeat(10)}`,
   UNSUBSCRIBE_SIGNING_SECRET: 'e2e-unsubscribe-secret-0123456789abcdef',
   APP_URL: 'https://app.example.test',
+  TRIGGERED_SEND_TRIAL_DOMAINS: 'example.test',
 }
 const sent: Array<Record<string, any>> = []
 let answers: Array<Record<string, unknown>> = []
 
-const RULE = {
+const BASE_RULE = {
   gate_contract_version: 1,
   audience: { sources: ['meta_lead_form'], max_age_days: 3, min_age: 'previous_local_day' },
   schedule: { timezone: 'Pacific/Auckland' },
@@ -65,8 +71,12 @@ const RULE = {
   },
 }
 
-/** A fresh client with an active template and an authorized, armed welcome authorization. */
-async function newClient(dailyCap = 5): Promise<{ clientId: string; authId: string }> {
+/** This version sends trials only: every scenario's authorization is a trial to its own (internal) addresses. */
+const trialRule = (addresses: string[] | null) => ({ ...BASE_RULE, recipient_allowlist: addresses })
+
+/** A fresh client with an active template and an authorized, armed welcome authorization (a trial unless `null`). */
+async function newClient(addresses: string[] | null, dailyCap = 5, proposedHoursAgo = 0): Promise<{ clientId: string; authId: string }> {
+  const RULE = trialRule(addresses)
   const clientId = crypto.randomUUID()
   clients.push(clientId)
   ENV.TRIGGERED_SEND_CLIENTS = clients.join(',')
@@ -74,7 +84,15 @@ async function newClient(dailyCap = 5): Promise<{ clientId: string; authId: stri
   const t = await supabaseAdmin.from('crm_email_templates').insert({ client_id: clientId, template_key: 'auto-welcome', version: 1, name: 'Welcome', subject: 'Welcome, {{ first_name }}', body: 'Hi {{first_name}},\nThanks for your enquiry.', fact_source: 'none', pick_mode: 'none', pick_filter: {}, status: 'active', created_by: 'fde@example.test' })
   if (c.error || t.error) throw new Error(`seed client failed: ${c.error?.code ?? ''} ${t.error?.code ?? ''}`)
   const tmpl = await getCurrentTemplate(supabaseAdmin, clientId, 'auto-welcome')
-  const p = await insertProposal(supabaseAdmin, { requestId: crypto.randomUUID(), clientId, triggerKey: 'welcome', channel: 'email', account: 'cts', rule: RULE, ruleSha256: ruleSha256(RULE), templateVersion: 1, templateSha256: templateContentSha256(tmpl), dailyCap, proposedByEmail: 'pm@example.test' })
+  // The rehearsal only looks at leads after the proposal; a scenario that needs it proposes earlier (a plain insert, like a
+  // proposal that has been open for a while).
+  const p = proposedHoursAgo === 0
+    ? await insertProposal(supabaseAdmin, { requestId: crypto.randomUUID(), clientId, triggerKey: 'welcome', channel: 'email', account: 'cts', rule: RULE, ruleSha256: ruleSha256(RULE), templateVersion: 1, templateSha256: templateContentSha256(tmpl), dailyCap, proposedByEmail: 'pm@example.test' })
+    : await (async () => {
+      const id = crypto.randomUUID()
+      const ins = await supabaseAdmin.from('triggered_send_authorizations').insert({ id, request_id: crypto.randomUUID(), client_id: clientId, trigger_key: 'welcome', channel: 'email', account: 'cts', rule: RULE, rule_sha256: ruleSha256(RULE), template_version: 1, template_sha256: templateContentSha256(tmpl), daily_cap: dailyCap, proposed_by_email: 'pm@example.test', proposed_at: new Date(Date.now() - proposedHoursAgo * HOUR).toISOString() })
+      return ins.error ? { ok: false, code: ins.error.code } : { ok: true, id }
+    })()
   if (!p.ok) throw new Error(`proposal failed: ${p.code}`)
   const now = Date.now()
   const a = await authorizeProposal(supabaseAdmin, { id: p.id, byEmail: 'pm@example.test', byUserId: crypto.randomUUID(), liveFrom: new Date(now - 30 * HOUR).toISOString(), expiresAt: new Date(now + 30 * 24 * HOUR).toISOString() })
@@ -96,6 +114,18 @@ async function newGuest(clientId: string, email: string, name = 'Jane Lee', iden
   return id
 }
 
+/** No Mailchimp, no Graph (empty evidence, nothing suppressed); ME's own unsubscribes and ledger history are the REAL reads. */
+function ports(clientId: string) {
+  return {
+    consent: async () => ({ ok: true, bases: ['form_disclosure_attested'], sourceRef: 'e2e' }),
+    dnc: async () => ({ ok: true, blocked: false }),
+    member: async () => ({ ok: true, state: 'not_applicable', tags: [] }),
+    evidence: async () => ({ ok: true, items: [], legacy: { welcomed: false, batchSeen: true, campaignIds: [] } }),
+    unsubscribed: (c: { contactId: string; addresses: string[] }) => readEmailUnsubscribed(supabaseAdmin, clientId, { contactId: c.contactId, addresses: c.addresses }),
+    addressHistory: (c: Record<string, unknown>) => readAddressHistory(supabaseAdmin, clientId, c),
+  }
+}
+
 function deps() {
   let n = 0
   return {
@@ -108,15 +138,7 @@ function deps() {
       },
     },
     checkMailboxes: async () => ({ ok: true }),
-    // No Mailchimp, no Graph: the evidence is empty and every other read says "fine".
-    createPorts: () => ({
-      consent: async () => ({ ok: true, bases: ['form_disclosure_attested'], sourceRef: 'e2e' }),
-      dnc: async () => ({ ok: true, blocked: false }),
-      member: async () => ({ ok: true, state: 'not_applicable', tags: [] }),
-      evidence: async () => ({ ok: true, items: [], legacy: { welcomed: false, batchSeen: true, campaignIds: [] } }),
-      unsubscribed: async () => ({ ok: true, unsubscribed: false }),
-      addressHistory: async () => ({ ok: true, complained: false, hardBounced: false }),
-    }),
+    createPorts: ({ clientId }: { clientId: string }) => ports(clientId),
     revokeAsSystem: async (record: { id: string }, code: string) => {
       const r = await revokeAuthorization(supabaseAdmin, { id: record.id, by: `system:${code}`, reason: `e2e: ${code}` })
       return r.ok ? 'revoked' : 'failed'
@@ -138,7 +160,7 @@ async function planFor(clientId: string) {
 
 // ── S1. one guest, one letter ──
 {
-  const { clientId } = await newClient()
+  const { clientId } = await newClient(['guest1@example.test'])
   const guest = await newGuest(clientId, 'guest1@example.test')
   const plan = await planFor(clientId)
   check('S1a the plan holds the guest who came in yesterday', plan.contactIds.length === 1 && plan.contactIds[0] === guest, plan)
@@ -158,7 +180,7 @@ async function planFor(clientId: string) {
 
 // ── S2. an unclear answer, then the next run takes the letter over and replays the very same request ──
 {
-  const { clientId } = await newClient()
+  const { clientId } = await newClient(['guest2@example.test'])
   const guest = await newGuest(clientId, 'guest2@example.test')
   const plan = await planFor(clientId)
   answers = [{ kind: 'unknown', code: 'timeout', status: null }]
@@ -173,7 +195,7 @@ async function planFor(clientId: string) {
 
 // ── S3/S4. refused on the first attempt; our own account is wrong ──
 {
-  const { clientId } = await newClient()
+  const { clientId } = await newClient(['guest3@example.test'])
   const guest = await newGuest(clientId, 'guest3@example.test')
   const plan = await planFor(clientId)
   answers = [{ kind: 'rejected', code: 'validation_error', status: 422 }]
@@ -183,7 +205,7 @@ async function planFor(clientId: string) {
   check('S3 refused: failed provider_rejected (the address is free again), the timeline record is cancelled', r.outcome === 'rejected' && row?.status === 'failed' && row?.reason_code === 'provider_rejected' && tp.data?.metadata?.send_state === 'cancelled', { r, row: row?.status, tp: tp.data })
 }
 {
-  const { clientId } = await newClient()
+  const { clientId } = await newClient(['guest4@example.test'])
   const guest = await newGuest(clientId, 'guest4@example.test')
   answers = [{ kind: 'account_error', code: 'invalid_api_key', status: 403 }]
   const r = await sendOne({ plan: await planFor(clientId), contactId: guest, deps: deps() })
@@ -193,7 +215,7 @@ async function planFor(clientId: string) {
 
 // ── S5. revoked between the plan and the letter ──
 {
-  const { clientId, authId } = await newClient()
+  const { clientId, authId } = await newClient(['guest5@example.test'])
   const guest = await newGuest(clientId, 'guest5@example.test')
   const plan = await planFor(clientId)
   await revokeAuthorization(supabaseAdmin, { id: authId, by: 'pm@example.test', reason: 'e2e brake' })
@@ -204,7 +226,7 @@ async function planFor(clientId: string) {
 
 // ── S6/S7. one address on two contacts; the day's cap ──
 {
-  const { clientId } = await newClient()
+  const { clientId } = await newClient(['same@example.test'])
   const a = await newGuest(clientId, 'same@example.test')
   const b = await newGuest(clientId, 'same@example.test', 'June Park', false)
   const plan = await planFor(clientId)
@@ -213,7 +235,7 @@ async function planFor(clientId: string) {
   check('S6 the same address is welcomed once: the second contact is skipped address_duplicate', ra.outcome === 'sent' && rb.outcome === 'skipped' && rb.reason === 'address_duplicate' && (await liveRow(clientId, b))?.status === 'skipped', { ra, rb })
 }
 {
-  const { clientId } = await newClient(1)
+  const { clientId } = await newClient(['cap1@example.test', 'cap2@example.test'], 1)
   const a = await newGuest(clientId, 'cap1@example.test')
   const b = await newGuest(clientId, 'cap2@example.test', 'June Park')
   const plan = await planFor(clientId)
@@ -224,7 +246,7 @@ async function planFor(clientId: string) {
 
 // ── S8. a receipt that came before the message id was written is applied right after it ──
 {
-  const { clientId } = await newClient()
+  const { clientId } = await newClient(['guest8@example.test'])
   const guest = await newGuest(clientId, 'guest8@example.test')
   const messageId = `e2e-msg-early-${crypto.randomUUID()}`
   const stored = await supabaseAdmin.from('provider_webhook_events').insert({ provider: 'resend', account: 'system', provider_event_id: `e2e-${crypto.randomUUID()}`, event_type: 'email.delivered', provider_message_id: messageId, occurred_at: new Date().toISOString(), payload: { type: 'email.delivered', data: { email_id: messageId } } })
@@ -236,7 +258,7 @@ async function planFor(clientId: string) {
 
 // ── S9. the template was edited after the authorization ──
 {
-  const { clientId, authId } = await newClient()
+  const { clientId, authId } = await newClient(['guest9@example.test'])
   const guest = await newGuest(clientId, 'guest9@example.test')
   const plan = await planFor(clientId)
   await supabaseAdmin.from('crm_email_templates').insert({ client_id: clientId, template_key: 'auto-welcome', version: 2, name: 'Welcome', subject: 'Hello, {{ first_name }}', body: 'Hi {{first_name}}, new words.', fact_source: 'none', pick_mode: 'none', pick_filter: {}, status: 'active', created_by: 'fde@example.test' })
@@ -247,13 +269,67 @@ async function planFor(clientId: string) {
 
 // ── S10. the switches ──
 {
-  const { clientId } = await newClient()
+  const { clientId } = await newClient(['guest10@example.test'])
   await newGuest(clientId, 'guest10@example.test')
   ENV.TRIGGERED_SEND_LIVE = 'TRUE'
   const prepared = await prepareSend({ clientId, dryRun: false, deps: deps() })
   ENV.TRIGGERED_SEND_LIVE = 'true'
   const dry = await prepareSend({ clientId, dryRun: true, deps: deps() })
   check('S10 not exactly "true", or a dry run: nothing is planned', prepared.kind === 'stop' && prepared.receipt.status === 'not_armed' && dry.kind === 'stop' && dry.receipt.status === 'dry_run', { a: prepared.kind === 'stop' ? prepared.receipt.status : 'plan', b: dry.kind === 'stop' ? dry.receipt.status : 'plan' })
+}
+
+// ── S11. an authorization for real guests is not sent by this version ──
+{
+  const { clientId } = await newClient(null)
+  await newGuest(clientId, 'guest11@gmail-like.test')
+  const prepared = await prepareSend({ clientId, dryRun: false, deps: deps() })
+  check('S11 an authorization without an allow-list plans nothing (formal_sending_not_enabled)', prepared.kind === 'stop' && prepared.receipt.status === 'formal_sending_not_enabled', prepared.kind === 'stop' ? prepared.receipt.status : 'plan')
+}
+
+// ── S12. the guest unsubscribed between the first try and the takeover: the replay is never sent ──
+{
+  const { clientId } = await newClient(['guest12@example.test'])
+  const guest = await newGuest(clientId, 'guest12@example.test')
+  answers = [{ kind: 'unknown', code: 'timeout', status: null }]
+  await sendOne({ plan: await planFor(clientId), contactId: guest, deps: deps() })
+  const row = await liveRow(clientId, guest)
+  const unsub = await recordEmailUnsubscribe(supabaseAdmin, { clientId, contactId: guest, addressSha256: String(row?.to_address_sha256), triggeredSendId: String(row?.id), via: 'link', occurredAt: new Date().toISOString() })
+  await supabaseAdmin.from('triggered_sends').update({ lease_expires_at: new Date(Date.now() - 60_000).toISOString() }).eq('id', row?.id)
+  const before = sent.length
+  const r = await sendOne({ plan: await planFor(clientId), contactId: guest, deps: deps() })
+  const after = await liveRow(clientId, guest)
+  check('S12 unsubscribed since the first try: noted, still pending (marked "may have gone out"), no replay sent', unsub.ok && r.outcome === 'blocked' && r.reason === 'email_unsubscribed' && after?.status === 'pending' && after?.last_block_reason === 'email_unsubscribed' && after?.provider_impact === 'PROVIDER_UNKNOWN' && sent.length === before, { r, unsub, status: after?.status, note: after?.last_block_reason, impact: after?.provider_impact })
+}
+
+// ── S13. the whole order as the workflow runs it (当场试跑): rehearsal, then real sending; a real guest is never touched ──
+{
+  const { clientId } = await newClient(['trial13@example.test'], 5, 31)
+  const trial = await newGuest(clientId, 'trial13@example.test')
+  const real = await newGuest(clientId, 'realguest13@not-internal.test', 'Sam Real')
+  const sweepDeps = () => ({ ...createProdSweepDeps(), checkMailboxes: async () => ({ ok: true }), createPorts: ({ clientId: id }: { clientId: string }) => ({ ports: ports(id), legacyBatches: () => [] }) })
+  const steps: string[] = []
+  const step = { run: async <T,>(id: string, fn: () => Promise<T>): Promise<T> => { steps.push(id); return fn() } }
+  const before = sent.length
+  const result = await runSweepOrder(step, {
+    startRun: async () => undefined,
+    finishRun: async () => undefined,
+    prepare: (a: { clientId: string; dryRun: boolean }) => prepareSweep({ ...a, deps: sweepDeps() }),
+    decideChunk: (a: Record<string, unknown>) => decideChunk({ ...a, deps: sweepDeps() }),
+    finalize: finalizeSweep,
+    sendPrepare: (a: { clientId: string; dryRun: boolean }) => prepareSend({ ...a, deps: deps() }),
+    sendStale: (plan: unknown) => recordStale({ plan, deps: deps() }),
+    sendOne: (a: { plan: unknown; contactId: string }) => sendOne({ ...a, deps: deps() }),
+    finalizeSend,
+    now: () => new Date(),
+  }, { client_id: clientId, trigger_key: 'welcome', dry_run: false }, `e2e-run-${crypto.randomUUID()}`)
+  const shadow = await supabaseAdmin.from('triggered_sends').select('contact_id, status, reason_code').eq('client_id', clientId).eq('dedupe_scope', 'shadow')
+  const realLive = await liveRow(clientId, real)
+  const trialLive = await liveRow(clientId, trial)
+  const ok = result.send?.by_outcome?.sent === 1 && sent.length === before + 1 && sent.at(-1)?.to === 'trial13@example.test'
+    && trialLive?.status === 'sent' && realLive === null && (shadow.data ?? []).length === 2
+    && steps.includes('send-prepare') && steps.includes('send-0') && result.send?.provider_impact === 'PROVIDER_ACCEPTED'
+  const realShadow = (shadow.data ?? []).find((r: { contact_id: string }) => r.contact_id === real)
+  check('S13 one order end to end: 2 rehearsal rows, exactly one letter (to the trial address), the real guest has no live row', ok && realShadow?.reason_code === 'not_in_allowlist', { steps, send: result.send, shadow: shadow.data, real: realLive?.status ?? null, trial: trialLive?.status, top: { status: result.status, no_send: result.no_send } })
 }
 
 console.log(`\n${passed} passed, ${failures.length} failed (provider calls in this process: ${sent.length}, none left the machine)`)

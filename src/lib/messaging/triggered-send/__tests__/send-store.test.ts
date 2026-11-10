@@ -106,3 +106,26 @@ describe('the two locks', () => {
     expect(contactBusy.acquireRecipientLock).not.toHaveBeenCalled()
   })
 })
+
+describe('the live ledger — after the first review', () => {
+  it('reads contacts in chunks of 100 (a long id list must not make one request too long)', async () => {
+    const stub = createQueryStub({ triggered_sends: { data: [], error: null } })
+    const ids = Array.from({ length: 230 }, (_, i) => `b0000000-0000-4000-8000-${String(i).padStart(12, '0')}`)
+    await createSendLedger(stub.db).rowsFor(CLIENT, ids)
+    const sizes = stub.of('triggered_sends').filter((c) => c.method === 'in').map((c) => (c.args[1] as unknown[]).length)
+    expect(sizes).toEqual([100, 100, 30])
+  })
+
+  it('🔴 an unclear answer marks the pending row "may have gone out", with the same compare-and-set', async () => {
+    const stub = createQueryStub({ triggered_sends: { data: [{ id: ROW.id }], error: null } })
+    expect(await createSendLedger(stub.db).markUnknown(ROW)).toEqual({ ok: true, result: 'updated' })
+    const q = stub.of('triggered_sends')
+    expect(has(q, 'update', { provider_impact: 'PROVIDER_UNKNOWN' }) && has(q, 'eq', 'status', 'pending') && has(q, 'eq', 'updated_at', ROW.updatedAt)).toBe(true)
+  })
+
+  it('more receipts for one message than a letter can have = a read not to trust', async () => {
+    const many = Array.from({ length: 21 }, () => ({ event_type: 'email.delivered', provider_message_id: 'msg-1', occurred_at: null, payload: {} }))
+    const stub = createQueryStub({ provider_webhook_events: { data: many, error: null } })
+    expect(await replayStoredReceipts(stub.db, 'msg-1', () => undefined, () => new Date())).toEqual({ applied: 0, error: 'receipts read: more receipts than one letter can have' })
+  })
+})

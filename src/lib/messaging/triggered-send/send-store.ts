@@ -19,6 +19,10 @@ const TABLE = 'triggered_sends'
 const COLUMNS = 'id, contact_id, status, reason_code, authorization_id, idempotency_key, rendered_sha256, to_address_sha256, first_attempt_at, provider_message_id, updated_at'
 /** How long a claimed letter is ours before another run may take it over (§3.3; the claim allows 1–30). */
 export const CLAIM_LEASE_MINUTES = 10
+/** Contact ids per ledger read (the rehearsal reads in the same size): a long id list must not make the request too long. */
+const ROWS_CHUNK = 100
+/** Receipts of one message: a handful at most (sent, delivered, a bounce or complaint). More = a read not to trust. */
+const MAX_RECEIPTS_PER_MESSAGE = 20
 const CLAIM_OUTCOMES: ReadonlySet<string> = new Set([
   'claimed', 'takeover', 'in_flight', 'exists_terminal', 'expired_unknown', 'address_duplicate', 'cap_reached', 'auth_inactive', 'rule_invalid', 'template_mismatch',
 ])
@@ -118,10 +122,13 @@ export function createSendLedger(db: SupabaseClient): SendLedger {
   const live = () => db.from(TABLE).select(COLUMNS).eq('trigger_key', 'welcome').eq('channel', 'email').eq('dedupe_scope', 'lifetime')
   return {
     async rowsFor(clientId, contactIds) {
-      if (contactIds.length === 0) return { ok: true, rows: [] }
-      const { data, error } = await live().eq('client_id', clientId).in('contact_id', [...contactIds])
-      if (error) return { ok: false, error: `ledger read: ${codeOf(error)}` }
-      return { ok: true, rows: ((data as DbRow[] | null) ?? []).map(toRow) }
+      const rows: LifetimeRow[] = []
+      for (let i = 0; i < contactIds.length; i += ROWS_CHUNK) {
+        const { data, error } = await live().eq('client_id', clientId).in('contact_id', contactIds.slice(i, i + ROWS_CHUNK))
+        if (error) return { ok: false, error: `ledger read: ${codeOf(error)}` }
+        rows.push(...((data as DbRow[] | null) ?? []).map(toRow))
+      }
+      return { ok: true, rows }
     },
     async rowById(clientId, id) {
       const { data, error } = await live().eq('client_id', clientId).eq('id', id).maybeSingle()
@@ -142,6 +149,7 @@ export function createSendLedger(db: SupabaseClient): SendLedger {
       // Changed meanwhile (a receipt moved it on): there is nothing to note any more.
       return { ok: true }
     },
+    markUnknown: (row) => casUpdate(db, row, 'pending', { provider_impact: 'PROVIDER_UNKNOWN' }),
     claim: (input) => claimRpc(db, input),
     markSent: (row, input) =>
       casUpdate(db, row, 'pending', { status: 'sent', provider_message_id: input.messageId, provider_account: input.account, sent_at: input.sentAt, provider_impact: 'PROVIDER_ACCEPTED' }),
@@ -195,8 +203,9 @@ export async function replayStoredReceipts(db: SupabaseClient, messageId: string
       .eq('provider', 'resend')
       .eq('provider_message_id', messageId)
       .order('received_at', { ascending: true })
-      .limit(20)
+      .limit(MAX_RECEIPTS_PER_MESSAGE + 1)
     if (error) return { applied: 0, error: `receipts read: ${codeOf(error)}` }
+    if ((data ?? []).length > MAX_RECEIPTS_PER_MESSAGE) return { applied: 0, error: 'receipts read: more receipts than one letter can have' }
     const store = createReceiptStore(db)
     let applied = 0
     for (const raw of (data as Array<{ event_type: string; provider_message_id: string | null; occurred_at: string | null; payload: unknown }> | null) ?? []) {

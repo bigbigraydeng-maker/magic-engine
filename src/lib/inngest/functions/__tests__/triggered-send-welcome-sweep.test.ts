@@ -364,6 +364,28 @@ describe('sweepFinishOpts', () => {
   }
 })
 
+describe('sweepFinishOpts — real sending in the run log', () => {
+  const base = { ...emptySendReceipt('2026-11-02T20:00:00.000Z'), authorization_id: 'auth-1' }
+  const r = (): SweepReceipt => ({
+    status: 'swept', client_id: CLIENT_A, dry_run: false, authorization_id: 'auth-1', to_decide: 0, ignored: 0, decided: 0, already_decided: 0, deferred: 0,
+    inserted: 0, would_send: 0, skipped_by_reason: {}, deferred_by_reason: {}, deferred_samples: {}, legacy_batches: [], no_send: true, provider_impact: 'NONE', error: null, created_at: '2026-11-02T20:00:00.000Z',
+  })
+
+  it('🔴 once a letter may have gone out, the run says so at the top (no_send false, the provider impact)', () => {
+    const opts = sweepFinishOpts(r(), { ...base, tried: 1, by_outcome: { sent: 1 }, provider_impact: 'PROVIDER_ACCEPTED' })
+    expect(opts.summary).toMatchObject({ no_send: false, provider_impact: 'PROVIDER_ACCEPTED' })
+    expect(opts.error).toBeUndefined()
+  })
+
+  it('🔴 switched on but broken (no key, a stop) is an error in the run log; nothing to do is not', () => {
+    expect(sweepFinishOpts(r(), { ...base, status: 'no_account_key' }).error).toBe('send: no_account_key')
+    expect(sweepFinishOpts(r(), { ...base, stopped: 'account_error:provider_account_error' }).error).toBe('send stopped: account_error:provider_account_error')
+    expect(sweepFinishOpts(r(), { ...base, stopped: 'blocked:cap_reached' }).error).toBeUndefined()
+    expect(sweepFinishOpts(r(), { ...base, status: 'not_armed' }).error).toBeUndefined()
+    expect(sweepFinishOpts(r(), { ...base, status: 'formal_sending_not_enabled' }).error).toBe('send: formal_sending_not_enabled')
+  })
+})
+
 describe('handleTriggeredSendFailure', () => {
   it('returns no_run_id without calling closeRun', async () => {
     const closeRun = vi.fn()

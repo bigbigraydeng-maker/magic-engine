@@ -11,6 +11,11 @@
  *   are there (§16.8 ①: checked before anything is claimed).
  * A changed template, gate or rule revokes the authorization (`system:<reason>`); a template that cannot be READ only
  * holds this run back (a passing outage must not throw a PM's authorization away, §4.1).
+ *
+ * 🔴 **Only a trial goes out in this version** (an authorization with a recipient allow-list, internal inboxes only).
+ *    An authorization for real guests stops here (`formal_sending_not_enabled`) until real sending is switched on in its
+ *    own change: the old daily batch has to be retired first, or a guest could be welcomed twice on the overlap days
+ *    (review of P2-2c-2a, 子牙 P0-1), and a sending account has to be bound to its clients (子牙 P1-1, 魏征 P1-3).
  */
 
 import type { EmailTemplateVersion } from '@/lib/crm/email-templates/types'
@@ -83,6 +88,7 @@ export async function checkArmed(deps: SendDeps, clientId: string, now: Date, ex
   if (!verdict.active) {
     return SELF_REVOKING_REASONS.has(verdict.reason) ? selfRevoke(deps, record, verdict.reason) : no('authorization_inactive', verdict.reason, record.id)
   }
+  if (verdict.rule.recipient_allowlist === null) return no('formal_sending_not_enabled', null, record.id)
   const trial = checkTrialRecipients(verdict.rule, deps.env)
   if (!trial.ok) return no(trial.reason, null, record.id)
   const missing = sendingPrerequisite(record, deps, now)

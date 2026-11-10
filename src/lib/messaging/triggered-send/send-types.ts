@@ -9,7 +9,7 @@ import type { TemplateRead } from './authorization-core'
 import type { AuthorizationRecord } from './authorization-store'
 import type { SendTouchpointInput, TouchpointCancel, TouchpointWrite } from './send-touchpoint'
 import type { TriggeredSendRule } from './rule'
-import type { ContactsRead, MailboxCheck, ShadowContact, ShadowGatePorts } from './types'
+import type { MailboxCheck, ShadowContact, ShadowGatePorts } from './types'
 
 export type EnvReader = (name: string) => string | undefined
 
@@ -88,6 +88,8 @@ export interface SendLedger {
   recordDecision(input: DecisionWrite): Promise<LedgerWrite>
   /** A `pending` row met a gate (locks, the cap): only the reason is noted, the status stays (§4.2). */
   noteBlock(row: LifetimeRow, reasonCode: string): Promise<LedgerWrite>
+  /** The provider's answer was unclear: the row stays pending, but says the letter may have gone out. */
+  markUnknown(row: LifetimeRow): Promise<CasWrite>
   claim(input: ClaimInput): Promise<ClaimRead>
   markSent(row: LifetimeRow, input: { messageId: string; account: string; sentAt: string }): Promise<CasWrite>
   markFailed(row: LifetimeRow, input: { reasonCode: string; account: string }): Promise<CasWrite>
@@ -112,7 +114,8 @@ export interface SendDeps {
   loadTemplate(clientId: string, key: string): Promise<TemplateRead>
   /** Revoke as the system (`system:<code>`); best effort, never throws. */
   revokeAsSystem(record: AuthorizationRecord, code: string): Promise<'revoked' | 'not_open' | 'failed'>
-  loadContacts(args: { clientId: string; sinceIso: string; sources: readonly string[] }): Promise<ContactsRead>
+  /** The contacts carrying one of these addresses (a trial's allow-list): by registered e-mail or primary e-mail. */
+  findContactIdsByAddresses(clientId: string, addresses: readonly string[]): Promise<{ ok: true; contactIds: string[] } | { ok: false; error: string }>
   loadContact(args: { clientId: string; contactId: string; sources: readonly string[] }): Promise<ContactLoad>
   checkMailboxes(clientId: string, required: readonly string[]): Promise<MailboxCheck>
   createPorts(args: { clientId: string; rule: TriggeredSendRule; now: Date }): ShadowGatePorts
@@ -131,6 +134,8 @@ export type SendStopStatus =
   | 'dry_run'
   | 'not_armed'
   | 'no_active_authorization'
+  /** The authorization is for real guests (no allow-list): not sent by this version (see send-arming.ts). */
+  | 'formal_sending_not_enabled'
   | 'authorization_inactive'
   | 'authorization_changed'
   | 'authorization_self_revoked'
