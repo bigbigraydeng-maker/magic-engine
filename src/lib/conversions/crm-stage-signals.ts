@@ -30,8 +30,26 @@ export type WritebackOutcomeKind = OutcomeForSend['outcomeKind']
 export type CrmStageDef = {
   /** 发给 Meta 的阶段名，原样作为事件名。 */
   eventName: string
-  /** 客户管理页里哪些阶段算「到过这一档」（后续阶段也可以列进来）。 */
+  /** 客户管理页里哪些阶段算「到过这一档」（后续阶段也可以列进来）。可以为空，只要配了 `bookingMilestone`。 */
   stageKeys: string[]
+  /**
+   * 订单里哪个里程碑被员工标成「已收」也算到过这一档（`deposit` 定金 / `balance` 尾款）。
+   * 比客人阶段准：客人阶段常是事后批量补的，订单里程碑是标的那一刻（2026-11-10 CTS 实测）。
+   */
+  bookingMilestone: BookingMilestoneKind | null
+}
+
+export type BookingMilestoneKind = 'deposit' | 'balance'
+const BOOKING_KINDS: readonly BookingMilestoneKind[] = ['deposit', 'balance']
+
+/** 订单里程碑在计划器里用的内部阶段名——带冒号，不会跟客户管理页的阶段 key 撞。 */
+export function bookingStageKey(kind: BookingMilestoneKind): string {
+  return `booking:${kind}`
+}
+
+/** 这一档认哪些「阶段变化」：客户管理页的阶段 + 订单里程碑。 */
+export function matchKeysOf(def: CrmStageDef): string[] {
+  return def.bookingMilestone ? [...def.stageKeys, bookingStageKey(def.bookingMilestone)] : def.stageKeys
 }
 
 export type CrmStageSignalsConfig = {
@@ -77,11 +95,21 @@ export function parseCrmStageSignalsConfig(leadsConfig: unknown): CrmStageSignal
     if (!isRecord(s)) return null
     const eventName = cleanName(s.event_name)
     if (!eventName || seenNames.has(eventName)) return null
-    if (!Array.isArray(s.stage_keys)) return null
-    const stageKeys = s.stage_keys.filter((k): k is string => typeof k === 'string' && k.trim().length > 0)
-    if (stageKeys.length === 0) return null
+    if (s.stage_keys != null && !Array.isArray(s.stage_keys)) return null
+    const stageKeys = (Array.isArray(s.stage_keys) ? s.stage_keys : []).filter(
+      (k): k is string => typeof k === 'string' && k.trim().length > 0,
+    )
+    // `booking:` 开头是订单里程碑的内部名字，客户管理页的阶段不许用，免得两种来源混在一起
+    if (stageKeys.some((k) => k.startsWith('booking:'))) return null
+    let bookingMilestone: BookingMilestoneKind | null = null
+    if (s.booking_milestone != null) {
+      // 写了但不认识 = 配置写错，整体不生效（不猜成「没写」）
+      if (!BOOKING_KINDS.includes(s.booking_milestone as BookingMilestoneKind)) return null
+      bookingMilestone = s.booking_milestone as BookingMilestoneKind
+    }
+    if (stageKeys.length === 0 && !bookingMilestone) return null
     seenNames.add(eventName)
-    stages.push({ eventName, stageKeys })
+    stages.push({ eventName, stageKeys, bookingMilestone })
   }
   if (stages.length === 0) return null
 
@@ -201,7 +229,7 @@ export function planLeadStageEvents(input: {
       .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
 
     const firstAt = config.stages.map((def) => {
-      const keys = new Set(def.stageKeys)
+      const keys = new Set(matchKeysOf(def))
       let min = Infinity
       for (const c of changes) {
         if (keys.has(c.toStage)) min = Math.min(min, Date.parse(c.at))
