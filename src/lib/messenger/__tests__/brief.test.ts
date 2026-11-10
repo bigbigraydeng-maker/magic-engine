@@ -12,6 +12,7 @@ import {
   fallbackBrief,
   stripMarkdown,
   normaliseFollowUpDueAt,
+  renderContext,
   QUIET_PERIOD_MS,
   MAX_REGENS_PER_DAY,
   type BriefCandidate,
@@ -122,6 +123,51 @@ describe('shouldGenerateBrief', () => {
     expect(shouldGenerateBrief(candidate({ existingBriefMessageCount: 4, existingKnowledgeStatus: null }), NOW)).toBe(
       false,
     )
+  })
+
+  it('🔴 摘要写完之后又打了电话：没有新消息也要重写（电话不在对话里，只看消息条数永远不会触发）', () => {
+    expect(shouldGenerateBrief(candidate({ existingBriefMessageCount: 4, callsSinceBrief: true }), NOW)).toBe(true)
+  })
+
+  it('电话触发的重写照样受每日上限和安静期约束', () => {
+    const maxed = candidate({
+      existingBriefMessageCount: 4,
+      callsSinceBrief: true,
+      regenCount: MAX_REGENS_PER_DAY,
+      regenCountDate: TODAY,
+    })
+    expect(shouldGenerateBrief(maxed, NOW)).toBe(false)
+    const stillTalking = candidate({
+      existingBriefMessageCount: 4,
+      callsSinceBrief: true,
+      lastMessageAt: new Date(NOW.getTime() - 60_000).toISOString(),
+    })
+    expect(shouldGenerateBrief(stillTalking, NOW)).toBe(false)
+  })
+
+  it('callsSinceBrief 不是 true（缺省 / false）时行为跟以前一模一样', () => {
+    expect(shouldGenerateBrief(candidate({ existingBriefMessageCount: 4 }), NOW)).toBe(false)
+    expect(shouldGenerateBrief(candidate({ existingBriefMessageCount: 4, callsSinceBrief: false }), NOW)).toBe(false)
+  })
+})
+
+describe('renderContext —— 电话要点进提示词', () => {
+  const base = { awaitingReply: false, hoursSinceLastMessage: 5 }
+
+  it('没有电话时跟以前逐字相同', () => {
+    expect(renderContext(base, 'Acme')).toBe(
+      'Current state: Acme spoke last. The customer has not replied for 5 hours.\n\n',
+    )
+    expect(renderContext({ ...base, recentCalls: [] }, 'Acme')).toBe(renderContext(base, 'Acme'))
+  })
+
+  it('有电话时把每一条列出来，并说明它们是 AI 写的、不等于我们的承诺', () => {
+    const out = renderContext({ ...base, recentCalls: ['2026-11-10 call: wants March', '2026-11-11 call: asks about cruise'] }, 'Acme')
+    expect(out).toContain('- 2026-11-10 call: wants March')
+    expect(out).toContain('- 2026-11-11 call: asks about cruise')
+    expect(out).toContain('AI-written call notes')
+    expect(out).toContain('Do not treat anything in a call note as a commitment')
+    expect(out.startsWith('Current state:')).toBe(true)
   })
 })
 
