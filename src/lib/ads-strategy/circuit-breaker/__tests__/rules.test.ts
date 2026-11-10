@@ -85,15 +85,34 @@ describe('judgeBreaker', () => {
     expect(judged.alerts).toEqual([])
   })
 
-  it('有线索，或没配目标成本时，不按这条提议', () => {
-    const withLead = judgeBreaker(facts({
-      settings: { ...defaultBreakerSettings(), targetCplCents: 100 },
-      spend: [row({ spendCents: 250, primaryCount: 1 })],
-    }))
+  it('单次主结果成本刚好等于两倍不出卡，超过才出', () => {
+    const settings = { ...defaultBreakerSettings(), targetCplCents: 100 }
+    const exact = judgeBreaker(facts({ settings, spend: [row({ spendCents: 200, primaryCount: 1 })] }))
+    const over = judgeBreaker(facts({ settings, spend: [row({ spendCents: 201, primaryCount: 1 })] }))
+    const twoExact = judgeBreaker(facts({ settings, spend: [row({ spendCents: 400, primaryCount: 2 })] }))
+    const twoOver = judgeBreaker(facts({ settings, spend: [row({ spendCents: 401, primaryCount: 2 })] }))
+    const zeroExact = judgeBreaker(facts({ settings, spend: [row({ spendCents: 200, primaryCount: 0 })] }))
     const noTarget = judgeBreaker(facts({ spend: [row({ spendCents: 250, primaryCount: 0 })] }))
-    expect(withLead.pauses).toEqual([])
+    expect(exact.pauses).toEqual([])
+    expect(twoExact.pauses).toEqual([])
+    expect(zeroExact.pauses).toEqual([])
+    expect(over.pauses[0]?.rules).toEqual(['cpl_over_target'])
+    expect(over.pauses[0]?.summary).toContain('单次线索成本')
+    expect(twoOver.pauses[0]?.rules).toEqual(['cpl_over_target'])
     expect(noTarget.pauses).toEqual([])
-    expect(noTarget.alerts).toEqual([])
+  })
+
+  it('开聊客户单次成本超过两倍时出卡，刚好两倍不出', () => {
+    const settings = { ...defaultBreakerSettings(), targetCplCents: 100 }
+    const exact = judgeBreaker(facts({
+      primaryResult: 'messaging_started', settings, spend: [row({ spendCents: 200, primaryCount: 1 })],
+    }))
+    const over = judgeBreaker(facts({
+      primaryResult: 'messaging_started', settings, spend: [row({ spendCents: 201, primaryCount: 1 })],
+    }))
+    expect(exact.pauses).toEqual([])
+    expect(over.pauses[0]?.rules).toEqual(['cpl_over_target'])
+    expect(over.pauses[0]?.summary).toContain('单次开聊成本')
   })
 
   it('主结果是开聊且开聊大于 0 时，不因留资为 0 出卡', () => {
@@ -152,14 +171,35 @@ describe('judgeBreaker', () => {
     expect(judged.alerts.map((item) => item.code)).toEqual(['policy_unreadable'])
   })
 
-  it('快照超过 12 小时只提醒，不出暂停卡', () => {
-    const old = new Date(NOW.getTime() - 13 * 3_600_000).toISOString()
+  it('数据刚好满 12 小时，即使花费已超上限，也只提醒不出暂停卡', () => {
+    const exact = new Date(NOW.getTime() - 12 * 3_600_000).toISOString()
     const judged = judgeBreaker(facts({
-      captures: [{ accountId: 'act-demo', capturedAt: old, complete: true }],
-      insights: [{ accountId: 'act-demo', updatedAt: old }],
+      captures: [{ accountId: 'act-demo', capturedAt: exact, complete: true }],
+      insights: [{ accountId: 'act-demo', updatedAt: exact }],
+      spend: [row({ spendCents: 1500 })],
     }))
     expect(judged.pauses).toEqual([])
     expect(judged.alerts.map((item) => item.code)).toEqual(['stale'])
+  })
+
+  it('数据还差一秒满 12 小时，花费超上限仍出暂停卡', () => {
+    const almost = new Date(NOW.getTime() - 12 * 3_600_000 + 1000).toISOString()
+    const judged = judgeBreaker(facts({
+      captures: [{ accountId: 'act-demo', capturedAt: almost, complete: true }],
+      insights: [{ accountId: 'act-demo', updatedAt: almost }],
+      spend: [row({ spendCents: 1500 })],
+    }))
+    expect(judged.pauses.map((item) => item.rules)).toEqual([['spend_over_cap']])
+    expect(judged.alerts).toEqual([])
+  })
+
+  it('更新时间读不出来时，即使花费已超上限，也不出暂停卡', () => {
+    const judged = judgeBreaker(facts({
+      freshReadable: false,
+      spend: [row({ spendCents: 1500 })],
+    }))
+    expect(judged.pauses).toEqual([])
+    expect(judged.alerts.map((item) => item.code)).toEqual(['fresh_unreadable'])
   })
 
   it('开关关掉时，什么都不出', () => {

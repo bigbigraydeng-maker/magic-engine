@@ -28,6 +28,15 @@ import {
 } from '@/lib/ads-strategy/monitoring/spend-cap-notice'
 import { listActiveCircuitTrips } from '@/lib/ads-strategy/circuit-state'
 import {
+  evaluateIntradaySpendSampleStall,
+  INTRADAY_SPEND_SAMPLE_CRON_JOB,
+  INTRADAY_SPEND_SAMPLE_LOOKBACK_HOURS,
+  intradaySpendSampleStallHow,
+  intradaySpendSampleStallShouldAlert,
+  intradaySpendSampleStallWhat,
+  type IntradaySpendSampleCronRun,
+} from '@/lib/ads-strategy/monitoring/intraday-spend-sample-stall'
+import {
   collectDailyPullbackGaps,
   formatDailyPullbackGapWhat,
   type PullbackErrorRow,
@@ -298,6 +307,53 @@ export async function pushAdsDailySpendOverCapNoticeItems(
   }
 }
 
+const INTRADAY_STALL_INFRA_MARKER = '日内花费采样'
+
+async function loadIntradaySpendSampleRuns(
+  supabase: SupabaseClient,
+  since: string,
+): Promise<IntradaySpendSampleCronRun[]> {
+  const { data, error } = await supabase
+    .from('cron_run_logs')
+    .select('status, finished_at, started_at')
+    .eq('job_name', INTRADAY_SPEND_SAMPLE_CRON_JOB)
+    .gte('started_at', since)
+    .not('finished_at', 'is', null)
+    .order('started_at', { ascending: false })
+    .limit(80)
+  if (error) throw new Error(`${INTRADAY_SPEND_SAMPLE_CRON_JOB} 运行记录读取失败：${error.message}`)
+  return (data ?? []) as IntradaySpendSampleCronRun[]
+}
+
+export async function pushAdsIntradaySpendSampleStallItems(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+  now: Date,
+): Promise<void> {
+  const since = new Date(now.getTime() - INTRADAY_SPEND_SAMPLE_LOOKBACK_HOURS * 3_600_000).toISOString()
+  const runs = await loadIntradaySpendSampleRuns(supabase, since)
+  const finding = evaluateIntradaySpendSampleStall(runs, now)
+  if (!intradaySpendSampleStallShouldAlert(finding)) return
+  if (
+    items.some(
+      (i) =>
+        i.kind === 'ads_agent_sync_stale' &&
+        i.client_id === 'infra' &&
+        i.what.includes(INTRADAY_STALL_INFRA_MARKER),
+    )
+  ) {
+    return
+  }
+  items.push({
+    kind: 'ads_agent_sync_stale',
+    client_id: 'infra',
+    client_name: 'Magic Engine 后台',
+    what: intradaySpendSampleStallWhat(finding!),
+    how: intradaySpendSampleStallHow(),
+    href: `${APP_BASE}/dashboard/admin/cron-health`,
+  })
+}
+
 async function loadRecentDailyPullbackRuns(
   supabase: SupabaseClient,
   limit: number,
@@ -362,6 +418,7 @@ export async function pushAdsAgentMonitorItems(
 ): Promise<void> {
   await pushAdsAgentStaleItems(supabase, items, now, nameOf)
   await pushAdsDailyPullbackGapItems(supabase, items, now, nameOf)
+  await pushAdsIntradaySpendSampleStallItems(supabase, items, now)
   await pushAdsDailySpendOverCapNoticeItems(supabase, items, nameOf)
   await pushAdsPlanDeliveryStageMissingItems(supabase, items, nameOf)
 }

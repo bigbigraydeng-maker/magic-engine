@@ -1,10 +1,21 @@
 /**
  * Creative test → scale → retire. Pure. No network, no database.
  * Target cost comes from the client row. Missing target means no card.
+ *
+ * Scaling qualification confirmed by Ray 2026-11-10: at least 7 live days,
+ * at least 10 leads, cost per lead at or under the client target, and at most
+ * one scaling proposal per New Zealand day. Cards only. The retire multiple
+ * was not part of that confirmation.
  */
 
 import { resolveTargetCplMajor } from '@/lib/ads-strategy/client-target-cpl'
+import { nzToday } from '@/lib/ads-strategy/promo-window'
 import { OWNERSHIP_MAX_AD_CAPTURE_AGE_HOURS } from '@/lib/ads-strategy/portfolio/diagnostics/thresholds'
+
+/** Calendar day in Pacific/Auckland. The one-card cap uses this, not UTC. */
+export function nzProposalDay(now: Date): string {
+  return nzToday(now.getTime())
+}
 
 export const CONSERVATIVE_CREATIVE_RULES = {
   minLiveDays: 7,

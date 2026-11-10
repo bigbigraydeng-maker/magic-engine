@@ -2,8 +2,10 @@ import { resolveTargetCplCents } from '@/lib/ads-strategy/client-target-cpl'
 
 /**
  * Per-client breaker settings from existing JSON. No new column.
- * Missing keys keep the conservative defaults. A bad number is not a zero.
- * The lead-cost target is the shared client target, not a number written here.
+ * Confirmed by Ray 2026-11-10: the default multiple is 2 and the stale
+ * reminder starts at 12 hours. A tighter client number is kept. A looser
+ * or bad number falls back. A bad number is not a zero.
+ * The cost target is the shared client target, not a number written here.
  */
 
 export const BREAKER_CONFIG_KEY = 'ads_circuit_breaker'

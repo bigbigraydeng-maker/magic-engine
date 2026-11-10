@@ -103,8 +103,11 @@ export function classifyRead(input: ClassifyReadInput): ClassifyReadResult {
   if (!ok || !complete) {
     return { verdict: 'read_failed', reason: 'read_failed' };
   }
+  // The ad set query only asks for non-paused statuses. When the account still
+  // looks active, a successful empty list means those ad sets are paused, not
+  // that the read failed. Incomplete or error responses are already read_failed.
   if (kind === 'adsets' && accountHasActiveCampaigns && rowCount === 0) {
-    return { verdict: 'read_failed', reason: 'empty_adset_list' };
+    return { verdict: 'ok', reason: 'all_paused' };
   }
   return { verdict: 'ok', reason: 'ok' };
 }
