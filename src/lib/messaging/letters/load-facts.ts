@@ -216,8 +216,6 @@ export async function loadMeSends(
       channel: 'me',
       proposalPending,
       proposalApproved,
-      // 已经开始发 = 有真发行（不是演练），并且至少一行不是被拦 / 跳过（约定 §10）。
-      started: rows.some((row) => !row.rehearsal && row.status !== 'blocked' && row.status !== 'skipped'),
       recipients: mergeOutcomes(rows),
     })
   }

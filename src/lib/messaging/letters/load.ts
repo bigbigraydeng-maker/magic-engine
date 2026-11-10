@@ -5,16 +5,19 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { listContactNamesForClient } from '@/lib/crm/booking-overview-reads'
 import { nzTodayIso } from '@/lib/crm/booking-view'
+import { cleanDisplayName } from '@/lib/crm/clean-display-name'
+import { loadBookingTourFacts } from '@/lib/tour-catalog/booking-facts'
 import { SCHEDULED_BATCHES_SHOWN, buildDetail, buildList, type LetterFacts } from './aggregate'
 import { COUNTDOWN_CADENCE, type CountdownCadence } from './cadence'
 import { shiftDays } from './dates'
 import { lookbackDaysFor } from './history'
 import { buildTemplateKey, buildTriggerKey, parseLetterKey, type LetterIdentity } from './keys'
-import { loadBookingFacts } from './load-bookings'
+import { UNKNOWN_TOUR_NAME, loadBookingFacts } from './load-bookings'
 import { loadMeSends, loadRegistry } from './load-facts'
 import { planCountdownCalendar, planCountdownIssue } from './plan'
-import type { AutoLetterDetail, AutoLettersList, PlannedLetter } from './types'
+import type { AutoLetterDetail, AutoLettersList, NzDate, PlannedLetter } from './types'
 
 export type CadenceResolver = (clientId: string) => CountdownCadence | null
 
@@ -92,7 +95,43 @@ export async function loadAutoLettersList(
   }
 }
 
-/** 找不到这封信（编号不认识，或现在的计划里没有它）→ null，路由翻成 404。 */
+/**
+ * 现在的计划里已经没有这封信（团取消了、出发日改了、订单变了），可是发送记录或提案里有它的痕迹：
+ * 照记录把详情拼出来（姓名、团名另外去查），不让员工点一封已经发出去的信却得到「没找到」。
+ * 记录里一点痕迹都没有 → null（照旧 404）。只读，只给姓名，不返回邮箱。
+ */
+async function detailFromRecords(
+  db: SupabaseClient,
+  clientId: string,
+  identity: LetterIdentity,
+  letterKey: string,
+  today: NzDate,
+): Promise<AutoLetterDetail | null> {
+  const stub: PlannedLetter = {
+    letterKey,
+    sendDate: identity.sendDate,
+    tourId: identity.tourId,
+    tourName: UNKNOWN_TOUR_NAME,
+    departOn: identity.departOn,
+    monthsLeft: identity.monthsLeft,
+    recipients: [],
+  }
+  const letterFacts = (await loadLetterFacts(db, clientId, [stub])).get(letterKey) ?? null
+  if (letterFacts?.sends == null) return null
+  const people = letterFacts.sends.recipients.map((recipient) => recipient.contactId)
+  const [tours, names] = await Promise.all([
+    loadBookingTourFacts(db, clientId, [identity.tourId]),
+    listContactNamesForClient(db, clientId, people),
+  ])
+  const letter: PlannedLetter = {
+    ...stub,
+    tourName: tours.get(identity.tourId)?.name ?? UNKNOWN_TOUR_NAME,
+    recipients: people.map((contactId) => ({ contactId, displayName: cleanDisplayName(names.get(contactId) ?? null), seats: null })),
+  }
+  return buildDetail(letter, letterFacts, today)
+}
+
+/** 找不到这封信（编号不认识，或现在的计划和记录里都没有它）→ null，路由翻成 404。 */
 export async function loadAutoLetterDetail(
   db: SupabaseClient,
   clientId: string,
@@ -104,9 +143,10 @@ export async function loadAutoLetterDetail(
   if (identity === null) return null
   const cadence = resolveCadence(clientId)
   if (cadence === null) return null
+  const today = nzTodayIso(now)
   const { facts } = await loadBookingFacts(db, clientId)
   const letter = planCountdownIssue(facts, identity.sendDate, cadence).find((candidate) => candidate.letterKey === letterKey)
-  if (letter === undefined) return null
+  if (letter === undefined) return detailFromRecords(db, clientId, identity, letterKey, today)
   const letterFacts = await loadLetterFacts(db, clientId, [letter])
-  return buildDetail(letter, letterFacts.get(letterKey) ?? null, nzTodayIso(now))
+  return buildDetail(letter, letterFacts.get(letterKey) ?? null, today)
 }

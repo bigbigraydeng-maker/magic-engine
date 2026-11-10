@@ -32,7 +32,7 @@ function outcome(over: Partial<RecipientOutcome> & { contactId: string }): Recip
 }
 
 function sends(over: Partial<SendFacts> = {}): SendFacts {
-  return { channel: 'me', proposalPending: false, proposalApproved: false, started: false, recipients: [], ...over }
+  return { channel: 'me', proposalPending: false, proposalApproved: false, recipients: [], ...over }
 }
 
 describe('deriveLetterStatus', () => {
@@ -41,10 +41,24 @@ describe('deriveLetterStatus', () => {
     expect(deriveLetterStatus(sends())).toBe('draft')
   })
 
-  it('ME letters: a pending proposal waits for release, a started one is sent', () => {
+  it('ME letters: a pending proposal waits for release; a letter is sent once at least one person really got it', () => {
+    const delivered = [outcome({ contactId: 'c1' })]
     expect(deriveLetterStatus(sends({ proposalPending: true }))).toBe('awaiting_release')
-    expect(deriveLetterStatus(sends({ started: true }))).toBe('sent')
-    expect(deriveLetterStatus(sends({ proposalPending: true, started: true }))).toBe('awaiting_release')
+    expect(deriveLetterStatus(sends({ recipients: delivered }))).toBe('sent')
+    expect(deriveLetterStatus(sends({ proposalPending: true, recipients: delivered }))).toBe('awaiting_release')
+  })
+
+  it('a letter nobody really got is not sent: all failed, all blocked, all queued, rehearsal only, or released with no record at all', () => {
+    for (const bad of ['failed', 'blocked', 'pending', 'rehearsal'] as const) {
+      const rows = [outcome({ contactId: 'c1', outcome: bad }), outcome({ contactId: 'c2', outcome: bad })]
+      expect(deriveLetterStatus(sends({ recipients: rows }))).toBe('draft')
+    }
+    expect(deriveLetterStatus(sends({ proposalApproved: true }))).toBe('draft')
+  })
+
+  it('one person who really got it is enough, whatever happened to the others', () => {
+    const rows = [outcome({ contactId: 'c1', outcome: 'failed', reasonCode: 'bounced' }), outcome({ contactId: 'c2' })]
+    expect(deriveLetterStatus(sends({ recipients: rows }))).toBe('sent')
   })
 
   it('Mailchimp letters: any real send makes it sent; there is no 等你放行 on this side', () => {
@@ -77,7 +91,6 @@ describe('buildLetterRow', () => {
     const facts: LetterFacts = {
       registry: { subject: 'Subject', previewText: null, bodyText: null },
       sends: sends({
-        started: true,
         recipients: [
           outcome({ contactId: 'c1', outcome: 'sent' }),
           outcome({ contactId: 'c2', outcome: 'rehearsal' }),
@@ -94,7 +107,7 @@ describe('buildLetterRow', () => {
 
   describe('opened (reference only)', () => {
     const openedOf = (recipients: RecipientOutcome[]): number | null =>
-      buildLetterRow(planned({ sendDate: '2026-12-02' }), { registry: null, sends: sends({ started: true, recipients }) }).counts.opened
+      buildLetterRow(planned({ sendDate: '2026-12-02' }), { registry: null, sends: sends({ recipients }) }).counts.opened
 
     it('this kind of letter does not record opens → null (a dash), never 0', () => {
       expect(openedOf([outcome({ contactId: 'c1' }), outcome({ contactId: 'c2' })])).toBeNull()
@@ -123,7 +136,7 @@ describe('buildLetterRow', () => {
     it('the drawer tiles carry the same number', () => {
       const detail = buildDetail(planned({ sendDate: '2026-12-02' }), {
         registry: null,
-        sends: sends({ started: true, recipients: [outcome({ contactId: 'c1', opened: true }), outcome({ contactId: 'c2', opened: false })] }),
+        sends: sends({ recipients: [outcome({ contactId: 'c1', opened: true }), outcome({ contactId: 'c2', opened: false })] }),
       })
       expect(detail.tiles.opened).toBe(1)
       expect(detail.letter.counts.opened).toBe(1)
@@ -165,7 +178,7 @@ describe('buildList', () => {
   })
 
   it('batch phase: all sent → sent; any awaiting release → awaiting; otherwise draft', () => {
-    const sentFacts: LetterFacts = { registry: null, sends: sends({ started: true }) }
+    const sentFacts: LetterFacts = { registry: null, sends: sends({ recipients: [outcome({ contactId: 'c1' })] }) }
     const awaitingFacts: LetterFacts = { registry: null, sends: sends({ proposalPending: true }) }
     expect(buildList(plan, new Map([['k1', sentFacts], ['k2', sentFacts]]), '2026-11-10', 'now').nextBatch?.phase).toBe('sent')
     expect(buildList(plan, new Map([['k1', sentFacts], ['k2', awaitingFacts]]), '2026-11-10', 'now').nextBatch?.phase).toBe('awaiting_release')
@@ -223,7 +236,6 @@ describe('buildDetail', () => {
     const detail = buildDetail(letter, {
       registry: null,
       sends: sends({
-        started: true,
         recipients: [
           outcome({ contactId: 'c1', outcome: 'sent' }),
           outcome({ contactId: 'c2', outcome: 'blocked', reasonCode: 'frequency_full' }),
@@ -258,14 +270,14 @@ describe('buildDetail', () => {
     expect(mailchimp.mailchimpSummary).toEqual({ opened: 2, clicked: 1 }) // the blocked row is not counted
     expect(mailchimp.recipients.find((r) => r.contactId === 'c1')).toMatchObject({ opened: true, clicked: true })
 
-    const me = buildDetail(letter, { registry: null, sends: sends({ started: true, recipients: rows.map((r) => ({ ...r, opened: null, clicked: null })) }) })
+    const me = buildDetail(letter, { registry: null, sends: sends({ recipients: rows.map((r) => ({ ...r, opened: null, clicked: null })) }) })
     expect(me.mailchimpSummary).toBeNull()
     expect(me.recipients.every((r) => r.opened === null && r.clicked === null)).toBe(true)
   })
 
   it('the recipient total never falls below the people who have a result: people only in the records are counted too', () => {
     const rows = [outcome({ contactId: 'c1' }), outcome({ contactId: 'gone-1' }), outcome({ contactId: 'gone-2', outcome: 'failed', reasonCode: 'bounced' })]
-    const detail = buildDetail(letter, { registry: null, sends: sends({ started: true, recipients: rows }) })
+    const detail = buildDetail(letter, { registry: null, sends: sends({ recipients: rows }) })
     expect(detail.letter.counts.recipients).toBe(5) // c1, c2, c3 planned + two people only in the records
     expect(detail.tiles.recipients).toBe(detail.recipients.length) // same number as the rows of the list
     const { sent, blocked, failed, rehearsal } = detail.tiles
@@ -275,7 +287,7 @@ describe('buildDetail', () => {
   it('a person with a send record who is no longer in the plan is still listed (name unknown)', () => {
     const detail = buildDetail(letter, {
       registry: null,
-      sends: sends({ started: true, recipients: [outcome({ contactId: 'gone', outcome: 'sent' })] }),
+      sends: sends({ recipients: [outcome({ contactId: 'gone', outcome: 'sent' })] }),
     })
     const gone = detail.recipients.find((r) => r.contactId === 'gone')
     expect(gone).toMatchObject({ displayName: null, seats: null, status: 'sent' })
@@ -298,7 +310,7 @@ describe('buildDetail · a batch that has already gone out', () => {
       { contactId: 'c3', displayName: 'Cy', seats: 1 },
     ],
   })
-  const wentOut: LetterFacts = { registry: null, sends: sends({ started: true, recipients: [outcome({ contactId: 'c1' }), outcome({ contactId: 'c3', outcome: 'pending' })] }) }
+  const wentOut: LetterFacts = { registry: null, sends: sends({ recipients: [outcome({ contactId: 'c1' }), outcome({ contactId: 'c3', outcome: 'pending' })] }) }
   const note = (detail: ReturnType<typeof buildDetail>, id: string) => detail.recipients.find((r) => r.contactId === id)?.reasonText
 
   it('people planned but absent from the send record say they were not yet depositors, not 待发', () => {

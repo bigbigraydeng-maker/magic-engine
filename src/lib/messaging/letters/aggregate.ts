@@ -2,9 +2,10 @@
  * 把「计划出来的信」和「登记 / 发送事实」拼成读接口的两种返回（列表、详情）。纯函数，不读数据库、不看现在几点
  * （「今天」从参数传进来）。读数据库的部分在 load.ts，它把表里的行整理成这里的输入。
  *
- * 状态怎么推（合同稿 §3）：
- *  - ME 自己发的信：有未授权的提案 → 等你放行；已授权且开始发 → 已发；其余 → 草稿（含「还没写」）。
- *  - 走 Mailchimp 的信：有任何真发出去的记录 → 已发，否则草稿（Mailchimp 的放行在 Mailchimp 里，不显示「等你放行」）。
+ * 状态怎么推（合同稿 §3；「已发」的口径 11-10 傍晚按独立审查意见收紧）：
+ *  - ME 自己发的信：有未授权的提案 → 等你放行；至少一位真的收到了（发出 / 送达）→ 已发；
+ *    其余（全部出错、全部被拦、还在排队、放行了却一行记录都没有）→ 草稿（含「还没写」）——数字（出错 / 被拦）照常显示。
+ *  - 走 Mailchimp 的信：同样是至少一位真的收到了 → 已发，否则草稿（Mailchimp 的放行在 Mailchimp 里，不显示「等你放行」）。
  *  - 演练（彩排）行永远不算「已发」，单独计数。
  */
 
@@ -66,8 +67,6 @@ export interface SendFacts {
    * 撤回的提案不算痕迹——状态里没有「撤下了、没发」这一种可显示。
    */
   proposalApproved: boolean
-  /** 已授权且已经开始发。 */
-  started: boolean
   recipients: RecipientOutcome[]
 }
 
@@ -124,10 +123,8 @@ function countsOf(planned: PlannedLetter, sends: SendFacts | null): LetterCounts
 
 export function deriveLetterStatus(sends: SendFacts | null): LetterStatus {
   if (sends === null) return 'draft'
-  if (sends.channel === 'mailchimp') return sends.recipients.some((r) => r.outcome === 'sent') ? 'sent' : 'draft'
-  if (sends.proposalPending) return 'awaiting_release'
-  if (sends.started) return 'sent'
-  return 'draft'
+  if (sends.channel === 'me' && sends.proposalPending) return 'awaiting_release'
+  return sends.recipients.some((r) => r.outcome === 'sent') ? 'sent' : 'draft'
 }
 
 export function buildLetterRow(planned: PlannedLetter, facts: LetterFacts | null): LetterRow {

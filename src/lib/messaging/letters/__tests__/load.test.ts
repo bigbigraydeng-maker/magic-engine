@@ -13,6 +13,7 @@ import { COUNTDOWN_CADENCE } from '../cadence'
 import { buildLetterKey, buildTemplateKey, buildTriggerKey } from '../keys'
 import { UNKNOWN_TOUR_NAME, loadBookingFacts } from '../load-bookings'
 import { loadMeSends, loadRegistry, recipientStatusOf } from '../load-facts'
+import { deriveLetterStatus } from '../aggregate'
 import { loadAutoLetterDetail, loadAutoLettersList } from '../load'
 
 const pad = (n: number): string => String(n).padStart(12, '0')
@@ -213,7 +214,7 @@ describe('loadMeSends', () => {
       { client_id: CLIENT_A, trigger_key: OTHER, authorized_at: null, revoked_at: null, template_sha256: null },
     ])
     const sends = await loadMeSends(ctx.db, CLIENT_A, [TRIGGER, OTHER])
-    expect(sends.get(TRIGGER)).toMatchObject({ channel: 'me', proposalPending: true, proposalApproved: false, started: false, recipients: [] })
+    expect(sends.get(TRIGGER)).toMatchObject({ channel: 'me', proposalPending: true, proposalApproved: false, recipients: [] })
     expect(sends.has(OTHER)).toBe(false) // the rehearsal-only welcome proposal has no template version: not "waiting"
   })
 
@@ -222,7 +223,7 @@ describe('loadMeSends', () => {
       { client_id: CLIENT_A, trigger_key: TRIGGER, authorized_at: '2026-11-20T00:00:00Z', revoked_at: null, template_sha256: 'sha' },
     ])
     const facts = (await loadMeSends(ctx.db, CLIENT_A, [TRIGGER])).get(TRIGGER)
-    expect(facts).toMatchObject({ channel: 'me', proposalPending: false, proposalApproved: true, started: false, recipients: [] })
+    expect(facts).toMatchObject({ channel: 'me', proposalPending: false, proposalApproved: true, recipients: [] })
   })
 
   it('a withdrawn proposal leaves no trace (no status can say 撤下了、没发), even one that was approved before it was withdrawn', async () => {
@@ -233,7 +234,7 @@ describe('loadMeSends', () => {
     expect((await loadMeSends(ctx.db, CLIENT_A, [TRIGGER, OTHER])).size).toBe(0)
   })
 
-  it('real sends: started once any row is not blocked/skipped; each person gets the mapped result and reason', async () => {
+  it('real sends: each person gets the mapped result and reason; the letter counts as sent once anyone really got it', async () => {
     seed('triggered_sends', [
       send({ contact_id: cid(1), status: 'delivered' }),
       send({ contact_id: cid(2), status: 'blocked', reason_code: 'frequency_full' }),
@@ -242,7 +243,7 @@ describe('loadMeSends', () => {
       send({ contact_id: cid(5), client_id: CLIENT_B }),
     ])
     const facts = (await loadMeSends(ctx.db, CLIENT_A, [TRIGGER])).get(TRIGGER)
-    expect(facts?.started).toBe(true)
+    expect(deriveLetterStatus(facts ?? null)).toBe('sent')
     expect(facts?.proposalPending).toBe(false)
     expect(facts?.recipients).toEqual([
       { contactId: cid(1), outcome: 'sent', reasonCode: null, opened: null, clicked: null },
@@ -252,15 +253,24 @@ describe('loadMeSends', () => {
     ])
   })
 
-  it('only blocked / skipped rows means nothing has started', async () => {
-    seed('triggered_sends', [
-      send({ contact_id: cid(1), status: 'blocked', reason_code: 'dnc' }),
-      send({ contact_id: cid(2), status: 'skipped', reason_code: 'stale' }),
-    ])
-    expect((await loadMeSends(ctx.db, CLIENT_A, [TRIGGER])).get(TRIGGER)?.started).toBe(false)
+  it('a letter nobody really got stays a draft: only blocked / skipped / suppressed rows, only failures, only queued rows', async () => {
+    const cases: Array<[string, Row[]]> = [
+      ['blocked and skipped', [send({ contact_id: cid(1), status: 'blocked', reason_code: 'dnc' }), send({ contact_id: cid(2), status: 'skipped', reason_code: 'stale' })]],
+      ['suppressed counts as blocked, not as sent', [send({ contact_id: cid(1), status: 'suppressed', reason_code: 'email_unsubscribed' })]],
+      ['all failed', [send({ contact_id: cid(1), status: 'bounced' }), send({ contact_id: cid(2), status: 'failed', reason_code: 'bad_email' })]],
+      ['still queued', [send({ contact_id: cid(1), status: 'claimed' }), send({ contact_id: cid(2), status: 'pending' })]],
+    ]
+    for (const [label, rows] of cases) {
+      ctx = createFakeDb()
+      state = ctx.state
+      seed('triggered_sends', rows)
+      const facts = (await loadMeSends(ctx.db, CLIENT_A, [TRIGGER])).get(TRIGGER)
+      expect(facts?.recipients.length, label).toBeGreaterThan(0)
+      expect(deriveLetterStatus(facts ?? null), label).toBe('draft')
+    }
   })
 
-  it('rehearsal rows are rehearsal, never sent, and never make a letter started; a real row beats a rehearsal row for the same person', async () => {
+  it('rehearsal rows are rehearsal, never sent, and never make a letter sent; a real row beats a rehearsal row for the same person', async () => {
     seed('triggered_sends', [
       send({ contact_id: cid(1), dedupe_scope: 'shadow', status: 'shadow' }),
       send({ contact_id: cid(2), dedupe_scope: 'shadow', status: 'skipped', reason_code: 'dnc' }),
@@ -270,7 +280,7 @@ describe('loadMeSends', () => {
     const facts = (await loadMeSends(ctx.db, CLIENT_A, [TRIGGER])).get(TRIGGER)
     const byId = Object.fromEntries((facts?.recipients ?? []).map((r) => [r.contactId, r.outcome]))
     expect(byId).toEqual({ [cid(1)]: 'rehearsal', [cid(2)]: 'rehearsal', [cid(3)]: 'sent' })
-    expect(facts?.started).toBe(true) // person 3's real send
+    expect(deriveLetterStatus(facts ?? null)).toBe('sent') // person 3's real send
   })
 
   it('reads only the columns it needs: no rule (it holds the trial mailing list), no address hash, no annotations', async () => {
@@ -512,6 +522,34 @@ describe('rhythm, past batches and empty reasons', () => {
       )
       expect(letterReads.length).toBeGreaterThan(0)
       for (const q of letterReads) expect(q.columns ?? '').not.toMatch(/rule|address|annotations|email|created_by|note|raw/i)
+    })
+
+    it('a letter that already went out still opens from the records after its tour left the plan (orders cancelled)', async () => {
+      seedHistory()
+      state.tables.crm_bookings = (state.tables.crm_bookings ?? []).map((b) => (b.tour_id === T1 ? { ...b, status: 'cancelled' } : b))
+      const detail = await loadAutoLetterDetail(ctx.db, CLIENT_A, buildLetterKey(NOV_4) as string, NOW)
+      expect(detail?.letter).toMatchObject({ status: 'sent', audience: { tourName: 'Tour One', departOn: '2027-03-11', monthsLeft: 4 } })
+      expect(detail?.tiles).toMatchObject({ recipients: 2, sent: 1, blocked: 1 })
+      expect(detail?.recipients.map((r) => [r.displayName, r.status, r.reasonText])).toEqual([
+        ['Al Test', 'blocked', '他最近 7 天已收 2 封'],
+        ['Bea Test', 'sent', null],
+      ])
+      expect(JSON.stringify(detail)).not.toMatch(/@|email/i)
+    })
+
+    it('a key that is in neither the plan nor the records is still not found', async () => {
+      seedHistory()
+      state.tables.crm_bookings = (state.tables.crm_bookings ?? []).map((b) => (b.tour_id === T2 ? { ...b, status: 'cancelled' } : b))
+      expect(await loadAutoLetterDetail(ctx.db, CLIENT_A, buildLetterKey(NOV_4_TOUR_TWO) as string, NOW)).toBeNull()
+    })
+
+    it('a letter rebuilt from the records is read inside this client only', async () => {
+      seedHistory()
+      state.tables.crm_bookings = (state.tables.crm_bookings ?? []).map((b) => (b.tour_id === T1 ? { ...b, status: 'cancelled' } : b))
+      state.queries.length = 0
+      await loadAutoLetterDetail(ctx.db, CLIENT_A, buildLetterKey(NOV_4) as string, NOW)
+      expect(state.queries.length).toBeGreaterThan(0)
+      for (const q of state.queries) expect(q.eqs).toContainEqual(['client_id', CLIENT_A])
     })
 
     it('a past letter opens in the drawer the same way an upcoming one does', async () => {

@@ -34,7 +34,6 @@ function wentOut(recipients?: RecipientOutcome[]): LetterFacts {
       channel: 'me',
       proposalPending: false,
       proposalApproved: false,
-      started: true,
       recipients: recipients ?? [outcome({ contactId: 'c1' }), outcome({ contactId: 'c2', outcome: 'blocked', reasonCode: 'dnc' })],
     },
   }
@@ -43,13 +42,13 @@ function wentOut(recipients?: RecipientOutcome[]): LetterFacts {
 /** 提案递上去了，等 PM 放行。 */
 const waiting: LetterFacts = {
   registry: null,
-  sends: { channel: 'me', proposalPending: true, proposalApproved: false, started: false, recipients: [] },
+  sends: { channel: 'me', proposalPending: true, proposalApproved: false, recipients: [] },
 }
 
 /** PM 已放行，可是一行发送记录都没有（引擎没动）。 */
 const approvedOnly: LetterFacts = {
   registry: null,
-  sends: { channel: 'me', proposalPending: false, proposalApproved: true, started: false, recipients: [] },
+  sends: { channel: 'me', proposalPending: false, proposalApproved: true, recipients: [] },
 }
 
 describe('lookbackDaysFor', () => {
