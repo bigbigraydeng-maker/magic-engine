@@ -82,7 +82,8 @@ function Header({ profile, onLogout }: { profile: PortalView['profile']; onLogou
     <div className="mb-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-me-charcoal/90">你好，{profile.display_name}</h1>
+          <div className="text-xs font-bold tracking-[0.08em] text-me-ochre">MAGIC NETWORK</div>
+          <h1 className="mt-1 text-2xl font-bold text-me-charcoal/90">你好，{profile.display_name}</h1>
           <span className="mt-2 inline-block rounded-full bg-me-ochre/15 px-3 py-1 text-xs font-bold text-me-charcoal/75">
             {profile.level ? LEVEL_BADGE[profile.level] : '—'}
           </span>

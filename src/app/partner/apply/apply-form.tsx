@@ -72,7 +72,7 @@ export function ApplyForm({ termsVersion, initialReferralCode }: ApplyFormProps)
         <div className="px-6 py-8">
           <h2 className="text-base font-bold text-me-charcoal/90">申请已收到</h2>
           <p className="mt-3 text-sm text-me-charcoal/75">
-            谢谢！我们会逐份审核，审核后用你留的邮箱或电话联系你。审核通过后你会收到一条登录经销商后台的链接。
+            谢谢！我们会逐份审核，审核后用你留的邮箱或电话联系你。审核通过后你会收到一条登录 Magic Network 经销商后台的链接。
           </p>
         </div>
       </div>

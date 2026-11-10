@@ -275,9 +275,9 @@ function PartnerBand({ applyHref }: { applyHref: string }) {
     <div className="ctaband partner">
       <div>
         <div className="cb-t serif">想把它推荐给身边的老板？</div>
-        <div className="cb-n">成为 Magic Engine 经销商：加入免费，不囤货，按客户实付金额拿分润，零售最高 {topRate}%。</div>
+        <div className="cb-n">加入 Magic Network（Magic Engine 经销商网络）：加入免费，不囤货，按客户实付金额拿分润，零售最高 {topRate}%。</div>
       </div>
-      <Link href={applyHref} className="btn line">了解经销商计划</Link>
+      <Link href={applyHref} className="btn line">了解 Magic Network</Link>
     </div>
   )
 }
