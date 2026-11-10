@@ -42,14 +42,10 @@ describe('确认卡 page routes a go-live card', () => {
     const link = await screen.findByRole('link', { name: GO_LIVE_CONFIRM_LABEL })
     expect(link.getAttribute('href')).toBe(GO_LIVE_CONFIRM_HREF)
 
-    const goLiveButton = screen.getAllByRole('button', { name: '确认' }).find((button) => button.hasAttribute('disabled'))
-    expect(goLiveButton).toBeTruthy()
-    fireEvent.click(goLiveButton as HTMLButtonElement)
-    expect(fetchMock.mock.calls.map((call) => String(call[0]))).not.toContain(
-      `/api/clients/${CLIENT}/confirmation-cards/${GO_LIVE_RUN}/decision`,
-    )
+    const confirmButtons = screen.getAllByRole('button', { name: '确认' })
+    expect(confirmButtons).toHaveLength(1)
 
-    const other = screen.getAllByRole('button', { name: '确认' }).find((button) => !button.hasAttribute('disabled'))
+    const other = confirmButtons[0]!
     fireEvent.click(other as HTMLButtonElement)
     await waitFor(() => {
       expect(fetchMock.mock.calls.map((call) => String(call[0]))).toContain(
