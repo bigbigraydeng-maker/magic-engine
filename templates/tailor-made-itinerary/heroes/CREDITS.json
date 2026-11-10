@@ -131,5 +131,25 @@
     "licenseUrl": "https://creativecommons.org/licenses/by/2.0",
     "source": "https://commons.wikimedia.org/wiki/File:Xi%27an_Bell_Tower_-_54075117224.jpg",
     "note": "resized to 1400px wide, re-encoded JPEG q58"
+  },
+  "family-theme-parks": {
+    "author": "Riku Lu (Shanghai Disney castle, left) + N509FZ (Universal Beijing globe, right)",
+    "license": "CC0 1.0 (left) + CC BY-SA 4.0 (right); composite shared under CC BY-SA 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+    "source": [
+      "https://commons.wikimedia.org/wiki/File:Enchanted_Storybook_Castle_(125438).jpg",
+      "https://commons.wikimedia.org/wiki/File:Universal_Studios_Beijing_globe_square_(20210907121340).jpg"
+    ],
+    "note": "two-photo diagonal composite, 1400x800, JPEG q68"
+  },
+  "family-theme-parks-portrait": {
+    "author": "Riku Lu (Shanghai Disney castle, left) + N509FZ (Universal Beijing globe, right)",
+    "license": "CC0 1.0 (left) + CC BY-SA 4.0 (right); composite shared under CC BY-SA 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+    "source": [
+      "https://commons.wikimedia.org/wiki/File:Enchanted_Storybook_Castle_(125438).jpg",
+      "https://commons.wikimedia.org/wiki/File:Universal_Studios_Beijing_globe_square_(20210907121340).jpg"
+    ],
+    "note": "two-photo stacked composite (castle top, globe bottom), 1000x1500 portrait, JPEG q68"
   }
 }
