@@ -302,3 +302,7 @@ body:has(.ast) { background: #0B0B0C; }
   .ast .float-cta { left: 16px; right: 16px; bottom: 16px; justify-content: center; height: 52px; font-size: 16px; }
   .ast .foot { padding-bottom: 84px; }
 }
+
+/* Bridge to the distributor programme */
+.ast .ctaband.partner { background: transparent; border-color: rgba(244,239,230,.22); }
+.ast .foot-link { color: #D9B26A; border-bottom: 1px solid rgba(217,178,106,.5); }

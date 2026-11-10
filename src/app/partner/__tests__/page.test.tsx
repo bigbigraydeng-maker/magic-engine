@@ -4,7 +4,7 @@ import { render, screen } from '@testing-library/react'
 import PartnerPage from '../page'
 
 const VIEW = {
-  profile: { display_name: '李经理', status: 'approved', level: 'tier1', approved_at: '2026-10-01T00:00:00Z' },
+  profile: { display_name: '李经理', status: 'approved', level: 'tier1', approved_at: '2026-10-01T00:00:00Z', referral_code: 'ABCD2345' },
   upgrade: { next: null, selfPurchaseBestCents: 0, selfPurchaseTargetCents: 1_598_000, directSalesCents: 0, directSalesTargetCents: 2_397_000, recentTeamMonths: [{ month: '2026-10', team_sales_cents: 16_000_000 }], premierMonthlyTargetCents: 15_000_000, directTier1: 1, directTier1Target: 2 },
   team: { direct: [{ display_name: '王小明', level: 'standard', status: 'approved' }], total: 3 },
   sales: [],
@@ -31,5 +31,9 @@ describe('partner page', () => {
     expect(screen.getAllByText(/一级经销商/).length).toBeGreaterThan(0)
     expect(screen.getByText(/团队一共 3 人/)).toBeTruthy()
     expect(screen.getAllByText('$2600.00').length).toBeGreaterThan(0)
+    const product = screen.getByLabelText('发给客户：产品介绍页') as HTMLInputElement
+    expect(product.value).toMatch(/\/ai-steward\?ref=ABCD2345$/)
+    const apply = screen.getByLabelText(/^发给想做经销商的人/) as HTMLInputElement
+    expect(apply.value).toMatch(/\/partner\/apply\?ref=ABCD2345$/)
   })
 })

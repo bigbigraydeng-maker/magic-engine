@@ -29,7 +29,7 @@ function ApplicantDetails({ d, sameEmail }: { d: Distributor; sameEmail: number 
           这个邮箱还有 {sameEmail} 份别的记录：可能有人冒用邮箱，批准前先联系本人确认上线是谁
         </div>
       )}
-      {d.referral_code && <div className="mt-1 text-xs text-me-charcoal/55">推荐码 {d.referral_code}</div>}
+      {d.referral_code && <div className="mt-1 text-xs text-me-charcoal/55">邀请码 {d.referral_code}</div>}
       {d.application_note && (
         <p className="mt-1 max-w-xs whitespace-pre-line text-xs text-me-charcoal/70">{d.application_note}</p>
       )}

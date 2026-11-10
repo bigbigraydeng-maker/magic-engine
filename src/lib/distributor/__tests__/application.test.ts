@@ -78,6 +78,9 @@ describe('parseApplication', () => {
     expect(bad({ accept_terms: 'true' })).toMatchObject({ ok: false })
     expect(bad({ terms_version: 'distributor-terms-old' })).toMatchObject({ ok: false })
     expect(bad({ referral_code: 'O0O0O0O0' })).toMatchObject({ ok: false })
+    // Invite-only: a missing or blank code is refused before anything touches the database.
+    expect(bad({ referral_code: '' })).toEqual({ ok: false, errors: ['目前仅限邀请加入，请填写介绍你的经销商给的邀请码'] })
+    expect(bad({ referral_code: undefined })).toMatchObject({ ok: false })
     expect(bad({ contact_email: 'not-an-email' })).toMatchObject({ ok: false })
     expect(bad({ contact_phone: 'call me' })).toMatchObject({ ok: false })
     expect(bad({ note: 'x'.repeat(1001) })).toMatchObject({ ok: false })
