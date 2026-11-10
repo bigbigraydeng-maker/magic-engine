@@ -5,6 +5,7 @@ import { createKernel } from '@/lib/kernel'
 import { isUuid } from '@/lib/validation-utils'
 import { assertMayClick, clickerFromSession, decideConfirmationCard } from '@/lib/confirmation-card'
 import { parseDecisionBody, publicError } from '@/lib/confirmation-card/http'
+import { blockGoLiveOnGenericDecision } from '@/lib/ads-go-live/generic-block'
 import { blockScaleFallbackOnConfirm } from '@/lib/ads-strategy/daily-card-guard'
 
 export async function POST(
@@ -38,6 +39,8 @@ export async function POST(
     const kernel = createKernel(supabaseAdmin)
     const blocked = await blockScaleFallbackOnConfirm(kernel, params.id, params.runId, body.resolution)
     if (blocked) return NextResponse.json({ error: blocked }, { status: 409 })
+    const goLive = await blockGoLiveOnGenericDecision(kernel, params.id, params.runId)
+    if (goLive) return NextResponse.json({ error: goLive }, { status: 409 })
     const card = await decideConfirmationCard(kernel, {
       clientId: params.id,
       runId: params.runId,
