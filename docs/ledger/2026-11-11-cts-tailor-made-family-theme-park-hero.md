@@ -1,7 +1,7 @@
 ---
 id: 2026-11-11-cts-tailor-made-family-theme-park-hero
 title: CTS 定制行程单封面图库新增「亲子 · 上海迪士尼 / 北京环球影城」横版和竖版两张
-status: done
+status: decided
 owner: agent
 decided_on: 2026-11-11
 source: session:dde5b762
