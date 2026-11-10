@@ -99,6 +99,7 @@ describe('social-plan GET — isolates campaign_daily_v1 rows from the legacy pl
     // rows (legacy plans never set plan_kind at all).
     expect(clause).toContain('plan_data->>plan_kind.is.null')
     expect(clause).toContain('plan_data->>plan_kind.neq.campaign_daily_v1')
+    expect(clause).toContain('plan_data->>plan_kind.neq.weekly_slot_plan_v1')
     expect(clause).not.toMatch(/^plan_data->>plan_kind\.eq\./)
   })
 
