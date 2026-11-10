@@ -175,4 +175,9 @@ describe('Facebook 线索编号', () => {
     const preview = maskForPreview(outcome(), CONFIG, META)
     expect((preview.匹配键_无 as string[]).includes('Facebook 线索编号')).toBe(true)
   })
+
+  it('库里存的国际格式纯数字电话，没配默认国家码时预览也算「有电话」', () => {
+    const p = maskForPreview(outcome({ customerPhone: '6421555123' }), { ...CONFIG, defaultPhoneCountry: null }, META)
+    expect(p['匹配键_有']).toContain('电话')
+  })
 })
