@@ -1,7 +1,7 @@
 ---
 id: 2026-11-10-crm-all-list-ai-takeover-tag
 title: 「全部客人」名单里补上「AI 跟进中」小标（之前只有今天名单和抽屉有）
-status: done
+status: decided
 owner: agent
 decided_on: 2026-11-10
 source: session:96dc6edf
