@@ -10,8 +10,8 @@ source: session:5b9407a2
 verify_by: 2026-09-30
 verify_how: ① 有人点过「连接 Meta」之后，`select via from` 判定结果应为 `client_oauth`（不是 `staff_verified`）—— 看每小时那次同步的运行记录里 NAL 那条不再报 `page_not_verified`；② `select max(last_message_at) from conversations where client_id='4ae76381-cd45-43bd-85cd-98cfd7604007' and channel='messenger'` 要追到当天，而不是停在 2026-09-16；③ 若卡片变绿但②仍停在 9-16，说明授权账号在主页上没有「消息」权限，按卡上那句换账号再点一次
 supersedes: 2026-09-27-nal-messenger-outage-task-already-sent
-last_checked: 2026-11-09
-check_note: 11-09：只读查生产库，NAL messenger 会话最新 last_message_at 仍是 2026-09-16T02:03Z（verify_how ② 未追到当天）；无法判断是否有人点过「连接 Meta」，不翻状态，仍待 PM 确认是否已点
+last_checked: 2026-11-10
+check_note: 11-10：只读查库NAL messenger最新last_message_at仍为2026-09-16；今早待办邮件仍有NAL「私信、表单线索、评论自动回复已暂停，绑定没通过核实」及「Facebook授权断44天」两条，说明尚未有人点连接Meta，verify_how②未成立；非失败，仍待PM安排点
 ---
 **我 2026-09-27 早先那张卡写「人工任务写得对」，这一条把它纠正了。** 那条任务教人先点「重新核实」——那个按钮救不了私信。
 

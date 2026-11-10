@@ -11,6 +11,7 @@ vi.mock('../../_components/VisualDirectionSection', () => ({ VisualDirectionSect
 vi.mock('../../_components/CampaignDailyPlanPanel', () => ({ CampaignDailyPlanPanel: ({ campaignId }: { campaignId: string }) => <div>post-panel:{campaignId}</div> }))
 vi.mock('../../_components/DailyPlanReelsPanel', () => ({ DailyPlanReelsPanel: () => <div>reels-panel</div> }))
 vi.mock('../../_components/WeekOverviewPanel', () => ({ WeekOverviewPanel: () => <div>overview-panel</div> }))
+vi.mock('../../_components/SocialReadbackPanel', () => ({ SocialReadbackPanel: () => <div>readback-panel</div> }))
 
 import DailyPlanPage from '../page'
 import { WorkspaceViewerProvider } from '@/app/dashboard/workspace-viewer'
@@ -52,6 +53,7 @@ describe('DailyPlanPage — one concept: 社媒日常', () => {
     await screen.findByRole('heading', { level: 1, name: '社媒日常' })
     fireEvent.click(screen.getByRole('tab', { name: '本周总览' }))
     expect(screen.getByText('overview-panel')).toBeInTheDocument()
+    expect(screen.getByText('readback-panel')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('tab', { name: '短视频' }))
     expect(screen.getByText('reels-panel')).toBeInTheDocument()
   })

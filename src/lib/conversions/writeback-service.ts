@@ -26,6 +26,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { isDoNotContact, type DncTouch } from '@/lib/crm/dnc'
 import { actionSourceForSourceKind, type SourceKind } from './intake'
 import { eventAgeMs, isPastEventWindow, DAY_MS } from './event-window'
+import { parseCrmStageSignalsConfig, readCapiSendKinds } from './crm-stage-signals'
 import type {
   ClientSendConfig,
   DestinationWriter,
@@ -58,7 +59,11 @@ const STUCK_SENDING_MS = 5 * 60_000
 const AUTH_RETRY_DELAY_MS = 60 * 60_000
 
 export type SendOutcomeResult = {
-  status: WritebackStatus
+  /**
+   * `not_allowed` 不是发送记录的状态：客户配置不允许发这类事件，**连发送记录都没建**。
+   * 跟 `queued` 分开，页面才能说清「这个客户不回传这类事件」，而不是一直显示排队中。
+   */
+  status: WritebackStatus | 'not_allowed'
   /** 说人话的一句话，直接能显示给 PM。 */
   message: string
   writebackId: string | null
@@ -70,7 +75,8 @@ type OutcomeRow = {
   id: string
   client_id: string
   contact_id: string | null
-  outcome_kind: 'purchase' | 'balance' | 'lead'
+  outcome_kind: 'purchase' | 'balance' | 'lead' | 'lead_stage'
+  lead_stage: string | null
   customer_email: string | null
   customer_phone: string | null
   customer_first: string | null
@@ -92,6 +98,7 @@ function toOutcomeForSend(row: OutcomeRow): OutcomeForSend {
     clientId: row.client_id,
     contactId: row.contact_id,
     outcomeKind: row.outcome_kind,
+    leadStage: row.lead_stage,
     customerEmail: row.customer_email,
     customerPhone: row.customer_phone,
     customerFirst: row.customer_first,
@@ -102,7 +109,9 @@ function toOutcomeForSend(row: OutcomeRow): OutcomeForSend {
     occurredAt: row.occurred_at,
     pageScopedUserId: row.page_scoped_user_id,
     metaLeadId: row.meta_lead_id,
-    actionSource: actionSourceForSourceKind(row.source_kind),
+    // 线索阶段事件按 Meta 线索阶段集成的规定固定为 system_generated，跟数据来源渠道无关。
+    actionSource:
+      row.outcome_kind === 'lead_stage' ? 'system_generated' : actionSourceForSourceKind(row.source_kind),
   }
 }
 
@@ -132,7 +141,7 @@ export async function sendApprovedOutcome(
   const { data: outcomeData, error: outcomeErr } = await supabase
     .from('me_sale_outcomes')
     .select(
-      'id, client_id, contact_id, outcome_kind, customer_email, customer_phone, ' +
+      'id, client_id, contact_id, outcome_kind, lead_stage, customer_email, customer_phone, ' +
         'customer_first, customer_last, order_ref, amount_minor, currency, ' +
         'occurred_at, review_status, redacted_at, page_scoped_user_id, meta_lead_id, source_kind',
     )
@@ -197,7 +206,7 @@ export async function sendApprovedOutcome(
   // ── 3. 读客户配置 ──────────────────────────────────────────────────
   const { data: clientData, error: clientErr } = await supabase
     .from('clients')
-    .select('id, default_phone_country, conversion_stage, facebook_page_id')
+    .select('id, default_phone_country, conversion_stage, facebook_page_id, leads_config')
     .eq('id', outcome.client_id)
     .maybeSingle()
 
@@ -208,11 +217,38 @@ export async function sendApprovedOutcome(
     default_phone_country: string | null
     conversion_stage: string | null
     facebook_page_id: string | null
+    leads_config?: unknown
   }
+
+  // ── 3b. 这个客户允许发这类事件吗（所有发送入口共用这一道闸）──────────
+  // 批准即发、再试一次、AI 自动审核、失败补发、邮箱付款识别、线索阶段回传
+  // 全都走这个函数，闸放在这里才一个都漏不掉。不允许就连发送记录都不建。
+  const allowedKinds = readCapiSendKinds(client.leads_config)
+  if (allowedKinds && !allowedKinds.includes(outcome.outcome_kind)) {
+    return {
+      status: 'not_allowed',
+      message: '这个客户不回传这类事件给广告平台（客户配置里没开），这条不会发送',
+      writebackId: null,
+    }
+  }
+
+  const stageCfg = outcome.outcome_kind === 'lead_stage' ? parseCrmStageSignalsConfig(client.leads_config) : null
+  if (outcome.outcome_kind === 'lead_stage' && !stageCfg?.enabled) {
+    return {
+      status: 'not_allowed',
+      message: '这个客户没开线索阶段回传，这条不会发送',
+      writebackId: null,
+    }
+  }
+
   const config: ClientSendConfig = {
     clientId: outcome.client_id,
     defaultPhoneCountry: client.default_phone_country,
     facebookPageId: client.facebook_page_id,
+    crmStage:
+      stageCfg?.datasetId != null
+        ? { datasetId: stageCfg.datasetId, leadEventSource: stageCfg.leadEventSource }
+        : null,
   }
 
   // ── 4. 抢发送记录（数据库唯一约束是第一道闸）────────────────────────
@@ -304,7 +340,11 @@ export async function sendApprovedOutcome(
   const forSend = toOutcomeForSend(outcome)
 
   // ── 6. 试运行：只构造、只预检，不真发 ──────────────────────────────
-  if (client.conversion_stage !== 'live') {
+  // 线索阶段事件要客户整体 live **且** 线索阶段这一路单独切到 live 才真发——
+  // 新开一路回传时先单独试运行，不因为客户的成交回传早已 live 就跟着真发。
+  const isDryRun =
+    client.conversion_stage !== 'live' || (outcome.outcome_kind === 'lead_stage' && stageCfg?.mode !== 'live')
+  if (isDryRun) {
     let preview: Record<string, unknown>
     try {
       writer.build(forSend, config) // 构造不出来要当场知道

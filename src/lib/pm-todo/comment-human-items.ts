@@ -37,6 +37,7 @@ const INTENT_LABEL: Record<CommentIntent, string> = {
   faq_itinerary: '问行程',
   faq_visa: '问签证',
   faq_signup: '问怎么订',
+  praise: '夸奖',
 }
 
 function auditHref(clientId: string): string {
