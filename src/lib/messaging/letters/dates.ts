@@ -25,6 +25,12 @@ export function fromDayNumber(dayNumber: number): NzDate {
   return new Date(dayNumber * MS_PER_DAY).toISOString().slice(0, 10)
 }
 
+/** 往后（正数）或往前（负数）挪几天；日期无效 → null。 */
+export function shiftDays(date: NzDate, days: number): NzDate | null {
+  const n = toDayNumber(date)
+  return n === null ? null : fromDayNumber(n + days)
+}
+
 /** 周几：0 = 周日 … 3 = 周三 … 6 = 周六；日期无效 → null。 */
 export function weekdayOf(date: NzDate): number | null {
   const n = toDayNumber(date)

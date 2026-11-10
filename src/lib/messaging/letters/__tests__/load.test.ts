@@ -13,6 +13,7 @@ import { COUNTDOWN_CADENCE } from '../cadence'
 import { buildLetterKey, buildTemplateKey, buildTriggerKey } from '../keys'
 import { UNKNOWN_TOUR_NAME, loadBookingFacts } from '../load-bookings'
 import { loadMeSends, loadRegistry, recipientStatusOf } from '../load-facts'
+import { deriveLetterStatus } from '../aggregate'
 import { loadAutoLetterDetail, loadAutoLettersList } from '../load'
 
 const pad = (n: number): string => String(n).padStart(12, '0')
@@ -177,11 +178,12 @@ describe('loadRegistry', () => {
 })
 
 describe('recipientStatusOf', () => {
-  it('maps the ledger statuses the way the contract says; unknown means still pending, never sent', () => {
-    for (const s of ['sent', 'delivered', 'delivery_delayed']) expect(recipientStatusOf(s)).toBe('sent')
+  it('maps the ledger statuses the way the send window defined them: a complaint means it arrived, an unknown outcome stays its own thing, anything unrecognised is still pending, never sent', () => {
+    for (const s of ['sent', 'delivered', 'delivery_delayed', 'complained']) expect(recipientStatusOf(s)).toBe('sent')
     for (const s of ['blocked', 'skipped', 'suppressed']) expect(recipientStatusOf(s)).toBe('blocked')
-    for (const s of ['failed', 'bounced', 'complained', 'unknown_outcome']) expect(recipientStatusOf(s)).toBe('failed')
-    for (const s of ['pending', 'shadow', 'something_new', '']) expect(recipientStatusOf(s)).toBe('pending')
+    for (const s of ['failed', 'bounced']) expect(recipientStatusOf(s)).toBe('failed')
+    expect(recipientStatusOf('unknown_outcome')).toBe('unknown')
+    for (const s of ['pending', 'claimed', 'shadow', 'something_new', '']) expect(recipientStatusOf(s)).toBe('pending')
   })
 })
 
@@ -213,19 +215,27 @@ describe('loadMeSends', () => {
       { client_id: CLIENT_A, trigger_key: OTHER, authorized_at: null, revoked_at: null, template_sha256: null },
     ])
     const sends = await loadMeSends(ctx.db, CLIENT_A, [TRIGGER, OTHER])
-    expect(sends.get(TRIGGER)).toMatchObject({ channel: 'me', proposalPending: true, started: false, recipients: [] })
+    expect(sends.get(TRIGGER)).toMatchObject({ channel: 'me', proposalPending: true, proposalApproved: false, recipients: [] })
     expect(sends.has(OTHER)).toBe(false) // the rehearsal-only welcome proposal has no template version: not "waiting"
   })
 
-  it('an approved or withdrawn proposal is not waiting', async () => {
+  it('an approved proposal is not waiting, but it leaves a trace even with no send row (approved, nothing went out)', async () => {
     seed('triggered_send_authorizations', [
       { client_id: CLIENT_A, trigger_key: TRIGGER, authorized_at: '2026-11-20T00:00:00Z', revoked_at: null, template_sha256: 'sha' },
-      { client_id: CLIENT_A, trigger_key: OTHER, authorized_at: null, revoked_at: '2026-11-20T00:00:00Z', template_sha256: 'sha' },
+    ])
+    const facts = (await loadMeSends(ctx.db, CLIENT_A, [TRIGGER])).get(TRIGGER)
+    expect(facts).toMatchObject({ channel: 'me', proposalPending: false, proposalApproved: true, recipients: [] })
+  })
+
+  it('a withdrawn proposal leaves no trace (no status can say 撤下了、没发), even one that was approved before it was withdrawn', async () => {
+    seed('triggered_send_authorizations', [
+      { client_id: CLIENT_A, trigger_key: TRIGGER, authorized_at: null, revoked_at: '2026-11-20T00:00:00Z', template_sha256: 'sha' },
+      { client_id: CLIENT_A, trigger_key: OTHER, authorized_at: '2026-11-19T00:00:00Z', revoked_at: '2026-11-20T00:00:00Z', template_sha256: 'sha' },
     ])
     expect((await loadMeSends(ctx.db, CLIENT_A, [TRIGGER, OTHER])).size).toBe(0)
   })
 
-  it('real sends: started once any row is not blocked/skipped; each person gets the mapped result and reason', async () => {
+  it('real sends: each person gets the mapped result and reason; the letter counts as sent once anyone really got it', async () => {
     seed('triggered_sends', [
       send({ contact_id: cid(1), status: 'delivered' }),
       send({ contact_id: cid(2), status: 'blocked', reason_code: 'frequency_full' }),
@@ -234,25 +244,62 @@ describe('loadMeSends', () => {
       send({ contact_id: cid(5), client_id: CLIENT_B }),
     ])
     const facts = (await loadMeSends(ctx.db, CLIENT_A, [TRIGGER])).get(TRIGGER)
-    expect(facts?.started).toBe(true)
+    expect(deriveLetterStatus(facts ?? null)).toBe('sent')
     expect(facts?.proposalPending).toBe(false)
     expect(facts?.recipients).toEqual([
-      { contactId: cid(1), outcome: 'sent', reasonCode: null, opened: null, clicked: null },
-      { contactId: cid(2), outcome: 'blocked', reasonCode: 'frequency_full', opened: null, clicked: null },
-      { contactId: cid(3), outcome: 'failed', reasonCode: 'bounced', opened: null, clicked: null },
-      { contactId: cid(4), outcome: 'failed', reasonCode: 'bad_email', opened: null, clicked: null },
+      { contactId: cid(1), outcome: 'sent', reasonCode: null, settled: true, opened: null, clicked: null },
+      // a plain "blocked" row on a lifetime record can still be retried: not final
+      { contactId: cid(2), outcome: 'blocked', reasonCode: 'frequency_full', settled: false, opened: null, clicked: null },
+      { contactId: cid(3), outcome: 'failed', reasonCode: 'bounced', settled: true, opened: null, clicked: null },
+      { contactId: cid(4), outcome: 'failed', reasonCode: 'bad_email', settled: true, opened: null, clicked: null },
     ])
   })
 
-  it('only blocked / skipped rows means nothing has started', async () => {
-    seed('triggered_sends', [
-      send({ contact_id: cid(1), status: 'blocked', reason_code: 'dnc' }),
-      send({ contact_id: cid(2), status: 'skipped', reason_code: 'stale' }),
-    ])
-    expect((await loadMeSends(ctx.db, CLIENT_A, [TRIGGER])).get(TRIGGER)?.started).toBe(false)
+  it('every ledger status says whether it can still change: a queued, retryable or unknown row can, the rest are final', async () => {
+    const cases: Array<[string, boolean]> = [
+      ['sent', true],
+      ['delivered', true],
+      ['delivery_delayed', true],
+      ['complained', true],
+      ['skipped', true],
+      ['suppressed', true],
+      ['failed', true],
+      ['bounced', true],
+      ['blocked', false],
+      ['pending', false],
+      ['claimed', false],
+      ['unknown_outcome', false],
+    ]
+    seed('triggered_sends', cases.map(([status], index) => send({ contact_id: cid(index + 1), status })))
+    const facts = (await loadMeSends(ctx.db, CLIENT_A, [TRIGGER])).get(TRIGGER)
+    const settledOf = Object.fromEntries((facts?.recipients ?? []).map((r) => [r.contactId, r.settled]))
+    expect(settledOf).toEqual(Object.fromEntries(cases.map(([, settled], index) => [cid(index + 1), settled])))
   })
 
-  it('rehearsal rows are rehearsal, never sent, and never make a letter started; a real row beats a rehearsal row for the same person', async () => {
+  it('the letter status follows the ledger: nobody received it and every row is final → not sent; a row that can still change keeps it a draft; unknown outcomes are their own status; a complaint means it arrived', async () => {
+    const cases: Array<[string, Row[], string]> = [
+      ['skipped only', [send({ contact_id: cid(1), status: 'skipped', reason_code: 'dnc' }), send({ contact_id: cid(2), status: 'skipped', reason_code: 'stale' })], 'not_sent'],
+      ['suppressed counts as blocked, not as sent', [send({ contact_id: cid(1), status: 'suppressed', reason_code: 'email_unsubscribed' })], 'not_sent'],
+      ['all failed', [send({ contact_id: cid(1), status: 'bounced' }), send({ contact_id: cid(2), status: 'failed', reason_code: 'bad_email' })], 'not_sent'],
+      ['a retryable block keeps the batch going', [send({ contact_id: cid(1), status: 'blocked', reason_code: 'dnc' }), send({ contact_id: cid(2), status: 'skipped', reason_code: 'stale' })], 'draft'],
+      ['still queued', [send({ contact_id: cid(1), status: 'claimed' }), send({ contact_id: cid(2), status: 'pending' })], 'draft'],
+      ['one queued row among final ones', [send({ contact_id: cid(1), status: 'failed' }), send({ contact_id: cid(2), status: 'pending' })], 'draft'],
+      ['unknown outcome, nobody confirmed', [send({ contact_id: cid(1), status: 'unknown_outcome' }), send({ contact_id: cid(2), status: 'failed' })], 'unknown'],
+      ['a complaint means it arrived', [send({ contact_id: cid(1), status: 'complained' })], 'sent'],
+      ['one receipt beats an unknown outcome', [send({ contact_id: cid(1), status: 'delivery_delayed' }), send({ contact_id: cid(2), status: 'unknown_outcome' })], 'sent'],
+    ]
+    for (const [label, rows, expected] of cases) {
+      ctx = createFakeDb()
+      state = ctx.state
+      seed('triggered_sends', rows)
+      const facts = (await loadMeSends(ctx.db, CLIENT_A, [TRIGGER])).get(TRIGGER)
+      expect(facts?.recipients.length, label).toBeGreaterThan(0)
+      // a send day long gone: nothing here depends on the clock, every case has real rows
+      expect(deriveLetterStatus(facts ?? null, { sendDate: '2026-12-02', today: '2026-12-20' }), label).toBe(expected)
+    }
+  })
+
+  it('rehearsal rows are rehearsal, never sent, and never make a letter sent; a real row beats a rehearsal row for the same person', async () => {
     seed('triggered_sends', [
       send({ contact_id: cid(1), dedupe_scope: 'shadow', status: 'shadow' }),
       send({ contact_id: cid(2), dedupe_scope: 'shadow', status: 'skipped', reason_code: 'dnc' }),
@@ -262,7 +309,7 @@ describe('loadMeSends', () => {
     const facts = (await loadMeSends(ctx.db, CLIENT_A, [TRIGGER])).get(TRIGGER)
     const byId = Object.fromEntries((facts?.recipients ?? []).map((r) => [r.contactId, r.outcome]))
     expect(byId).toEqual({ [cid(1)]: 'rehearsal', [cid(2)]: 'rehearsal', [cid(3)]: 'sent' })
-    expect(facts?.started).toBe(true) // person 3's real send
+    expect(deriveLetterStatus(facts ?? null)).toBe('sent') // person 3's real send
   })
 
   it('reads only the columns it needs: no rule (it holds the trial mailing list), no address hash, no annotations', async () => {
@@ -349,7 +396,7 @@ describe('loadAutoLettersList / loadAutoLetterDetail (end to end on a fake datab
     ])
     const detail = await loadAutoLetterDetail(ctx.db, CLIENT_A, key)
     expect(detail?.letter).toMatchObject({ letterKey: key, subject: 'S', bodyText: 'Kia ora {{first_name}}', previewText: null, status: 'draft' })
-    expect(detail?.tiles).toEqual({ recipients: 2, sent: 0, blocked: 1, failed: 0, rehearsal: 1 })
+    expect(detail?.tiles).toEqual({ recipients: 2, sent: 0, blocked: 1, failed: 0, rehearsal: 1, unknown: 0, opened: null })
     expect(detail?.recipients.map((r) => [r.displayName, r.status, r.reasonText, r.seats])).toEqual([
       ['Al Test', 'rehearsal', null, null],
       ['Bea Test', 'blocked', '他最近 7 天已收 2 封', 2],
@@ -391,6 +438,8 @@ describe('rhythm, past batches and empty reasons', () => {
       nextBatch: null,
       depositLetters: [],
       scheduledLetters: [],
+      pastLetters: [],
+      tourGroups: [],
       totalDistinctLetters: 0,
       cadence: null,
       notices: [],
@@ -431,6 +480,115 @@ describe('rhythm, past batches and empty reasons', () => {
     expect((await loadAutoLettersList(ctx.db, CLIENT_A, NOW, () => ({ ...COUNTDOWN_CADENCE, firstMonth: 4 }))).cadence).toEqual({ firstMonth: 4 })
   })
 
+  describe('history: batches that already went out stay on the list', () => {
+    const NOV_4 = { sendDate: '2026-11-04', tourId: T1, departOn: '2027-03-11', monthsLeft: 4 as const }
+    const OCT_7 = { sendDate: '2026-10-07', tourId: T1, departOn: '2027-03-11', monthsLeft: 5 as const }
+    const NOV_4_TOUR_TWO = { sendDate: '2026-11-04', tourId: T2, departOn: '2027-05-08', monthsLeft: 6 as const }
+
+    function seedHistory(): void {
+      seedCatalog()
+      seedBooking({ n: 1, name: 'Bea Test', party: 2 })
+      seedBooking({ n: 2, name: 'Al Test' })
+      seedBooking({ n: 3, name: 'Cy Test', tour: T2, departure: D2, snapshot: '2027-05-08', party: 1 })
+      seed('triggered_sends', [
+        { id: 'h1', client_id: CLIENT_A, trigger_key: buildTriggerKey(NOV_4), contact_id: cid(1), dedupe_scope: 'lifetime', status: 'delivered', reason_code: null },
+        { id: 'h2', client_id: CLIENT_A, trigger_key: buildTriggerKey(NOV_4), contact_id: cid(2), dedupe_scope: 'lifetime', status: 'blocked', reason_code: 'frequency_full' },
+      ])
+      seed('triggered_send_authorizations', [
+        { client_id: CLIENT_A, trigger_key: buildTriggerKey(OCT_7), authorized_at: null, revoked_at: null, template_sha256: 'sha' },
+      ])
+    }
+
+    it('lists the letters that left a trace, newest first, with their results; the rest of the past stays out', async () => {
+      seedHistory()
+      const list = await loadAutoLettersList(ctx.db, CLIENT_A, NOW)
+      expect(list.pastLetters.map((l) => [l.sendDate, l.audience.tourName, l.audience.monthsLeft, l.status])).toEqual([
+        ['2026-11-04', 'Tour One', 4, 'sent'],
+        ['2026-10-07', 'Tour One', 5, 'awaiting_release'],
+      ])
+      expect(list.pastLetters[0].counts).toEqual({ recipients: 2, sent: 1, blocked: 1, failed: 0, rehearsal: 0, unknown: 0, opened: null })
+      expect(list.pastLetters.map((l) => l.letterKey)).not.toContain(buildLetterKey(NOV_4_TOUR_TWO)) // planned that day, but nothing in the records
+    })
+
+    it('a batch that was approved but never went out stays in the history as not sent, and counts as overdue in its group', async () => {
+      seedHistory()
+      seed('triggered_send_authorizations', [
+        { client_id: CLIENT_A, trigger_key: buildTriggerKey(NOV_4_TOUR_TWO), authorized_at: '2026-11-03T00:00:00Z', revoked_at: null, template_sha256: 'sha' },
+      ])
+      const list = await loadAutoLettersList(ctx.db, CLIENT_A, NOW)
+      const row = list.pastLetters.find((l) => l.letterKey === buildLetterKey(NOV_4_TOUR_TWO))
+      expect(row).toMatchObject({ status: 'not_sent', counts: { sent: null } })
+      expect(list.tourGroups.find((g) => g.tourName === 'Tour Two')).toMatchObject({ lettersOverdue: 1, lettersSent: 0 })
+    })
+
+    it('the upcoming list and the next batch do not change', async () => {
+      seedHistory()
+      const list = await loadAutoLettersList(ctx.db, CLIENT_A, NOW)
+      expect(list.nextBatch?.sendDate).toBe('2026-12-02')
+      expect(list.scheduledLetters.map((l) => l.sendDate)).toEqual(['2026-12-02', '2026-12-02', '2027-01-06', '2027-01-06'])
+      expect(list.totalDistinctLetters).toBe(16)
+    })
+
+    it('tour groups count what went out, what is ahead and what was due but never went out', async () => {
+      seedHistory()
+      const { tourGroups } = await loadAutoLettersList(ctx.db, CLIENT_A, NOW)
+      const one = tourGroups.find((g) => g.tourName === 'Tour One')
+      const two = tourGroups.find((g) => g.tourName === 'Tour Two')
+      expect(one).toMatchObject({ departOn: '2027-03-11', recipients: 2, lettersSent: 1, lettersOverdue: 1 })
+      expect(one?.lettersAhead).toBe(7) // 3 monthly letters (12/2, 1/6, 2/3) + 4 weekly letters in the last month
+      expect(one?.lastSent).toMatchObject({ letterKey: buildLetterKey(NOV_4), sent: 1, blocked: 1, failed: 0, unknown: 0, opened: null })
+      expect(one?.next).toMatchObject({ sendDate: '2026-12-02', status: 'draft' })
+      expect(two).toMatchObject({ departOn: '2027-05-08', recipients: 1, lettersSent: 0, lettersOverdue: 0, lastSent: null })
+    })
+
+    it('the history reads stay inside this client and never ask for an address, a rule or who wrote a letter', async () => {
+      seedHistory()
+      await loadAutoLettersList(ctx.db, CLIENT_A, NOW)
+      expect(state.queries.length).toBeGreaterThan(0)
+      for (const q of state.queries) expect(q.eqs).toContainEqual(['client_id', CLIENT_A])
+      const letterReads = state.queries.filter((q) =>
+        ['triggered_sends', 'triggered_send_authorizations', 'crm_email_templates'].includes(q.table),
+      )
+      expect(letterReads.length).toBeGreaterThan(0)
+      for (const q of letterReads) expect(q.columns ?? '').not.toMatch(/rule|address|annotations|email|created_by|note|raw/i)
+    })
+
+    it('a letter that already went out still opens from the records after its tour left the plan (orders cancelled)', async () => {
+      seedHistory()
+      state.tables.crm_bookings = (state.tables.crm_bookings ?? []).map((b) => (b.tour_id === T1 ? { ...b, status: 'cancelled' } : b))
+      const detail = await loadAutoLetterDetail(ctx.db, CLIENT_A, buildLetterKey(NOV_4) as string, NOW)
+      expect(detail?.letter).toMatchObject({ status: 'sent', audience: { tourName: 'Tour One', departOn: '2027-03-11', monthsLeft: 4 } })
+      expect(detail?.tiles).toMatchObject({ recipients: 2, sent: 1, blocked: 1 })
+      expect(detail?.recipients.map((r) => [r.displayName, r.status, r.reasonText])).toEqual([
+        ['Al Test', 'blocked', '他最近 7 天已收 2 封'],
+        ['Bea Test', 'sent', null],
+      ])
+      expect(JSON.stringify(detail)).not.toMatch(/@|email/i)
+    })
+
+    it('a key that is in neither the plan nor the records is still not found', async () => {
+      seedHistory()
+      state.tables.crm_bookings = (state.tables.crm_bookings ?? []).map((b) => (b.tour_id === T2 ? { ...b, status: 'cancelled' } : b))
+      expect(await loadAutoLetterDetail(ctx.db, CLIENT_A, buildLetterKey(NOV_4_TOUR_TWO) as string, NOW)).toBeNull()
+    })
+
+    it('a letter rebuilt from the records is read inside this client only', async () => {
+      seedHistory()
+      state.tables.crm_bookings = (state.tables.crm_bookings ?? []).map((b) => (b.tour_id === T1 ? { ...b, status: 'cancelled' } : b))
+      state.queries.length = 0
+      await loadAutoLetterDetail(ctx.db, CLIENT_A, buildLetterKey(NOV_4) as string, NOW)
+      expect(state.queries.length).toBeGreaterThan(0)
+      for (const q of state.queries) expect(q.eqs).toContainEqual(['client_id', CLIENT_A])
+    })
+
+    it('a past letter opens in the drawer the same way an upcoming one does', async () => {
+      seedHistory()
+      const detail = await loadAutoLetterDetail(ctx.db, CLIENT_A, buildLetterKey(NOV_4) as string, NOW)
+      expect(detail?.letter.status).toBe('sent')
+      expect(detail?.tiles).toMatchObject({ recipients: 2, sent: 1, blocked: 1 })
+    })
+  })
+
   it('statuses the ledger leaves without a reason still get a plain one', async () => {
     seedTwoGuests()
     const trigger = buildTriggerKey(T1_DEC)
@@ -440,6 +598,293 @@ describe('rhythm, past batches and empty reasons', () => {
     ])
     const detail = await loadAutoLetterDetail(ctx.db, CLIENT_A, KEY, NOW)
     const byName = Object.fromEntries((detail?.recipients ?? []).map((r) => [r.displayName, [r.status, r.reasonText]]))
-    expect(byName).toEqual({ 'Bea Test': ['failed', '发送结果不明，等人核对'], 'Al Test': ['failed', '他投诉过'] })
+    // an unknown outcome is its own status now (the letter may well have arrived); a complaint means it did arrive
+    expect(byName).toEqual({ 'Bea Test': ['unknown', '发送结果不明，等人核对'], 'Al Test': ['sent', '他投诉过'] })
+  })
+
+  it('a letter whose every result is unknown shows as unknown on the list, in its group, and in the drawer', async () => {
+    seedTwoGuests()
+    const trigger = buildTriggerKey(T1_DEC)
+    seed('triggered_sends', [
+      { id: 'a', client_id: CLIENT_A, trigger_key: trigger, contact_id: cid(1), dedupe_scope: 'lifetime', status: 'unknown_outcome', reason_code: null },
+      { id: 'b', client_id: CLIENT_A, trigger_key: trigger, contact_id: cid(2), dedupe_scope: 'lifetime', status: 'unknown_outcome', reason_code: null },
+    ])
+    const list = await loadAutoLettersList(ctx.db, CLIENT_A, NOW)
+    const row = list.scheduledLetters.find((l) => l.letterKey === KEY)
+    expect(row).toMatchObject({ status: 'unknown', counts: { recipients: 2, sent: 0, failed: 0, unknown: 2 } })
+    expect(list.nextBatch?.phase).toBe('unknown')
+    expect(list.tourGroups.find((g) => g.tourName === 'Tour One')).toMatchObject({ lettersUnknown: 1, lettersSent: 0, lettersOverdue: 0 })
+    const detail = await loadAutoLetterDetail(ctx.db, CLIENT_A, KEY, NOW)
+    expect(detail?.letter.status).toBe('unknown')
+    expect(detail?.tiles).toMatchObject({ sent: 0, unknown: 2 })
+  })
+})
+
+describe('letters sent through Mailchimp', () => {
+  const NOV_4 = { sendDate: '2026-11-04', tourId: T1, departOn: '2027-03-11', monthsLeft: 4 as const }
+  const NOV_4_TOUR_TWO = { sendDate: '2026-11-04', tourId: T2, departOn: '2027-05-08', monthsLeft: 6 as const }
+  const KEY = buildLetterKey(NOV_4) as string
+  const TITLE = buildTemplateKey(NOV_4) as string
+  const TITLE_PATH = 'metadata->>email_campaign_title'
+
+  let counter = 0
+  const touch = (over: Row): Row => ({
+    id: `tp-${String((counter += 1)).padStart(4, '0')}`,
+    client_id: CLIENT_A,
+    contact_id: cid(1),
+    channel: 'email',
+    source: 'mailchimp',
+    direction: 'outbound',
+    summary: 'Sample summary text',
+    metadata: {},
+    ...over,
+  })
+  /** The "sent" record the Mailchimp sync writes for one guest of one campaign. */
+  const sentRow = (n: number, status = 'sent', title = TITLE, campaign = 'camp-1', over: Row = {}): Row =>
+    touch({
+      contact_id: cid(n),
+      direction: 'outbound',
+      metadata: { kind: 'sent', automated: true, email_campaign_id: campaign, email_campaign_title: title, email_send_status: status },
+      ...over,
+    })
+  /** The open / click record the sync writes. */
+  const openRow = (n: number, opened: boolean, clicked: boolean, title = TITLE, campaign = 'camp-1', over: Row = {}): Row =>
+    touch({
+      contact_id: cid(n),
+      direction: 'inbound',
+      metadata: { email_campaign_id: campaign, email_campaign_title: title, email_opened: opened, email_clicked: clicked },
+      ...over,
+    })
+
+  function seedThreeGuests(): void {
+    seedCatalog()
+    seedBooking({ n: 1, name: 'Bea Test', party: 2 })
+    seedBooking({ n: 2, name: 'Al Test' })
+    seedBooking({ n: 3, name: 'Cy Test' })
+  }
+  const byName = (detail: Awaited<ReturnType<typeof loadAutoLetterDetail>>) =>
+    Object.fromEntries((detail?.recipients ?? []).map((r) => [r.displayName, r]))
+
+  it('a letter whose Mailchimp campaign carries its template key as the title is sent, with each guest’s result and opens', async () => {
+    seedThreeGuests()
+    seed('contact_touchpoints', [
+      sentRow(1),
+      sentRow(2, 'hard'),
+      sentRow(3, 'soft'),
+      openRow(1, true, true),
+    ])
+    const detail = await loadAutoLetterDetail(ctx.db, CLIENT_A, KEY, NOW)
+    expect(detail?.letter).toMatchObject({ status: 'sent', channel: 'mailchimp' })
+    expect(detail?.letter.counts).toEqual({ recipients: 3, sent: 1, blocked: 0, failed: 2, rehearsal: 0, unknown: 0, opened: 1 })
+    expect(detail?.mailchimpSummary).toEqual({ opened: 1, clicked: 1 })
+    const people = byName(detail)
+    expect(people['Bea Test']).toMatchObject({ status: 'sent', reasonText: null, opened: true, clicked: true })
+    expect(people['Al Test']).toMatchObject({ status: 'failed', reasonText: '邮箱退回', opened: null })
+    expect(people['Cy Test']).toMatchObject({ status: 'failed', reasonText: '暂时没送达', opened: null })
+    expect(JSON.stringify(detail)).not.toMatch(/@|summary text/i)
+  })
+
+  it('the past batch stays on the list with its numbers, and its group counts it as sent', async () => {
+    seedThreeGuests()
+    seed('contact_touchpoints', [sentRow(1), sentRow(2), sentRow(3), openRow(1, true, false), openRow(2, true, true)])
+    const list = await loadAutoLettersList(ctx.db, CLIENT_A, NOW)
+    const row = list.pastLetters.find((l) => l.letterKey === KEY)
+    expect(row).toMatchObject({ status: 'sent', channel: 'mailchimp', counts: { recipients: 3, sent: 3, failed: 0, opened: 2 } })
+    expect(list.tourGroups.find((g) => g.tourName === 'Tour One')).toMatchObject({
+      lettersSent: 1,
+      lastSent: { letterKey: KEY, sent: 3, opened: 2 },
+    })
+  })
+
+  it('a guest who only has an open record counts as received (he could not open what never arrived)', async () => {
+    seedThreeGuests()
+    seed('contact_touchpoints', [sentRow(1), openRow(2, true, false)])
+    const people = byName(await loadAutoLetterDetail(ctx.db, CLIENT_A, KEY, NOW))
+    expect(people['Al Test']).toMatchObject({ status: 'sent', opened: true, clicked: false })
+    expect(people['Bea Test']).toMatchObject({ status: 'sent', opened: false, clicked: false }) // recorded as sent, no open record while others have one
+  })
+
+  it('a click means an open, whatever the open flag says', async () => {
+    seedThreeGuests()
+    seed('contact_touchpoints', [sentRow(1), openRow(1, false, true)])
+    const detail = await loadAutoLetterDetail(ctx.db, CLIENT_A, KEY, NOW)
+    expect(byName(detail)['Bea Test']).toMatchObject({ opened: true, clicked: true })
+  })
+
+  it('no open or click record at all means opens are not recorded yet: dashes, never zero', async () => {
+    seedThreeGuests()
+    seed('contact_touchpoints', [sentRow(1), sentRow(2)])
+    const detail = await loadAutoLetterDetail(ctx.db, CLIENT_A, KEY, NOW)
+    expect(detail?.letter.status).toBe('sent')
+    expect(detail?.letter.counts.opened).toBeNull()
+    expect(detail?.mailchimpSummary).toBeNull()
+    expect(detail?.recipients.every((r) => r.opened === null && r.clicked === null)).toBe(true)
+  })
+
+  it('an outbound record that is not a "sent" record (another kind of note under the same title) is ignored', async () => {
+    seedThreeGuests()
+    seed('contact_touchpoints', [
+      sentRow(1),
+      touch({ contact_id: cid(2), direction: 'outbound', metadata: { kind: 'note', email_campaign_id: 'camp-1', email_campaign_title: TITLE, email_send_status: 'sent' } }),
+    ])
+    const detail = await loadAutoLetterDetail(ctx.db, CLIENT_A, KEY, NOW)
+    expect(detail?.letter.counts).toMatchObject({ sent: 1 })
+    expect(byName(detail)['Al Test']).toMatchObject({ status: 'pending' })
+  })
+
+  it('an open record that says neither opened nor clicked is ignored: it does not make anybody a recipient or count as tracked', async () => {
+    seedThreeGuests()
+    seed('contact_touchpoints', [sentRow(1), openRow(2, false, false)])
+    const detail = await loadAutoLetterDetail(ctx.db, CLIENT_A, KEY, NOW)
+    expect(detail?.letter.counts).toMatchObject({ sent: 1, opened: null })
+    expect(byName(detail)['Al Test']).toMatchObject({ status: 'pending' })
+    expect(detail?.mailchimpSummary).toBeNull()
+  })
+
+  it('an unrecognised send status is never counted as sent', async () => {
+    seedThreeGuests()
+    seed('contact_touchpoints', [sentRow(1, 'queued'), sentRow(2, '')])
+    const detail = await loadAutoLetterDetail(ctx.db, CLIENT_A, KEY, NOW)
+    expect(detail?.letter.status).toBe('draft')
+    expect(byName(detail)['Bea Test']).toMatchObject({ status: 'pending', reasonText: null })
+  })
+
+  it('the title must equal the template key exactly: a different case, a longer title, or a record from another source or client is not this letter', async () => {
+    seedThreeGuests()
+    seed('contact_touchpoints', [
+      sentRow(1, 'sent', TITLE.toUpperCase()),
+      sentRow(2, 'sent', `${TITLE}-copy`),
+      sentRow(3, 'sent', `Weekly news — ${TITLE}`),
+      sentRow(1, 'sent', TITLE, 'camp-x', { source: 'gmail' }),
+      sentRow(2, 'sent', TITLE, 'camp-y', { client_id: CLIENT_B }),
+      sentRow(3, 'sent', TITLE, 'camp-z', { direction: 'inbound' }), // inbound, but it says neither "opened" nor "clicked": proves nothing
+    ])
+    const list = await loadAutoLettersList(ctx.db, CLIENT_A, NOW)
+    const detail = await loadAutoLetterDetail(ctx.db, CLIENT_A, KEY, NOW)
+    expect(detail?.letter.channel).toBe('me')
+    expect(detail?.letter.counts.sent).toBeNull()
+    expect(list.pastLetters.map((l) => l.letterKey)).not.toContain(KEY)
+    expect(list.notices ?? []).toEqual([])
+  })
+
+  it('two sent campaigns with the same title are not guessed: the letter is shown as not recorded and a notice says why', async () => {
+    seedThreeGuests()
+    seed('contact_touchpoints', [sentRow(1, 'sent', TITLE, 'camp-1'), sentRow(2, 'sent', TITLE, 'camp-2'), openRow(1, true, true, TITLE, 'camp-1')])
+    const list = await loadAutoLettersList(ctx.db, CLIENT_A, NOW)
+    expect(list.notices).toContain(`「${TITLE}」在 Mailchimp 里对不上：有 2 个同名活动，这封信的发送情况先不显示（只留一个同名活动就能对上）。`)
+    expect(list.pastLetters.map((l) => l.letterKey)).not.toContain(KEY) // nothing recorded for it, so it is not listed
+    const detail = await loadAutoLetterDetail(ctx.db, CLIENT_A, KEY, NOW)
+    expect(detail?.letter).toMatchObject({ status: 'draft', channel: 'me', counts: { sent: null } })
+  })
+
+  it('one ambiguous title does not stop the other letters from being matched', async () => {
+    seedThreeGuests()
+    const other = buildTemplateKey(NOV_4_TOUR_TWO) as string
+    seedBooking({ n: 4, tour: T2, departure: D2, snapshot: '2027-05-08', name: 'Di Test' })
+    seed('contact_touchpoints', [sentRow(1, 'sent', TITLE, 'camp-1'), sentRow(2, 'sent', TITLE, 'camp-2'), sentRow(4, 'sent', other, 'camp-9')])
+    const list = await loadAutoLettersList(ctx.db, CLIENT_A, NOW)
+    expect(list.notices?.filter((n) => n.includes('对不上'))).toHaveLength(1)
+    const matched = list.pastLetters.find((l) => l.letterKey === buildLetterKey(NOV_4_TOUR_TWO))
+    expect(matched).toMatchObject({ status: 'sent', channel: 'mailchimp', counts: { recipients: 1, sent: 1 } })
+  })
+
+  it('when both sides have records the Mailchimp one wins: the letter was sent there, so it is not waiting for release', async () => {
+    seedThreeGuests()
+    seed('triggered_send_authorizations', [
+      { client_id: CLIENT_A, trigger_key: buildTriggerKey(NOV_4), authorized_at: null, revoked_at: null, template_sha256: 'sha' },
+    ])
+    seed('contact_touchpoints', [sentRow(1), sentRow(2)])
+    const detail = await loadAutoLetterDetail(ctx.db, CLIENT_A, KEY, NOW)
+    expect(detail?.letter).toMatchObject({ status: 'sent', channel: 'mailchimp' })
+  })
+
+  describe('a letter that both sides sent: ME has people who really received it, and a Mailchimp campaign carries the same title', () => {
+    const BOTH_SIDES = (me: number, mailchimp: number): string =>
+      `「${TITLE}」这封信 ME 和 Mailchimp 都发过，可能重复发了（ME 发了 ${me} 位，Mailchimp 发了 ${mailchimp} 位）；页面先按 Mailchimp 的记录显示。`
+    const meRow = (n: number, status: string, scope = 'lifetime'): Row => ({
+      id: `s-${n}-${status}-${scope}`,
+      client_id: CLIENT_A,
+      trigger_key: buildTriggerKey(NOV_4),
+      contact_id: cid(n),
+      dedupe_scope: scope,
+      status,
+      reason_code: null,
+    })
+
+    it('says so on top of the page with both counts, and still shows the Mailchimp record', async () => {
+      seedThreeGuests()
+      seed('triggered_sends', [meRow(1, 'delivered'), meRow(2, 'sent')])
+      seed('contact_touchpoints', [sentRow(1), sentRow(2), sentRow(3)])
+      const list = await loadAutoLettersList(ctx.db, CLIENT_A, NOW)
+      expect(list.notices).toContain(BOTH_SIDES(2, 3))
+      expect(list.pastLetters.find((l) => l.letterKey === KEY)).toMatchObject({ status: 'sent', channel: 'mailchimp', counts: { sent: 3 } })
+    })
+
+    it('says nothing when ME only has rehearsal rows, rows nobody received, or a proposal', async () => {
+      seedThreeGuests()
+      seed('triggered_sends', [
+        meRow(1, 'shadow', 'shadow'),
+        meRow(2, 'failed'),
+        meRow(3, 'skipped'),
+        meRow(1, 'pending'),
+      ])
+      seed('triggered_send_authorizations', [
+        { client_id: CLIENT_A, trigger_key: buildTriggerKey(NOV_4), authorized_at: '2026-11-03T00:00:00Z', revoked_at: null, template_sha256: 'sha' },
+      ])
+      seed('contact_touchpoints', [sentRow(1), sentRow(2)])
+      const list = await loadAutoLettersList(ctx.db, CLIENT_A, NOW)
+      expect(list.notices ?? []).toEqual([])
+    })
+
+    it('says nothing when only ME sent it, or only Mailchimp did', async () => {
+      seedThreeGuests()
+      seed('triggered_sends', [meRow(1, 'delivered')])
+      const onlyMe = await loadAutoLettersList(ctx.db, CLIENT_A, NOW)
+      expect(onlyMe.notices ?? []).toEqual([])
+      ctx = createFakeDb()
+      state = ctx.state
+      seedThreeGuests()
+      seed('contact_touchpoints', [sentRow(1)])
+      const onlyMailchimp = await loadAutoLettersList(ctx.db, CLIENT_A, NOW)
+      expect(onlyMailchimp.notices ?? []).toEqual([])
+    })
+  })
+
+  it('a letter that has left the plan but was sent through Mailchimp still opens from the records', async () => {
+    seedCatalog()
+    seed('contacts', [contactRow({ id: cid(7), client_id: CLIENT_A, display_name: 'Gone Guest' })])
+    const goneTitle = buildTemplateKey(NOV_4_TOUR_TWO) as string
+    seed('contact_touchpoints', [sentRow(7, 'sent', goneTitle, 'camp-7'), openRow(7, true, false, goneTitle, 'camp-7')])
+    const detail = await loadAutoLetterDetail(ctx.db, CLIENT_A, buildLetterKey(NOV_4_TOUR_TWO) as string, NOW)
+    expect(detail?.letter).toMatchObject({ status: 'sent', channel: 'mailchimp' })
+    expect(detail?.recipients.map((r) => [r.displayName, r.status, r.opened])).toEqual([['Gone Guest', 'sent', true]])
+    expect(detail?.mailchimpSummary).toEqual({ opened: 1, clicked: 0 })
+  })
+
+  it('reads only this client’s Mailchimp records by title, asks for explicit columns, and never reads the summary text', async () => {
+    seedThreeGuests()
+    seed('contact_touchpoints', [sentRow(1), openRow(1, true, false)])
+    state.queries.length = 0
+    await loadAutoLettersList(ctx.db, CLIENT_A, NOW)
+    const reads = state.queries.filter((q) => q.table === 'contact_touchpoints')
+    expect(reads.length).toBeGreaterThan(0)
+    for (const q of reads) {
+      expect(q.eqs).toContainEqual(['client_id', CLIENT_A])
+      expect(q.eqs).toContainEqual(['source', 'mailchimp'])
+      expect(q.columns).toBe('id, contact_id, direction, metadata')
+      expect(q.columns ?? '').not.toMatch(/summary|\*|raw|address/i)
+      const [path, titles] = q.ins[0]
+      expect(path).toBe(TITLE_PATH)
+      expect(titles).toContain(TITLE)
+    }
+  })
+
+  it('a client with no Mailchimp records reads them once per hundred letters and shows nothing different', async () => {
+    seedThreeGuests()
+    state.queries.length = 0
+    const list = await loadAutoLettersList(ctx.db, CLIENT_A, NOW)
+    expect(list.pastLetters).toEqual([])
+    expect(list.notices).toEqual([])
+    expect(state.queries.filter((q) => q.table === 'contact_touchpoints').length).toBeGreaterThan(0)
   })
 })

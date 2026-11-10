@@ -51,7 +51,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   return (
     <div className="space-y-1">
       <p className="text-xs font-bold text-me-charcoal/70">{label}</p>
-      {hint && <p className="text-[11px] text-me-charcoal/55">{hint}</p>}
+      {hint && <p className="text-xs text-me-charcoal/55">{hint}</p>}
       {children}
     </div>
   )

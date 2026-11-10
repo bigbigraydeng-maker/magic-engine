@@ -5,7 +5,7 @@
  * person clicks 「看示例」, and the page labels the whole view as sample data. No real people,
  * no email addresses, no phone numbers, no company or tour names.
  *
- * Each LetterSummary object (T1, L1..L10) is built once and referenced by BOTH the overview and the
+ * Each LetterSummary object (T1, L1..L12) is built once and referenced by BOTH the overview and the
  * details, so the two views can never drift apart.
  */
 
@@ -19,6 +19,7 @@ import type {
   LetterSummary,
   RecipientRow,
   RecipientStatus,
+  TourGroupSummary,
 } from './types'
 
 /* ------------------------------------------------------------------ helpers */
@@ -46,6 +47,8 @@ interface RecipientSpec {
   status: RecipientStatus
   reasonCode?: string | null
   reasonDetail?: string | null
+  /** Plain-language reason, as the read interface would already have translated it. */
+  reasonText?: string | null
   engagement?: 'opened' | 'clicked' | null
 }
 
@@ -64,6 +67,7 @@ function makeRecipients(
       status: extra.status,
       reasonCode: extra.reasonCode ?? null,
       reasonDetail: extra.reasonDetail ?? null,
+      ...(extra.reasonText ? { reasonText: extra.reasonText } : {}),
       engagement: extra.engagement ?? null,
     }
   })
@@ -94,7 +98,9 @@ const T1: LetterSummary = {
   sentCount: null,
   blockedCount: null,
   failedCount: null,
+  unknownCount: 0,
   rehearsalCount: 0,
+  openedCount: null,
 }
 
 const L1: LetterSummary = {
@@ -107,7 +113,9 @@ const L1: LetterSummary = {
   sentCount: 8,
   blockedCount: 1,
   failedCount: 1,
+  unknownCount: 0,
   rehearsalCount: 0,
+  openedCount: 6,
 }
 
 const L2: LetterSummary = {
@@ -120,7 +128,9 @@ const L2: LetterSummary = {
   sentCount: 4,
   blockedCount: 1,
   failedCount: 0,
+  unknownCount: 0,
   rehearsalCount: 0,
+  openedCount: null,
 }
 
 const L3: LetterSummary = {
@@ -133,7 +143,9 @@ const L3: LetterSummary = {
   sentCount: null,
   blockedCount: null,
   failedCount: null,
+  unknownCount: 0,
   rehearsalCount: 0,
+  openedCount: null,
 }
 
 const L4: LetterSummary = {
@@ -146,7 +158,9 @@ const L4: LetterSummary = {
   sentCount: null,
   blockedCount: null,
   failedCount: null,
+  unknownCount: 0,
   rehearsalCount: 0,
+  openedCount: null,
 }
 
 const L5: LetterSummary = {
@@ -159,7 +173,9 @@ const L5: LetterSummary = {
   sentCount: null,
   blockedCount: null,
   failedCount: null,
+  unknownCount: 0,
   rehearsalCount: 0,
+  openedCount: null,
 }
 
 const L6: LetterSummary = {
@@ -172,7 +188,9 @@ const L6: LetterSummary = {
   sentCount: null,
   blockedCount: null,
   failedCount: null,
+  unknownCount: 0,
   rehearsalCount: 5,
+  openedCount: null,
 }
 
 const L7: LetterSummary = {
@@ -185,7 +203,9 @@ const L7: LetterSummary = {
   sentCount: null,
   blockedCount: null,
   failedCount: null,
+  unknownCount: 0,
   rehearsalCount: 0,
+  openedCount: null,
 }
 
 const L8: LetterSummary = {
@@ -198,7 +218,9 @@ const L8: LetterSummary = {
   sentCount: null,
   blockedCount: null,
   failedCount: null,
+  unknownCount: 0,
   rehearsalCount: 0,
+  openedCount: null,
 }
 
 const L9: LetterSummary = {
@@ -211,7 +233,9 @@ const L9: LetterSummary = {
   sentCount: null,
   blockedCount: null,
   failedCount: null,
+  unknownCount: 0,
   rehearsalCount: 0,
+  openedCount: null,
 }
 
 const L10: LetterSummary = {
@@ -224,7 +248,41 @@ const L10: LetterSummary = {
   sentCount: null,
   blockedCount: null,
   failedCount: null,
+  unknownCount: 0,
   rehearsalCount: 0,
+  openedCount: null,
+}
+
+/** A past batch where nobody got the letter: 3 blocked by the sending rules, 2 failed. */
+const L11: LetterSummary = {
+  letterId: 'demo-l11',
+  sendDate: '2026-11-04',
+  audienceLabel: '示例团丙 · 6个月信',
+  title: 'Sample letter: welcome aboard',
+  status: 'not_sent',
+  recipientCount: 5,
+  sentCount: 0,
+  blockedCount: 3,
+  failedCount: 2,
+  unknownCount: 0,
+  rehearsalCount: 0,
+  openedCount: null,
+}
+
+/** A past batch with no confirmed delivery, but four results still unknown (the letters may well have arrived). */
+const L12: LetterSummary = {
+  letterId: 'demo-l12',
+  sendDate: '2026-11-04',
+  audienceLabel: '示例团丁 · 6个月信',
+  title: 'Sample letter: welcome aboard',
+  status: 'unknown',
+  recipientCount: 5,
+  sentCount: 0,
+  blockedCount: 1,
+  failedCount: 0,
+  unknownCount: 4,
+  rehearsalCount: 0,
+  openedCount: null,
 }
 
 /* ----------------------------------------------------------------- contents */
@@ -254,6 +312,19 @@ const L2_CONTENT: LetterContent = {
     heading('What happens next'),
     bullet('We will write once a month.'),
     bullet('Every letter is checked before it goes out.'),
+    paragraph('Warm regards, The Sample Team'),
+  ],
+}
+
+/** Same text for L11 and L12 (they share the same title). */
+const WELCOME_CONTENT: LetterContent = {
+  title: L11.title,
+  previewText: 'A short welcome and what to expect.',
+  body: [
+    paragraph('Hi {first_name},'),
+    paragraph('Welcome aboard. This is invented sample text.'),
+    heading('What to expect'),
+    bullet('We will write once a month.'),
     paragraph('Warm regards, The Sample Team'),
   ],
 }
@@ -311,6 +382,16 @@ function l2Spec(n: number): RecipientSpec {
   return { status: 'sent' }
 }
 
+function l11Spec(n: number): RecipientSpec {
+  if (n <= 18) return { status: 'blocked', reasonCode: 'frequency_full' }
+  return { status: 'failed', reasonCode: 'bounced', reasonDetail: '地址无效' }
+}
+
+function l12Spec(n: number): RecipientSpec {
+  if (n === 21) return { status: 'blocked', reasonCode: 'dnc' }
+  return { status: 'unknown', reasonCode: 'unknown_outcome', reasonText: '发送结果不明，等人核对' }
+}
+
 function pendingSpec(): RecipientSpec {
   return { status: 'pending' }
 }
@@ -331,6 +412,8 @@ const L7_RECIPIENTS: RecipientRow[] = makeRecipients(range(1, 10), pendingSpec)
 const L8_RECIPIENTS: RecipientRow[] = makeRecipients(range(11, 11), pendingSpec)
 const L9_RECIPIENTS: RecipientRow[] = makeRecipients(range(16, 20), pendingSpec)
 const L10_RECIPIENTS: RecipientRow[] = makeRecipients(range(21, 25), pendingSpec)
+const L11_RECIPIENTS: RecipientRow[] = makeRecipients(range(16, 20), l11Spec)
+const L12_RECIPIENTS: RecipientRow[] = makeRecipients(range(21, 25), l12Spec)
 
 /* ----------------------------------------------------------------- sections */
 
@@ -348,8 +431,95 @@ const SCHEDULED_SECTION: LetterSection = {
   kind: 'scheduled',
   title: '按期发送的信',
   note: '示例：每月第一个周三；最后一个月每周三',
-  footnote: '共 10 个不同的信，这里先列最近几批；往后的批次到时间再出现。（示例数据）',
-  letters: [L1, L2, L3, L4, L5, L6, L7, L8, L9, L10],
+  footnote: '共 8 个不同的信，这里先列最近两批；往后的批次到时间再出现。（示例数据）',
+  letters: [L3, L4, L5, L6, L7, L8, L9, L10],
+}
+
+/** 已经过了发信日、系统里有记录的信，新的在前（和真实数据的列法一样）。 */
+const PAST_SECTION: LetterSection = {
+  key: 'past',
+  kind: 'scheduled',
+  title: '已过发信日的信',
+  note: '系统里有发送记录或提交记录的',
+  footnote:
+    '这里只列最近几批。发信日已经过了、却还是「草稿」或「等你放行」的，说明这一批没有发出去；没有记录的日子不列。（示例数据）',
+  letters: [L2, L11, L12, L1],
+}
+
+/* ------------------------------------------------------------------- groups */
+
+/** 「最近一封已发」那一格：直接取这封信的数字，和列表里永远一致。 */
+function lastSentOf(letter: LetterSummary): NonNullable<TourGroupSummary['lastSent']> {
+  return {
+    letterId: letter.letterId,
+    sendDate: letter.sendDate ?? '',
+    recipientCount: letter.recipientCount,
+    sentCount: letter.sentCount ?? 0,
+    blockedCount: letter.blockedCount ?? 0,
+    failedCount: letter.failedCount ?? 0,
+    unknownCount: letter.unknownCount,
+    openedCount: letter.openedCount,
+  }
+}
+
+function nextOf(letter: LetterSummary): NonNullable<TourGroupSummary['next']> {
+  return { letterId: letter.letterId, sendDate: letter.sendDate ?? '', status: letter.status }
+}
+
+const GROUP_A: TourGroupSummary = {
+  groupId: 'demo-group-a',
+  tourName: '示例团甲',
+  departOn: '2027-03-11',
+  recipientCount: 10,
+  lettersSent: 1,
+  lettersAhead: 2,
+  lettersOverdue: 0,
+  lettersUnknown: 0,
+  lastSent: lastSentOf(L1),
+  next: nextOf(L3),
+  letterIds: [L1.letterId, L3.letterId, L7.letterId],
+}
+
+const GROUP_B: TourGroupSummary = {
+  groupId: 'demo-group-b',
+  tourName: '示例团乙',
+  departOn: '2027-03-18',
+  recipientCount: 5,
+  lettersSent: 1,
+  lettersAhead: 2,
+  lettersOverdue: 0,
+  lettersUnknown: 0,
+  lastSent: lastSentOf(L2),
+  next: nextOf(L4),
+  letterIds: [L2.letterId, L4.letterId, L8.letterId],
+}
+
+const GROUP_C: TourGroupSummary = {
+  groupId: 'demo-group-c',
+  tourName: '示例团丙',
+  departOn: '2027-05-08',
+  recipientCount: 5,
+  lettersSent: 0,
+  lettersAhead: 2,
+  lettersOverdue: 1,
+  lettersUnknown: 0,
+  lastSent: null,
+  next: nextOf(L5),
+  letterIds: [L11.letterId, L5.letterId, L9.letterId],
+}
+
+const GROUP_D: TourGroupSummary = {
+  groupId: 'demo-group-d',
+  tourName: '示例团丁',
+  departOn: '2027-05-13',
+  recipientCount: 5,
+  lettersSent: 0,
+  lettersAhead: 2,
+  lettersOverdue: 0,
+  lettersUnknown: 1,
+  lastSent: null,
+  next: nextOf(L6),
+  letterIds: [L12.letterId, L6.letterId, L10.letterId],
 }
 
 /* ------------------------------------------------------------------ exports */
@@ -361,7 +531,8 @@ export const DEMO_OVERVIEW: AutoSendOverview = {
     recipientCount: 21,
     status: 'draft',
   },
-  sections: [TRIGGER_SECTION, SCHEDULED_SECTION],
+  sections: [TRIGGER_SECTION, SCHEDULED_SECTION, PAST_SECTION],
+  groups: [GROUP_A, GROUP_B, GROUP_C, GROUP_D],
 }
 
 export const DEMO_DETAILS: Readonly<Record<string, LetterDetail>> = {
@@ -375,13 +546,14 @@ export const DEMO_DETAILS: Readonly<Record<string, LetterDetail>> = {
     summary: L1,
     content: L1_CONTENT,
     recipients: L1_RECIPIENTS,
-    openInfo: { kind: 'per_recipient', openedPeople: 6, clickedPeople: 2 },
+    openInfo: { kind: 'per_recipient', openedPeople: 6, clickedPeople: 2, fromMailchimp: true },
   },
   'demo-l2': {
     summary: L2,
     content: L2_CONTENT,
     recipients: L2_RECIPIENTS,
-    openInfo: { kind: 'totals_only', opens: 3, clicks: 1 },
+    // ME 自己发的信现在不记录打开：整列显示「—」。
+    openInfo: { kind: 'none' },
   },
   'demo-l3': {
     summary: L3,
@@ -429,6 +601,18 @@ export const DEMO_DETAILS: Readonly<Record<string, LetterDetail>> = {
     summary: L10,
     content: null,
     recipients: L10_RECIPIENTS,
+    openInfo: { kind: 'none' },
+  },
+  'demo-l11': {
+    summary: L11,
+    content: WELCOME_CONTENT,
+    recipients: L11_RECIPIENTS,
+    openInfo: { kind: 'none' },
+  },
+  'demo-l12': {
+    summary: L12,
+    content: WELCOME_CONTENT,
+    recipients: L12_RECIPIENTS,
     openInfo: { kind: 'none' },
   },
 }
