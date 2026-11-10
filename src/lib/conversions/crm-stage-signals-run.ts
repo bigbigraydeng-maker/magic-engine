@@ -28,9 +28,11 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { normalizeEmail, normalizePhone } from '@/lib/pii/normalize'
 import { DAY_MS } from './event-window'
 import {
+  bookingStageKey,
   parseCrmStageSignalsConfig,
   planLeadStageEvents,
   readCapiSendKinds,
+  type BookingMilestoneKind,
   type CrmStageSignalsConfig,
   type FormLead,
   type StageChange,
@@ -95,16 +97,24 @@ export async function loadPlan(supabase: SupabaseClient, clientId: string, cfg: 
   const sinceIso = new Date(now.getTime() - CRM_STAGE_WINDOW_MS).toISOString()
   const stageKeys = [...new Set(cfg.stages.flatMap((s) => s.stageKeys))]
 
-  // 窗口内有动静的客人：阶段变到配置里的档，或（要报第一档时）新进来的表单线索
-  const recentChanges = await supabase
-    .from('contact_stage_events')
-    .select('contact_id')
-    .eq('client_id', clientId)
-    .in('to_stage', stageKeys)
-    .gte('created_at', sinceIso)
-    .limit(QUERY_CAP)
-  if (recentChanges.error) throw new Error(`读取阶段变化失败：${recentChanges.error.message}`)
-  const ids = new Set(capped(recentChanges.data as { contact_id: string }[] | null, '近 7 天阶段变化').map((r) => r.contact_id))
+  const bookingKinds = [...new Set(cfg.stages.flatMap((s) => (s.bookingMilestone ? [s.bookingMilestone] : [])))]
+
+  // 窗口内有动静的客人：阶段变到配置里的档、订单里程碑被标成已收，或（要报第一档时）新进来的表单线索
+  const ids = new Set<string>()
+  if (stageKeys.length > 0) {
+    const recentChanges = await supabase
+      .from('contact_stage_events')
+      .select('contact_id')
+      .eq('client_id', clientId)
+      .in('to_stage', stageKeys)
+      .gte('created_at', sinceIso)
+      .limit(QUERY_CAP)
+    if (recentChanges.error) throw new Error(`读取阶段变化失败：${recentChanges.error.message}`)
+    for (const r of capped(recentChanges.data as { contact_id: string }[] | null, '近 7 天阶段变化')) ids.add(r.contact_id)
+  }
+  if (bookingKinds.length > 0) {
+    for (const cid of await recentBookingContacts(supabase, clientId, bookingKinds, sinceIso)) ids.add(cid)
+  }
 
   if (cfg.initialEventName) {
     const recentLeads = await supabase
@@ -125,7 +135,7 @@ export async function loadPlan(supabase: SupabaseClient, clientId: string, cfg: 
   if (contactIds.length === 0) return { plan: { events: [], skipped: [] }, contacts }
 
   // 这些客人的全部历史（判断「最早什么时候到过这一档」要看全）
-  const changes = await inChunks(contactIds, async (part) => {
+  const stageChanges = stageKeys.length === 0 ? [] : await inChunks(contactIds, async (part) => {
     const r = await supabase
       .from('contact_stage_events')
       .select('contact_id, to_stage, created_at')
@@ -138,6 +148,9 @@ export async function loadPlan(supabase: SupabaseClient, clientId: string, cfg: 
       (x): StageChange => ({ contactId: x.contact_id, toStage: x.to_stage, at: x.created_at }),
     )
   })
+  const bookingChanges =
+    bookingKinds.length === 0 ? [] : await bookingMilestoneChanges(supabase, clientId, bookingKinds, contactIds)
+  const changes = [...stageChanges, ...bookingChanges]
   const leads = await inChunks(contactIds, async (part) => {
     const r = await supabase
       .from('contact_touchpoints')
@@ -166,6 +179,106 @@ export async function loadPlan(supabase: SupabaseClient, clientId: string, cfg: 
 
   const plan = planLeadStageEvents({ config: cfg, leads, changes, now, windowMs: CRM_STAGE_WINDOW_MS })
   return { plan, contacts }
+}
+
+/** 时间窗内有里程碑被标成「已收」的订单，对应哪些客人（只算没取消的订单）。 */
+async function recentBookingContacts(
+  supabase: SupabaseClient,
+  clientId: string,
+  kinds: BookingMilestoneKind[],
+  sinceIso: string,
+): Promise<string[]> {
+  const ev = await supabase
+    .from('crm_booking_events')
+    .select('booking_id')
+    .eq('client_id', clientId)
+    .eq('action', 'milestone_paid')
+    .in('milestone_kind', kinds)
+    .gte('created_at', sinceIso)
+    .limit(QUERY_CAP)
+  if (ev.error) throw new Error(`读取订单收款记录失败：${ev.error.message}`)
+  const bookingIds = [...new Set(capped(ev.data as { booking_id: string }[] | null, '近 7 天订单收款记录').map((r) => r.booking_id))]
+  if (bookingIds.length === 0) return []
+  const rows = await inChunks(bookingIds, async (part) => {
+    const r = await supabase
+      .from('crm_bookings')
+      .select('contact_id')
+      .eq('client_id', clientId)
+      .eq('status', 'active')
+      .in('id', part)
+    if (r.error) throw new Error(`读取订单失败：${r.error.message}`)
+    return (r.data ?? []) as { contact_id: string | null }[]
+  })
+  return [...new Set(rows.flatMap((r) => (r.contact_id ? [r.contact_id] : [])))]
+}
+
+/**
+ * 这些客人的订单里程碑「被标成已收」的全部时刻，转成计划器认的阶段变化。
+ *
+ * 只算：订单没取消，且这个里程碑**现在仍是已收**（标了又取消的不算）。
+ * 时间用员工标的那一刻（`crm_booking_events.created_at`），不用 `paid_on`：`paid_on` 可以补填成
+ * 几十天前的日期，Meta 不收 7 天前的事件；标的那一刻才是 ME 第一次知道这件事的时间。
+ */
+async function bookingMilestoneChanges(
+  supabase: SupabaseClient,
+  clientId: string,
+  kinds: BookingMilestoneKind[],
+  contactIds: string[],
+): Promise<StageChange[]> {
+  const bookings = await inChunks(contactIds, async (part) => {
+    const r = await supabase
+      .from('crm_bookings')
+      .select('id, contact_id')
+      .eq('client_id', clientId)
+      .eq('status', 'active')
+      .in('contact_id', part)
+      .limit(QUERY_CAP)
+    if (r.error) throw new Error(`读取订单失败：${r.error.message}`)
+    return capped(r.data as { id: string; contact_id: string | null }[] | null, '订单')
+  })
+  const contactOf = new Map<string, string>()
+  for (const b of bookings) if (b.contact_id) contactOf.set(b.id, b.contact_id)
+  const bookingIds = [...contactOf.keys()]
+  if (bookingIds.length === 0) return []
+
+  const paidNow = new Set<string>()
+  const milestones = await inChunks(bookingIds, async (part) => {
+    const r = await supabase
+      .from('crm_booking_milestones')
+      .select('booking_id, kind')
+      .eq('client_id', clientId)
+      .eq('state', 'paid')
+      .in('kind', kinds)
+      .in('booking_id', part)
+      .limit(QUERY_CAP)
+    if (r.error) throw new Error(`读取订单里程碑失败：${r.error.message}`)
+    return capped(r.data as { booking_id: string; kind: BookingMilestoneKind }[] | null, '订单里程碑')
+  })
+  for (const m of milestones) paidNow.add(`${m.booking_id}|${m.kind}`)
+  if (paidNow.size === 0) return []
+
+  const events = await inChunks(bookingIds, async (part) => {
+    const r = await supabase
+      .from('crm_booking_events')
+      .select('booking_id, milestone_kind, created_at')
+      .eq('client_id', clientId)
+      .eq('action', 'milestone_paid')
+      .in('milestone_kind', kinds)
+      .in('booking_id', part)
+      .limit(QUERY_CAP)
+    if (r.error) throw new Error(`读取订单收款记录失败：${r.error.message}`)
+    return capped(
+      r.data as { booking_id: string; milestone_kind: BookingMilestoneKind; created_at: string }[] | null,
+      '订单收款记录',
+    )
+  })
+  const out: StageChange[] = []
+  for (const e of events) {
+    const contactId = contactOf.get(e.booking_id)
+    if (!contactId || !paidNow.has(`${e.booking_id}|${e.milestone_kind}`)) continue
+    out.push({ contactId, toStage: bookingStageKey(e.milestone_kind), at: e.created_at })
+  }
+  return out
 }
 
 /** 这些客人已经报过哪些档（不限时间窗）——同一位客人的同一档只报一次。 */

@@ -4,6 +4,7 @@ import {
   planLeadStageEvents,
   readCapiSendKinds,
   leadStageSourceRef,
+  bookingStageKey,
 } from '../crm-stage-signals'
 
 const DAY = 86_400_000
@@ -15,8 +16,12 @@ const LEAD_A = '1189338710082692'
 const LEAD_B = '2397056934398420'
 
 const STAGES = [
-  { eventName: 'Quoted', stageKeys: ['quoted'] },
-  { eventName: 'Deposit Paid', stageKeys: ['deposit_paid', 'paid_full'] },
+  { eventName: 'Quoted', stageKeys: ['quoted'], bookingMilestone: null },
+  { eventName: 'Deposit Paid', stageKeys: ['deposit_paid', 'paid_full'], bookingMilestone: null },
+]
+const STAGES_BOOKING = [
+  { eventName: 'Quoted', stageKeys: ['quoted'], bookingMilestone: null },
+  { eventName: 'Deposit Paid', stageKeys: [], bookingMilestone: 'deposit' as const },
 ]
 
 function plan(over: Partial<Parameters<typeof planLeadStageEvents>[0]> = {}) {
@@ -69,6 +74,29 @@ describe('parseCrmStageSignalsConfig', () => {
     ['第一档名字跟后面某档重名', { crm_stage_signals: { ...good.crm_stage_signals, initial_event_name: 'Quoted' } }],
   ])('格式不对 → 整体不生效：%s', (_label, cfg) => {
     expect(parseCrmStageSignalsConfig(cfg)).toBeNull()
+  })
+
+  it('某一档只读订单里程碑、不列客人阶段 → 合法', () => {
+    const c = parseCrmStageSignalsConfig({
+      crm_stage_signals: { ...good.crm_stage_signals, stages: [{ event_name: 'Deposit Paid', booking_milestone: 'deposit' }] },
+    })
+    expect(c?.stages).toEqual([{ eventName: 'Deposit Paid', stageKeys: [], bookingMilestone: 'deposit' }])
+  })
+
+  it('客人阶段的 key 用了 booking: 开头（会跟订单里程碑的内部名字撞）→ 整体不生效', () => {
+    expect(
+      parseCrmStageSignalsConfig({
+        crm_stage_signals: { ...good.crm_stage_signals, stages: [{ event_name: 'X', stage_keys: ['booking:deposit'] }] },
+      }),
+    ).toBeNull()
+  })
+
+  it('订单里程碑写了不认识的值 → 整体不生效（不猜成没写）', () => {
+    expect(
+      parseCrmStageSignalsConfig({
+        crm_stage_signals: { ...good.crm_stage_signals, stages: [{ event_name: 'X', stage_keys: ['quoted'], booking_milestone: 'refund' }] },
+      }),
+    ).toBeNull()
   })
 
   it('数据集编号格式不对 → 记为没配（发送时 fail-closed）', () => {
@@ -202,6 +230,34 @@ describe('planLeadStageEvents', () => {
       changes: [{ contactId: 'c1', toStage: 'contacted', at: ago(1) }],
     })
     expect(r.events).toEqual([])
+  })
+
+  it('订单定金被标成已收 → 报 Deposit Paid，并补上 Quoted；客人阶段上的「已付定金」不再算', () => {
+    const r = plan({
+      config: { stages: STAGES_BOOKING, initialEventName: null },
+      leads: [{ contactId: 'c1', leadId: LEAD_A, createdAt: ago(10) }],
+      changes: [{ contactId: 'c1', toStage: bookingStageKey('deposit'), at: ago(1) }],
+    })
+    expect(r.events.map((e) => e.eventName)).toEqual(['Quoted', 'Deposit Paid'])
+    const stageOnly = plan({
+      config: { stages: STAGES_BOOKING, initialEventName: null },
+      leads: [{ contactId: 'c1', leadId: LEAD_A, createdAt: ago(10) }],
+      changes: [{ contactId: 'c1', toStage: 'deposit_paid', at: ago(1) }],
+    })
+    expect(stageOnly.events).toEqual([])
+  })
+
+  it('一档同时认客人阶段和订单里程碑 → 取两边最早的那一刻', () => {
+    const both = [{ eventName: 'Deposit Paid', stageKeys: ['deposit_paid'], bookingMilestone: 'deposit' as const }]
+    const r = plan({
+      config: { stages: both, initialEventName: null },
+      leads: [{ contactId: 'c1', leadId: LEAD_A, createdAt: ago(10) }],
+      changes: [
+        { contactId: 'c1', toStage: 'deposit_paid', at: ago(1) },
+        { contactId: 'c1', toStage: bookingStageKey('deposit'), at: ago(3) },
+      ],
+    })
+    expect(r.events).toEqual([expect.objectContaining({ eventName: 'Deposit Paid', occurredAt: ago(3) })])
   })
 
   it('同一条线索同一档只出一条（幂等键唯一）', () => {
