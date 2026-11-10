@@ -97,13 +97,6 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-async function deactivateFromPreview(): Promise<void> {
-  fireEvent.click(screen.getByRole('button', { name: '更多操作' }))
-  fireEvent.click(screen.getByRole('menuitem', { name: '停用这个模板…' }))
-  fireEvent.click(screen.getByRole('button', { name: '确认停用' }))
-  await waitFor(() => expect(screen.queryByRole('menuitem', { name: '停用这个模板…' })).toBeNull())
-}
-
 describe('reading the list', () => {
   it('a failed read is an error with a retry, never "no templates"', async () => {
     const r = routes({ [LIST]: [{ status: 503, body: { error: '邮件模板功能暂时读不到数据' } }, { body: list() }] })
@@ -111,7 +104,7 @@ describe('reading the list', () => {
     expect(await screen.findByText(/暂时读不到邮件模板：邮件模板功能暂时读不到数据/)).toBeInTheDocument()
     expect(screen.queryByText('还没有模板。')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
-    expect(await screen.findByText('Post call')).toBeInTheDocument()
+    expect(await screen.findByTestId('template-preview-pane')).toBeInTheDocument()
     expect(r.of(LIST)).toHaveLength(2)
   })
 
@@ -127,16 +120,15 @@ describe('reading the list', () => {
     expect(await screen.findByText('还没有模板。')).toBeInTheDocument()
   })
 
-  it('lists manual templates and shows preview stats (free-write rows in stats are ignored)', async () => {
+  it('groups templates and shows preview stats (a free-written mail row is ignored in totals)', async () => {
     routes({ [LIST]: [{ body: list() }] })
     render(<TemplatesAdmin clientId="c1" />)
-    await screen.findByTestId('template-preview-pane')
-    expect(screen.getAllByText('Post call').length).toBeGreaterThan(0)
-    expect(screen.getByText(/近 30 天：发出 5/)).toBeInTheDocument()
-    expect(screen.getByText('展开停用的（1）')).toBeInTheDocument()
+    const pane = await screen.findByTestId('template-preview-pane')
+    expect(screen.getByRole('heading', { name: '同事手动发', level: 3 })).toBeInTheDocument()
+    expect(within(pane).getByText(/近 30 天：发出 5/)).toBeInTheDocument()
   })
 
-  it('shows subject and body in the preview without an extra click', async () => {
+  it('shows subject and body in the preview without opening 看内容', async () => {
     routes({ [LIST]: [{ body: list() }] })
     render(<TemplatesAdmin clientId="c1" />)
     await screen.findByTestId('template-preview-pane')
@@ -182,7 +174,7 @@ describe('re-reading after the settings were saved', () => {
     const r = routes({ [LIST]: [{ body: list() }, { status: 503, body: { error: '暂时读不到' } }] })
     render(<TemplatesAdmin clientId="c1" />)
     await screen.findByTestId('template-preview-pane')
-    fireEvent.click(screen.getByRole('button', { name: '+ 新建模板' }))
+    fireEvent.click(screen.getByRole('button', { name: '新建模板' }))
     expect(screen.getByTestId('editor')).toBeInTheDocument()
     act(() => {
       window.dispatchEvent(new Event(EMAIL_SETTINGS_SAVED_EVENT))
@@ -190,6 +182,7 @@ describe('re-reading after the settings were saved', () => {
     await waitFor(() => expect(r.of(LIST)).toHaveLength(2))
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(screen.getByTestId('editor')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Post call/ })).toBeInTheDocument()
     expect(screen.queryByText(/暂时读不到邮件模板/)).toBeNull()
   })
 
@@ -197,13 +190,14 @@ describe('re-reading after the settings were saved', () => {
     const r = routes({ [LIST]: [{ body: list() }, new Error('offline')] })
     render(<TemplatesAdmin clientId="c1" />)
     await screen.findByTestId('template-preview-pane')
-    fireEvent.click(screen.getByRole('button', { name: '+ 新建模板' }))
+    fireEvent.click(screen.getByRole('button', { name: '新建模板' }))
     act(() => {
       window.dispatchEvent(new Event(EMAIL_SETTINGS_SAVED_EVENT))
     })
     await waitFor(() => expect(r.of(LIST)).toHaveLength(2))
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(screen.getByTestId('editor')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Post call/ })).toBeInTheDocument()
     expect(screen.queryByText('网络出错')).toBeNull()
   })
 
@@ -222,7 +216,7 @@ describe('re-reading after the settings were saved', () => {
     })
     await waitFor(() => expect(f).toHaveBeenCalledTimes(2))
     expect(screen.queryByText('加载中…')).toBeNull()
-    expect(screen.getAllByText('Post call').length).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: /Post call/ })).toBeInTheDocument()
     await act(async () => {
       finish({ ok: true, status: 200, json: async () => list({ featureState: 'disabled' }) } as Response)
     })
@@ -233,13 +227,14 @@ describe('re-reading after the settings were saved', () => {
     const r = routes({ [LIST]: [{ body: list() }, { body: { html: 'maintenance' } }] })
     render(<TemplatesAdmin clientId="c1" />)
     await screen.findByTestId('template-preview-pane')
-    fireEvent.click(screen.getByRole('button', { name: '+ 新建模板' }))
+    fireEvent.click(screen.getByRole('button', { name: '新建模板' }))
     act(() => {
       window.dispatchEvent(new Event(EMAIL_SETTINGS_SAVED_EVENT))
     })
     await waitFor(() => expect(r.of(LIST)).toHaveLength(2))
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(screen.getByTestId('editor')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Post call/ })).toBeInTheDocument()
     expect(screen.queryByText('返回的数据看不懂')).toBeNull()
   })
 
@@ -274,11 +269,11 @@ describe('who may change what', () => {
     routes({ [LIST]: [{ body: list({ canEditTemplates: false }) }] })
     render(<TemplatesAdmin clientId="c1" />)
     await screen.findByTestId('template-preview-pane')
-    expect(screen.queryByRole('button', { name: '+ 新建模板' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '新建模板' })).toBeNull()
     expect(screen.queryByRole('button', { name: '编辑' })).toBeNull()
-    expect(screen.queryByRole('button', { name: '更多操作' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '停用' })).toBeNull()
     expect(screen.getByText('你可以看模板，修改要找 Magic Lab 的同事。')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '版本历史' })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: '历史' }).length).toBeGreaterThan(0)
   })
 })
 
@@ -290,7 +285,7 @@ describe('switching a template off or on', () => {
     })
     render(<TemplatesAdmin clientId="c1" />)
     await screen.findByTestId('template-preview-pane')
-    await deactivateFromPreview()
+    fireEvent.click(await screen.findByRole('button', { name: '停用' }))
     await waitFor(() => expect(r.of(PUT_KEY)).toHaveLength(1))
     expect(r.of(PUT_KEY)[0].body).toEqual({
       baseVersion: 3,
@@ -313,12 +308,10 @@ describe('switching a template off or on', () => {
       'PUT /api/clients/c1/crm/email-templates/a-thanks': [{ body: { template: row({ version: 2 }), notices: [] } }],
     })
     render(<TemplatesAdmin clientId="c1" />)
-    await screen.findByText('展开停用的（1）')
-    fireEvent.click(screen.getByText('展开停用的（1）'))
-    fireEvent.click(screen.getByRole('button', { name: /A thanks/ }))
-    await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: 'A thanks' })).toBeInTheDocument())
-    fireEvent.click(screen.getByRole('button', { name: '更多操作' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '重新启用' }))
+    await screen.findByTestId('template-preview-pane')
+    fireEvent.click(screen.getByRole('button', { name: /展开停用/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^A thanks/ }))
+    fireEvent.click(screen.getByRole('button', { name: '启用' }))
     await waitFor(() => expect(r.of('PUT /api/clients/c1/crm/email-templates/a-thanks')).toHaveLength(1))
     expect(r.of('PUT /api/clients/c1/crm/email-templates/a-thanks')[0].body).toMatchObject({ baseVersion: 1, status: 'active', changeNote: '启用' })
   })
@@ -327,7 +320,7 @@ describe('switching a template off or on', () => {
     const r = routes({ [LIST]: [{ body: list() }], [PUT_KEY]: [{ status: 409, body: { error: 'stale' } }] })
     render(<TemplatesAdmin clientId="c1" />)
     await screen.findByTestId('template-preview-pane')
-    await deactivateFromPreview()
+    fireEvent.click(await screen.findByRole('button', { name: '停用' }))
     expect(await screen.findByText('别人刚改过，请刷新后再试。')).toBeInTheDocument()
     expect(r.of(LIST).length).toBe(2)
   })
@@ -336,7 +329,7 @@ describe('switching a template off or on', () => {
     routes({ [LIST]: [{ body: list() }], [PUT_KEY]: [{ status: 400, body: { error: '正文：占位符不对' } }] })
     render(<TemplatesAdmin clientId="c1" />)
     await screen.findByTestId('template-preview-pane')
-    await deactivateFromPreview()
+    fireEvent.click(await screen.findByRole('button', { name: '停用' }))
     expect(await screen.findByText('正文：占位符不对')).toBeInTheDocument()
   })
 })
@@ -346,7 +339,7 @@ describe('the editor', () => {
     const r = routes({ [LIST]: [{ body: list() }] })
     render(<TemplatesAdmin clientId="c1" />)
     await screen.findByTestId('template-preview-pane')
-    fireEvent.click(screen.getByRole('button', { name: '+ 新建模板' }))
+    fireEvent.click(screen.getByRole('button', { name: '新建模板' }))
     expect(screen.getByTestId('editor')).toHaveAttribute('data-initial', 'NEW')
     fireEvent.click(screen.getByRole('button', { name: 'editor-save' }))
     await waitFor(() => expect(screen.queryByTestId('editor')).toBeNull())
@@ -382,14 +375,14 @@ describe('history', () => {
   const history = [row({ id: 'h3', version: 3 }), row({ id: 'h2', version: 2, status: 'disabled', changeNote: '改了称呼' })]
 
   it('lists the versions and writes a new one from an old one on top of the current version', async () => {
-    routes({ [LIST]: [{ body: list() }], [HISTORY]: [{ body: { template: row(), history } }] })
+    const r = routes({ [LIST]: [{ body: list() }], [HISTORY]: [{ body: { template: row(), history } }] })
     render(<TemplatesAdmin clientId="c1" />)
     await screen.findByTestId('template-preview-pane')
-    fireEvent.click(screen.getByRole('button', { name: '版本历史' }))
-    const old = await waitFor(() => screen.getByText(/改了称呼/), { timeout: 3000 })
+    fireEvent.click(screen.getByRole('button', { name: '历史' }))
+    await waitFor(() => expect(r.of(HISTORY)).toHaveLength(1))
+    const old = await screen.findByText(/改了称呼/)
     expect(old).toBeInTheDocument()
-    const buttons = screen.getAllByRole('button', { name: '以这一版内容写新版本' })
-    fireEvent.click(buttons[1])
+    fireEvent.click(within(old.closest('li') as HTMLElement).getByRole('button', { name: '以这一版写新版本' }))
     const editor = screen.getByTestId('editor')
     expect(editor).toHaveAttribute('data-initial', 'post-call')
     expect(editor).toHaveAttribute('data-prefill', '2')
@@ -399,28 +392,28 @@ describe('history', () => {
     routes({ [LIST]: [{ body: list({ canEditTemplates: false }) }], [HISTORY]: [{ body: { template: row(), history } }] })
     render(<TemplatesAdmin clientId="c1" />)
     await screen.findByTestId('template-preview-pane')
-    fireEvent.click(screen.getByRole('button', { name: '版本历史' }))
-    await waitFor(() => expect(screen.getByText(/改了称呼/)).toBeInTheDocument(), { timeout: 3000 })
-    expect(screen.queryByRole('button', { name: '以这一版内容写新版本' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '历史' }))
+    await waitFor(() => expect(screen.getByText(/改了称呼/)).toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: '以这一版写新版本' })).toBeNull()
   })
 
   it('a failed history read says so and can be retried', async () => {
     routes({ [LIST]: [{ body: list() }], [HISTORY]: [{ status: 503, body: { error: 'x' } }, { body: { template: row(), history } }] })
     render(<TemplatesAdmin clientId="c1" />)
     await screen.findByTestId('template-preview-pane')
-    fireEvent.click(screen.getByRole('button', { name: '版本历史' }))
-    await waitFor(() => expect(screen.getByText('暂时读不到历史。')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '历史' }))
+    expect(await screen.findByText('暂时读不到历史。')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
-    await waitFor(() => expect(screen.getByText(/改了称呼/)).toBeInTheDocument(), { timeout: 3000 })
+    await waitFor(() => expect(screen.getByText(/改了称呼/)).toBeInTheDocument())
   })
 
   it('a second click on 收起历史 hides it', async () => {
     routes({ [LIST]: [{ body: list() }], [HISTORY]: [{ body: { template: row(), history } }] })
     render(<TemplatesAdmin clientId="c1" />)
     await screen.findByTestId('template-preview-pane')
-    fireEvent.click(screen.getByRole('button', { name: '版本历史' }))
-    await waitFor(() => expect(screen.getByText(/改了称呼/)).toBeInTheDocument(), { timeout: 3000 })
+    fireEvent.click(screen.getByRole('button', { name: '历史' }))
+    await waitFor(() => expect(screen.getByText(/改了称呼/)).toBeInTheDocument())
     fireEvent.click(screen.getByRole('button', { name: '收起历史' }))
-    expect(screen.queryByText(/改了称呼/)).toBeNull()
+    expect(screen.queryByText('改了称呼')).toBeNull()
   })
 })

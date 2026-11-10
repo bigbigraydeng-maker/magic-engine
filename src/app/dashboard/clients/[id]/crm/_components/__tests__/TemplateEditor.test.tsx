@@ -218,19 +218,19 @@ describe('editing an existing template', () => {
 describe('placeholders', () => {
   it('offers the common ones plus the ones of the chosen content source', () => {
     draw()
-    expect(screen.getByRole('button', { name: '+ 客人名字' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '+ 团名' })).toBeNull()
+    expect(screen.getByRole('button', { name: '{{first_name}}' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '{{tour_name}}' })).toBeNull()
     fireEvent.change(screen.getByLabelText('内容来源'), { target: { value: 'published_tours' } })
-    expect(screen.getByRole('button', { name: '+ 团名' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '{{tour_name}}' })).toBeInTheDocument()
   })
 
   it('inserts into the field that was focused last (the body by default)', () => {
     draw()
     type('邮件正文', 'Hello ')
-    fireEvent.click(screen.getByRole('button', { name: '+ 客人名字' }))
+    fireEvent.click(screen.getByRole('button', { name: '{{first_name}}' }))
     expect((screen.getByLabelText('邮件正文') as HTMLTextAreaElement).value).toContain('{{first_name}}')
     fireEvent.focus(screen.getByLabelText('邮件主题'))
-    fireEvent.click(screen.getByRole('button', { name: '+ 销售名字' }))
+    fireEvent.click(screen.getByRole('button', { name: '{{sender_name}}' }))
     expect((screen.getByLabelText('邮件主题') as HTMLInputElement).value).toContain('{{sender_name}}')
   })
 })
