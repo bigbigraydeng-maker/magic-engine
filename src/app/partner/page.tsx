@@ -142,7 +142,7 @@ function ReferralCard({ code }: { code: string }) {
       </div>
       <div className="px-6 py-5">
         <p className="text-sm text-me-charcoal/75">
-          你的推荐码是 <span className="font-bold tabular-nums">{code}</span>。下面两条链接都带着它。
+          你的邀请码是 <span className="font-bold tabular-nums">{code}</span>。下面两条链接都带着它。
         </p>
         <CopyRow label="发给客户：产品介绍页" value={`${origin}/ai-steward?ref=${code}`} />
         <CopyRow label="发给想做经销商的人：申请页（审核通过后挂在你下面）" value={`${origin}/partner/apply?ref=${code}`} />

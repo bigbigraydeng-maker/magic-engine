@@ -9,7 +9,7 @@ import { Simulator } from './simulator'
 
 export const metadata: Metadata = { title: '申请成为经销商 · Magic Engine' }
 
-const CHIPS = ['加入免费', '只按真实付款分钱', '拉人本身没有奖励', '每月 1 日结算']
+const CHIPS = ['仅限邀请', '加入免费', '只按真实付款分钱', '拉人本身没有奖励', '每月 1 日结算']
 
 /** Worked examples, computed with the same engine as the monthly settlement. */
 function Examples() {
