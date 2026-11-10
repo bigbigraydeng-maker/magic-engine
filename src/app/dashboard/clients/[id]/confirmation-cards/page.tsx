@@ -1,4 +1,5 @@
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { AdsExecutionReviewPanel } from '../_components/AdsExecutionReviewPanel'
 import { CardList } from './card-list'
 
 export const dynamic = 'force-dynamic'
@@ -27,8 +28,9 @@ export default async function ConfirmationCardsPage({
           会改广告、预算或 Meta 的事，都在这里点头。你不点，什么都不会改。
         </p>
       </header>
-      <div className="max-w-3xl">
+      <div className="max-w-3xl space-y-8">
         <CardList clientId={params.id} />
+        <AdsExecutionReviewPanel clientId={params.id} />
       </div>
     </div>
   )
