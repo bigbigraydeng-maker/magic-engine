@@ -6,6 +6,7 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { AI_STEWARD_RULES_V1 as RULES } from '@/lib/distributor/config'
+import { normaliseReferralCode } from '@/lib/distributor/referral-code'
 import { formatDollars } from '@/lib/distributor/simulate'
 import './steward.css'
 
@@ -96,7 +97,7 @@ function CtaBand({ title, note, cta = '预约免费咨询' }: { title: string; n
   )
 }
 
-function Hero() {
+function Hero({ applyHref }: { applyHref: string }) {
   const plans = RULES.catalog.plans
   const minVideos = Math.min(...plans.map((p) => p.videosPerMonth))
   const maxVideos = Math.max(...plans.map((p) => p.videosPerMonth))
@@ -105,7 +106,7 @@ function Hero() {
     <>
       <div className="nav">
         <div className="logo">MAGIC ENGINE</div>
-        <div className="links"><a href="#why">服务</a><a href="#hot">热点</a><a href="#pricing">价格</a><Link href={CONTACT_HREF}>开始合作</Link></div>
+        <div className="links"><a href="#why">服务</a><a href="#hot">热点</a><a href="#pricing">价格</a><Link href={applyHref}>成为经销商</Link><Link href={CONTACT_HREF}>开始合作</Link></div>
       </div>
       <section className="hero" style={bg('owner.jpg')}>
         <div className="veil" />
@@ -267,6 +268,20 @@ function Pricing() {
   )
 }
 
+/** Bridge to the distributor programme: people who like the product can sell it. Carries the referral code. */
+function PartnerBand({ applyHref }: { applyHref: string }) {
+  const topRate = Math.max(...Object.values(RULES.retailRateBp)) / 100
+  return (
+    <div className="ctaband partner">
+      <div>
+        <div className="cb-t serif">想把它推荐给身边的老板？</div>
+        <div className="cb-n">成为 Magic Engine 经销商：加入免费，不囤货，按客户实付金额拿分润，零售最高 {topRate}%。</div>
+      </div>
+      <Link href={applyHref} className="btn line">了解经销商计划</Link>
+    </div>
+  )
+}
+
 function Steps() {
   return (
     <section className="sec">
@@ -280,14 +295,17 @@ function Steps() {
   )
 }
 
-export default function AiStewardPage() {
+export default async function AiStewardPage({ searchParams }: { searchParams: Promise<{ ref?: string | string[] }> }) {
+  const { ref } = await searchParams
+  const referralCode = normaliseReferralCode(Array.isArray(ref) ? ref[0] : ref)
+  const applyHref = referralCode ? `/partner/apply?ref=${referralCode}` : '/partner/apply'
   return (
     <main className="ast">
       <link rel="preconnect" href="https://fonts.googleapis.com" />
       <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
       <link rel="stylesheet" href={FONTS_HREF} />
       <div className="inner">
-        <Hero />
+        <Hero applyHref={applyHref} />
         <Pillars />
         <CtaBand title="想知道你的行业在新西兰该怎么做内容？" note="先免费聊一次，听听我们怎么看你的账号。" />
         <LocalCraft />
@@ -299,6 +317,7 @@ export default function AiStewardPage() {
         <Features />
         <Pricing />
         <Steps />
+        <PartnerBand applyHref={applyHref} />
         <section className="final" style={bg('owner.jpg')}>
           <div className="veil" />
           <div className="in">
@@ -309,7 +328,7 @@ export default function AiStewardPage() {
           </div>
         </section>
         <Link href={CONTACT_HREF} className="float-cta" aria-label="免费咨询">免费咨询</Link>
-        <footer className="foot"><span>© Magic Engine · 新西兰</span><span>图片来自 Unsplash：{PHOTO_CREDITS.join('、')}</span></footer>
+        <footer className="foot"><span>© Magic Engine · 新西兰　·　<Link href={applyHref} className="foot-link">成为经销商</Link></span><span>图片来自 Unsplash：{PHOTO_CREDITS.join('、')}</span></footer>
       </div>
     </main>
   )
