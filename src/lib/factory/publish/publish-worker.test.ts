@@ -12,6 +12,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
+vi.mock('@/lib/workflows/inngest-event', () => ({ sendInngestEvent: vi.fn(async () => ({ event_ids: ['evt-1'] })) }))
 const factSource = vi.hoisted(() => ({ load: vi.fn() }))
 vi.mock('@/lib/social/weekly-loop/fact-aliases', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/social/weekly-loop/fact-aliases')>()),
@@ -28,6 +29,7 @@ vi.mock('./facebook-reel-adapter', () => ({
 import { runPublishWorker } from './publish-worker'
 import { supabaseAdmin } from '@/lib/supabase'
 import { facebookReelAdapter } from './facebook-reel-adapter'
+import { sendInngestEvent } from '@/lib/workflows/inngest-event'
 import { REEL_AUTO_CHECK_KEYS, REEL_HUMAN_CHECK_KEYS } from '@/lib/social/content-review'
 
 // 默认夹具 = 切换日(2026-10-23)之前批准的旧版清单；不写死时间的话，过了切换日这些用例会被当成「必须第三版」而失败
@@ -161,7 +163,7 @@ const finalStatus = () => woUpdates.filter((u) => 'status' in u).at(-1)
 beforeEach(() => {
   vi.clearAllMocks()
   mockFindExisting.mockResolvedValue(null)
-  mockPublish.mockResolvedValue({ platform: 'facebook', post_id: 'p1', permalink: 'https://fb/p1' } as never)
+  mockPublish.mockResolvedValue({ platform: 'facebook', post_id: 'p1', permalink: 'https://fb/p1', video_state: 'DRAFT' } as never)
 })
 
 describe('发布正文红线闸', () => {
@@ -210,8 +212,10 @@ describe('发布正文红线闸', () => {
     const r = await run()
 
     expect(mockPublish).toHaveBeenCalledTimes(1)
-    expect(r.result).toBe('published')
+    expect(r.result).toBe('drafted')
     expect(finalStatus()!.status).toBe('published')
+    const stored = finalStatus()!.published_ref as { video_state?: string }
+    expect(stored.video_state).toBe('DRAFT')
   })
 
   it('🔴 live publish of an external upload without on-camera consent is refused before any provider call', async () => {
@@ -249,11 +253,12 @@ describe('发布正文红线闸', () => {
 
   it('🔴 already public on the platform (recovery): recorded even when the catalog is unreadable, but no first comment', async () => {
     factSource.load.mockResolvedValue({ ok: false, reason: 'load_failed' })
-    mockFindExisting.mockResolvedValue({ platform: 'facebook', post_id: 'p1', video_id: 'v1', permalink: 'https://fb/p1' } as never)
+    mockFindExisting.mockResolvedValue({ platform: 'facebook', post_id: 'p1', video_id: 'v1', permalink: 'https://fb/p1', video_state: 'PUBLISHED', published_at: '2026-11-04T00:00:00+0000' } as never)
     installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz/x?utm_source=a' } })
     const r = await runPublishWorker({ draft: false, workerId: 'test' })
 
-    expect(r.result).toBe('skipped_existing')
+    // Recorded as what it really is (public), just without the first comment.
+    expect(r.result).toBe('published')
     expect(vi.mocked(facebookReelAdapter.ensureFirstComment)).not.toHaveBeenCalled()
     expect(mockPublish).not.toHaveBeenCalled()
   })
@@ -323,7 +328,7 @@ describe('发布正文红线闸', () => {
 
     vi.clearAllMocks()
     mockFindExisting.mockResolvedValue(null)
-    mockPublish.mockResolvedValue({ platform: 'facebook', post_id: 'p1', permalink: 'https://fb/p1' } as never)
+    mockPublish.mockResolvedValue({ platform: 'facebook', post_id: 'p1', permalink: 'https://fb/p1', video_state: 'DRAFT' } as never)
     installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz/x?utm_source=a' }, approvedAt: '2026-10-22T23:59:59.000Z' })
     await run()
     expect(mockPublish).toHaveBeenCalled()
@@ -345,7 +350,7 @@ describe('发布正文红线闸', () => {
 describe('幂等锚写库', () => {
   const startThenPublish = () => mockPublish.mockImplementation(async args => {
     await args.onStarted?.('vid-1')
-    return { platform: 'facebook', post_id: 'p1' } as never
+    return { platform: 'facebook', post_id: 'p1', video_state: 'DRAFT' } as never
   })
 
   it('🔴 锚点(provisional 回执)写库失败 → 中止发布并置失败,不能当没事继续上传', async () => {
@@ -360,7 +365,7 @@ describe('幂等锚写库', () => {
   it('锚点写库成功 → 照常发布', async () => {
     installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz' } })
     startThenPublish()
-    expect((await run()).result).toBe('published')
+    expect((await run()).result).toBe('drafted')
     expect(woUpdates.some(u => (u.published_ref as { video_id?: string } | undefined)?.video_id === 'vid-1')).toBe(true)
   })
 })
@@ -391,11 +396,35 @@ describe('发布记录与失败原因', () => {
 
   it('title falls back to the brand name, never the placeholder "factory reel"', async () => {
     installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz' }, noAngle: true })
+    mockPublish.mockResolvedValue({ platform: 'facebook', post_id: 'p1', permalink: 'https://fb/p1', video_state: 'PUBLISHED' } as never)
     await run()
 
     const ex = inserts.find((i) => i.table === 'execution_items')
     expect(String(ex?.payload.title)).toContain('CTS Tours')
     expect(String(ex?.payload.title)).not.toContain('factory reel')
+  })
+
+  it('a draft receipt is not booked as sent and does not start readback', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz' } })
+    await run()
+
+    expect(sendInngestEvent).not.toHaveBeenCalled()
+    expect(inserts.find((i) => i.table === 'execution_items')).toBeUndefined()
+    const log = inserts.find((i) => i.table === 'fde_work_logs')
+    expect(String(log?.payload.summary)).toContain('草稿已上传')
+    expect(String(log?.payload.summary)).not.toContain('已发到')
+  })
+
+  it('a receipt without a Meta state is a failure with a reason, not a publish', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz' } })
+    mockPublish.mockResolvedValue({ platform: 'facebook', post_id: 'p1', permalink: 'https://fb/p1' } as never)
+    const r = await run()
+
+    expect(r).toMatchObject({ result: 'failed', detail: 'publish_state_unconfirmed' })
+    expect(finalStatus()).toMatchObject({ status: 'publish_failed', next_retry_at: null })
+    expect(String(finalStatus()!.reject_reason)).toContain('没有确认')
+    expect(sendInngestEvent).not.toHaveBeenCalled()
+    expect(inserts.find((i) => i.table === 'flywheel_actions')).toBeUndefined()
   })
 
   it('interrupted upload is not re-sent and tells the PM to check manually', async () => {
