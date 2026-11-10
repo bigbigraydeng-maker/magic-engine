@@ -332,6 +332,18 @@ async function planFor(clientId: string) {
   check('S13 one order end to end: 2 rehearsal rows, exactly one letter (to the trial address), the real guest has no live row', ok && realShadow?.reason_code === 'not_in_allowlist', { steps, send: result.send, shadow: shadow.data, real: realLive?.status ?? null, trial: trialLive?.status, top: { status: result.status, no_send: result.no_send } })
 }
 
+// ── S14. an internal inbox that has been a contact for months still gets its one trial letter ──
+{
+  const { clientId } = await newClient(['old14@example.test'])
+  const id = crypto.randomUUID()
+  const at = new Date(Date.now() - 90 * 24 * HOUR).toISOString()
+  await supabaseAdmin.from('contacts').insert({ id, client_id: clientId, primary_email: 'old14@example.test', display_name: 'Ops Team', created_at: at })
+  await supabaseAdmin.from('contact_identities').insert({ contact_id: id, client_id: clientId, kind: 'email', value: 'old14@example.test' })
+  const plan = await planFor(clientId)
+  const r = await sendOne({ plan, contactId: id, deps: deps() })
+  check('S14 a 90-day-old internal contact without any lead form is planned and sent its one trial letter', plan.contactIds.includes(id) && r.outcome === 'sent', { plan: plan.contactIds.length, r })
+}
+
 console.log(`\n${passed} passed, ${failures.length} failed (provider calls in this process: ${sent.length}, none left the machine)`)
 if (failures.length > 0) {
   for (const f of failures) console.log(`  - ${f}`)

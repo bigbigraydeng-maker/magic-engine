@@ -19,12 +19,15 @@ import type { ShadowContact } from './types'
 
 /** A trial names at most 3 addresses; more contacts than this behind them is not a trial any more. */
 export const MAX_TRIAL_CONTACTS = 10
+const TRIAL_EPOCH = '1970-01-01T00:00:00.000Z'
+const TRIAL_NO_MAX_AGE = 1_000_000
 
 export function emptySendReceipt(createdAt: string): SendReceipt {
   return {
     status: 'sent_run',
     authorization_id: null,
     tried: 0,
+    found: null,
     by_outcome: {},
     by_reason: {},
     provider_impact: 'NONE',
@@ -38,8 +41,13 @@ function stopped(createdAt: string, status: SendStopStatus, error: string | null
   return { kind: 'stop', receipt: { ...emptySendReceipt(createdAt), status, error, authorization_id: authorizationId } }
 }
 
-/** Letters in flight first (so a cap reached later cannot starve them), then new guests, then the stale ones. */
-function sortGuests(contacts: readonly ShadowContact[], rows: readonly LifetimeRow[], liveFrom: string, now: Date, timeZone: string, maxAgeDays: number) {
+/**
+ * Letters in flight first (so a cap reached later cannot starve them), then new guests, then the stale ones.
+ * `trial`: the allow-listed internal contacts are due whatever their age or the authorization's start (only "not
+ * created today" still holds, so the letter goes out the morning after): the age rules protect real guests from being
+ * welcomed late, and an internal inbox that already is a contact must still get its one trial letter (子牙 R2 P2-B).
+ */
+function sortGuests(contacts: readonly ShadowContact[], rows: readonly LifetimeRow[], liveFrom: string, now: Date, timeZone: string, maxAgeDays: number, trial: boolean) {
   const byContact = new Map(rows.map((r) => [r.contactId, r]))
   const pending: string[] = []
   const fresh: string[] = []
@@ -51,7 +59,9 @@ function sortGuests(contacts: readonly ShadowContact[], rows: readonly LifetimeR
       pending.push(contact.contactId)
       continue
     }
-    const age = classifyContactAge({ createdAt: contact.createdAt, proposedAt: liveFrom, now, timeZone, maxAgeDays })
+    const age = classifyContactAge(trial
+      ? { createdAt: contact.createdAt, proposedAt: TRIAL_EPOCH, now, timeZone, maxAgeDays: TRIAL_NO_MAX_AGE }
+      : { createdAt: contact.createdAt, proposedAt: liveFrom, now, timeZone, maxAgeDays })
     if (age === 'candidate') fresh.push(contact.contactId)
     else if (age === 'stale') stale.push(contact.contactId)
   }
@@ -79,13 +89,13 @@ export async function prepareSend(args: { clientId: string; dryRun: boolean; dep
     const rows = ids.length === 0 ? { ok: true as const, rows: [] } : await deps.ledger.rowsFor(clientId, ids)
     if (!rows.ok) return stopped(at, 'read_failed', rows.error, record.id)
     // Only guests that came in after the authorization's start (§5.1): classifyContactAge drops the earlier ones.
-    const sorted = sortGuests(found.contacts, rows.rows, record.liveFrom, now, rule.schedule.timezone, rule.audience.max_age_days)
+    const sorted = sortGuests(found.contacts, rows.rows, record.liveFrom, now, rule.schedule.timezone, rule.audience.max_age_days, true)
     if (sorted.contactIds.length > 0) {
       // Unreadable mailboxes = "no person wrote yet" cannot be trusted: the whole batch waits (§5.2 F).
       const mailbox = await deps.checkMailboxes(clientId, rule.human_mail.required_mailboxes)
       if (!mailbox.ok) return stopped(at, 'mailbox_unreadable', mailbox.detail, record.id)
     }
-    return { kind: 'plan', plan: { clientId, authorizationId: record.id, sweepDay, contactIds: sorted.contactIds, staleIds: sorted.staleIds, createdAt: at } }
+    return { kind: 'plan', plan: { clientId, authorizationId: record.id, sweepDay, contactIds: sorted.contactIds, staleIds: sorted.staleIds, found: found.contacts.length, createdAt: at } }
   } catch (err) {
     return stopped(at, 'read_failed', `unexpected: ${err instanceof Error ? err.name : 'unknown'}`, null)
   }
@@ -141,7 +151,7 @@ function bump(counts: Record<string, number>, key: string): void {
 
 /** Phase 3: the run's receipt. `results` in the order the guests were tried; the first that stopped the run names why. */
 export function finalizeSend(plan: SendPlan, results: readonly SendOneResult[]): SendReceipt {
-  const receipt: SendReceipt = { ...emptySendReceipt(plan.createdAt), authorization_id: plan.authorizationId }
+  const receipt: SendReceipt = { ...emptySendReceipt(plan.createdAt), authorization_id: plan.authorizationId, found: plan.found }
   for (const r of results) {
     receipt.tried += 1
     bump(receipt.by_outcome, r.outcome)

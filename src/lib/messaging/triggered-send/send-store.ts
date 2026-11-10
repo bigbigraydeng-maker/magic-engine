@@ -16,7 +16,7 @@ import { createReceiptStore } from './receipt-store-prod'
 import type { CasWrite, ClaimInput, ClaimOutcome, ClaimRead, DecisionWrite, EnvReader, LedgerWrite, LifetimeRow, SendLedger, SendLocks } from './send-types'
 
 const TABLE = 'triggered_sends'
-const COLUMNS = 'id, contact_id, status, reason_code, authorization_id, idempotency_key, rendered_sha256, to_address_sha256, first_attempt_at, provider_message_id, updated_at'
+const COLUMNS = 'id, contact_id, status, reason_code, authorization_id, idempotency_key, rendered_sha256, to_address_sha256, first_attempt_at, provider_message_id, attempts, updated_at'
 /** How long a claimed letter is ours before another run may take it over (§3.3; the claim allows 1–30). */
 export const CLAIM_LEASE_MINUTES = 10
 /** Contact ids per ledger read (the rehearsal reads in the same size): a long id list must not make the request too long. */
@@ -42,6 +42,7 @@ interface DbRow {
   to_address_sha256: string | null
   first_attempt_at: string | null
   provider_message_id: string | null
+  attempts: number | null
   updated_at: string
 }
 
@@ -57,6 +58,7 @@ function toRow(r: DbRow): LifetimeRow {
     toAddressSha256: r.to_address_sha256,
     firstAttemptAt: r.first_attempt_at,
     providerMessageId: r.provider_message_id,
+    attempts: typeof r.attempts === 'number' ? r.attempts : 0,
     updatedAt: r.updated_at,
   }
 }

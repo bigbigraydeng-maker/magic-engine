@@ -311,12 +311,19 @@ const SEND_PROBLEMS: ReadonlySet<string> = new Set([
   'no_unsubscribe_secret', 'no_app_url', 'mailbox_unreadable', 'authorization_self_revoked', 'formal_sending_not_enabled',
 ])
 
+/** Single letters that went wrong without stopping the run: the run log shows them too (魏征 R2 P2-丙). */
+const LETTER_PROBLEMS = ['conflict', 'write_failed', 'read_failed'] as const
+
 function sendProblem(send: SendReceipt | null): string | null {
   if (send === null) return null
   if (SEND_PROBLEMS.has(send.status)) return `send: ${send.status}${send.error === null ? '' : ` (${send.error})`}`
+  const parts: string[] = []
   // The day's cap is the rule working as meant; any other stop is a problem.
-  if (send.stopped !== null && !send.stopped.startsWith('blocked:cap_reached')) return `send stopped: ${send.stopped}`
-  return null
+  if (send.stopped !== null && !send.stopped.startsWith('blocked:cap_reached')) parts.push(`send stopped: ${send.stopped}`)
+  if (send.status === 'sent_run' && send.found === 0) parts.push('send: no contact carries the trial addresses')
+  const letters = LETTER_PROBLEMS.filter((k) => (send.by_outcome[k] ?? 0) > 0).map((k) => `${send.by_outcome[k]} ${k}`)
+  if (letters.length > 0) parts.push(`send letters: ${letters.join(', ')}`)
+  return parts.length === 0 ? null : parts.join('; ')
 }
 
 /** The onFailure of both functions: close exactly this run's run-log row. Never throws. */

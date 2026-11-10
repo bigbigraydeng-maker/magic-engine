@@ -30,6 +30,8 @@ export interface LifetimeRow {
   toAddressSha256: string | null
   firstAttemptAt: string | null
   providerMessageId: string | null
+  /** How often the row was claimed or taken over: a change means another run owns the letter now. */
+  attempts: number
   updatedAt: string
 }
 
@@ -159,6 +161,8 @@ export interface SendPlan {
   contactIds: string[]
   /** Contacts too old to welcome: written as skipped:stale. */
   staleIds: string[]
+  /** Contacts found behind the trial's addresses (0 = the allow-list matches nobody: a setup problem). */
+  found: number
   createdAt: string
 }
 
@@ -199,6 +203,8 @@ export interface SendReceipt {
   authorization_id: string | null
   /** Guests tried (one step each). */
   tried: number
+  /** Contacts found behind the trial's addresses; null when the run stopped before looking. */
+  found: number | null
   by_outcome: Record<string, number>
   by_reason: Record<string, number>
   /** The strongest provider impact of the run (any letter accepted → PROVIDER_ACCEPTED). */

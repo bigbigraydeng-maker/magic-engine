@@ -169,6 +169,61 @@ describe('sendOne — what the provider says', () => {
   })
 })
 
+describe('sendOne — second review', () => {
+  function inFlightRow() {
+    const first = renderWelcomeLetter(template(), 'Jane Lee', '2026-11-20')
+    return w.ledger.seed({
+      status: 'pending', idempotencyKey: 'triggered-send:welcome:first-key', renderedSha256: first.ok ? first.letter.renderedSha256 : 'x',
+      toAddressSha256: addressSha256('lead@example.org'), firstAttemptAt: '2026-11-19T20:00:00.000Z', attempts: 1,
+    })
+  }
+
+  it('🔴 an unclear REPLAY only holds this letter; an unclear first attempt stops the run (子牙 R2 P2-A)', async () => {
+    inFlightRow()
+    w.answers = [{ kind: 'unknown', code: 'invalid_idempotent_request', status: 409 }]
+    expect(await run()).toMatchObject({ outcome: 'unknown_outcome', stopRun: false })
+  })
+
+  it('🔴 a receipt that already bound the row wins over the provider’s refusal or unclear answer (魏征 R2 P2-乙)', async () => {
+    w.answers = [{ kind: 'rejected', code: 'validation_error', status: 422 }]
+    w.deps.ledger.markFailed = async () => {
+      const row = w.ledger.byContact(CONTACT)
+      if (row) Object.assign(row, { status: 'delivered', providerMessageId: 'msg-r', updatedAt: 'later' })
+      return { ok: true, result: 'changed' }
+    }
+    expect(await run()).toMatchObject({ outcome: 'sent', reason: 'receipt_first:provider_rejected', providerImpact: 'PROVIDER_ACCEPTED' })
+    expect(w.timeline.cancels).toHaveLength(0)
+    w = sendWorld()
+    w.answers = [{ kind: 'unknown', code: 'timeout', status: null }]
+    w.deps.ledger.markUnknown = async () => {
+      const row = w.ledger.byContact(CONTACT)
+      if (row) Object.assign(row, { status: 'delivered', providerMessageId: 'msg-r', updatedAt: 'later' })
+      return { ok: true, result: 'changed' }
+    }
+    expect(await run()).toMatchObject({ outcome: 'sent', reason: 'receipt_first', stopRun: false, providerImpact: 'PROVIDER_ACCEPTED' })
+  })
+
+  it('🔴 another run took the letter over meanwhile: "failed" is never written, the timeline stays (魏征 R2 P2-甲)', async () => {
+    w.answers = [{ kind: 'rejected', code: 'validation_error', status: 422 }]
+    const original = w.deps.ledger.markFailed
+    let first = true
+    w.deps.ledger.markFailed = async (row, input) => {
+      if (first) {
+        first = false
+        const live = w.ledger.byContact(CONTACT)
+        // A takeover: still pending, one more attempt, a new lease (so the row changed under us).
+        if (live) Object.assign(live, { attempts: live.attempts + 1, updatedAt: 'taken-over' })
+        return { ok: true, result: 'changed' }
+      }
+      return original(row, input)
+    }
+    const r = await run()
+    expect(r).toMatchObject({ outcome: 'conflict', reason: 'provider_rejected:row_moved' })
+    expect(w.ledger.byContact(CONTACT)?.status).toBe('pending')
+    expect(w.timeline.cancels).toHaveLength(0)
+  })
+})
+
 describe('sendOne — re-checks before every letter', () => {
   it('🔴 this version sends trials only: an authorization for real guests stops before anything', async () => {
     w.set.record(authorizedRecord(sendableRule()))

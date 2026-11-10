@@ -55,17 +55,17 @@ describe('prepareSend', () => {
     expect(await prepareSend({ clientId: CLIENT, dryRun: false, deps: w.deps })).toMatchObject({ kind: 'stop', receipt: { status: 'not_armed' } })
   })
 
-  it('🔴 a trial finds its guests by the allow-listed addresses alone; letters in flight first; too old = stale; before the start = never', async () => {
+  it('🔴 a trial finds its guests by the allow-listed addresses alone; letters in flight first; age and start do not matter, only "not today"', async () => {
     const fresh = guest()
     const flying = guest({ contactId: 'b0000000-0000-4000-8000-000000000003' })
-    const old = guest({ contactId: 'b0000000-0000-4000-8000-000000000002', createdAt: '2026-11-16T01:00:00.000Z' })
-    const before = guest({ contactId: 'b0000000-0000-4000-8000-000000000005', createdAt: '2026-11-15T01:00:00.000Z' })
-    w.extraContacts = [flying, old, before]
+    const old = guest({ contactId: 'b0000000-0000-4000-8000-000000000002', createdAt: '2026-08-16T01:00:00.000Z' })
+    const today = guest({ contactId: 'b0000000-0000-4000-8000-000000000005', createdAt: '2026-11-19T20:00:00.000Z' })
+    w.extraContacts = [flying, old, today]
     w.ledger.seed({ contactId: flying.contactId, status: 'pending' })
-    // The authorization started 4 days ago, so a 3-day-old-plus guest is stale and one from before the start is ignored.
-    w.set.record(authorizedRecord(undefined, template(), { liveFrom: '2026-11-15T12:00:00.000Z' }))
+    // An internal inbox that has been a contact since August still gets its one trial letter; one made today waits.
+    w.set.record(authorizedRecord(undefined, template(), { liveFrom: '2026-11-19T12:00:00.000Z' }))
     const prepared = await prepareSend({ clientId: CLIENT, dryRun: false, deps: w.deps })
-    expect(prepared).toMatchObject({ kind: 'plan', plan: { contactIds: [flying.contactId, fresh.contactId], staleIds: [old.contactId], sweepDay: '2026-11-20' } })
+    expect(prepared).toMatchObject({ kind: 'plan', plan: { contactIds: [flying.contactId, fresh.contactId, old.contactId], staleIds: [], found: 4, sweepDay: '2026-11-20' } })
     expect(w.lookups).toEqual([['lead@example.org']])
   })
 

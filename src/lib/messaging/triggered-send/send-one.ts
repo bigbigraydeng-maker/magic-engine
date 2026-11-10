@@ -268,9 +268,16 @@ async function recordOutcome(c: Ctx, row: LifetimeRow, outcome: ResendSendOutcom
   if (attempt === 'first' && outcome.kind === 'rejected') return failed(c, row, 'provider_rejected', 'rejected', false)
   if (attempt === 'first' && outcome.kind === 'account_error') return failed(c, row, 'provider_account_error', 'account_error', true)
   // Anything else (and every refusal of a replay) may have gone out: keep it pending, never send a second letter. The
-  // row says so, and the run stops: when the provider is in trouble, every further guest would end up the same way.
+  // row says so. A FIRST attempt that is unclear stops the run (the provider is in trouble, every further guest would
+  // end up the same); an unclear replay only holds this letter (it may answer 409 until the 20 hours are up, 子牙 R2 P2-A).
   const marked = await onPending(c, row, (r) => c.deps.ledger.markUnknown(r))
-  return result('unknown_outcome', marked.kind === 'written' ? outcome.code : `${outcome.code}:not_marked`, row.id, { providerImpact: 'PROVIDER_UNKNOWN', stopRun: true })
+  if (marked.kind === 'moved' && receiptAccepted(marked.row)) return result('sent', 'receipt_first', row.id, { providerImpact: 'PROVIDER_ACCEPTED' })
+  return result('unknown_outcome', marked.kind === 'written' ? outcome.code : `${outcome.code}:not_marked`, row.id, { providerImpact: 'PROVIDER_UNKNOWN', stopRun: attempt === 'first' })
+}
+
+/** A receipt bound the row (it carries the provider's message id): the provider has the letter, whatever we were told. */
+function receiptAccepted(row: LifetimeRow | null): boolean {
+  return row !== null && row.providerMessageId !== null
 }
 
 type OnPending = { kind: 'written' } | { kind: 'moved'; row: LifetimeRow | null } | { kind: 'error' }
@@ -279,7 +286,12 @@ type OnPending = { kind: 'written' } | { kind: 'moved'; row: LifetimeRow | null 
  * A compare-and-set write on a row that should still be pending. "Changed" is read again: still pending (a note or a
  * takeover touched it) = try again on the fresh row; anything else = it moved on (a receipt), and the caller decides.
  */
-async function onPending(c: Ctx, row: LifetimeRow, write: (r: LifetimeRow) => Promise<{ ok: true; result: 'updated' | 'changed' } | { ok: false; error: string }>): Promise<OnPending> {
+async function onPending(
+  c: Ctx,
+  row: LifetimeRow,
+  write: (r: LifetimeRow) => Promise<{ ok: true; result: 'updated' | 'changed' } | { ok: false; error: string }>,
+  sameOwner = false,
+): Promise<OnPending> {
   let current = row
   for (let i = 0; i < CAS_TRIES; i += 1) {
     const w = await write(current)
@@ -288,6 +300,9 @@ async function onPending(c: Ctx, row: LifetimeRow, write: (r: LifetimeRow) => Pr
     const again = await c.deps.ledger.rowById(c.plan.clientId, current.id)
     if (!again.ok) return { kind: 'error' }
     if (again.row === null || again.row.status !== 'pending') return { kind: 'moved', row: again.row }
+    // `sameOwner`: another run took the letter over meanwhile (its replay may be at the provider right now): not ours
+    // to conclude any more (魏征 R2 P2-甲).
+    if (sameOwner && again.row.attempts !== row.attempts) return { kind: 'moved', row: again.row }
     current = again.row
   }
   return { kind: 'error' }
@@ -305,10 +320,11 @@ async function recordSent(c: Ctx, row: LifetimeRow, messageId: string): Promise<
 }
 
 async function failed(c: Ctx, row: LifetimeRow, reasonCode: string, outcome: 'rejected' | 'account_error' | 'not_attempted', stopRun: boolean): Promise<SendOneResult> {
-  const written = await onPending(c, row, (r) => c.deps.ledger.markFailed(r, { reasonCode, account: c.armed.record.account }))
+  const written = await onPending(c, row, (r) => c.deps.ledger.markFailed(r, { reasonCode, account: c.armed.record.account }), true)
   if (written.kind === 'error') return result('write_failed', `failed:${reasonCode}`, row.id, { stopRun })
-  // The row moved on before "failed" could be written (a receipt): the letter's state is not ours to call "not sent",
-  // so the timeline record stays as it is.
+  // The row moved on before "failed" could be written (a receipt, or another run took it over): the letter's state is
+  // not ours to call "not sent", so the timeline record stays as it is. A receipt that bound it = accepted (魏征 R2 P2-乙).
+  if (written.kind === 'moved' && receiptAccepted(written.row)) return result('sent', `receipt_first:${reasonCode}`, row.id, { stopRun, providerImpact: 'PROVIDER_ACCEPTED' })
   if (written.kind === 'moved') return result('conflict', `${reasonCode}:row_moved`, row.id, { stopRun })
   // Not sent for certain: the timeline record no longer counts toward "7 days, 2 e-mails" (§16.8 ②⑤).
   const cancelled = await c.deps.cancelTouchpoint(c.plan.clientId, row.id)

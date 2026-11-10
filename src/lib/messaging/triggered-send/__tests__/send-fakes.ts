@@ -65,7 +65,7 @@ export function guest(over: Partial<SendContact> = {}): SendContact {
 export const NOT_WELCOMED: EvidenceRead = { ok: true, items: [], legacy: { welcomed: false, batchSeen: true, campaignIds: [] } }
 
 export function plan(over: Partial<SendPlan> = {}): SendPlan {
-  return { clientId: CLIENT, authorizationId: AUTH_ID, sweepDay: '2026-11-20', contactIds: [CONTACT], staleIds: [], createdAt: SEND_NOW.toISOString(), ...over }
+  return { clientId: CLIENT, authorizationId: AUTH_ID, sweepDay: '2026-11-20', contactIds: [CONTACT], staleIds: [], found: 1, createdAt: SEND_NOW.toISOString(), ...over }
 }
 
 let tick = 0
@@ -88,7 +88,7 @@ export class FakeLedger {
   seed(over: Partial<LifetimeRow>): LifetimeRow {
     const row: LifetimeRow = {
       id: `e0000000-0000-4000-8000-00000000000${++this.n}`, contactId: CONTACT, status: 'blocked', reasonCode: null, authorizationId: AUTH_ID,
-      idempotencyKey: null, renderedSha256: null, toAddressSha256: null, firstAttemptAt: null, providerMessageId: null, updatedAt: stamp(), ...over,
+      idempotencyKey: null, renderedSha256: null, toAddressSha256: null, firstAttemptAt: null, providerMessageId: null, attempts: 0, updatedAt: stamp(), ...over,
     }
     this.rows.set(row.id, row)
     return row
@@ -147,9 +147,10 @@ export class FakeLedger {
     if (existing?.status === 'pending') {
       if (existing.authorizationId !== input.authorizationId || existing.renderedSha256 !== input.renderedSha256) return { ok: true as const, outcome: 'in_flight' as const, sendId: existing.id, idempotencyKey: existing.idempotencyKey }
       existing.updatedAt = stamp()
+      existing.attempts += 1
       return { ok: true as const, outcome: 'takeover' as const, sendId: existing.id, idempotencyKey: existing.idempotencyKey }
     }
-    const fields = { status: 'pending', authorizationId: input.authorizationId, idempotencyKey: input.idempotencyKey, renderedSha256: input.renderedSha256, toAddressSha256: input.toAddressSha256, firstAttemptAt: '2026-11-19T21:00:00.000Z', updatedAt: stamp() }
+    const fields = { status: 'pending', authorizationId: input.authorizationId, idempotencyKey: input.idempotencyKey, renderedSha256: input.renderedSha256, toAddressSha256: input.toAddressSha256, firstAttemptAt: '2026-11-19T21:00:00.000Z', attempts: 1, updatedAt: stamp() }
     const row = existing ?? this.seed({ contactId: input.contactId })
     Object.assign(row, fields)
     return { ok: true as const, outcome: 'claimed' as const, sendId: row.id, idempotencyKey: input.idempotencyKey }

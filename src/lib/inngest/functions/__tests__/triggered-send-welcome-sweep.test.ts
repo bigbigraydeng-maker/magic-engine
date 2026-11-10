@@ -286,7 +286,7 @@ describe('runSweepOrder', () => {
 
   it('🔴 real sending runs after the rehearsal: one step to plan, one for the stale guests, one per guest; a stop ends the run', async () => {
     const step = fakeStep()
-    const sendPlan: SendPlan = { clientId: CLIENT_A, authorizationId: 'auth-1', sweepDay: '2026-11-03', contactIds: ['g1', 'g2', 'g3'], staleIds: ['old1'], createdAt: '2026-11-02T20:00:00.000Z' }
+    const sendPlan: SendPlan = { clientId: CLIENT_A, authorizationId: 'auth-1', sweepDay: '2026-11-03', contactIds: ['g1', 'g2', 'g3'], staleIds: ['old1'], found: 4, createdAt: '2026-11-02T20:00:00.000Z' }
     const stop: SendOneResult = { outcome: 'account_error', reason: 'provider_account_error', sendId: 'r2', stopRun: true, providerImpact: 'NONE' }
     const { deps, sendOne, sendStale, finishRun } = sweepDeps({ kind: 'done', receipt: receipt({ status: 'no_open_proposal' }) }, {
       sendPrepare: vi.fn(async (): Promise<SendPrepareResult> => ({ kind: 'plan', plan: sendPlan })),
@@ -383,6 +383,12 @@ describe('sweepFinishOpts — real sending in the run log', () => {
     expect(sweepFinishOpts(r(), { ...base, stopped: 'blocked:cap_reached' }).error).toBeUndefined()
     expect(sweepFinishOpts(r(), { ...base, status: 'not_armed' }).error).toBeUndefined()
     expect(sweepFinishOpts(r(), { ...base, status: 'formal_sending_not_enabled' }).error).toBe('send: formal_sending_not_enabled')
+  })
+
+  it('a trial whose addresses match nobody, and single letters that went wrong, show in the run log (魏征 R2 P2-丙)', () => {
+    expect(sweepFinishOpts(r(), { ...base, found: 0 }).error).toBe('send: no contact carries the trial addresses')
+    expect(sweepFinishOpts(r(), { ...base, found: 2, tried: 2, by_outcome: { sent: 1, conflict: 1 } }).error).toBe('send letters: 1 conflict')
+    expect(sweepFinishOpts(r(), { ...base, found: 1, tried: 1, by_outcome: { sent: 1 } }).error).toBeUndefined()
   })
 })
 
