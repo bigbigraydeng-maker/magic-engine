@@ -357,6 +357,7 @@ const GREETING_OR_FAQ: ReadonlySet<CommentIntent> = new Set([
   'faq_itinerary',
   'faq_visa',
   'faq_signup',
+  'praise',
 ])
 
 export type CommentAutoReplyBlock = 'not_greeting_or_faq' | 'routing_error'
