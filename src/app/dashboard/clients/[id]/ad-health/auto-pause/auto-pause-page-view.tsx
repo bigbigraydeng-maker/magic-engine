@@ -6,14 +6,9 @@ import type { CardPayload } from '@/components/confirmation-card/HeldCards'
 import { MeButton, MePanel, MePill, MeStatCard } from '@/components/ui/me-primitives'
 import { ApprovalContextNotes } from '../../ads-health/approval-context-notes'
 import { useAutoPauseData, type PendingItem } from './use-auto-pause-data'
+import { autoPauseSummaryCounts, matchPauseCard } from './auto-pause-summary-counts'
 
 const REJECT_REASONS = ['刚改过，观察一下', '品牌曝光优先', '季节性投放', '其他'] as const
-
-function matchPauseCard(p: PendingItem, cards: readonly CardPayload[]): CardPayload | null {
-  const name = p.adsetName?.trim()
-  if (!name) return null
-  return cards.find((c) => c.what.includes(name) || c.scope.includes(name) || c.account.includes(name)) ?? null
-}
 
 function CardShell({ children, id }: { children: React.ReactNode; id?: string }) {
   return <div id={id} className="rounded-2xl border border-me-stone bg-white p-5 shadow-card">{children}</div>
@@ -39,11 +34,10 @@ export function AutoPausePageView({
   const pausedRows = useMemo(() => ledger.filter((r) => r.status === 'paused'), [ledger])
   const failedRows = useMemo(() => ledger.filter((r) => r.status === 'failed'), [ledger])
 
-  const counts = useMemo(() => {
-    if (!pending) return { waiting: 0, issued: cards.length, paused: pausedRows.length, dismissed: dismissed.length }
-    const waiting = pending.filter((p) => !matchPauseCard(p, cards)).length
-    return { waiting, issued: pending.length - waiting + cards.length, paused: pausedRows.length, dismissed: dismissed.length }
-  }, [pending, cards, pausedRows.length, dismissed.length])
+  const counts = useMemo(
+    () => autoPauseSummaryCounts(pending, cards, ledger),
+    [pending, cards, ledger],
+  )
 
   const decide = useCallback(async (it: PendingItem, resolution: 'approve' | 'reject', reason?: string) => {
     if (!it.expectedDecisionId) return

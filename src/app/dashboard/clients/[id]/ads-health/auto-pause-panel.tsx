@@ -17,7 +17,6 @@ export default function AutoPausePanel({
   readonly clientId: string
   readonly onPendingAdsChanged?: () => void
 }) {
-  void onPendingAdsChanged
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-me-stone bg-me-ivory px-4 py-3">
