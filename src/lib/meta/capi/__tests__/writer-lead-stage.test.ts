@@ -132,13 +132,15 @@ describe('发到哪里', () => {
   })
 })
 
-describe('数据集编号误填成网站像素', () => {
-  it('发送时按配置错误拦下，一个请求都不发', async () => {
-    const { fetcher } = fakeFetch(ok)
-    const wrong: ClientSendConfig = { ...BASE, crmStage: { datasetId: WEB_PIXEL, leadEventSource: 'Magic Engine' } }
-    const raw = await writer.send(writer.build(stage(), wrong), wrong, { fetcher })
-    expect(raw).toMatchObject({ ok: false, errorName: 'ConfigError' })
-    expect(fetcher).not.toHaveBeenCalled()
+describe('线索阶段数据集跟网站像素是同一个（Meta 统一数据集）', () => {
+  it('照发：发到配置的数据集，事件仍带 system_generated + crm 标记', async () => {
+    const { fetcher, urls } = fakeFetch(ok)
+    const same: ClientSendConfig = { ...BASE, crmStage: { datasetId: WEB_PIXEL, leadEventSource: 'Magic Engine' } }
+    const payload = writer.build(stage(), same)
+    const raw = await writer.send(payload, same, { fetcher })
+    expect(raw).toMatchObject({ ok: true, status: 200 })
+    expect(urls).toEqual([expect.stringContaining(`/${WEB_PIXEL}/events`)])
+    expect(payload.data[0]).toMatchObject({ action_source: 'system_generated', custom_data: { event_source: 'crm' } })
   })
 })
 
