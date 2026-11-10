@@ -37,6 +37,8 @@ import { AnomalySignalPanel } from './_components/AnomalySignalPanel'
 import { IntelligenceSummarySection } from '../_components/intelligence/IntelligenceSummarySection'
 import { BriefGateBanner } from '../_components/BriefGateBanner'
 import { pageRewriterUrlForExecutionItem } from '@/lib/page-rewriter/url'
+import { ExecutionFdeChrome, type ExecutionPriorityRow } from './_components/ExecutionFdeChrome'
+import { executionBoardStats } from './execution-page-stats'
 // MemoryAnnotationPanel removed — Phase 20.D item 6: system handles flywheel recording automatically
 
 // ---------------------------------------------------------------------------
@@ -1975,6 +1977,8 @@ export function ExecutionClient() {
   const [clientName, setClientName] = useState<string | null>(null)
   // Phase 20.D: FDE 手动录入
   const [showManualEntry, setShowManualEntry] = useState(false)
+  const [waitingCards, setWaitingCards] = useState(0)
+  const [socialDrafts, setSocialDrafts] = useState(0)
   // 后台生成中的执行项 ID 集合（关闭 drawer 后仍在 AI 生成，kanban 卡片显示"制作中"）
   const [bgGeneratingIds, setBgGeneratingIds] = useState<Set<string>>(new Set())
   // 图片生成中的执行项 ID 集合（drawer 还开着，但图片在 Visual Studio 渲染，kanban 卡片也要显示"制作中"）
@@ -2150,6 +2154,70 @@ export function ExecutionClient() {
   // 用 items.length 作为 trigger — items 数量变化（如完成一张）时重算
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId, items.length])
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const [cardsRes, benchRes] = await Promise.all([
+          fetch(`/api/clients/${clientId}/confirmation-cards`, { cache: 'no-store' }).catch(() => null),
+          fetch(`/api/clients/${clientId}/workbench-summary`, { cache: 'no-store' }).catch(() => null),
+        ])
+        if (!cancelled && cardsRes?.ok) {
+          const json = await cardsRes.json() as { cards?: Array<{ status?: string }> }
+          setWaitingCards((json.cards ?? []).filter(c => c.status === 'waiting').length)
+        }
+        if (!cancelled && benchRes?.ok) {
+          const json = await benchRes.json() as { summary?: { social?: { draft?: number } } }
+          setSocialDrafts(json.summary?.social?.draft ?? 0)
+        }
+      } catch {
+        if (!cancelled) {
+          setWaitingCards(0)
+          setSocialDrafts(0)
+        }
+      }
+    })()
+    return () => { cancelled = true }
+  }, [clientId])
+
+  const boardStats = useMemo(() => executionBoardStats(items), [items])
+
+  const priorityRows = useMemo((): ExecutionPriorityRow[] => {
+    const rows: ExecutionPriorityRow[] = []
+    if (waitingCards > 0 && rows.length < 3) {
+      rows.push({
+        id: 'confirm-cards',
+        urgent: true,
+        title: `有 ${waitingCards} 张确认卡等你点头`,
+        description: '会改 Meta 广告或预算；没点之前不会动。',
+        href: `/dashboard/clients/${clientId}/confirmation-cards`,
+        cta: '去确认卡',
+      })
+    }
+    if (socialDrafts > 0 && rows.length < 3) {
+      rows.push({
+        id: 'social-drafts',
+        title: `审 ${socialDrafts} 条社媒草稿`,
+        description: '在每日计划里批准或打回。',
+        href: `/dashboard/clients/${clientId}/daily-plan?tab=post`,
+        cta: '去审',
+      })
+    }
+    for (const rec of dailyRecs) {
+      if (rows.length >= 3) break
+      const fullItem = items.find(i => i.id === rec.id)
+      rows.push({
+        id: rec.id,
+        title: rec.title,
+        description: rec.description || rec.reason,
+        href: `/dashboard/clients/${clientId}/execution`,
+        cta: '打开任务',
+        onClick: fullItem ? () => setDetailItem(fullItem) : undefined,
+      })
+    }
+    return rows
+  }, [waitingCards, socialDrafts, dailyRecs, items, clientId])
 
   // 状态变更 — 乐观更新（点击立即变）+ 失败回滚并报错
   const handleStatusChange = useCallback(async (itemId: string, status: ExecutionItemStatus) => {
@@ -2768,98 +2836,63 @@ export function ExecutionClient() {
         </button>
       </div>
 
-      {/* Header */}
-      <div className="sticky top-0 z-10 border-b border-slate-200 bg-[#f6f7f2]/95 px-4 py-3 backdrop-blur md:px-6">
-        {/* 面包屑导航 — FDE 随时知道自己在哪 */}
-        <div className="mx-auto max-w-7xl mb-2.5">
-          <nav className="flex items-center gap-1.5 text-[11px] font-semibold">
-            <Link href="/dashboard" className="text-slate-400 hover:text-indigo-600 transition-colors">← Dashboard</Link>
+      <div className="sticky top-0 z-10 border-b border-black/10 bg-me-ivory/95 backdrop-blur">
+        <div className="mx-auto max-w-7xl space-y-4 px-4 py-4 md:px-6">
+          <nav className="flex items-center gap-1.5 text-[11px] font-semibold text-me-charcoal/45">
             {clientName && (
-              <>
-                <span className="text-slate-300">/</span>
-                <Link
-                  href={`/dashboard/clients/${clientId}`}
-                  className="max-w-[180px] truncate text-slate-500 hover:text-indigo-600 transition-colors"
-                >
-                  {clientName}
-                </Link>
-              </>
+              <Link href={`/dashboard/clients/${clientId}`} className="truncate hover:text-me-ochre">{clientName}</Link>
             )}
-            <span className="text-slate-300">/</span>
-            <span className="font-black text-slate-800">执行看板</span>
+            <span aria-hidden>/</span>
+            <span className="font-black text-me-charcoal">任务</span>
           </nav>
-        </div>
-        <BriefGateBanner clientId={clientId} featureLabel="execution dashboard actions">
-          <div className="mx-auto flex max-w-7xl flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <h1 className="text-xl font-black text-slate-950">{clientName ?? '执行看板'}</h1>
-              <p className="mt-0.5 text-xs font-semibold text-slate-500">按阶段跟踪处方落地、内容生成与执行证明</p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              {/* 主操作：录入工作 */}
-              <button
-                onClick={() => setShowManualEntry(true)}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 transition-colors"
-              >
-                ＋ 录入工作
-              </button>
-              {/* 主操作：Marketing Plan */}
+          <BriefGateBanner clientId={clientId} featureLabel="execution dashboard actions">
+            <ExecutionFdeChrome
+              stats={boardStats}
+              priorities={priorityRows}
+              onManualEntry={() => setShowManualEntry(true)}
+              confirmationHref={`/dashboard/clients/${clientId}/confirmation-cards`}
+              waitingCards={waitingCards}
+            />
+            <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
               <Link
                 href={`/dashboard/clients/${clientId}/marketing-plan`}
-                className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-cyan-200 bg-cyan-50 px-3 text-xs font-black text-cyan-800 transition-colors hover:bg-cyan-100"
+                className="inline-flex min-h-9 items-center rounded-lg border border-me-ochre/25 bg-white px-3 text-xs font-black text-me-charcoal hover:border-me-ochre/40"
               >
-                Marketing Plan
+                营销计划
               </Link>
-              {/* 项目级鲁班 — 常驻按钮 */}
               <button
+                type="button"
                 onClick={() => setProjectLubanOpen(true)}
-                className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-3 text-xs font-black text-violet-800 transition-colors hover:bg-violet-100"
+                className="inline-flex min-h-9 items-center rounded-lg border border-me-ochre/25 bg-white px-3 text-xs font-black text-me-charcoal hover:border-me-ochre/40"
               >
-                🤖 鲁班
+                鲁班
               </button>
-              {/* 溢出菜单 */}
               <div className="relative">
                 <button
+                  type="button"
                   onClick={() => setShowOverflow(v => !v)}
-                  className="inline-flex min-h-10 items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 transition-colors hover:border-slate-300 hover:text-slate-950"
+                  className="inline-flex min-h-9 items-center rounded-lg border border-black/10 bg-white px-3 text-xs font-black text-me-charcoal"
                 >
-                  ···
+                  更多 ···
                 </button>
                 {showOverflow && (
                   <>
-                    {/* 透明遮罩：点击外部关闭 */}
-                    <div className="fixed inset-0 z-10" onClick={() => setShowOverflow(false)} />
-                    <div className="absolute right-0 top-full z-20 mt-1 w-44 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
-                      <button
-                        onClick={() => { setReviewOpen(true); setShowOverflow(false) }}
-                        className="w-full px-4 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                      >
-                        复盘
-                      </button>
+                    <p className="fixed inset-0 z-10" onClick={() => setShowOverflow(false)} aria-hidden />
+                    <div className="absolute right-0 top-full z-20 mt-1 w-44 rounded-lg border border-black/10 bg-white py-1 shadow-lg">
+                      <button type="button" onClick={() => { setReviewOpen(true); setShowOverflow(false) }} className="w-full px-4 py-2 text-left text-xs font-semibold hover:bg-me-ivory">复盘</button>
                       {items.length > 0 && (
-                        <button
-                          onClick={() => { void handleDownloadDocx(); setShowOverflow(false) }}
-                          disabled={isDocxLoading}
-                          className="w-full px-4 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                        >
-                          {isDocxLoading ? '下载中…' : '↓ 下载执行方案'}
+                        <button type="button" onClick={() => { void handleDownloadDocx(); setShowOverflow(false) }} disabled={isDocxLoading} className="w-full px-4 py-2 text-left text-xs font-semibold hover:bg-me-ivory disabled:opacity-50">
+                          {isDocxLoading ? '下载中…' : '下载执行方案'}
                         </button>
                       )}
-                      <div className="my-1 border-t border-slate-100" />
-                      <Link
-                        href={`/dashboard/clients/${clientId}/prescription/new`}
-                        onClick={() => setShowOverflow(false)}
-                        className="block px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                      >
-                        ＋ 新处方
-                      </Link>
+                      <Link href={`/dashboard/clients/${clientId}/prescription/new`} onClick={() => setShowOverflow(false)} className="block px-4 py-2 text-xs font-semibold hover:bg-me-ivory">新处方</Link>
                     </div>
                   </>
                 )}
               </div>
             </div>
-          </div>
-        </BriefGateBanner>
+          </BriefGateBanner>
+        </div>
       </div>
 
       <div className="mx-auto max-w-7xl space-y-4 px-4 py-6 transition-all duration-200 md:px-6">
@@ -3019,8 +3052,8 @@ export function ExecutionClient() {
                   onClick={() => setStatusFilter(t.v)}
                   className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
                     statusFilter === t.v
-                      ? 'bg-slate-900 text-white'
-                      : 'bg-white border border-gray-200 text-gray-600 hover:border-slate-400 hover:text-slate-700'
+                      ? 'bg-me-charcoal text-white'
+                      : 'bg-white border border-black/10 text-me-charcoal/60 hover:border-me-ochre/40 hover:text-me-charcoal'
                   }`}
                 >
                   {t.label}{t.v !== 'all' && counts[t.v] !== undefined ? ` ${counts[t.v]}` : ''}
@@ -3035,12 +3068,12 @@ export function ExecutionClient() {
         {/* DAPE W5 (spec §2.4.5) — AI 推荐今天做 3 件
             短模式（无 LLM 调用，纯规则排序）。点击卡片 → 滚动到看板对应卡片并打开详情。
             Collapse 状态 + items 为空时不显示。 */}
-        {dailyRecs.length > 0 && (
-          <div className="rounded-xl border border-violet-200 bg-gradient-to-br from-violet-50 to-white p-4 shadow-sm">
+        {dailyRecs.length > 0 && priorityRows.length === 0 && (
+          <div className="rounded-xl border border-me-ochre/25 bg-me-ochre/5 p-4 shadow-sm">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
                 <span className="text-lg">🧠</span>
-                <h3 className="text-sm font-bold text-violet-900">AI 推荐今天做 {dailyRecs.length} 件</h3>
+                <h3 className="text-sm font-bold text-me-charcoal">AI 推荐今天做 {dailyRecs.length} 件</h3>
                 {dailyRecsLoading && (
                   <span className="h-3 w-3 animate-spin rounded-full border-2 border-violet-300 border-t-violet-700" />
                 )}
