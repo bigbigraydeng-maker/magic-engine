@@ -1,9 +1,11 @@
 ---
 id: 2026-11-10-ads-proposal-thresholds-confirmed
 title: 放量建议和熔断门槛已按确认规则对齐
-status: decided
+status: done
 owner: agent
 decided_on: 2026-11-10
+done_on: 2026-11-10
+done_ref: pr:3744
 source: doc:docs/ledger/2026-11-09-ads-circuit-breaker-propose-pause.md
 verify_by: 2026-11-12
 verify_how: 用假数据核对门槛：差一天、差一条、成本刚好等于目标或刚好两倍，都不出对应建议；过线才出卡。数据旧满 12 小时只有提醒待办。
