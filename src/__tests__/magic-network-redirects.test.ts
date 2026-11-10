@@ -1,40 +1,45 @@
 /**
  * Magic Network moved to its own site (PM 2026-11-10「Redirect now」): the old public product and
- * application pages must send visitors there, temporarily, and only those two — the distributor
- * portal (/partner) stays in ME until the new site has a database.
+ * application pages send visitors there with their query string; the portal (/partner) is not touched.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-type Redirect = { source: string; destination: string; permanent: boolean }
+const redirect = vi.hoisted(() => vi.fn((url: string) => { throw new Error(`REDIRECT ${url}`) }))
+vi.mock('next/navigation', () => ({ redirect }))
 
-async function load(env?: string): Promise<Redirect[]> {
-  vi.resetModules()
-  if (env === undefined) delete process.env.MAGIC_NETWORK_URL
-  else process.env.MAGIC_NETWORK_URL = env
-  const config = (await import('../../next.config.js')).default as { redirects: () => Promise<Redirect[]> }
-  return config.redirects()
-}
+import { magicNetworkUrl } from '@/lib/magic-network-url'
+import AiStewardPage from '@/app/ai-steward/page'
+import ApplyPage from '@/app/partner/apply/page'
 
 afterEach(() => {
   delete process.env.MAGIC_NETWORK_URL
+  redirect.mockClear()
 })
 
-describe('Magic Network redirects', () => {
-  it('sends the old product and application pages to the new site, not permanently', async () => {
-    const r = await load()
-    expect(r).toEqual(expect.arrayContaining([
-      { source: '/ai-steward', destination: 'https://magic-network.onrender.com/products/ai-steward', permanent: false },
-      { source: '/partner/apply', destination: 'https://magic-network.onrender.com/join', permanent: false },
-    ]))
+describe('magicNetworkUrl', () => {
+  it('points at the temporary site and keeps the query string', () => {
+    expect(magicNetworkUrl('/join', { ref: 'ABCD2345' })).toBe('https://magic-network.onrender.com/join?ref=ABCD2345')
+    expect(magicNetworkUrl('/join')).toBe('https://magic-network.onrender.com/join')
   })
 
-  it('leaves the distributor portal in ME', async () => {
-    const r = await load()
-    expect(r.some((x) => x.source === '/partner' || x.source.startsWith('/partner/:'))).toBe(false)
+  it('uses MAGIC_NETWORK_URL once set, without a doubled slash, and keeps repeated params', () => {
+    process.env.MAGIC_NETWORK_URL = 'https://network.example.nz/'
+    expect(magicNetworkUrl('/products/ai-steward', { ref: 'ABCD2345', utm: ['a', 'b'] })).toBe(
+      'https://network.example.nz/products/ai-steward?ref=ABCD2345&utm=a&utm=b',
+    )
+  })
+})
+
+describe('old ME pages', () => {
+  it('/ai-steward sends visitors to the product page on the new site', async () => {
+    await expect(AiStewardPage({ searchParams: Promise.resolve({ ref: 'ABCD2345' }) })).rejects.toThrow(
+      'REDIRECT https://magic-network.onrender.com/products/ai-steward?ref=ABCD2345',
+    )
   })
 
-  it('uses MAGIC_NETWORK_URL once the real domain is set, without a doubled slash', async () => {
-    const r = await load('https://network.example.nz/')
-    expect(r.find((x) => x.source === '/partner/apply')?.destination).toBe('https://network.example.nz/join')
+  it('/partner/apply sends visitors to the application page on the new site', async () => {
+    await expect(ApplyPage({ searchParams: Promise.resolve({ ref: 'ABCD2345' }) })).rejects.toThrow(
+      'REDIRECT https://magic-network.onrender.com/join?ref=ABCD2345',
+    )
   })
 })
