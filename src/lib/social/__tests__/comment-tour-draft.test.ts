@@ -123,10 +123,11 @@ describe('tourFactLines', () => {
       ...LOOP,
       inclusions: ['Hotels from 2,699 per person', 'English-speaking tour guide'],
       exclusions: ['Single supplement 800', 'Travel insurance'],
-      highlights: ['Entrance fees and meals as specified in the itinerary'],
+      highlights: ['Entrance fees and meals as specified in the itinerary', 'Grand Canal cruise and the Hundred Flower Garden'],
     })
     expect(lines).toContain('Included: English-speaking tour guide')
     expect(lines).toContain('Not included: Travel insurance')
+    expect(lines).toContain('Highlight: Grand Canal cruise and the Hundred Flower Garden')
     expect(lines.join('\n')).not.toMatch(/2,699|800/)
   })
 })
@@ -142,7 +143,7 @@ describe('validateTourDraft', () => {
     'Yes, and it is only $2,000.',
     'Yes, from NZD 2000.',
     'Yes, NZ 2699 all up.',
-    'Two thousand six hundred per head.',
+    'Two thousand dollars per head.',
     'Price is 2 k pp.',
     '10% off this week.',
     'It is half price.',

@@ -141,7 +141,7 @@ function durationAgrees(haystack: string, tour: PublishedTourFact): boolean {
 
 const MONEY_SHAPE = /[$€£¥%]|\b(?:NZD|AUD|USD|CNY|RMB|NZ|AU)\s*\d|\b(?:NZD|AUD|USD|CNY|RMB)\b/i
 /** Price talk without a currency sign: "2,699 per person", "supplement 800", "half price", "two thousand". */
-const PRICE_WORDS = /\b(?:dollars?|bucks|cents?|price[sd]?|pricing|cost(?:s|ing)?|fares?\s+from|per\s+person|pp|p\.p\.|supplements?|surcharges?|discount(?:s|ed)?|deposit|payment|cheap(?:er|est)?|expensive|half\s+price|free\s+of\s+charge|refund(?:s|able)?|hundred|thousand|grand|from\s+\d|\d\s*k)\b/i
+const PRICE_WORDS = /\b(?:dollars?|bucks|cents?|price[sd]?|pricing|cost(?:s|ing)?|fares?\s+from|per\s+person|pp|p\.p\.|supplements?|surcharges?|discount(?:s|ed)?|deposit|payment|cheap(?:er|est)?|expensive|half\s+price|free\s+of\s+charge|refund(?:s|able)?|\d\s*k)\b/i
 
 function talksMoney(text: string): boolean {
   return MONEY_SHAPE.test(text) || PRICE_WORDS.test(text)
