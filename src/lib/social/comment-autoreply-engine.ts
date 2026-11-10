@@ -443,8 +443,8 @@ async function processClaimedComment(
     return { publicReplied: false, dmSent: false, hidden, needsHuman: false, failed: false }
   }
 
-  // Greeting/FAQ only. Praise, price, complaint, refund, unknown, and routing
-  // errors are not replied to or DM'd — they join the existing needs_human queue.
+  // Greeting, FAQ or genuine praise only. Price, complaint, refund, unknown, and
+  // routing errors are not replied to or DM'd — they join the needs_human queue.
   const gate = assessCommentAutoReply(comment.message, decision.category)
   if (!gate.send) {
     await finalise(claim.rowId, handoffDecision(decision, gate.block), {
