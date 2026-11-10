@@ -77,7 +77,9 @@ describe('status — the PM page', () => {
       UNSUBSCRIBE_SIGNING_SECRET: 's'.repeat(40),
     }
     const res = await statusQuery(deps(), CLIENT)
-    expect(res.body).toMatchObject({ mode: 'live', prerequisites: { account: 'cts', unsubscribe_secret: true, receipts_webhook: false } })
+    expect(res.body).toMatchObject({ mode: 'live', prerequisites: { account: 'cts', account_key: true, unsubscribe_secret: true } })
+    // Which webhook receives an account's receipts is not knowable here: the status does not pretend to know.
+    expect(Object.keys(res.body.prerequisites as object).sort()).toEqual(['account', 'account_key', 'unsubscribe_secret'])
     expect(JSON.stringify(res.body)).not.toContain('x'.repeat(30))
     expect(JSON.stringify(res.body)).not.toContain('s'.repeat(40))
     env.TRIGGERED_SEND_LIVE = 'TRUE'

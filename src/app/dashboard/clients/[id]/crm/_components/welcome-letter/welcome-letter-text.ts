@@ -73,7 +73,7 @@ export interface StatusPayload {
   mode?: 'live' | 'practice'
   proposal?: ProposalView | null
   authorization?: AuthorizationView | null
-  prerequisites?: { account: string; account_key: boolean; unsubscribe_secret: boolean; receipts_webhook: boolean } | null
+  prerequisites?: { account: string; account_key: boolean; unsubscribe_secret: boolean } | null
 }
 
 const STATE_TEXT: Readonly<Record<string, string>> = {

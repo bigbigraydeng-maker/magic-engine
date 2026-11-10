@@ -110,9 +110,8 @@ function Prerequisites({ data, mode }: { data: StatusPayload['prerequisites']; m
         {row(mode === 'live', mode === 'live' ? '真发开关：已打开（Render 上两个开关都开着）' : '真发开关：关着，只演练、不会真发（要你在 Render 打开两个开关并重新部署）')}
         {data != null && row(data.account_key, `发信账号「${data.account}」的钥匙已放进 Render`)}
         {data != null && row(data.unsubscribe_secret, '一键退订链接的签名密钥已放进 Render')}
-        {data != null && row(data.receipts_webhook, '发信回执通道已接上（这个账号的回执能收进来）')}
       </ul>
-      <p className="mt-2 text-xs text-me-charcoal/60">这里只显示有没有，不显示任何密钥。</p>
+      <p className="mt-2 text-xs text-me-charcoal/60">这里只显示有没有，不显示任何密钥。每封信的送达、退信、投诉能不能记回来，要在只发内部邮箱的试跑里实测。</p>
     </Section>
   )
 }

@@ -46,7 +46,7 @@ function status(over: Record<string, unknown> = {}) {
       template: { key: 'auto-welcome', readable: true, version: 3, subject: 'Welcome, {{ first_name }}', body: 'Hi {{first_name}}', check: 'ok' },
       warnings: [],
     },
-    prerequisites: { account: 'cts', account_key: false, unsubscribe_secret: true, receipts_webhook: false },
+    prerequisites: { account: 'cts', account_key: false, unsubscribe_secret: true },
     ...over,
   }
 }

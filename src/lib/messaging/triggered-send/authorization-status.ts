@@ -8,8 +8,6 @@
 
 import type { EmailTemplateVersion } from '@/lib/crm/email-templates/types'
 import { readResendAccountKey } from '@/lib/messaging/adapters/resend-email'
-import { loadResendWebhookSecret } from '@/lib/messaging/provider-events/resend-signature'
-import { isResendAccount } from '@/lib/messaging/provider-events/types'
 import { isLiveFor, readLiveSwitches, TRIGGERED_SEND_SWITCHES } from '@/lib/platform/live-switch'
 import { salesCapWarning } from './authorization-authorize'
 import { done, recordView, refuse, type CommandDeps, type CommandResult, type SalesCapRead } from './authorization-commands'
@@ -139,14 +137,17 @@ async function authorizationStatus(deps: CommandDeps, record: AuthorizationRecor
   }
 }
 
-/** What a real send of this account needs, as yes/no. */
+/**
+ * What a real send of this account needs, as yes/no. Receipts are not listed: which webhook receives an account's
+ * receipts is not visible from here (an account label can share the Resend account behind the `system` webhook, as
+ * CTS does), so the controlled trial proves them instead (provider events = ledger rows, §17).
+ */
 function prerequisitesFor(account: string, env: StatusDeps['env']): Record<string, unknown> {
   const unsubscribe = (env(UNSUBSCRIBE_SECRET_ENV) ?? '').trim()
   return {
     account,
     account_key: readResendAccountKey(account, env).ok,
     unsubscribe_secret: unsubscribe.length >= UNSUBSCRIBE_SECRET_MIN_LENGTH,
-    receipts_webhook: isResendAccount(account) && loadResendWebhookSecret(account, env) !== null,
   }
 }
 
