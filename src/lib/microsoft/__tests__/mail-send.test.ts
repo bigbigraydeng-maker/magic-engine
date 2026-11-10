@@ -15,10 +15,15 @@ vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
 vi.mock('@/lib/platform-oauth/token-manager', () => ({
   getValidTokenForConnection: vi.fn(),
 }))
+// The unsubscribe rule has its own tests (src/lib/crm/__tests__/reply-unsubscribe-gate.test.ts); here only its wiring.
+vi.mock('@/lib/crm/reply-unsubscribe-gate', () => ({
+  checkReplyUnsubscribe: vi.fn(async () => ({ blocked: false })),
+}))
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { getValidTokenForConnection } from '@/lib/platform-oauth/token-manager'
-import { sendMailReply, mailReplyWindow } from '../mail-send'
+import { checkReplyUnsubscribe } from '@/lib/crm/reply-unsubscribe-gate'
+import { callWithRetry, sendMailReply, mailReplyWindow } from '../mail-send'
 
 const INPUT = {
   clientId: 'c1',
@@ -31,6 +36,7 @@ const INPUT = {
 interface DbOpts {
   conversation?: { id: string; client_id: string; channel: string; contact_id: string | null; page_id: string | null } | null
   lastInboundMessageId?: string | null
+  lastInboundSentAt?: string | null
   connection?: { id: string } | null
   auditInsertError?: { message: string } | null
 }
@@ -79,7 +85,9 @@ function mockDb(opts: DbOpts) {
                   order: () => ({
                     limit: () => ({
                       maybeSingle: async () => ({
-                        data: opts.lastInboundMessageId ? { message_id: opts.lastInboundMessageId } : null,
+                        data: opts.lastInboundMessageId
+                          ? { message_id: opts.lastInboundMessageId, sent_at: opts.lastInboundSentAt ?? null }
+                          : null,
                       }),
                     }),
                   }),
@@ -377,5 +385,92 @@ describe('mailReplyWindow（跟 channel-dispatch 的 CHANNEL_WINDOW 查表形状
   it('客人来过信，不管多久之前 → open，msRemaining 是 Infinity（邮件不存在"窗口快关了"）', () => {
     expect(mailReplyWindow('2020-01-01T00:00:00Z')).toEqual({ kind: 'open', msRemaining: Number.POSITIVE_INFINITY })
     expect(mailReplyWindow(new Date().toISOString())).toEqual({ kind: 'open', msRemaining: Number.POSITIVE_INFINITY })
+  })
+})
+
+describe('callWithRetry: the optional "do not mark the connection as failed" switch', () => {
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('without the switch the token is asked for exactly as before (no extra argument)', async () => {
+    ;(getValidTokenForConnection as ReturnType<typeof vi.fn>).mockResolvedValue('tok-1')
+    await callWithRetry('conn-1', async () => ({ ok: true as const, value: 1 }))
+    expect(getValidTokenForConnection).toHaveBeenCalledTimes(1)
+    expect(getValidTokenForConnection).toHaveBeenCalledWith('conn-1')
+  })
+
+  it('with markErrorOnFailure:false both token requests (also the forced refresh after a 401) carry the switch', async () => {
+    ;(getValidTokenForConnection as ReturnType<typeof vi.fn>).mockResolvedValue('tok-1')
+    let calls = 0
+    const result = await callWithRetry(
+      'conn-1',
+      async () => (++calls === 1 ? { ok: false as const, status: 401, error: 'expired' } : { ok: true as const, value: 2 }),
+      { markErrorOnFailure: false },
+    )
+    expect(result).toEqual({ ok: true, value: 2 })
+    expect(getValidTokenForConnection).toHaveBeenNthCalledWith(1, 'conn-1', { markErrorOnFailure: false })
+    expect(getValidTokenForConnection).toHaveBeenNthCalledWith(2, 'conn-1', { forceRefresh: true, markErrorOnFailure: false })
+  })
+
+  it('a token that cannot be had still gives the usual 424 answer', async () => {
+    ;(getValidTokenForConnection as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('refresh failed'))
+    const result = await callWithRetry('conn-1', async () => ({ ok: true as const, value: 3 }), { markErrorOnFailure: false })
+    expect(result).toMatchObject({ ok: false, status: 424 })
+  })
+})
+
+describe('退订邮件（P2-2b）：只拦「客人最后一封来信之后才退订」的回复', () => {
+  it('把这条对话的客户、联系人和客人最后一封来信的时间交给退订规则', async () => {
+    mockDb({ conversation: CONNECTED, lastInboundMessageId: 'm-in', lastInboundSentAt: '2026-11-09T01:00:00Z', connection: CONNECTION })
+    mockGraph({ createReply: [{ ok: true, id: 'g-unsub-1' }] })
+    const r = await sendMailReply(INPUT)
+    expect(r).toMatchObject({ ok: true, messageId: 'g-unsub-1' })
+    expect(checkReplyUnsubscribe).toHaveBeenCalledTimes(1)
+    expect(checkReplyUnsubscribe).toHaveBeenCalledWith({ clientId: 'c1', contactId: 'p1', lastInboundAt: '2026-11-09T01:00:00Z' })
+  })
+
+  it('没有来信时间时照样交给规则（规则按「任何退订都拦」处理）', async () => {
+    mockDb({ conversation: CONNECTED, lastInboundMessageId: 'm-in', connection: CONNECTION })
+    mockGraph({})
+    await sendMailReply(INPUT)
+    expect(checkReplyUnsubscribe).toHaveBeenCalledWith({ clientId: 'c1', contactId: 'p1', lastInboundAt: null })
+  })
+
+  it('规则说退订了 → 409，原因照传；不写审计、不碰 Graph', async () => {
+    vi.mocked(checkReplyUnsubscribe).mockResolvedValueOnce({
+      blocked: true,
+      status: 409,
+      reason: 'email_unsubscribed',
+      error: '这位客人在他最后一封来信之后退订了邮件',
+    })
+    mockDb({ conversation: CONNECTED, lastInboundMessageId: 'm-in', connection: CONNECTION })
+    mockGraph({})
+    const r = await sendMailReply(INPUT)
+    expect(r).toEqual({ ok: false, status: 409, reason: 'email_unsubscribed', error: '这位客人在他最后一封来信之后退订了邮件' })
+    expect(auditInserted).toEqual([])
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('查不清 → 503，不发', async () => {
+    vi.mocked(checkReplyUnsubscribe).mockResolvedValueOnce({
+      blocked: true,
+      status: 503,
+      reason: 'unsubscribe_unverifiable',
+      error: '暂时查不到他有没有退订邮件',
+    })
+    mockDb({ conversation: CONNECTED, lastInboundMessageId: 'm-in', connection: CONNECTION })
+    mockGraph({})
+    const r = await sendMailReply(INPUT)
+    expect(r).toMatchObject({ ok: false, status: 503, reason: 'unsubscribe_unverifiable' })
+    expect(auditInserted).toEqual([])
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('线程里没有客人来信 → 照旧 409 no_thread，不去查退订', async () => {
+    mockDb({ conversation: CONNECTED, lastInboundMessageId: null, connection: CONNECTION })
+    const r = await sendMailReply(INPUT)
+    expect(r).toMatchObject({ ok: false, status: 409, reason: 'no_thread' })
+    expect(checkReplyUnsubscribe).not.toHaveBeenCalled()
   })
 })

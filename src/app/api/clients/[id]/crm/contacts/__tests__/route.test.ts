@@ -218,6 +218,22 @@ describe('GET contacts — 分页形状', () => {
     expect(body).not.toHaveProperty('contacts')
   })
 
+  it('「AI 跟进中」镜像列有值 → 分页行带 aiTakeover: true（全部客人名单小标）', async () => {
+    const original = CONTACTS[0].ai_takeover_since
+    CONTACTS[0].ai_takeover_since = '2026-11-10T01:59:33.874Z'
+    try {
+      const { body } = await get('client-a', '?page=1&perPage=100')
+      const items = body.items as Array<{ contactId: string; aiTakeover?: boolean }>
+      expect(items.find((r) => r.contactId === 'a1')?.aiTakeover).toBe(true)
+      expect(items.filter((r) => r.contactId !== 'a1').every((r) => r.aiTakeover === false)).toBe(true)
+      const cols = recorded.filter((r) => r.table === 'contacts').map((r) => r.columns ?? '')
+      expect(cols.some((c) => c.includes('ai_takeover_since'))).toBe(true)
+    } finally {
+      if (original === undefined) delete CONTACTS[0].ai_takeover_since
+      else CONTACTS[0].ai_takeover_since = original
+    }
+  })
+
   it('阶段营销动作无效时与阶段接口一样回退到 suppress', async () => {
     const original = STAGES[0].marketing_action
     STAGES[0].marketing_action = 'invalid'
@@ -480,7 +496,12 @@ describe('GET contacts — view=priority（WP3 R5 接线）', () => {
     }], error: null })
     const { body } = await get('cts', '?view=priority')
     expect(body.recentNotes).toEqual(expect.arrayContaining([expect.objectContaining({ contactId: 'a2', at: createdAt })]))
-    expect(recorded.some((r) => r.table === 'contact_touchpoints')).toBe(false)
+    // PR #3427 起，最近手记会按触点 id 单独读一次自己的摘要（批次函数不带 summary）。
+    // 允许的只有这一条：按 id 精确取、限定本客户；不许再出现整表扫描式的触点查询。
+    const touchQueries = recorded.filter((r) => r.table === 'contact_touchpoints')
+    expect(touchQueries).toHaveLength(1)
+    expect(touchQueries[0].ins.map(([col]) => col)).toEqual(['id'])
+    expect(touchQueries[0].eqs).toContainEqual(['client_id', 'cts'])
   })
 
   it('按电话搜索时兼容本地格式，并将触点查询限制到命中的联系人', async () => {

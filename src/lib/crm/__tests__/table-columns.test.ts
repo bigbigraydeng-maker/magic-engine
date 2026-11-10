@@ -91,3 +91,54 @@ describe('visibleCustomColumns · 数据驱动', () => {
     expect(CUSTOM_COLUMNS.map((c) => c.key)).toEqual(['tour_interest'])
   })
 })
+
+describe('extractCustomColumns · tour_interest · 员工手记优先于其他来源（PM 2026-10-30）', () => {
+  it('员工手记的团名压过更新的 AI 通话整理值', () => {
+    const tps = [
+      tp({
+        source: 'me_manual',
+        occurredAt: '2026-10-30T04:00:00.000Z',
+        metadata: { tour_interest: 'China Unveiled' },
+      }),
+      tp({
+        source: 'twilio',
+        occurredAt: '2026-10-30T05:00:00.000Z',
+        metadata: { tour_interest: 'Silk Road' },
+      }),
+    ]
+    expect(extractCustomColumns(tps).tour_interest).toBe('China Unveiled')
+  })
+
+  it('存量里 AI 编出来的团名（原话里没有）不采信，退回其他来源', () => {
+    const tps = [
+      tp({
+        source: 'me_manual',
+        raw: '客户说贵',
+        occurredAt: '2026-10-30T05:00:00.000Z',
+        metadata: { tour_interest: 'Best of China' },
+      }),
+      tp({ source: 'twilio', occurredAt: '2026-10-30T04:00:00.000Z', metadata: { tour_interest: 'Silk Road' } }),
+    ]
+    expect(extractCustomColumns(tps).tour_interest).toBe('Silk Road')
+  })
+
+  it('原话里有这个团名（大小写 / 空格不同）→ 采信', () => {
+    const tps = [
+      tp({ source: 'me_manual', raw: '想去 china  unveiled 14 days', metadata: { tour_interest: 'China Unveiled' } }),
+    ]
+    expect(extractCustomColumns(tps).tour_interest).toBe('China Unveiled')
+  })
+
+  it('没有员工手记时，仍退回其他来源', () => {
+    const tps = [tp({ source: 'twilio', metadata: { tour_interest: 'Silk Road' } })]
+    expect(extractCustomColumns(tps).tour_interest).toBe('Silk Road')
+  })
+
+  it('FB 表单下拉仍是第一优先（不被员工手记改变）', () => {
+    const tps = [
+      tp({ channel: 'meta_lead_form', metadata: { tour_interest_raw: 'Best of China' } }),
+      tp({ source: 'me_manual', metadata: { tour_interest: 'China Unveiled' } }),
+    ]
+    expect(extractCustomColumns(tps).tour_interest).toBe('Best of China')
+  })
+})

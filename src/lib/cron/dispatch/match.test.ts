@@ -22,6 +22,10 @@ describe('cronMatches', () => {
       ['*/30 * * * *', '2026-10-24T04:30:00Z', true],
       ['25 */2 * * *', '2026-10-24T02:25:00Z', true],
       ['25 */2 * * *', '2026-10-24T03:25:00Z', false],
+      ['25,55 * * * *', '2026-10-24T02:25:00Z', true],
+      ['25,55 * * * *', '2026-10-24T02:55:00Z', true],
+      ['25,55 * * * *', '2026-10-24T02:30:00Z', false],
+      ['25,55 * * * *', '2026-10-24T03:25:00Z', true],
       ['0 */6 * * *', '2026-10-24T18:00:00Z', true],
       ['30 */6 * * *', '2026-10-24T06:30:00Z', true],
       ['30 */6 * * *', '2026-10-24T03:30:00Z', false],
@@ -57,6 +61,15 @@ describe('selectDue', () => {
   it('keeps viral discovery on the daily midnight tick', () => {
     const due = selectDue(DISPATCH_CATALOG, 'daily', new Date('2026-10-24T00:00:10Z'))
     expect(due.map((job) => job.service)).toContain('viral-discovery-weekly')
+  })
+
+  it('marks meta lead sync due at minute 25 and 55, including odd hours', () => {
+    const names = (iso: string) =>
+      selectDue(DISPATCH_CATALOG, 'frequent', new Date(iso)).map((job) => job.service)
+    expect(names('2026-10-24T02:25:00Z')).toContain('meta-leads-hourly')
+    expect(names('2026-10-24T02:55:00Z')).toContain('meta-leads-hourly')
+    expect(names('2026-10-24T02:30:00Z')).not.toContain('meta-leads-hourly')
+    expect(names('2026-10-24T03:25:00Z')).toContain('meta-leads-hourly')
   })
 
   it('knocks baseline domains every day at 17:00 UTC', () => {

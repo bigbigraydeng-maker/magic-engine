@@ -16,6 +16,7 @@ const m = vi.hoisted(() => ({
   loadClientPrescription: vi.fn(),
   loadOptions: vi.fn(),
   liveAds: vi.fn(),
+  liveLink: vi.fn(),
   dispatch: vi.fn(),
   plan: null as Record<string, unknown> | null,
   updates: [] as Record<string, unknown>[],
@@ -37,6 +38,7 @@ vi.mock('@/lib/marketing-plan/promo/facts', async () => {
 })
 vi.mock('@/lib/marketing-plan/promo/options', () => ({ loadPromoOptions: m.loadOptions }))
 vi.mock('@/lib/marketing-plan/promo/live-ads', () => ({ loadLiveAds: m.liveAds }))
+vi.mock('@/lib/marketing-plan/promo/live-ad-link-load', () => ({ loadLiveAdLink: m.liveLink }))
 vi.mock('@/lib/supabase', () => {
   const chain = (): Record<string, unknown> => {
     const c: Record<string, unknown> = {}
@@ -159,10 +161,18 @@ describe('PUT promo — 保存时服务端校验', () => {
     expect(m.loadPromoFacts).toHaveBeenCalled()
     expect(m.loadPromoFacts.mock.calls[0][4]).toBeUndefined()
   })
-  it('上限读不到只是未核实：允许保存（批准时由检查清单挡）', async () => {
+  it('计划上的每天总上限才算数：旧客户总闸读不到仍可保存', async () => {
     const gate = goodFacts({ config: null })
     m.loadPromoFacts.mockResolvedValue(loadedFacts(gate))
     expect((await PUT(req({ promo: baseSpec() }, 'PUT'), { params: P })).status).toBe(200)
+  })
+  it('有广告却没填每天总上限：草稿仍可保存，不拿旧总闸或各步骤预算来顶上', async () => {
+    const spec = baseSpec()
+    delete spec.daily_total_cap_cents
+    const gate = goodFacts({ config: { daily_budget_cap_cents: 1, primary_result: 'leads', creative_pool: [] } })
+    m.loadPromoFacts.mockResolvedValue(loadedFacts(gate))
+    const res = await PUT(req({ promo: spec }, 'PUT'), { params: P })
+    expect(res.status).toBe(200)
   })
   it.each(['approved', 'completed'])('计划是 %s → 409（内容被锁）', async (status) => {
     m.plan = planWith(undefined, { status })
@@ -200,27 +210,36 @@ describe('PUT promo — 保存时服务端校验', () => {
 })
 
 describe('GET promo — 在跑广告提示只给内部账号', () => {
-  beforeEach(() => { m.liveAds.mockResolvedValue({ ok: true, live_adsets: 1, spending_adsets: 1, by_account: [], currency: 'NZD', as_of: null, snapshot_age_hours: 0 }) })
-  it('内部账号（admin）：草稿计划返回 live_ads', async () => {
+  beforeEach(() => {
+    m.liveAds.mockClear()
+    m.liveLink.mockClear()
+    m.liveAds.mockResolvedValue({ ok: true, live_adsets: 1, spending_adsets: 1, by_account: [], currency: 'NZD', as_of: null, snapshot_age_hours: 0 })
+    m.liveLink.mockResolvedValue({ lines: ['对上关系'] })
+  })
+  it('内部账号（admin）：草稿计划返回 live_ads 和对上关系', async () => {
     m.access.mockResolvedValue({ ok: true, tier: 'admin', user: { email: 'fde@example.com' } })
     const json = await (await GET(req(null, 'GET'), { params: P })).json()
     expect(json.live_ads_visible).toBe(true)
     expect(json.live_ads.ok).toBe(true)
     expect(m.liveAds).toHaveBeenCalledWith('client-1')
+    expect(json.live_link.lines).toEqual(['对上关系'])
   })
   it('付费客户账号：不读也不返回 live_ads', async () => {
     m.access.mockResolvedValue({ ok: true, tier: 'paid_client', user: { email: 'boss@client.example' } })
     const json = await (await GET(req(null, 'GET'), { params: P })).json()
     expect(json.live_ads_visible).toBe(false)
     expect(json.live_ads).toBeNull()
+    expect(json.live_link).toBeNull()
     expect(m.liveAds).not.toHaveBeenCalled()
+    expect(m.liveLink).not.toHaveBeenCalled()
   })
-  it('已批准的计划：内部账号也不读', async () => {
+  it('已批准的计划：内部账号也读开投回执和对上关系', async () => {
     m.access.mockResolvedValue({ ok: true, tier: 'admin', user: { email: 'fde@example.com' } })
     m.plan = planWith(undefined, { status: 'approved' })
     const json = await (await GET(req(null, 'GET'), { params: P })).json()
-    expect(json.live_ads).toBeNull()
-    expect(m.liveAds).not.toHaveBeenCalled()
+    expect(json.live_ads.ok).toBe(true)
+    expect(m.liveAds).toHaveBeenCalledWith('client-1')
+    expect(m.liveLink).toHaveBeenCalledWith('client-1')
   })
 })
 
@@ -422,6 +441,20 @@ describe('POST acknowledge — 按计划继续', () => {
 })
 
 describe('POST approve — 推广计划批准前检查', () => {
+  it('计划里没写每天总上限 → 不能批准，旧客户总闸填了也不算', async () => {
+    const spec = baseSpec()
+    delete spec.daily_total_cap_cents
+    m.loadPromoFacts.mockResolvedValue(loadedFacts(goodFacts({
+      manual_checks: verifiedChecks(spec),
+      config: { daily_budget_cap_cents: 99_999, primary_result: 'leads', creative_pool: [{ ref: 'vid-1', status: 'approved' }] },
+    })))
+    m.plan = planWith(spec)
+    const res = await APPROVE(req({}), { params: P })
+    expect(res.status).toBe(409)
+    const json = await res.json()
+    expect(json.blockers.map((b: { key: string }) => b.key)).toContain('ads.cap_set')
+    expect(m.updates).toHaveLength(0)
+  })
   it('第一阶段硬门没过 → 409 并说清哪一项、怎么办；不派发、不改状态', async () => {
     m.plan = planWith(baseSpec())
     const res = await APPROVE(req({}), { params: P })

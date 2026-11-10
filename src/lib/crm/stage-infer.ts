@@ -25,6 +25,7 @@ import {
   StageVerdictSchema,
   SAFE_STAGES,
   POOL_STAGE,
+  hasHumanOutbound,
   renderTranscript,
   ruleOnlyStage,
   usableStage,
@@ -181,17 +182,22 @@ export async function loadConfiguredStages(clientId: string): Promise<Set<string
 export async function loadTranscriptLines(
   clientId: string,
   contactId: string,
+  /**
+   * 只要这一刻之前**已经入库**的（按 created_at，不按发生时间）——复核旧判断时还原
+   * 「当时模型看得到什么」，后补导入的不算（`docs/sops/2026-11-03-crm-ai-judgement-review-rules-v1.0.md` BZ-17）。
+   */
+  opts: { ingestedBefore?: string } = {},
 ): Promise<TranscriptLine[]> {
+  let touchQuery = supabaseAdmin
+    .from('contact_touchpoints')
+    .select('channel, direction, occurred_at, raw, summary, source, metadata')
+    .eq('client_id', clientId)
+    .eq('contact_id', contactId)
+    .neq('channel', 'messenger')
+  if (opts.ingestedBefore) touchQuery = touchQuery.lte('created_at', opts.ingestedBefore)
   const [{ data: convs, error: cErr }, { data: touches, error: tErr }] = await Promise.all([
     supabaseAdmin.from('conversations').select('id').eq('client_id', clientId).eq('contact_id', contactId),
-    supabaseAdmin
-      .from('contact_touchpoints')
-      .select('channel, direction, occurred_at, raw, summary, source, metadata')
-      .eq('client_id', clientId)
-      .eq('contact_id', contactId)
-      .neq('channel', 'messenger')
-      .order('occurred_at', { ascending: false })
-      .limit(200),
+    touchQuery.order('occurred_at', { ascending: false }).limit(200),
   ])
 
   /**
@@ -224,17 +230,25 @@ export async function loadTranscriptLines(
     if (t.channel === 'email' && t.direction === 'outbound' && isAutomatedTouch(t.source, t.metadata)) continue
     // 电话触点的原话在 raw；raw 空的（FB 表单之类）退回 summary。
     const body = (t.raw ?? t.summary ?? '').trim()
-    if (body) lines.push({ at: t.occurred_at, direction: t.direction, body, channel: t.channel })
+    if (body) {
+      lines.push({
+        at: t.occurred_at,
+        direction: t.direction,
+        body,
+        channel: t.channel,
+        automated: t.direction === 'outbound' && isAutomatedTouch(t.source, t.metadata),
+      })
+    }
   }
 
   const convIds = ((convs ?? []) as { id: string }[]).map((c) => c.id)
   if (convIds.length > 0) {
-    const { data: msgs, error: mErr } = await supabaseAdmin
+    let msgQuery = supabaseAdmin
       .from('conversation_messages')
       .select('direction, body, sent_at')
       .in('conversation_id', convIds)
-      .order('sent_at', { ascending: false })
-      .limit(500)
+    if (opts.ingestedBefore) msgQuery = msgQuery.lte('created_at', opts.ingestedBefore)
+    const { data: msgs, error: mErr } = await msgQuery.order('sent_at', { ascending: false }).limit(500)
     // 同上：邮件 / 私信原文正是这套东西存在的理由，读不到就别判。
     if (mErr) throw new Error(`读往来原文失败: ${mErr.message}`)
     for (const m of (msgs ?? []) as {
@@ -454,6 +468,13 @@ export async function inferStagesFromConversations(
       if (!stage || !verdict) {
         result.rejected++
         await toPool('看过往来记录，还看不出他到哪一步')
+        continue
+      }
+
+      // 「已联系 / 已报价」必须有真人联系过他的记录；只有客人自己的话（含表单回声）不行。
+      if ((stage === 'contacted' || stage === 'quoted') && !hasHumanOutbound(lines)) {
+        result.rejected++
+        await toPool('库里没有真人联系过他的记录')
         continue
       }
 

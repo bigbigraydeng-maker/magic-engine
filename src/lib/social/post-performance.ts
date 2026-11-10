@@ -1,4 +1,5 @@
 import type { FieldRead } from '@/lib/meta/post-engagement'
+import { PUBLISH_MEASUREMENT_WINDOW_SET } from '@/lib/campaign/daily-plan-publish'
 import { SOCIAL_PLATFORMS, normalizePlatform, type SocialPlatform } from '@/lib/social/platforms'
 
 // ---------------------------------------------------------------------------
@@ -91,8 +92,8 @@ export interface PostPerformanceReport {
   since: string
   until: string
   limit: number
-  /** Reel publish actions seen but deliberately not read here (Reel is a separate slice). */
-  reel_actions_excluded: number
+  /** factory_reel publish actions included in posts.items (same T+4/T+72 readback as image posts). */
+  reel_action_count: number
   platforms: PlatformBlock[]
 }
 
@@ -193,6 +194,13 @@ export function readingFromReceipt(receipt: ReceiptRow | null, metric: PostMetri
 // 5. pickReceipt
 // ---------------------------------------------------------------------------
 
+export function receiptAtWindow(receipts: ReceiptRow[], windowHours: number): ReceiptRow | null {
+  for (const r of receipts) {
+    if (r.window_hours === windowHours) return r
+  }
+  return null
+}
+
 export function pickReceipt(receipts: ReceiptRow[]): ReceiptRow | null {
   if (receipts.length === 0) return null
 
@@ -200,6 +208,7 @@ export function pickReceipt(receipts: ReceiptRow[]): ReceiptRow | null {
   let bestAny: ReceiptRow | null = null
 
   for (const r of receipts) {
+    if (!PUBLISH_MEASUREMENT_WINDOW_SET.has(r.window_hours)) continue
     if (bestAny === null || r.window_hours > bestAny.window_hours) bestAny = r
     if (r.status === 'ok' || r.status === 'partial') {
       if (bestOk === null || r.window_hours > bestOk.window_hours) bestOk = r
@@ -392,8 +401,8 @@ export function buildPostPerformanceReport(input: {
     else list.push(r)
   }
 
-  // Split actions by payload.source.
-  let reel_actions_excluded = 0
+  // Split actions by payload.source (daily_plan + factory_reel share the post readback chain).
+  let reel_action_count = 0
   const postItems: PostItem[] = []
 
   for (const action of input.actions) {
@@ -401,7 +410,9 @@ export function buildPostPerformanceReport(input: {
     const source = payload !== null ? payload.source : undefined
 
     if (source === 'factory_reel') {
-      reel_actions_excluded += 1
+      reel_action_count += 1
+      const receipts = receiptsByAction.get(action.id) ?? []
+      postItems.push(buildPostItem(action, receipts))
       continue
     }
     if (source === 'daily_plan') {
@@ -460,7 +471,7 @@ export function buildPostPerformanceReport(input: {
     since: input.since,
     until: input.until,
     limit: input.limit,
-    reel_actions_excluded,
+    reel_action_count,
     platforms,
   }
 }
@@ -478,7 +489,7 @@ function renderReading(r: Reading): string {
 export function formatPostPerformanceText(report: PostPerformanceReport): string {
   const lines: string[] = []
   lines.push(
-    `客户 ${report.client_id} 窗口 ${report.since} ~ ${report.until}（Reel 动作已排除 ${report.reel_actions_excluded} 条）`,
+    `客户 ${report.client_id} 窗口 ${report.since} ~ ${report.until}（Reel 动作 ${report.reel_action_count} 条）`,
   )
 
   for (const block of report.platforms) {

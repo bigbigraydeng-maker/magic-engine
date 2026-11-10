@@ -9,6 +9,7 @@ import { shouldRemindToday, streakPhrase } from './remind-cadence'
 import { checkCronHealth } from '@/lib/cron/health'
 import { CRON_REGISTRY } from '@/lib/cron/registry'
 import { ADS_AUTO_PAUSE_ACTION_KEY } from '@/lib/action-submission/ads-auto-pause-key'
+import { isOverlapSkipSummary } from '@/lib/meta/leads-sync-lock'
 
 /**
  * `ad-readback-sweep` 写进运行记录的那份 summary 的形状。
@@ -517,18 +518,18 @@ export async function pushMailchimpExportItems(
     .not('finished_at', 'is', null)
     .in('status', ['completed', 'failed'])
     .order('finished_at', { ascending: false })
-    .limit(1)
+    .limit(5)
 
   if (error) throw new Error(`cron_run_logs query failed: ${error.message}`)
 
-  const run = (data ?? [])[0] as
-    | {
-        finished_at: string | null
-        summary: {
-          results?: Array<{ clientId: string; clientName: string | null; mailchimp?: Record<string, number> }>
-        } | null
-      }
-    | undefined
+  const rows = (data ?? []) as Array<{
+    finished_at: string | null
+    summary: {
+      results?: Array<{ clientId: string; clientName: string | null; mailchimp?: Record<string, number> }>
+      skipped?: unknown
+    } | null
+  }>
+  const run = rows.find((row) => !isOverlapSkipSummary(row.summary))
   if (!run?.summary) return
 
   const hoursOld = run.finished_at ? (now.getTime() - Date.parse(run.finished_at)) / 3_600_000 : null

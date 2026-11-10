@@ -5,6 +5,39 @@
 
 ---
 
+### 2026-11-10（ME 自己发信的底座第 3 单之一：欢迎信授权页，只有 PM 本人能批）
+
+PR [#3754](https://github.com/bigbigraydeng-maker/magic-engine/pull/3754)（合并 `e07318618`；A 级，PM 本人在 76 窗口回「合 3754」后由 76 签字并合并）。CRM 新增一页 `/dashboard/clients/<客户>/crm/welcome-letter`：看提案写了什么、信长什么样、彩排连续几天一致、旧群发每批对得上几位；「授权」先预览再确认，只有 `TRIGGERED_SEND_APPROVER_EMAILS` 名单里的人能点；「撤销」永远能点。四个接口 `/api/clients/[id]/triggered-send/{propose,authorize,revoke,status}`。不发信、不改数据库结构、不开开关。上线核对（11-10 17:22）：四个接口不登录全部 401、不缓存；生产里只有 10-31 那份彩排提案，没人批过，真发 0 行。
+
+### 2026-11-10（ME 自己发信的底座第 2 单：每封信的下落记回账本，一键退订链接能用）
+
+PR [#3736](https://github.com/bigbigraydeng-maker/magic-engine/pull/3736)（合并 `097a9f683`；A 级，PM 本人在 76 窗口回「合 3736」后由 76 合并）。一键退订入口 `/api/u/<令牌>`（GET 只显示按钮、POST 才退订，只停邮件不停电话；签名令牌只带发送记录编号）；Resend 回执入库后叫醒回执消费函数 `cloud-triggered-send-provider-event`，只认消息号、信自己的标签或签名退订链接，状态只前进；投诉 = 退订邮件；销售手发和回复客人来信都查退订。不发信、不改数据库结构、不开开关。上线核对（11-10 15:34）：假签名退订链接显示「This link is not valid」；合并后系统邮件回执照常入库、发信账本 0 行变化；线上事件通道有密钥。
+
+### 2026-11-10（ME 自己发信的底座第 1 单：能经 Resend 发出去，销售手发加三处加严）
+
+PR [#3720](https://github.com/bigbigraydeng-maker/magic-engine/pull/3720)（合并 `27063ea2f`；A 级，PM 本人回「合」后 `--admin`）。Resend 发信接口：钥匙按发信账号分开（`RESEND_API_KEY_<账号>`），缺钥匙宁可不发、绝不借 ME 系统钥匙；15 秒超时一律记「结果不明」、只许同一幂等键重发；首发被 400/413/422 拒才算「被拒」，401/403/404/451 算「我们自己的钥匙或账号错了」。ME 自动发的信计入销售「7 天 2 封」（按收件地址读发信账本）；销售手发在锁内拦已退订的客人；`auto-` 开头的自动信模板销售选不到也发不出。本单不发信，两个总开关没开。PM 11-10 已在 Render 填 `RESEND_API_KEY_CTS`、`UNSUBSCRIBE_SIGNING_SECRET`（只核了变量名）。11-10 03:32 部署上线。台账卡 `2026-11-10-me-send-gate-p2-2a-resend-send`（11/17 验）。
+
+### 2026-11-04（广告健康页「每条广告」加素材成绩单）
+
+PR [#3583](https://github.com/bigbigraydeng-maker/magic-engine/pull/3583)（B 级，只读；修复方案第 5 刀）。每个广告组下每条素材并排列：链接点击、按这个组自己的结果种类数结果（表单组数留资、WhatsApp/私信组数开聊、播放量组不算单价）、单价、投放天数、「能不能比」。旅游门槛每条 150 次链接点击（剧本参数），其他行业「门槛未定」。每组标「只能当参考，不是因果」；这周改过受众或版位的组标「前后不全可比」。顺带修：WhatsApp 组和系列以前显示「留资 0」，现在显示开聊数。试跑（生产只读）：CTS 组 C 四条素材全部「还不能比」，组 A 主力素材「够数了」；NAL WhatsApp 组「开聊 64」。台账卡 `2026-11-04-ads-knife5-creative-scorecard`（11/07 验）。
+
+### 2026-11-04（广告成绩单每行可以调预算：加要 PM 本人批，减点了就改）
+
+PR [#3570](https://github.com/bigbigraydeng-maker/magic-engine/pull/3570)（合并 `15eed5847`；A 级，PM 回「合 3570」后 `--admin`；修复方案第 3 刀 3b）。广告健康页成绩单每行加「调预算」：确认框当场读 Meta 当前预算和上次修改时间，写客户日上限余量、+10% / +20% 能不能点和原因、能减到的最低金额、系统没法自动核对的几条。**加**：只提交，进成绩单下方新增的「等 PM 批的加预算」一栏，PM 本人批了才改；72 小时内 Meta 上改过（含人工）不让加；系列预算只在系列下恰好一个在投组时能加。**减**：复用人工止损，管理员点了就改，一次最多减 20%。顺带修了 ABO 广告组加预算原本提交不了的问题（幂等键去掉 campaign_id）。**已知限制**：内核核对客户预算合计时只认最新一轮快照写进去的行，新西兰白天加预算几乎总被拒，待另修。部署 12:16 UTC live；未登录访问新接口返回 401。台账卡 `2026-11-04-ads-knife3b-scorecard-budget-buttons`（11/10 验）。
+
+### 2026-11-04（加钱只有 PM 本人能批）
+
+PR [#3567](https://github.com/bigbigraydeng-maker/magic-engine/pull/3567)（合并 `085ac97b5`；A 级，PM 回「合 3567」后 `--admin`；修复方案第 3 刀 3a）。加预算 / 挪预算 / 新建再营销组（注册表 `spendIncrease: true`）不管客户策略写的是不是自动，只有 `ADS_SPEND_APPROVER_EMAILS` 名单里的人能批（PM 11-03 定只放 PM 本人 gmail）；内核五道闸（策略同步、授权预检、签批准、复用旧授权、执行前复核）。重开暂停的广告也改用同一名单。暂停、减预算不受影响。部署后手动触发同步：CTS 三条加钱类策略 `auto_approve` → `require_approval`（v3→v4），NAL 同三条（v1→v2），其余广告策略没动。台账卡 `2026-11-03-ads-knife3a-spend-gate-pm-only`（11/06 验）。
+
+### 2026-11-03（包拯：每周复核 AI 判客人阶段准不准，CTS 已打开）
+
+PR [#3557](https://github.com/bigbigraydeng-maker/magic-engine/pull/3557)（合并 `073d8501e`；A 级，PM 回「合 3557」后 `--admin`；修复方案第 1b 刀）。新 agent「包拯」每周三新西兰 10:00 把上周 CRM「AI 读对话判阶段」的判断交给 Claude Sonnet，按判断那一刻已入库的对话独立再判一次，算 8 周准确率区间；两个模型判得不一样的进今日待办「系统判不了真假、要你认一下的」，复核页 `/dashboard/clients/<id>/baozheng/<判断编号>`（只给内部员工）点「原来的 AI 对 / 复核的对 / 都不对」，只记结论（`crm_segment_feedback`），**不改客人阶段**。另每周从「读不出来、放进新线索」里抽 5 个查漏判。规则书 `docs/sops/2026-11-03-crm-ai-judgement-review-rules-v1.0.md`。
+PM 回「开包拯」后：CTS 客户设置 `leads_config.baozheng` 写入阶段归类；生产服务 `BAOZHENG_ENABLED=true` 并重新部署（`dep-dbkodfd9fdbs73btp6t0`，07:05 UTC live）。当场执行定时函数本身：运行记录 `faff84c6` 状态完成，复核 14 条、6 条分歧、0 报错、$0.037；今日待办算出 6 条分歧条目（无客人姓名原话）；复核页打开正常。本周（W45）CTS 已复核，周三排班那次会跳过 CTS。**关掉**：Render 把 `BAOZHENG_ENABLED` 删掉或改非 true 后重新部署；或把 CTS `leads_config.baozheng.enabled` 改 false（立即生效）。台账卡 `2026-11-03-baozheng-1b-weekly-review`（11/10 验）。
+
+### 2026-11-03（视频工厂页能直接下单做一条视频变体）
+
+PR [#3556](https://github.com/bigbigraydeng-maker/magic-engine/pull/3556)（合并 `2f3ac3369`；A 级，PM 回「合 3556」后 `--admin`）。工厂页新增「下单做一条视频（照已有视频改一样）」：选一条已出片的模板视频当底稿，只改开场字或换配乐，成片停在待审，不发布、不进素材池；同一客户 24 小时最多 10 单。当场试跑：正式库下单 2a423cdf（换配乐）出片到待审；中途查出出片电脑本机曲库镜像缺 Music 文件夹，已补。内容工厂卡片上的「生成视频」按钮没做。台账卡 `2026-11-03-me-factory-variant-order-entry`（11/10 验）。
+
 ### 2026-10-14（推广计划第一步：批准加固 + 只读推广计划页）
 
 设计稿 `docs/specs/2026-10-14-promo-plan-board-design-v0.1.md`。批准重试不再重复派任务；已批准计划不能直接改内容（要改先退回草稿）；手工加任务须计划已批准；批准留回执。新增客户页「推广计划」：一句话头条、本周对账、下一阶段检查清单（绿/黄/红/灰）、「按计划继续」。不碰广告账户、不新增表。**回滚**：revert 本 PR。

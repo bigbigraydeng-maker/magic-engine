@@ -71,6 +71,8 @@ const adsStep = z.object({
      * 让已批准计划的内容指纹变一次、被判成「内容变过了」，人工核实记录跟着作废。
      */
     targeting: adsTargeting.optional(),
+    /** 这笔日预算算试投还是已证明。不填就不写这个键，避免旧计划指纹变化。 */
+    budget_role: z.enum(['test', 'proven']).optional(),
   }),
 })
 
@@ -180,6 +182,15 @@ const salesHandover = z.object({
   fallback: z.string().min(1),
 })
 
+/** 试投 → 放量 → 稳住。不填就不写这个键，旧的已批准计划不会因此被当成改过。 */
+const delivery = z.object({
+  stage: z.enum(['test', 'scale', 'steady']),
+  goal: z.string().min(1),
+  started_on: dateStr,
+  test_share: z.number().gt(0).lt(1).optional(),
+  proven_share: z.number().gt(0).lt(1).optional(),
+})
+
 const phase = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
@@ -201,6 +212,14 @@ export const PromoSpecSchema = z.object({
   schema: z.literal('promo_v1'),
   /** 目标真相源：goals.id，必须属于同一个客户（保存时服务端校验）。 */
   goal_id: z.string().min(1),
+  /**
+   * 这位客户一天的广告总上限，账户币种的「分」。
+   * 没有默认值。旧计划没写这个键时，解析结果里也不留下这个键，
+   * 否则已批准计划的内容指纹会变。各广告步骤的日预算加总不是这个数。
+   */
+  daily_total_cap_cents: z.number().int().positive().optional(),
+  /** 投放阶段。可选且无默认值，解析时若缺失会把键删掉。 */
+  delivery: delivery.optional(),
   phases: z.array(phase).min(1),
   /** 销售承接就绪，计划级。 */
   sales_handover: salesHandover.optional(),
@@ -210,6 +229,8 @@ export const PromoSpecSchema = z.object({
 })
 
 export type PromoSpec = z.infer<typeof PromoSpecSchema>
+export type DeliveryStage = 'test' | 'scale' | 'steady'
+export type BudgetRole = 'test' | 'proven'
 export type PromoPhase = z.infer<typeof phase>
 export type PromoStep = z.infer<typeof step>
 export type AdsStep = z.infer<typeof adsStep>
@@ -242,8 +263,31 @@ export function parsePromoSpec(raw: unknown): ParsePromoResult {
       issues: parsed.error.issues.map(i => ({ path: i.path.join('.'), message: i.message })),
     }
   }
-  const issues = crossFieldIssues(parsed.data)
-  return issues.length > 0 ? { ok: false, issues } : { ok: true, spec: parsed.data }
+  const spec = withoutUnsetOptionals(parsed.data)
+  const issues = crossFieldIssues(spec)
+  return issues.length > 0 ? { ok: false, issues } : { ok: true, spec }
+}
+
+/** 缺了的可选键必须真删掉。留着 undefined 会在内容指纹里变成 null，已批准计划会被当成改过。 */
+function dropUndefined(obj: object, keys: readonly string[]): void {
+  const rec = obj as Record<string, unknown>
+  for (const key of keys) if (rec[key] === undefined) delete rec[key]
+}
+
+function withoutUnsetOptionals(spec: PromoSpec): PromoSpec {
+  const next = { ...spec }
+  dropUndefined(next, ['daily_total_cap_cents', 'delivery'])
+  if (next.delivery) dropUndefined(next.delivery, ['test_share', 'proven_share'])
+  next.phases = spec.phases.map(phase => ({
+    ...phase,
+    steps: phase.steps.map(step => {
+      if (step.kind !== 'ads_campaign') return step
+      const settings = { ...step.settings }
+      dropUndefined(settings, ['budget_role'])
+      return { ...step, settings }
+    }),
+  }))
+  return next
 }
 
 function crossFieldIssues(spec: PromoSpec): PromoValidationIssue[] {
@@ -306,6 +350,17 @@ function crossFieldIssues(spec: PromoSpec): PromoValidationIssue[] {
   for (let i = 1; i < sorted.length; i++) {
     if (sorted[i].start_date <= sorted[i - 1].end_date) {
       issues.push({ path: 'phases', message: `阶段 ${sorted[i - 1].id} 与 ${sorted[i].id} 日期重叠` })
+    }
+  }
+
+  const share = spec.delivery
+  if (share) {
+    const hasTest = share.test_share !== undefined
+    const hasProven = share.proven_share !== undefined
+    if (hasTest !== hasProven) {
+      issues.push({ path: 'delivery', message: '试投比例和已证明比例要一起填，不能只填一个' })
+    } else if (hasTest && hasProven && Math.abs((share.test_share ?? 0) + (share.proven_share ?? 0) - 1) > 0.001) {
+      issues.push({ path: 'delivery', message: '试投比例和已证明比例加起来要等于 1' })
     }
   }
 

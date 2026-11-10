@@ -4,6 +4,9 @@ import type {
   GuardrailRule,
   PublishedToursProviderSettings,
 } from './types'
+import { TEMPLATE_KEY_RE } from './template-store'
+import { checkCatalogueAgainst, parseCatalogueSettings, serialiseCatalogue } from './catalogue-settings'
+import { checkLinkTrackingAgainst, parseLinkTrackingSettings, serialiseLinkTracking } from './link-tracking-settings'
 
 export type ParseSettingsResult =
   | { ok: true; settings: EmailSettings }
@@ -16,6 +19,7 @@ const MAX_HOSTS = 20
 const MAX_RULES = 50
 const MAX_PHRASES = 50
 const MAX_URL_LENGTH = 300
+const MAX_CAP_EXEMPT_KEYS = 20
 
 const HOSTNAME_RE =
   /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/
@@ -200,6 +204,36 @@ function parseFrequencyCap(
   )
   if (max === null || windowDays === null) return undefined
   return { max, windowDays }
+}
+
+function parseCapExemptTemplateKeys(
+  value: unknown,
+  path: string,
+  sink: ErrorSink,
+): string[] | undefined {
+  if (value === undefined) return [] // versions stored before this key existed
+  if (!Array.isArray(value)) {
+    sink.add(path, 'must be an array of template keys')
+    return undefined
+  }
+  if (value.length > MAX_CAP_EXEMPT_KEYS) {
+    sink.add(path, `must have at most ${MAX_CAP_EXEMPT_KEYS} entries`)
+    return undefined
+  }
+  const seen = new Set<string>()
+  const out: string[] = []
+  let ok = true
+  value.forEach((entry, i) => {
+    if (typeof entry !== 'string' || !TEMPLATE_KEY_RE.test(entry)) {
+      sink.add(`${path}[${i}]`, 'must be a template key (lower-case letters, digits and hyphens)')
+      ok = false
+      return
+    }
+    if (seen.has(entry)) return
+    seen.add(entry)
+    out.push(entry)
+  })
+  return ok ? out : undefined
 }
 
 function parseAllowlist(
@@ -501,22 +535,30 @@ function parseProviders(
     sink.add(path, 'must be an object')
     return null
   }
-  for (const key of unknownKeys(value, ['published_tours'])) {
+  for (const key of unknownKeys(value, ['published_tours', 'catalogue', 'link_tracking'])) {
     sink.add(`${path}.${key}`, 'unknown key')
   }
-  if (!('published_tours' in value)) {
-    return {}
+  const out: EmailSettings['providers'] = {}
+  let ok = true
+  if ('published_tours' in value) {
+    const publishedTours = parsePublishedTours(value.published_tours, `${path}.published_tours`, sink)
+    if (publishedTours === null) ok = false
+    else out.publishedTours = publishedTours
   }
-  const publishedTours = parsePublishedTours(
-    value.published_tours,
-    `${path}.published_tours`,
-    sink,
-  )
-  if (publishedTours === null) return null
-  return { publishedTours }
+  if ('catalogue' in value) {
+    const catalogue = parseCatalogueSettings(value.catalogue, `${path}.catalogue`, (p, m) => sink.add(p, m))
+    if (catalogue === null) ok = false
+    else out.catalogue = catalogue
+  }
+  if ('link_tracking' in value) {
+    const tracking = parseLinkTrackingSettings(value.link_tracking, `${path}.link_tracking`, (p, m) => sink.add(p, m))
+    if (tracking === null) ok = false
+    else out.linkTracking = tracking
+  }
+  return ok ? out : null
 }
 
-const TOP_LEVEL_KEYS = [
+const REQUIRED_TOP_LEVEL_KEYS = [
   'enabled',
   'send_mailbox',
   'allow_unsolicited',
@@ -530,6 +572,8 @@ const TOP_LEVEL_KEYS = [
   'providers',
 ] as const
 
+const OPTIONAL_TOP_LEVEL_KEYS = ['cap_exempt_template_keys'] as const
+
 interface ParsedParts {
   enabled: boolean | null
   sendMailbox: string | null | undefined
@@ -537,6 +581,7 @@ interface ParsedParts {
   footer: string | null | undefined
   limits: EmailSettings['limits'] | null
   frequencyCap: EmailSettings['frequencyCap'] | undefined
+  capExemptTemplateKeys: string[] | undefined
   recipientAllowlist: string[] | null | undefined
   sameTemplateCooldownHours: number | null
   callPromptHours: number | null
@@ -552,6 +597,7 @@ function readParts(raw: Record<string, unknown>, sink: ErrorSink): ParsedParts {
     footer: readFooter(raw.footer, 'footer', sink),
     limits: parseLimits(raw.limits, 'limits', sink),
     frequencyCap: parseFrequencyCap(raw.frequency_cap, 'frequency_cap', sink),
+    capExemptTemplateKeys: parseCapExemptTemplateKeys(raw.cap_exempt_template_keys, 'cap_exempt_template_keys', sink),
     recipientAllowlist: parseAllowlist(
       raw.recipient_allowlist,
       'recipient_allowlist',
@@ -579,6 +625,7 @@ function assemble(p: ParsedParts): EmailSettings | null {
     p.footer === undefined ||
     p.limits === null ||
     p.frequencyCap === undefined ||
+    p.capExemptTemplateKeys === undefined ||
     p.recipientAllowlist === undefined ||
     p.sameTemplateCooldownHours === null ||
     p.callPromptHours === null ||
@@ -594,6 +641,7 @@ function assemble(p: ParsedParts): EmailSettings | null {
     footer: p.footer,
     limits: p.limits,
     frequencyCap: p.frequencyCap,
+    capExemptTemplateKeys: p.capExemptTemplateKeys,
     recipientAllowlist: p.recipientAllowlist,
     sameTemplateCooldownHours: p.sameTemplateCooldownHours,
     callPromptHours: p.callPromptHours,
@@ -602,13 +650,27 @@ function assemble(p: ParsedParts): EmailSettings | null {
   }
 }
 
+// Every required key must be present; a key outside required + optional is unknown.
+function readTopLevelKeys(raw: Record<string, unknown>, sink: ErrorSink): void {
+  for (const key of REQUIRED_TOP_LEVEL_KEYS) {
+    if (!(key in raw)) sink.add(`root.${key}`, 'is required')
+  }
+  for (const key of unknownKeys(raw, [...REQUIRED_TOP_LEVEL_KEYS, ...OPTIONAL_TOP_LEVEL_KEYS])) {
+    sink.add(`root.${key}`, 'unknown key')
+  }
+}
+
 export function parseEmailSettingsStrict(raw: unknown): ParseSettingsResult {
   if (!isPlainObject(raw)) {
     return { ok: false, errors: ['root: must be an object'] }
   }
   const sink = new ErrorSink()
-  readExactKeys(raw, TOP_LEVEL_KEYS, 'root', sink)
+  readTopLevelKeys(raw, sink)
   const settings = assemble(readParts(raw, sink))
+  if (settings !== null) {
+    checkCatalogueAgainst(settings, (p, m) => sink.add(p, m))
+    checkLinkTrackingAgainst(settings, (p, m) => sink.add(p, m))
+  }
   if (sink.errors.length > 0 || settings === null) {
     return { ok: false, errors: sink.errors }
   }
@@ -625,6 +687,9 @@ export function serialiseEmailSettings(
       all_tours_url: settings.providers.publishedTours.allToursUrl,
     }
   }
+  // Only written when set: a version without it stays readable by code that predates the catalogue line.
+  if (settings.providers.catalogue) providers.catalogue = serialiseCatalogue(settings.providers.catalogue)
+  if (settings.providers.linkTracking) providers.link_tracking = serialiseLinkTracking(settings.providers.linkTracking)
   return {
     enabled: settings.enabled,
     send_mailbox: settings.sendMailbox,
@@ -638,6 +703,10 @@ export function serialiseEmailSettings(
     frequency_cap: settings.frequencyCap
       ? { max: settings.frequencyCap.max, window_days: settings.frequencyCap.windowDays }
       : null,
+    // Written only when used: a version without exemptions stays readable by the previous release (its parser refuses unknown keys).
+    ...(settings.capExemptTemplateKeys.length > 0
+      ? { cap_exempt_template_keys: [...settings.capExemptTemplateKeys] }
+      : {}),
     recipient_allowlist: settings.recipientAllowlist
       ? [...settings.recipientAllowlist]
       : null,

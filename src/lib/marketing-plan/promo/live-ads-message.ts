@@ -33,6 +33,13 @@ export type LiveAdsFact =
       as_of: string | null
       /** 最近一次「完整」广告快照抓取距今小时数；读不到 = null */
       snapshot_age_hours: number | null
+      /**
+       * ok = 开投回执读全了；failed = 读不到或没读全，不能下「没有批准记录」的结论。
+       * 缺这个字段 = 这次没有核对回执（旧调用），也不下那句结论。
+       */
+      receipt_read?: 'ok' | 'failed'
+      /** 开着、但对不上「已执行并且读回」的开投回执的广告组数，按账户。 */
+      unrecorded?: { ad_account_id: string; count: number }[]
     }
   | { ok: false; reason: string }
 
@@ -47,10 +54,17 @@ export const SNAPSHOT_STALE_HOURS = 48
 /** 「确认没有在跑的广告」要求快照新到什么程度：抓取每 6 小时一次，留 2 小时余量 */
 export const SNAPSHOT_FRESH_HOURS = 8
 
-function redSentence(spending: LiveAdsAccount[], currency: string | null): string {
-  const prefix = currency ? (MONEY_PREFIX[currency] ?? `${currency} `) : ''
-  const items = spending.map(a => `${nameOf(a)} 近 2 天已花 ${prefix}${a.spend_2d.toFixed(2)}（${a.live_adsets} 个广告组开着）`)
-  return `⚠️ ME 里没有这些广告的批准记录，但 Meta 里它们在花钱：${items.join('；')}。要么补走批准流程，要么到 Meta 暂停。${REFRESH_NOTE}`
+function redSentence(fact: Extract<LiveAdsFact, { ok: true }>, rows: { ad_account_id: string; count: number }[]): string {
+  const prefix = fact.currency ? (MONEY_PREFIX[fact.currency] ?? `${fact.currency} `) : ''
+  const items = rows.map(row => {
+    const account = fact.by_account.find(item => item.ad_account_id === row.ad_account_id)
+    const name = account ? nameOf(account) : '已绑定的广告账户'
+    const spend = account && row.count === account.live_adsets && account.state === 'spending'
+      ? `，近 2 天已花 ${prefix}${account.spend_2d.toFixed(2)}`
+      : ''
+    return `${name} ${row.count} 个${spend}`
+  })
+  return `⚠️ 这些开着的广告组在 ME 里没有开投批准记录：${items.join('；')}。已经对上批准记录的不在这里。请补走批准流程，或者到 Meta 里暂停。${REFRESH_NOTE}`
 }
 
 function amberSentence(unknown: LiveAdsAccount[]): string {
@@ -67,9 +81,9 @@ function greySentences(fact: Extract<LiveAdsFact, { ok: true }>): string[] {
 }
 
 /**
- * 把读取结果翻成给 PM 的话。红字只给「近 2 天确认有花费」的账户；
- * 状态开着但花费数据没跟上 → 黄字（明说可能已经在花钱，别当成没事）；欠款停摆/近 2 天没花费 → 灰字；
- * 快照太久没更新 → 灰字（不能让「0 个」读成没事）。读不到 / 确实没有 → null。
+ * 花费跟不跟得上。不在这里下「没有批准记录」的结论——那句只看开投回执，见 describeUnrecordedAdsets。
+ * 状态开着但花费数据没跟上 → 黄字；欠款停摆 / 近 2 天没花费 → 灰字；
+ * 快照太久没更新 → 灰字。读不到 / 确实没有 → null。
  */
 export function describeLiveAds(fact: LiveAdsFact | null): LiveAdsMessage | null {
   if (!fact || !fact.ok) return null
@@ -79,15 +93,24 @@ export function describeLiveAds(fact: LiveAdsFact | null): LiveAdsMessage | null
       ? { level: 'grey', text: `广告快照已 ${Math.floor(age / 24)} 天没更新，没法判断 Meta 里有没有在跑的广告，请到 Meta 核对。` }
       : null
   }
-  const spending = fact.by_account.filter(a => a.state === 'spending')
   const unknown = fact.by_account.filter(a => a.state === 'no_spend_data')
   const parts: string[] = []
-  if (spending.length > 0) parts.push(redSentence(spending, fact.currency))
   if (unknown.length > 0) parts.push(amberSentence(unknown))
   parts.push(...greySentences(fact))
   if (parts.length === 0) return null
-  const level: LiveAdsLevel = spending.length > 0 ? 'red' : unknown.length > 0 ? 'amber' : 'grey'
+  const level: LiveAdsLevel = unknown.length > 0 ? 'amber' : 'grey'
   return { level, text: parts.join(' ') }
+}
+
+/** 只点名没有「已执行并且读回」开投回执的广告组。回执没读全就不说「没有批准记录」。 */
+export function describeUnrecordedAdsets(fact: LiveAdsFact | null): LiveAdsMessage | null {
+  if (!fact || !fact.ok || fact.receipt_read === undefined) return null
+  if (fact.receipt_read === 'failed') {
+    return { level: 'grey', text: '读不到开投批准记录，没法判断哪些开着的广告组没有批准。' }
+  }
+  const rows = (fact.unrecorded ?? []).filter(row => row.count > 0)
+  if (rows.length === 0) return null
+  return { level: 'red', text: redSentence(fact, rows) }
 }
 
 /**

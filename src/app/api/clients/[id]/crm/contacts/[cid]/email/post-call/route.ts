@@ -7,6 +7,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { isAutomatedTemplateKey } from '@/lib/crm/email-templates/automated-template-key'
 import { featureStateOf } from '@/lib/crm/email-templates/feature-state'
 import { loadPostCallState } from '@/lib/crm/email-templates/post-call-state'
 import { createPreviewData } from '@/lib/crm/email-templates/preview-prod'
@@ -27,7 +28,11 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     const settings = await loadEmailSettings(supabaseAdmin, params.id).catch(() => null)
     const featureState = featureStateOf(settings)
     const callPromptHours = settings?.kind === 'ok' ? settings.settings.callPromptHours : 24
-    const templates = featureState === 'ready' ? await listCurrentTemplates(supabaseAdmin, params.id) : []
+    // Templates of ME's automated letters (auto-…) are not for staff to pick; the send path refuses them as well.
+    const templates =
+      featureState === 'ready'
+        ? (await listCurrentTemplates(supabaseAdmin, params.id)).filter((t) => !isAutomatedTemplateKey(t.templateKey))
+        : []
     const result = await loadPostCallState(
       { clientId: params.id, contactId: params.cid, featureState, callPromptHours, templates, now: new Date() },
       createPreviewData(params.id),

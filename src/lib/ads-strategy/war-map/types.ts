@@ -65,6 +65,10 @@ export interface CampaignFrequencyInput {
   frequency7d: number | null
   /** 窗口内最近一个有花费的数据日；null = 窗口内没花过钱；不带 = 不判「已停」 */
   lastSpendDay?: string | null
+  /** 这个系列里「现在不在投」的广告组，在窗口内花的钱；系列频率混进了它们。不带 = 没查 / 不知道 */
+  stoppedAdsetSpend7d?: number
+  /** 这个系列里「现在在投」的广告组个数；不带 = 没查 / 不知道 */
+  liveAdsetCount?: number
 }
 
 /** 一个账户现在在不在投：最近有花费，或设置里有 ACTIVE 广告组 */
@@ -136,6 +140,8 @@ export interface WarMapInput {
   accountActivity?: Record<string, AccountActivity>
   /** 素材池里「已批准」的条数；null = 读不到素材池 */
   creativePoolApproved: number | null
+  /** 广告线索跟进。不带 = 调用方还没接，清单里不加这张卡。 */
+  followup?: FollowupInput
 }
 
 // ── 输出（页面直接渲染）────────────────────────────────────────────────
@@ -219,6 +225,22 @@ export interface FrequencyRow {
   spend7d: number
   light: Light
   note: string
+  /** true = 系列频率超红线，但数字混进了已暂停的广告组，在投的组单独的频率读不到，所以不亮红灯 */
+  mixedWithStopped?: boolean
+}
+
+export interface FollowupGroup {
+  label: string
+  count: number
+}
+
+export interface FollowupInput {
+  unreadable: boolean
+  groups: FollowupGroup[]
+  inWindow: number
+  outsideWindow: number
+  /** null = 还没有够老的线索，或这一段读不到。 */
+  rateWithin24h: number | null
 }
 
 export type ActionSeverity = 'red' | 'yellow' | 'info'
@@ -254,4 +276,6 @@ export interface WarMapView {
   goalNote: GoalNote | null
   /** 计划所挂目标的最新处方一行；没有就是 null */
   prescriptionLine: string | null
+  /** 近 7 天广告线索的 24 小时跟进率低于 80%。 */
+  budgetHold: boolean
 }

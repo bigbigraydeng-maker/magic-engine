@@ -59,6 +59,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   payment_email_needs_human: 'truth', // 邮件说收到款了、系统判不了真假/金额，要人核对
   ai_auto_review_circuit_breaker: 'decide', // 重新打开「AI 自动发给广告平台」
   ads_auto_pause_pending: 'decide', // 暂停在花钱的广告组
+  ads_auto_pause_blocked: 'decide', // 暂停建议被拦下、广告还在花钱：停不停 / 规则改不改由人定
   tour_publish_requested: 'decide', // 客户员工请我们把团目录的修改上架（对外）
   // 广告自治被熔断器冻住了，要不要恢复自动动手是个决定；同 ads_auto_pause_pending 一档
   // （WP3.1b 重做 PR A，2026-09-28 合并主干时补——这份穷举表在那个 PR 分叉之后才建）
@@ -78,6 +79,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   // 依法要求删数据我们答应了却没做到 —— 对外 / 合规义务。how 虽是「让开发查」，但主干明确
   // 要它留在 PM 可见栏（不许只写日志、进了 NEVER_DROP_KINDS），风险归 PM 拍板一栏。
   meta_data_deletion_failure: 'decide',
+  crm_link_tracking_silent: 'dev', // 邮件点击追踪疑似坏了：开发去修，信照常发
   // Magic Bridge 免费名额快满：加不加额度、加到多少美元由 PM 定（花钱）；不加则新客户到月底出不了报告
   magic_bridge_quota: 'decide',
   tools_wide_budget_warning: 'decide',
@@ -108,9 +110,16 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   comment_token_invalid: 'one_click',
   comment_autoreply_run_failing: 'dev', // 评论 cron 连续多轮没扫完：授权 / Meta 接口问题，开发看日志
   comment_reply_scope_missing: 'one_click', // 主页管理员重新「连接 Meta」并勾上管理评论权限
+  comment_needs_human_reply: 'client_side', // 主页评论要人公开回，不含自动回复范围改动
+  comment_human_check_failed: 'dev', // 「要人回」清单读不出来
   conversion_capi_token_dead: 'one_click',
   daily_plan_post_unmeasured: 'one_click', // 重新连接 Meta / 确认帖子公开
   daily_plan_first_comment_failed: 'one_click', // 在帖子下补发首评（文案已写好，复制即可）
+  social_readback_refused: 'one_click', // 打开视频看是不是已经公开，公开了就转给开发
+  social_post_readback_missing: 'dev', // 过点没回执：读数链欠账
+  social_post_readback_unreadable: 'truth', // 有回执但读不到，多是权限或平台字段
+  social_post_readback_retries_exhausted: 'dev', // 读数重试耗尽
+  social_story_readback_unsupported: 'weekly', // Story 类型暂无 T+N 读数，周知即可
   mailchimp_export_broken: 'one_click', // 设置页填回 Mailchimp Audience ID
   lead_sheet_reauth_needed: 'one_click', // 写表被 Google 判 403，重新走一次「连接 Google」
   calendar_closure_overdue_summary: 'truth', // 日历到期没闭环的件数：「认一下」哪些真做了
@@ -143,6 +152,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   phone_call_needs_review: 'client_side', // 电话没能自动记进客人档案，客户销售要看一眼是谁
   messenger_draft_send_failed: 'client_side', // 回复没发出去，要人工发给客人
   tool_lead_needs_followup: 'client_side', // 工具实验室有人留资，值得联系一下
+  distributor_application_pending: 'decide', // 有人申请做经销商：批不批只能 PM 定
 
   // ── 4 · 发出去前要看一眼的 ───────────────────────────────────────────
   blog_draft_waiting: 'review',
@@ -150,6 +160,9 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   linkedin_progress_needs_review: 'review', // 历史：LinkedIn 自动发帖已下线，仅夹具使用
   maliang_render_passed: 'review',
   libai_copy_unverified: 'review',
+  baozheng_review_disagree: 'truth', // 两个 AI 判一位客人判得不一样：系统判不了真假，要人认一下谁对（只记结论，不改客人）
+  factory_winner_confirm: 'truth', // 这条广告算不算「赢家样板」系统定不了，要人认（认了工厂才照它出片；不发布不花钱）
+  factory_winner_pm_only_unsynced: 'dev', // 「只认 PM」已按赢家标记生效，但客户设置里的开关没写上：开发补写，PM 不用动手
   simaqian_review_drafts: 'review',
   messenger_draft_pending_approval: 'review',
   messenger_draft_escalation: 'review',
@@ -161,6 +174,13 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   story_stalled: 'review', // 某条 Story 没发出去：看原因、决定重发还是改
   story_unknown_outcome: 'truth', // 系统判不了真假：Story 到底有没有发出去，只有看主页的人知道
   story_unarmed: 'review', // 已授权却没动静：发布器可能没跑
+  week_pack_needs_approval: 'review', // 下一周整包还没批
+  week_pack_items_held: 'review', // 有条目被单独拦住
+  social_weekly_loop_needs_human: 'review', // 下周的社媒视频排不出来，要人补片或改片
+  reel_scheduled_needs_human: 'review', // 周卡批过的 Reel 到日没发出去，要人重批或撤回
+  social_account_audit: 'review', // 账号自检：看哪类内容缺、定先做哪一类
+  social_readback_suggestion: 'review', // 回看建议：看哪类片效果好、定下周配比调不调
+  reel_daily_list_pending: 'decide', // 放行之后到日对外公开，撤不回
   auto_publish_record_conflict: 'truth', // 记录说撤回了、回执说又发了：帖子到底在不在主页，只有看主页的人知道
 
   // ── 5 · 系统判不了真假的 ─────────────────────────────────────────────
@@ -188,6 +208,13 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   cron_stuck: 'dev',
   cron_failing: 'dev',
   ads_config_unreadable: 'dev', // 广告回拉读不出广告设置，字段没对齐或临时故障，都是我们的活
+  ads_agent_sync_stale: 'dev', // 广告 Agent 后台同步太久没成功：开发排查，不占客户操作
+  ads_agent_daily_pull_gap: 'dev', // 每日回拉里日结果/体检局部失败：开发排查
+  ads_daily_spend_over_cap_notice: 'decide', // 花费超日上限只读提醒，不自动暂停
+  ads_circuit_breaker_pause: 'decide', // 异常只出暂停确认卡，等人点了才停
+  ads_circuit_breaker_alert: 'decide', // 快照或花费太旧，只提醒，不出卡
+  ads_plan_daily_cap_missing: 'decide', // 已批准计划还没填每天总上限，加预算会被拦住
+  ads_plan_delivery_stage_missing: 'decide', // 缺投放阶段：收回稳住与换阶段不工作，P-4 素材放量不受影响
   cron_not_running: 'dev',
   cron_silent_success: 'dev',
   ai_alerting_broken: 'dev',
@@ -211,6 +238,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   libai_check_unverifiable: 'dev',
   libai_check_missing: 'dev',
   libai_prompt_library_stale: 'dev',
+  baozheng_run_failed: 'dev', // 包拯周检没跑成：开发查，PM 那一栏留「没查成」
   simaqian_patrol_failed: 'dev',
   meta_token_check_failed: 'dev',
   deploy_check_failed: 'dev', // 「合了没上线」这个检查自己没跑成 —— how 写「不用你动手 / 回我一句我去修」
@@ -286,6 +314,8 @@ export const BLIND_SPOT_NOTE: Partial<Record<ManualItemKind, string>> = {
   promo_plan_watch_broken: '推广计划每日检查今天没跑成，计划有没有问题看不出来',
   ads_tracking_preflight_broken: '开投前追踪检查今天没跑成，像素 / 落地页 / 留资有没有问题看不出来',
   libai_check_missing: '有文案生成后没做溯源检查，「未证实的句子」可能没列全',
+  baozheng_run_failed: '包拯这周没复核成，「两个 AI 判得不一样」可能没列出来',
+  comment_human_check_failed: '主页评论「要人回」清单今天没读成，可能漏报',
 }
 
 export function blindSpotNotes(items: readonly ManualItem[]): string[] {

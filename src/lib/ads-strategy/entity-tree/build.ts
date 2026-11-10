@@ -3,6 +3,11 @@
  * Read-only, no I/O, no clock, no randomness.
  */
 
+import { pickWinnerBaseline, type FunnelRates } from './funnel-baseline'
+import { audienceChangedOn, judgeCreatives, type AudienceSnapshot, type CreativeVerdict } from './creative-compare'
+import { resolveCoreMetric, type CoreMetric } from '../rules/core-metric'
+import type { OutcomeStep } from '../portfolio/outcome-ladder'
+
 export interface InsightRow {
   level: 'campaign' | 'adset' | 'ad'
   entityId: string
@@ -14,6 +19,9 @@ export interface InsightRow {
   clicks: number
   leads: number
   messagingConversations: number
+  /** Link clicks from actions. Null = this row did not store actions (do not treat as zero). */
+  linkClicks?: number | null
+  video3sViews?: number | null
 }
 
 export interface SnapshotRow {
@@ -28,6 +36,11 @@ export interface SnapshotRow {
   capturedAt: string
   /** ads only: Facebook page the ad's creative posts from (tells whose ad it is in a shared account) */
   creativePageId?: string | null
+  /** ad sets only: Meta destination_type / optimization_goal, used to pick the ad set's own result type */
+  destinationType?: string | null
+  optimizationGoal?: string | null
+  /** ad sets only: stable key of audience + placements (creative-compare audienceKeyOf); null = not stored */
+  audienceKey?: string | null
 }
 
 export interface TreeOptions {
@@ -35,6 +48,14 @@ export interface TreeOptions {
   days: number
   /** campaigns whose campaign-level totals include another client's ad sets: totals are not shown */
   sharedCampaignIds?: ReadonlySet<string>
+  /** client's configured primary result; only breaks the messaging + lead-form tie (rules/core-metric) */
+  clientPrimary?: OutcomeStep | null
+  /** industry playbook creativeCompareMinLinkClicks; null/undefined = no threshold */
+  minLinkClicks?: number | null
+  /** wider snapshot list used only for audience-change detection (defaults to `snapshots`) */
+  audienceSnapshots?: SnapshotRow[]
+  /** IANA zone used to bucket audience-change days (defaults to UTC) */
+  timeZone?: string
 }
 
 export type DeliveryState = 'running' | 'stopped' | 'unknown'
@@ -45,9 +66,14 @@ export interface EntityMetrics {
   clicks: number
   leads: number
   messagingConversations: number
+  linkClicks: number
+  video3sViews: number
   costPerLead: number | null
+  /** Link clicks ÷ impressions. Null when link clicks were not stored. */
   ctr: number | null
   activeDays: number
+  /** true when at least one row stored link clicks */
+  linkClicksStored: boolean
 }
 
 export interface AdNode {
@@ -56,6 +82,7 @@ export interface AdNode {
   state: DeliveryState
   effectiveStatus: string | null
   metrics: EntityMetrics
+  creative: CreativeVerdict
 }
 
 export interface AdsetNode {
@@ -67,6 +94,12 @@ export interface AdsetNode {
   currency: string | null
   metrics: EntityMetrics
   ads: AdNode[]
+  /** the one result this ad set is judged on (rules/core-metric); null = video views / reach / other */
+  resultType: CoreMetric | null
+  /** false = no snapshot ever stored a destination or optimization goal for this ad set */
+  targetKnown: boolean
+  /** first day inside the window on which audience or placements changed; null = no change seen */
+  audienceChangedOn: string | null
 }
 
 export interface CampaignNode {
@@ -88,6 +121,8 @@ export interface EntityTree {
   window: { since: string; until: string; days: number }
   snapshotAt: string | null
   campaigns: CampaignNode[]
+  /** Account winner (an ad with at least 20 leads). Null = 样本不足. */
+  winnerBaseline: FunnelRates | null
 }
 
 type Level = 'campaign' | 'adset' | 'ad'
@@ -129,26 +164,36 @@ function emptyMetrics(): EntityMetrics {
     clicks: 0,
     leads: 0,
     messagingConversations: 0,
+    linkClicks: 0,
+    video3sViews: 0,
     costPerLead: null,
     ctr: null,
     activeDays: 0,
+    linkClicksStored: false,
   }
 }
 
 function metricsOf(rows: InsightRow[]): EntityMetrics {
   const m = emptyMetrics()
   const dates = new Set<string>()
+  let sawLink = false
   for (const r of rows) {
     m.spend += r.spend
     m.impressions += r.impressions
     m.clicks += r.clicks
     m.leads += r.leads
     m.messagingConversations += r.messagingConversations
+    if (r.linkClicks != null) {
+      m.linkClicks += r.linkClicks
+      sawLink = true
+    }
+    m.video3sViews += r.video3sViews ?? 0
     if (r.spend > 0) dates.add(r.date)
   }
   m.activeDays = dates.size
   m.costPerLead = m.leads > 0 ? m.spend / m.leads : null
-  m.ctr = m.impressions > 0 ? m.clicks / m.impressions : null
+  m.ctr = m.impressions > 0 && sawLink ? m.linkClicks / m.impressions : null
+  m.linkClicksStored = sawLink
   return m
 }
 
@@ -258,17 +303,88 @@ function sortByStateThenSpend<T extends { state: DeliveryState; metrics: EntityM
   })
 }
 
-function buildAd(info: EntityInfo, rows: InsightRow[]): AdNode {
+function buildAd(info: EntityInfo, metrics: EntityMetrics, creative: CreativeVerdict): AdNode {
   return {
     id: info.id,
     name: info.name,
     state: info.state,
     effectiveStatus: info.effectiveStatus,
-    metrics: metricsOf(rows),
+    metrics,
+    creative,
   }
 }
 
-function buildAdset(info: EntityInfo, rows: InsightRow[], ads: AdNode[]): AdsetNode {
+interface KnownTargets {
+  destinationType: string | null
+  optimizationGoal: string | null
+}
+
+/** Latest snapshot per ad set that stored a non-null destination OR optimization goal (any capture time). */
+function lastKnownTargets(snapshots: SnapshotRow[]): Map<string, KnownTargets> {
+  const latestAt = new Map<string, string>()
+  const out = new Map<string, KnownTargets>()
+  for (const s of snapshots) {
+    if (s.level !== 'adset') continue
+    const dest = s.destinationType ?? null
+    const goal = s.optimizationGoal ?? null
+    if (dest === null && goal === null) continue
+    const prev = latestAt.get(s.entityId)
+    if (prev !== undefined && s.capturedAt <= prev) continue
+    latestAt.set(s.entityId, s.capturedAt)
+    out.set(s.entityId, { destinationType: dest, optimizationGoal: goal })
+  }
+  return out
+}
+
+function buildAdsForAdset(
+  adset: EntityInfo,
+  infos: EntityInfo[],
+  rowsByEntity: Map<string, InsightRow[]>,
+  opts: TreeOptions,
+  targets: Map<string, KnownTargets>,
+): { ads: AdNode[]; resultType: CoreMetric | null; targetKnown: boolean } {
+  const known = targets.get(adset.id)
+  const targetKnown = known !== undefined
+  const resultType = targetKnown
+    ? resolveCoreMetric({
+        destinationType: known.destinationType,
+        optimizationGoal: known.optimizationGoal,
+        clientPrimary: opts.clientPrimary ?? null,
+      })
+    : null
+  const metrics = infos.map((i) => metricsOf(rowsByEntity.get(`ad|${i.id}`) ?? []))
+  const verdicts = judgeCreatives(metrics, resultType, opts.minLinkClicks ?? null, targetKnown)
+  const ads = infos.map((i, k) => buildAd(i, metrics[k], verdicts[k]))
+  return { ads, resultType, targetKnown }
+}
+
+function audienceChangesByAdset(
+  snapshots: SnapshotRow[],
+  since: string,
+  until: string,
+  timeZone: string,
+): Map<string, string | null> {
+  const byAdset = new Map<string, AudienceSnapshot[]>()
+  for (const s of snapshots) {
+    if (s.level !== 'adset') continue
+    const row: AudienceSnapshot = { capturedAt: s.capturedAt, audienceKey: s.audienceKey ?? null }
+    const arr = byAdset.get(s.entityId)
+    if (arr) arr.push(row)
+    else byAdset.set(s.entityId, [row])
+  }
+  const out = new Map<string, string | null>()
+  for (const [id, rows] of byAdset) out.set(id, audienceChangedOn(rows, since, until, timeZone))
+  return out
+}
+
+function buildAdset(
+  info: EntityInfo,
+  rows: InsightRow[],
+  ads: AdNode[],
+  resultType: CoreMetric | null,
+  targetKnown: boolean,
+  audienceChange: string | null,
+): AdsetNode {
   return {
     id: info.id,
     name: info.name,
@@ -278,6 +394,9 @@ function buildAdset(info: EntityInfo, rows: InsightRow[], ads: AdNode[]): AdsetN
     currency: info.currency,
     metrics: metricsOf(rows),
     ads: sortByStateThenSpend(ads),
+    resultType,
+    targetKnown,
+    audienceChangedOn: audienceChange,
   }
 }
 
@@ -321,6 +440,66 @@ function groupRowsByEntity(insights: InsightRow[], since: string, until: string)
   return map
 }
 
+function buildAdsetsByCampaign(
+  adsets: Map<string, EntityInfo>,
+  campaigns: Map<string, EntityInfo>,
+  adInfosByAdset: Map<string, EntityInfo[]>,
+  rowsByEntity: Map<string, InsightRow[]>,
+  audienceChanges: Map<string, string | null>,
+  targets: Map<string, KnownTargets>,
+  opts: TreeOptions,
+): Map<string, AdsetNode[]> {
+  const out = new Map<string, AdsetNode[]>()
+  for (const a of adsets.values()) {
+    if (a.parentId === null || !campaigns.has(a.parentId)) continue
+    const built = buildAdsForAdset(a, adInfosByAdset.get(a.id) ?? [], rowsByEntity, opts, targets)
+    const node = buildAdset(
+      a,
+      rowsByEntity.get(`adset|${a.id}`) ?? [],
+      built.ads,
+      built.resultType,
+      built.targetKnown,
+      audienceChanges.get(a.id) ?? null,
+    )
+    const arr = out.get(a.parentId)
+    if (arr) arr.push(node)
+    else out.set(a.parentId, [node])
+  }
+  return out
+}
+
+function placeholderCampaign(id: string): EntityInfo {
+  return {
+    id,
+    level: 'campaign',
+    name: id,
+    state: 'unknown',
+    effectiveStatus: null,
+    dailyBudget: null,
+    currency: null,
+    parentId: null,
+    campaignHint: null,
+  }
+}
+
+function unplacedByCampaign(
+  ads: Map<string, EntityInfo>,
+  adsets: Map<string, EntityInfo>,
+  campaigns: Map<string, EntityInfo>,
+  rowsByEntity: Map<string, InsightRow[]>,
+): Map<string, { count: number; spend: number; leads: number }> {
+  const unplaced = new Map<string, { count: number; spend: number; leads: number }>()
+  for (const ad of ads.values()) {
+    if (ad.parentId !== null && adsets.has(ad.parentId)) continue
+    if (ad.campaignHint === null || !campaigns.has(ad.campaignHint)) continue
+    const m = metricsOf(rowsByEntity.get(`ad|${ad.id}`) ?? [])
+    if (m.spend <= 0) continue
+    const cur = unplaced.get(ad.campaignHint) ?? { count: 0, spend: 0, leads: 0 }
+    unplaced.set(ad.campaignHint, { count: cur.count + 1, spend: cur.spend + m.spend, leads: cur.leads + m.leads })
+  }
+  return unplaced
+}
+
 export function buildEntityTree(insights: InsightRow[], snapshots: SnapshotRow[], opts: TreeOptions): EntityTree {
   const window = windowOf(opts)
   const snapshotAt = snapshotAtOf(snapshots)
@@ -339,48 +518,23 @@ export function buildEntityTree(insights: InsightRow[], snapshots: SnapshotRow[]
 
   // Placeholder campaigns for orphan adsets.
   for (const a of adsets.values()) {
-    if (a.parentId !== null && !campaigns.has(a.parentId)) {
-      campaigns.set(a.parentId, {
-        id: a.parentId,
-        level: 'campaign',
-        name: a.parentId,
-        state: 'unknown',
-        effectiveStatus: null,
-        dailyBudget: null,
-        currency: null,
-        parentId: null,
-        campaignHint: null,
-      })
-    }
+    if (a.parentId !== null && !campaigns.has(a.parentId)) campaigns.set(a.parentId, placeholderCampaign(a.parentId))
   }
 
-  const adsByAdset = new Map<string, AdNode[]>()
+  const adInfosByAdset = new Map<string, EntityInfo[]>()
   for (const ad of ads.values()) {
     if (ad.parentId === null || !adsets.has(ad.parentId)) continue
-    const node = buildAd(ad, rowsByEntity.get(`ad|${ad.id}`) ?? [])
-    const arr = adsByAdset.get(ad.parentId)
-    if (arr) arr.push(node)
-    else adsByAdset.set(ad.parentId, [node])
+    const arr = adInfosByAdset.get(ad.parentId)
+    if (arr) arr.push(ad)
+    else adInfosByAdset.set(ad.parentId, [ad])
   }
 
-  const adsetsByCampaign = new Map<string, AdsetNode[]>()
-  for (const a of adsets.values()) {
-    if (a.parentId === null || !campaigns.has(a.parentId)) continue
-    const node = buildAdset(a, rowsByEntity.get(`adset|${a.id}`) ?? [], adsByAdset.get(a.id) ?? [])
-    const arr = adsetsByCampaign.get(a.parentId)
-    if (arr) arr.push(node)
-    else adsetsByCampaign.set(a.parentId, [node])
-  }
+  const audienceSource = opts.audienceSnapshots ?? snapshots
+  const audienceChanges = audienceChangesByAdset(audienceSource, window.since, window.until, opts.timeZone ?? 'UTC')
+  const targets = lastKnownTargets(audienceSource)
+  const adsetsByCampaign = buildAdsetsByCampaign(adsets, campaigns, adInfosByAdset, rowsByEntity, audienceChanges, targets, opts)
 
-  const unplaced = new Map<string, { count: number; spend: number; leads: number }>()
-  for (const ad of ads.values()) {
-    if (ad.parentId !== null && adsets.has(ad.parentId)) continue
-    if (ad.campaignHint === null || !campaigns.has(ad.campaignHint)) continue
-    const m = metricsOf(rowsByEntity.get(`ad|${ad.id}`) ?? [])
-    if (m.spend <= 0) continue
-    const cur = unplaced.get(ad.campaignHint) ?? { count: 0, spend: 0, leads: 0 }
-    unplaced.set(ad.campaignHint, { count: cur.count + 1, spend: cur.spend + m.spend, leads: cur.leads + m.leads })
-  }
+  const unplaced = unplacedByCampaign(ads, adsets, campaigns, rowsByEntity)
 
   const campaignNodes: CampaignNode[] = []
   for (const c of campaigns.values()) {
@@ -393,9 +547,7 @@ export function buildEntityTree(insights: InsightRow[], snapshots: SnapshotRow[]
     ))
   }
 
-  return {
-    window,
-    snapshotAt,
-    campaigns: sortByStateThenSpend(campaignNodes),
-  }
+  const ranked = sortByStateThenSpend(campaignNodes)
+  const adMetrics = ranked.flatMap((c) => c.adsets.flatMap((s) => s.ads.map((a) => a.metrics)))
+  return { window, snapshotAt, campaigns: ranked, winnerBaseline: pickWinnerBaseline(adMetrics) }
 }

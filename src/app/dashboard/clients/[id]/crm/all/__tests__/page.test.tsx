@@ -145,6 +145,27 @@ describe('?contact=<id> 的人不在第一页（付款总览点名字）', () =>
     expect(window.sessionStorage.getItem('crm-deeplink-name:cts:c9')).toBeNull()
   })
 
+  it('没带名字（日历直达）→ 按编号单独读这一位再开抽屉，不弹「不在名单里」', async () => {
+    const first = [contact('c1', 'Bob Other')]
+    const target = [contact('c9', 'David Holmes')]
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/crm/contacts?') || url.endsWith('/crm/contacts')) {
+          const items = url.includes('ids=c9') ? target : first
+          return { ok: true, json: async () => ({ items, total: items.length, page: 1, perPage: 100, columns: [] }) }
+        }
+        if (url.includes('/timeline')) return { ok: true, json: async () => ({ timeline: [], omittedMessages: 0 }) }
+        return { ok: true, json: async () => ({ stages: [] }) }
+      }),
+    )
+    setUrl('?contact=c9')
+    render(<CrmAllContactsPage />)
+
+    await waitFor(() => expect(screen.getByText('往来记录')).toBeTruthy(), { timeout: 4000 })
+    expect(screen.queryByText(/不在这份名单里了/)).toBeNull()
+  })
+
   it('没带名字（存储被拦）→ 仍明说不在名单里，不装作成功', async () => {
     stubFetch([contact('c1', 'Bob Other')])
     setUrl('?contact=c9&focus=bookings')

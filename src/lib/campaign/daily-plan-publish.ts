@@ -34,6 +34,9 @@ export const DAILY_PLAN_POST_PUBLISHED_EVENT = 'daily_plan.post.published' as co
  */
 export const PUBLISH_MEASUREMENT_OFFSETS_HOURS = [4, 72] as const
 
+/** Whitelist of measurement window offsets (hours); W6 pickReceipt and contract tests share this. */
+export const PUBLISH_MEASUREMENT_WINDOW_SET = new Set<number>(PUBLISH_MEASUREMENT_OFFSETS_HOURS)
+
 // Same loose UUID *shape* check as daily-plan.ts — this repo's seeded client
 // ids (e.g. CTS `c0000000-…`) are not RFC4122-valid, so `z.uuid()` rejects them.
 const uuidLike = z

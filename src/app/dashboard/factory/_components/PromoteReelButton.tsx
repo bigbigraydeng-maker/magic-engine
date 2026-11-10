@@ -1,14 +1,93 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 
-interface PromotePreview {
+export interface ReelGoPublicFactCheck {
+  verdict: string
+  catalog_version: number | null
+  problems: string[]
+  note: string | null
+}
+
+export interface ReelGoPublicPreview {
   preview_token: string
   page_id: string
   video_id: string
   caption: string
   first_comment: string
   mode: string
+  fact_check?: ReelGoPublicFactCheck | null
+}
+
+/** Reads the optional pre-publish catalog check from a preview response; anything malformed is dropped. */
+export function readFactCheck(value: unknown): ReelGoPublicFactCheck | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const row = value as Record<string, unknown>
+  if (typeof row.verdict !== 'string') return null
+  const problems = Array.isArray(row.problems) ? row.problems.filter((p): p is string => typeof p === 'string') : []
+  return {
+    verdict: row.verdict,
+    catalog_version: typeof row.catalog_version === 'number' ? row.catalog_version : null,
+    problems,
+    note: typeof row.note === 'string' ? row.note : null,
+  }
+}
+
+function factCheckLine(check: ReelGoPublicFactCheck): string {
+  if (check.verdict === 'pass') return `团目录核对:通过(目录第 ${check.catalog_version ?? '?'} 版)`
+  if (check.verdict === 'not_applicable') return '团目录核对:不适用,这位客户没有已发布的团目录'
+  return `团目录核对:${check.verdict === 'fail' ? '对不上' : '要人核对'}`
+}
+
+export function ReelGoPublicPreviewPanel({
+  preview,
+  actions,
+}: {
+  preview: ReelGoPublicPreview
+  actions: ReactNode
+}) {
+  const isCommentOnly = preview.mode === 'comment_only'
+  return (
+    <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 space-y-2">
+      <p className="text-sm font-medium text-amber-900">请确认这条 Reel 的公开内容</p>
+      <dl className="text-xs text-slate-700 space-y-1">
+        <div>
+          <dt className="inline text-slate-500">主页 ID:</dt>
+          <dd className="inline break-all">{preview.page_id}</dd>
+        </div>
+        <div>
+          <dt className="inline text-slate-500">视频 ID:</dt>
+          <dd className="inline break-all">{preview.video_id}</dd>
+        </div>
+        {!isCommentOnly && (
+          <div>
+            <dt className="text-slate-500">文案:</dt>
+            <dd className="whitespace-pre-wrap break-words">{preview.caption}</dd>
+          </div>
+        )}
+        <div>
+          <dt className="text-slate-500">首评:</dt>
+          <dd className="whitespace-pre-wrap break-words">{preview.first_comment}</dd>
+        </div>
+      </dl>
+      {preview.fact_check && (
+        <div className="text-xs text-slate-700">
+          <p>{factCheckLine(preview.fact_check)}</p>
+          {preview.fact_check.problems.map((line, i) => <p key={i} className="text-red-700">{line}</p>)}
+          {preview.fact_check.note && <p className="text-slate-500">{preview.fact_check.note}</p>}
+        </div>
+      )}
+      {isCommentOnly ? (
+        <p className="text-xs text-amber-800">这条已经公开了,这里只补发首评,不会再发布一次</p>
+      ) : (
+        <p className="text-xs text-amber-800">确认后这条 Reel 会立刻对外公开,不能改回草稿(只能删帖)</p>
+      )}
+      {preview.mode === 'sync_only' && (
+        <p className="text-xs text-amber-800">这条在 Facebook 上已经是公开的,只会同步记录,不会再发布一次</p>
+      )}
+      {actions}
+    </div>
+  )
 }
 
 interface PromoteResult {
@@ -40,7 +119,7 @@ export function promoteEntry(o: {
 }
 
 export function PromoteReelButton({ orderId, onDone, commentOnly }: PromoteReelButtonProps) {
-  const [preview, setPreview] = useState<PromotePreview | null>(null)
+  const [preview, setPreview] = useState<ReelGoPublicPreview | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState<string | null>(null)
@@ -62,7 +141,7 @@ export function PromoteReelButton({ orderId, onDone, commentOnly }: PromoteReelB
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ confirm: false }),
       })
-      const json = (await res.json()) as Partial<PromotePreview> & { error?: string }
+      const json = (await res.json()) as Partial<ReelGoPublicPreview> & { error?: string }
       if (!res.ok || !json.preview_token) {
         setError(json.error ?? '操作失败')
         reset()
@@ -114,8 +193,6 @@ export function PromoteReelButton({ orderId, onDone, commentOnly }: PromoteReelB
     reset()
   }
 
-  const isCommentOnly = preview?.mode === 'comment_only'
-
   return (
     <div className="space-y-3">
       {done && (
@@ -136,53 +213,25 @@ export function PromoteReelButton({ orderId, onDone, commentOnly }: PromoteReelB
       )}
 
       {preview && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 space-y-2">
-          <p className="text-sm font-medium text-amber-900">请确认这条 Reel 的公开内容</p>
-          <dl className="text-xs text-slate-700 space-y-1">
-            <div>
-              <dt className="inline text-slate-500">主页 ID:</dt>
-              <dd className="inline break-all">{preview.page_id}</dd>
+        <ReelGoPublicPreviewPanel
+          preview={preview}
+          actions={(
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={confirm}
+                disabled={busy}
+                className="h-10 rounded-lg px-5 bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50"
+              >{busy ? '处理中…' : '确认公开'}</button>
+              <button
+                type="button"
+                onClick={cancel}
+                disabled={busy}
+                className="text-sm text-slate-500 hover:text-slate-700 disabled:opacity-50"
+              >取消</button>
             </div>
-            <div>
-              <dt className="inline text-slate-500">视频 ID:</dt>
-              <dd className="inline break-all">{preview.video_id}</dd>
-            </div>
-            {!isCommentOnly && (
-              <div>
-                <dt className="text-slate-500">文案:</dt>
-                <dd className="whitespace-pre-wrap break-words">{preview.caption}</dd>
-              </div>
-            )}
-            <div>
-              <dt className="text-slate-500">首评:</dt>
-              <dd className="whitespace-pre-wrap break-words">{preview.first_comment}</dd>
-            </div>
-          </dl>
-
-          {isCommentOnly ? (
-            <p className="text-xs text-amber-800">这条已经公开了,这里只补发首评,不会再发布一次</p>
-          ) : (
-            <p className="text-xs text-amber-800">确认后这条 Reel 会立刻对外公开,不能改回草稿(只能删帖)</p>
           )}
-          {preview.mode === 'sync_only' && (
-            <p className="text-xs text-amber-800">这条在 Facebook 上已经是公开的,只会同步记录,不会再发布一次</p>
-          )}
-
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={confirm}
-              disabled={busy}
-              className="h-10 rounded-lg px-5 bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50"
-            >{busy ? '处理中…' : '确认公开'}</button>
-            <button
-              type="button"
-              onClick={cancel}
-              disabled={busy}
-              className="text-sm text-slate-500 hover:text-slate-700 disabled:opacity-50"
-            >取消</button>
-          </div>
-        </div>
+        />
       )}
     </div>
   )

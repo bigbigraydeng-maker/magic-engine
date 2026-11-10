@@ -28,16 +28,18 @@ import {
   engagementFromMetadata,
   callStanceFromMetadata,
   isPhoneVerdict,
-  isFailedReach,
-  isUnansweredCall,
   latestIntentVerdict,
 } from '@/lib/crm/segments'
 import { reclassifyStoredOutcome } from '@/lib/crm/note-parser'
 import { isDoNotContact, withoutClearedDnc } from '@/lib/crm/dnc'
 import { WORKLIST_GROUPS, groupDisplayMeta } from '@/lib/crm/worklist-groups'
 import { contactCardTitle } from '@/lib/crm/display-name'
-import { followUpMarks, localDay } from '@/lib/crm/follow-up-marks'
-import { dayWorklist, localDayStartMs } from '@/lib/crm/day-list'
+import { followUpMarks } from '@/lib/crm/follow-up-marks'
+import { contactsTouchedToday, dayWorklist, localDayStartMs } from '@/lib/crm/day-list'
+import { applyTakeoverToDayList } from '@/lib/crm/ai-takeover/day-list-filter'
+import { toReengageTouchRow } from '@/lib/crm/ai-takeover/came-back'
+import { loadTakeoverSince } from '@/lib/crm/ai-takeover/prod'
+import { loadStageSuppressedTodayIds } from '@/lib/crm/day-stage-events'
 import { stageSuppressesWorklist, isMarketingAction } from '@/lib/crm/pipeline'
 import { isAutomatedTouch } from '@/lib/crm/automated-touch'
 import {
@@ -371,25 +373,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
    *    真推迟的那一头不受影响：live 版看得见 `snooze_until`，
    *    `dayRow` 靠 `droppedOff` 照样把他标成已处理（理由写「标了：先放着…」）。
    */
-  const todayLocal = localDay(now.toISOString(), timeZone)
-  const touchedTodayIds = new Set(
-    touches
-      .filter(
-        (t) =>
-          t.direction === 'outbound' &&
-          !isAutomatedTouch(t.source, t.metadata) &&
-          !engagementFromMetadata(t.metadata) &&
-          t.metadata?.action !== 'snooze' &&
-          t.metadata?.action !== 'unsnooze' &&
-          // 拨到一个空号不算「我们出手了」—— 客人什么都没收到，
-          // 该走的备用渠道一次都还没走。判据跟 day-list 共用同一个函数。
-          !isFailedReach(t.metadata?.outcome as string | undefined) &&
-          // 电话系统记录的「没人接」同样不算出手（PM 2026-10-12）。
-          !isUnansweredCall(t.metadata) &&
-          localDay(t.occurred_at, timeZone) === todayLocal,
-      )
-      .map((t) => t.contact_id),
-  )
+  const touchedTodayIds = contactsTouchedToday(touches, now, timeZone)
 
   /**
    * 今天**从「还在名单上」被推进到「不再联系」**的那些人。
@@ -406,29 +390,12 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
    * 一天内改了多次就看**最早那一条**的 from_stage，那才是今天早上的状态。
    * 读不到就当没有：最坏结果是人照旧当天消失（改动前的行为），不会多打电话。
    */
-  const stageSuppressedTodayIds = new Set<string>()
-  /** 已经看过今天第一条变更的人 —— 后面的都不看了。 */
-  const seenStageEvent = new Set<string>()
-  try {
-    const { data: events } = await supabaseAdmin
-      .from('contact_stage_events')
-      .select('contact_id, from_stage, created_at')
-      .eq('client_id', clientId)
-      .gte('created_at', new Date(localDayStartMs(now, timeZone)).toISOString())
-      .order('created_at', { ascending: true })
-
-    for (const e of events ?? []) {
-      const cid = e.contact_id as string
-      // 只认今天最早那一条 —— 后面的 from_stage 已经是今天改过之后的状态了。
-      if (seenStageEvent.has(cid)) continue
-      seenStageEvent.add(cid)
-      const from = e.from_stage as string | null
-      const wasOnList = !from || !(stageMeta.get(from)?.suppressed ?? false)
-      if (wasOnList) stageSuppressedTodayIds.add(cid)
-    }
-  } catch (err) {
-    console.error('[crm/today] 读今天的阶段变更失败，按「没改过」算:', err)
-  }
+  // 读取逻辑抽成共用函数，「全部客人」页同用一份（魏征复审 PR #3417 P2-c）。
+  const stageSuppressedTodayIds = await loadStageSuppressedTodayIds(
+    clientId,
+    localDayStartMs(now, timeZone),
+    (k) => stageMeta.get(k)?.suppressed ?? false,
+  )
 
   /**
    * 今天这份名单**一天之内不变**（判据见 lib/crm/day-list）。
@@ -445,6 +412,19 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       touchedToday: (id) => touchedTodayIds.has(id),
     },
   )
+
+  // AI 接管中的客人不进「今天要联系」；接管后客人回来了才重新出现，标「客人回来了」（lib/crm/ai-takeover）。
+  // 读不到接管名单就当没有人在接管 —— 跟这个功能上线前一样，整页照常打开。
+  const takeoverSince = await loadTakeoverSince(clientId).catch((err: unknown) => {
+    console.warn('[crm/today] 读 AI 接管名单失败，按无人接管显示:', err instanceof Error ? err.message : err)
+    return new Map<string, string>()
+  })
+  const shown = applyTakeoverToDayList(ranked, {
+    takeoverSince,
+    touchesOf: (id) => (byContact.get(id) ?? []).map(toReengageTouchRow),
+    dayStartMs: localDayStartMs(now, timeZone),
+    now,
+  })
 
   /**
    * 系统提议改阶段 —— 提议，不自动改。
@@ -638,7 +618,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     }
   }
 
-  const toRow = (c: (typeof ranked)[number]) => {
+  const toRow = (c: (typeof shown)[number]) => {
     const row = contactById.get(c.id)
     const last = (byContact.get(c.id) ?? [])[0]
     // 早上打开这一页要一眼看懂：今天动过没有、上次谁跟的、聊到哪了。
@@ -702,8 +682,14 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       suggestedChannel: c.seg.suggestedChannel,
       /** 号码在库里但打不通 —— 卡片靠它把「没留电话」和「号是坏的」分开说。 */
       phoneUnusable: c.seg.phoneUnusable ?? false,
+      /** 客人说过不要电话（只关电话，邮件照常）—— 抽屉据此藏拨号、显示撤销条。 */
+      doNotCall: c.seg.doNotCall === true,
       /** 被标成「别再联系」—— 抽屉靠它给出取消入口（早前判词误判过一批人）。 */
       doNotContact: c.doNotContact === true,
+      /** AI 跟进中（接管后客人回来了才会出现在这里）。 */
+      aiTakeover: c.takeover.aiTakeover,
+      /** 接管期间客人回信 / 填表 / 来电 / 发私信了 —— 卡片标「客人回来了」。 */
+      customerCameBack: c.takeover.cameBack !== null,
       dueAt: c.seg.dueAt,
       lastTouchAt: c.seg.lastTouchAt,
       lastNote: last?.summary ?? null,
@@ -735,7 +721,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   // 展示用分桶在 lib/crm/worklist-groups 里，不在这个文件里 —— 它漏一行就会让
   // 整段客人从页面上消失（2026-08-02 的 33 人事故），必须能被测试钉住。
   const buckets = WORKLIST_GROUPS.map(({ key, members, layer }) => {
-    const all = ranked
+    const all = shown
       .filter((c) => members.includes(c.seg.segment))
       // 置顶的排最前（多个置顶按最近钉的在上）。只在桶内生效 ——
       // 跨桶置顶会让人脱离「这批该怎么办」的说明，反而不知道要干嘛。
@@ -816,6 +802,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
          * 点开它就能拨那个已知打不通的号，是这一组里最不该出现的事。
          */
         phoneUnusable: seg.phoneUnusable ?? false,
+        doNotCall: seg.doNotCall === true,
         /** 「要记住的事」—— 见上面那一处同名字段的注释，两处必须一致。 */
         important: { note: row?.important_note ?? null, dueAt: row?.important_due_at ?? null },
         /** 被标成「别再联系」—— 抽屉靠它给出取消入口。 */
@@ -885,7 +872,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     viewerEmail: access.user.email ?? null,
     counts: segmentCounts(models, now),
     totalContacts: models.length,
-    todoTotal: ranked.length,
+    todoTotal: shown.length,
     generatedAt: now.toISOString(),
   })
 }

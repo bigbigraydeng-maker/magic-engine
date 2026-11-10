@@ -19,7 +19,7 @@ export interface ContentGateResult {
 
 // ---- frequency gate -------------------------------------------------------
 
-export type OutboundSource = 'sent_items' | 'audit' | 'touchpoint' | 'mailchimp'
+export type OutboundSource = 'sent_items' | 'audit' | 'touchpoint' | 'mailchimp' | 'me_send'
 
 /** One email we sent to one of the guest's addresses. */
 export interface OutboundItem {
@@ -31,6 +31,13 @@ export interface OutboundItem {
   subject: string | null
   /** Lower-case recipient address this item counts for. '' = contact-scoped (audit rows, touchpoints): counted for the primary address. */
   address: string
+  /**
+   * true = a mail a machine sent that still counts toward the cap (ME's own automated letters, source `me_send`). It is
+   * never a person's email: anything asking "did a person write to this guest" must leave it out. It is also never
+   * folded into another record as "the same mail" unless the two carry the same id (gates/frequency.ts). Absent = an
+   * ordinary item.
+   */
+  automated?: true
 }
 
 /** A source either answers (possibly with zero items) or fails. A failure is NEVER read as zero. */
@@ -50,7 +57,19 @@ export interface FrequencySources {
     addresses: readonly string[],
     sinceIso: string,
   ): Promise<SourceResult | { ok: true; items: []; applicable: false }>
+  /**
+   * ME's own automated mails to these addresses (the send ledger, matched by address fingerprint, so a guest whose address
+   * sits on two contact records is still counted). Every item is `automated: true`, source `me_send`.
+   */
+  meSends(addresses: readonly string[], sinceIso: string): Promise<SourceResult>
 }
+
+/**
+ * Lists the provider message ids (Graph ids) of mails that must NOT count toward the cap: replies to a guest's own
+ * enquiry, sent by templates the settings mark as exempt. It throws when it cannot list them all, and then the cap
+ * fails closed (frequency_unverifiable); a failure is never read as "there are none".
+ */
+export type ExemptIdLoader = (sinceIso: string) => Promise<readonly string[]>
 
 export type FrequencyVerdict =
   | { ok: true; count: number; items: OutboundItem[] }

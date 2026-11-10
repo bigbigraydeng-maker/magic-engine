@@ -3,7 +3,7 @@
  * 失败关闭：读不到 / 读不全受众列表就不建；排除名单失效 = 已付款老客人仍会看到广告，所以一并核状态。
  */
 import type { AdDraft } from './ad-draft'
-import { MIN_INCLUDED_AUDIENCE_SIZE } from './ad-draft'
+import { MIN_INCLUDED_AUDIENCE_SIZE, unionAudienceIds } from './ad-draft'
 import { fetchCustomAudiences, fetchCustomAudienceById, type GraphCustomAudience } from '@/lib/meta/entity-settings'
 
 /** 一个受众在建前核对时读到的事实；null = 没读到。 */
@@ -40,8 +40,8 @@ export async function checkAudiences(
   draft: AdDraft,
   deps: { adAccountId: string; accessToken: string },
 ): Promise<{ error: string | null; checked: AudiencesChecked | null }> {
-  const included = draft.audienceIds ?? []
-  const excluded = draft.excludedAudienceIds ?? []
+  // 多个广告组：受众写在每个组上，这里取所有组的并集来核对（只看根上会漏掉全部组的受众）。
+  const { included, excluded } = unionAudienceIds(draft)
   if (included.length === 0 && excluded.length === 0) return { error: null, checked: null }
 
   const read = await readAudienceList(deps)

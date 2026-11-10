@@ -21,6 +21,8 @@ export interface ContactRow {
   phoneUnusable?: boolean
   /** 被标成「别再联系」—— 展开里给一条取消的路（见 DncBanner）。 */
   doNotContact?: boolean
+  /** 客人说过不要电话（只关电话，邮件照常）—— 抽屉藏拨号、给「放回电话名单」。 */
+  doNotCall?: boolean
   email: string | null
   hasMessenger: boolean
   stage: string | null
@@ -41,6 +43,14 @@ export interface ContactRow {
    * 列表只画 `nextAction.line`；`stage` / `segment` 仍在，抽屉改阶段和筛选还要用。
    */
   nextAction: NextAction
+  /** 今天已经动过他了（记过笔记 / 打过电话 / 发过信）—— 卡片就地变灰打勾，位置不动。缺省 = 没有这个信息。 */
+  handled?: boolean
+  /** 已处理时的一句人话（例如「今天联系过了，他还没回」）。 */
+  handledWhy?: string | null
+  /** 「AI 跟进中」：发了目录、系统在跟（lib/crm/ai-takeover）。缺省 = 不在接管中。 */
+  aiTakeover?: boolean
+  /** 接管期间客人回来了（回信 / 填表 / 来电 / 私信）—— 名字旁标「客人回来了」。 */
+  customerCameBack?: boolean
   /** AI 对这位客人的摘要；分段列表「该做什么」列有就显示它，没有就显示规则那句。 */
   aiSummary?: string | null
   /** 最新一张 AI 摘要的意向；null = 没有摘要。 */
@@ -122,6 +132,7 @@ export const OUTCOME_LABEL: Record<string, string> = {
   missed_inbound: '漏接来电',
   bad_number: '号码不通',
   do_not_contact: '别再联系',
+  do_not_call: '只别打电话',
   not_interested: '没兴趣',
   // 少了这一条，「暂时不考虑」这个结论在时间线上完全不显示 ——
   // 软硬拒绝分开这件事，在最主要的翻查视图里就等于没做。

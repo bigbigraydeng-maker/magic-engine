@@ -22,6 +22,8 @@ export interface EmailTemplateVersion {
   pickFilter: PickFilter
   status: TemplateStatus
   changeNote: string | null
+  /** Colleague-facing note. Missing on older callers means "not set". */
+  whenToUse?: string | null
   createdBy: string
   createdAt: string
 }
@@ -38,6 +40,8 @@ export interface NewTemplateVersionInput {
   pickFilter: PickFilter
   status: TemplateStatus
   changeNote?: string | null
+  /** Omitted or blank is stored as null. */
+  whenToUse?: string | null
   createdBy: string
 }
 
@@ -88,6 +92,21 @@ export interface PublishedToursProviderSettings {
   allToursUrl: string // https URL
 }
 
+/**
+ * The client's current brochure / catalogue, sent by the one-click catalogue line. Client configuration only: what the
+ * document is (a tour brochure, a property booklet) lives in the template text, never in shared code.
+ */
+export interface CatalogueProviderSettings {
+  /** The template the catalogue line sends. Never cap-exempt (the parser refuses it). */
+  templateKey: string
+  /** Shown to people and kept on the line's records, e.g. "v9". */
+  versionLabel: string
+  /** https, its host in guardrails.allowedLinkHosts. */
+  url: string
+  /** YYYY-MM-DD, inclusive, in the client's time zone. After it no mail may carry `url`. */
+  validUntil: string
+}
+
 export interface EmailSettings {
   enabled: boolean
   sendMailbox: string | null
@@ -95,9 +114,24 @@ export interface EmailSettings {
   footer: string | null
   limits: { perUserPerHour: number; perUserPerDay: number; perMailboxPerDay: number }
   frequencyCap: { max: number; windowDays: number } | null
+  /** Template keys whose mails are replies to a guest's own enquiry: the weekly cap neither blocks them nor counts them. */
+  capExemptTemplateKeys: string[]
   recipientAllowlist: string[] | null
   sameTemplateCooldownHours: number
   callPromptHours: number
   guardrails: { allowedLinkHosts: string[]; rules: GuardrailRule[] }
-  providers: { publishedTours?: PublishedToursProviderSettings }
+  providers: {
+    publishedTours?: PublishedToursProviderSettings
+    catalogue?: CatalogueProviderSettings
+    linkTracking?: LinkTrackingSettings
+  }
+}
+
+/**
+ * Per-recipient click tracking for links to sites that report clicks back to ME (the client's own site).
+ * Design: docs/specs/2026-11-10-crm-email-click-tracking-b2-design-v0.md §4.1.
+ */
+export interface LinkTrackingSettings {
+  /** Lower-case hostnames whose links get a click token; each must also be in guardrails.allowedLinkHosts. */
+  hosts: string[]
 }

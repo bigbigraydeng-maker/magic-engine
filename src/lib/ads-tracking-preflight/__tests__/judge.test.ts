@@ -183,15 +183,28 @@ describe('tracking.pixel_alive', () => {
     expect(gate(judge(), KEY).status).toBe('green')
   })
 
-  it('从没触发过且没有 PageView → 红', () => {
-    const g = gate(judge(i => { i.meta.datasets[0].last_fired_at = null; i.meta.datasets[0].events_24h = {} }), KEY)
+  it('从没触发过且读到 PageView 为 0 → 红', () => {
+    const g = gate(judge(i => { i.meta.datasets[0].last_fired_at = null; i.meta.datasets[0].events_24h = { PageView: 0 } }), KEY)
     expect(g.status).toBe('red')
     expect(g.hard).toBe(true)
   })
 
-  it('最后触发在 30 小时前且 24 小时内没有 PageView → 红', () => {
-    const g = gate(judge(i => { i.meta.datasets[0].last_fired_at = hoursAgo(30); i.meta.datasets[0].events_24h = {} }), KEY)
+  it('最后触发在 30 小时前且读到 PageView 为 0 → 红', () => {
+    const g = gate(judge(i => { i.meta.datasets[0].last_fired_at = hoursAgo(30); i.meta.datasets[0].events_24h = { PageView: 0 } }), KEY)
     expect(g.status).toBe('red')
+  })
+
+  it('统计读回来是空的 → 灰，不是像素已死，也不是绿；硬门灰仍挡住批准', () => {
+    const gates = judge(i => {
+      i.meta.datasets[0].events_24h = {}
+      i.meta.datasets[0].events_7d = {}
+    })
+    const g = gate(gates, KEY)
+    expect(g.status).toBe('gray')
+    expect(g.reason).toBe('读不到数据，判不了')
+    expect(g.status).not.toBe('green')
+    expect(g.hard).toBe(true)
+    expect(preconditionsMet(gates)).toBe(false)
   })
 
   it('最后触发时间显示很旧，但 24 小时内确实有 PageView → 黄（多半是 Meta 显示延迟）', () => {
@@ -216,10 +229,20 @@ describe('tracking.pixel_alive', () => {
     expect(g.status).toBe('gray')
   })
 
-  it('官网同时发两个官方数据集，一个在线一个已死 → 黄', () => {
+  it('一个在线、另一个统计是空响应 → 黄，不把空响应说成已死，也不是绿', () => {
     const g = gate(judge(i => {
       i.landing.probes[0].pixel_ids = [OFFICIAL, OTHER_OFFICIAL]
       i.meta.datasets[1].events_24h = {}
+    }), KEY)
+    expect(g.status).toBe('yellow')
+    expect(g.reason).toContain('读不到数据，判不了')
+    expect(g.status).not.toBe('green')
+  })
+
+  it('官网同时发两个官方数据集，一个在线一个已死 → 黄', () => {
+    const g = gate(judge(i => {
+      i.landing.probes[0].pixel_ids = [OFFICIAL, OTHER_OFFICIAL]
+      i.meta.datasets[1].events_24h = { PageView: 0 }
     }), KEY)
     expect(g.status).toBe('yellow')
   })
@@ -247,6 +270,24 @@ describe('tracking.lead_event_seen', () => {
   it('事件统计没读到、也没有别处能证明 → 灰', () => {
     const g = gate(judge(i => { i.meta.datasets[0].events_7d = null }), KEY)
     expect(g.status).toBe('gray')
+  })
+
+  it('7 天统计是空响应 → 灰「读不到数据，判不了」，不是没收到留资，也不是绿；仍挡住批准', () => {
+    const gates = judge(i => { i.meta.datasets[0].events_7d = {} })
+    const g = gate(gates, KEY)
+    expect(g.status).toBe('gray')
+    expect(g.reason).toBe('读不到数据，判不了')
+    expect(g.status).not.toBe('green')
+    expect(g.hard).toBe(true)
+    expect(preconditionsMet(gates)).toBe(false)
+  })
+
+  it('读回了数据且留资次数是 0 → 仍是红，挡住批准', () => {
+    const gates = judge(i => { i.meta.datasets[0].events_7d = { PageView: 4, Lead: 0 } })
+    const g = gate(gates, KEY)
+    expect(g.status).toBe('red')
+    expect(g.reason).toContain('一条留资事件都没收到')
+    expect(preconditionsMet(gates)).toBe(false)
   })
 
   it('按客户配置的留资事件名数；默认的 Lead 不再算', () => {

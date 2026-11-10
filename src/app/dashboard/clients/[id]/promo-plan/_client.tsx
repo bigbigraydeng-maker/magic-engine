@@ -14,9 +14,12 @@ import type { PromoBoard } from '@/lib/marketing-plan/promo/board'
 import { approveButtonState, continueButtonVisible } from '@/lib/marketing-plan/promo/labels'
 import { buildPromoSample, describePromoSpec } from '@/lib/marketing-plan/promo/overview'
 import { readPromoSpec } from '@/lib/marketing-plan/promo/spec'
+import { creativeRefsOfPhase } from '@/lib/marketing-plan/promo/phase-creatives'
 import { pickPlanForPrescription } from '@/lib/marketing-plan/promo/plan-pick'
 import { ApprovalRecord } from './_components/ApprovalRecord'
 import { PlanOverview } from './_components/PlanOverview'
+import { DeliveryStageCard } from './_components/DeliveryStageCard'
+import type { DeliveryView } from '@/lib/marketing-plan/promo/stage-evidence'
 import { ScheduleTable } from './_components/ScheduleTable'
 import { expandPromoSchedule } from '@/lib/marketing-plan/promo/schedule'
 import { todayInNz } from '@/lib/marketing-plan/promo/schedule-view'
@@ -26,10 +29,11 @@ import { GateList } from './_components/GateList'
 import type { GoalPrescriptionView } from '@/lib/marketing-plan/promo/goal-prescription'
 import type { PromoOptions } from '@/lib/marketing-plan/promo/options'
 import { PrescriptionCard } from './_components/PrescriptionCard'
-import { adsRunningFrom, describeLiveAds } from '@/lib/marketing-plan/promo/live-ads-message'
+import { adsRunningFrom, describeLiveAds, describeUnrecordedAdsets } from '@/lib/marketing-plan/promo/live-ads-message'
 import type { LiveAdsFact, LiveAdsMessage } from '@/lib/marketing-plan/promo/live-ads-message'
 import { BlankDraftPlanButton } from './_components/BlankDraftPlanButton'
 import { PromoSpecEditor } from './_components/PromoSpecEditor'
+import { dailyTotalCapSentence } from '@/lib/marketing-plan/promo/daily-total-cap'
 import { PromoSpecForm } from './_components/PromoSpecForm'
 
 /** 计划内容变了（含从「高级」保存）就换 key，让表格和文本编辑器都重新读最新内容。 */
@@ -42,6 +46,7 @@ export function PromoPlanClient() {
   const [board, setBoard] = useState<PromoBoard | null>(null)
   const [options, setOptions] = useState<PromoOptions | null>(null)
   const [liveAds, setLiveAds] = useState<LiveAdsFact | null>(null)
+  const [liveLink, setLiveLink] = useState<string[] | null>(null)
   const [liveAdsVisible, setLiveAdsVisible] = useState(false)
   const [prescription, setPrescription] = useState<GoalPrescriptionView | null>(null)
   const [loading, setLoading] = useState(true)
@@ -50,6 +55,7 @@ export function PromoPlanClient() {
   const [message, setMessage] = useState<string | null>(null)
   const [showSample, setShowSample] = useState(false)
   const [approverOnly, setApproverOnly] = useState(false)
+  const [delivery, setDelivery] = useState<DeliveryView | null>(null)
 
   const base = `/api/clients/${clientId}/marketing-plan`
 
@@ -74,14 +80,18 @@ export function PromoPlanClient() {
       board?: PromoBoard
       options?: PromoOptions
       live_ads?: LiveAdsFact | null
+      live_link?: { lines: string[] } | null
       live_ads_visible?: boolean
       prescription?: GoalPrescriptionView | null
+      delivery?: DeliveryView | null
       error?: string
     }
     if (!json.success || !json.board) throw new Error(json.error ?? '读取推广计划失败')
     setBoard(json.board)
+    setDelivery(json.delivery ?? null)
     setOptions(json.options ?? null)
     setLiveAds(json.live_ads ?? null)
+    setLiveLink(json.live_link?.lines ?? null)
     setLiveAdsVisible(json.live_ads_visible === true)
     setPrescription(json.prescription ?? null)
   }, [base])
@@ -93,7 +103,7 @@ export function PromoPlanClient() {
       const id = keepId ?? pickPlanForPrescription(loaded.plans, loaded.prescription?.goal_id ?? null)?.id ?? null
       setSelectedId(id)
       if (id) await loadBoard(id)
-      else { setBoard(null); setPrescription(loaded.prescription) }
+      else { setBoard(null); setDelivery(null); setPrescription(loaded.prescription) }
     } catch (e) {
       setError((e as Error).message)
     } finally { setLoading(false) }
@@ -128,6 +138,44 @@ export function PromoPlanClient() {
     if (!j.success) throw new Error(j.error ?? '记录失败')
     setMessage('✓ 已记录：这一周你看过、没意见。计划和预算都没有改动。')
   })
+
+  const onMark = (stage: 'steady' | 'test') => {
+    void (async () => {
+      setBusy('mark'); setMessage(null)
+      try {
+        const res = await fetch(`${base}/${selectedId}/promo/delivery`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ stage }),
+        })
+        const json = await res.json() as { success: boolean; error?: string; reason?: string }
+        if (json.reason === 'approver_only') setApproverOnly(true)
+        if (!json.success) throw new Error(json.error ?? '没有改成')
+        setMessage(stage === 'steady' ? '✓ 已标为稳住。预算和每天总上限没有改。' : '✓ 已改回试投。预算和每天总上限没有改。')
+        await refresh(selectedId)
+      } catch (e) {
+        setMessage(`✗ ${(e as Error).message}`)
+      } finally {
+        setBusy(null)
+      }
+    })()
+  }
+
+  const onPropose = () => {
+    void (async () => {
+      setBusy('propose'); setMessage(null)
+      try {
+        const res = await fetch(`${base}/${selectedId}/promo/stage-proposal`, { method: 'POST' })
+        const json = await res.json() as { success: boolean; error?: string; plan_id?: string; reason?: string }
+        if (json.reason === 'approver_only') setApproverOnly(true)
+        if (!json.success || !json.plan_id) throw new Error(json.error ?? '没有生成草稿')
+        setMessage('✓ 已生成一份放量草稿。正在跑的计划没有改，也没有自动批准。')
+        await refresh(json.plan_id)
+      } catch (e) {
+        setMessage(`✗ ${(e as Error).message}`)
+      } finally {
+        setBusy(null)
+      }
+    })()
+  }
 
   const onApprove = () => {
     if (!confirm('确认批准这份计划？批准后只会派出内部待办，广告不会自动投放。')) return
@@ -205,7 +253,7 @@ export function PromoPlanClient() {
 
         {board && selected && (
           <>
-            <Headline board={board} plan={selected} liveAds={liveAdsVisible ? liveAds : null} liveAdsVisible={liveAdsVisible} clientId={clientId} />
+            <Headline board={board} plan={selected} liveAds={liveAdsVisible ? liveAds : null} liveLink={liveAdsVisible ? liveLink : null} liveAdsVisible={liveAdsVisible} clientId={clientId} />
             {board.approval?.deferred_blockers && board.approval.deferred_blockers.length > 0 && (
               <div className="rounded-xl border border-yellow-200 bg-yellow-50 px-4 py-3">
                 <p className="text-sm font-semibold text-yellow-800">这些阶段还没过关，开始前必须补齐</p>
@@ -215,6 +263,16 @@ export function PromoPlanClient() {
                   ))}
                 </ul>
               </div>
+            )}
+            {delivery && !showSample && (
+              <DeliveryStageCard
+                view={delivery}
+                busy={busy === 'propose'}
+                marking={busy === 'mark'}
+                canAct={!approverOnly && selected.status === 'approved'}
+                onPropose={onPropose}
+                onMark={onMark}
+              />
             )}
             {shownPhases
               ? <PlanOverview phases={shownPhases} sample={showSample} onCloseSample={showSample ? () => setShowSample(false) : undefined} />
@@ -226,7 +284,19 @@ export function PromoPlanClient() {
             {schedule && <ScheduleTable schedule={schedule} mode={scheduleMode} today={todayIso} phases={viewPhases} adsRunning={adsRunningFrom(liveAdsVisible ? liveAds : null)} />}
             <ApprovalRecord plan={selected} />
             {board.reconcile && selected.status === 'approved' && <ReconcileTable rec={board.reconcile} />}
-            {board.next_phase && <GateList view={board.next_phase} onVerify={onVerify} busyKey={busy} />}
+            {board.next_phase && (
+              <GateList
+                view={board.next_phase}
+                onVerify={onVerify}
+                busyKey={busy}
+                creatives={{
+                  clientId,
+                  refs: creativeRefsOfPhase(selected ? readPromoSpec(selected.plan_data) : null, board.next_phase.phase.id),
+                  canAct: !approverOnly,
+                  onChanged: () => { void refresh(selectedId) },
+                }}
+              />
+            )}
             {board.has_promo && !board.spec_valid && <SpecProblems board={board} />}
 
             {approverOnly && (
@@ -282,11 +352,14 @@ export function PromoPlanClient() {
   )
 }
 
-function Headline({ board, plan, liveAds, liveAdsVisible, clientId }: { board: PromoBoard; plan: MarketingPlan; liveAds: LiveAdsFact | null; liveAdsVisible: boolean; clientId: string }) {
+function Headline({ board, plan, liveAds, liveLink, liveAdsVisible, clientId }: {
+  board: PromoBoard; plan: MarketingPlan; liveAds: LiveAdsFact | null; liveLink: string[] | null; liveAdsVisible: boolean; clientId: string
+}) {
   const draft = plan.status === 'draft'
-  const live = draft ? describeLiveAds(liveAds) : null
+  const missing = describeUnrecordedAdsets(liveAds)
+  const live = describeLiveAds(liveAds)
   const text = draft
-    ? live?.level === 'red' ? '还没批准——但系统里显示广告已经在花钱'
+    ? missing?.level === 'red' ? '还没批准——有开着的广告组没有批准记录'
       : live?.level === 'amber' ? '还没批准——Meta 里的广告可能已经在花钱'
       : '还没批准——批准之前，ME 的自动动作都不会发生'
     : board.reconcile?.headline ?? (board.has_promo ? '推广计划的内容有问题，先改好' : '这份计划还没有推广计划的阶段')
@@ -295,7 +368,13 @@ function Headline({ board, plan, liveAds, liveAdsVisible, clientId }: { board: P
     <div className={`rounded-xl border px-5 py-4 ${blind ? 'bg-gray-100 border-gray-300' : 'bg-white border-gray-200'}`}>
       <p className="text-xs text-gray-500 mb-1">{plan.title}</p>
       <p className="text-lg font-bold text-gray-900">{text}</p>
-      {draft && liveAdsVisible && <LiveAdsNotice fact={liveAds} message={live} clientId={clientId} />}
+      <p className="text-sm text-gray-800 mt-2">{dailyTotalCapSentence(plan.plan_data)}</p>
+      {liveAdsVisible && <LiveAdsNotice fact={liveAds} missing={missing} message={live} clientId={clientId} />}
+      {liveAdsVisible && liveLink && liveLink.length > 0 && (
+        <ul className="mt-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 space-y-1">
+          {liveLink.map((line, index) => <li key={`${index}-${line}`}>{line}</li>)}
+        </ul>
+      )}
       {blind && <p className="text-xs text-gray-600 mt-1">“看不清”不是“正常”：先把上面写的缺项补上，再看对账。</p>}
       {board.today && !board.timezone_known && (
         <p className="text-xs text-yellow-800 mt-1">广告账户的时区还没确定，日期暂按世界标准时间算，花费对账会显示“看不清”。</p>
@@ -315,17 +394,23 @@ function SpecProblems({ board }: { board: PromoBoard }) {
   )
 }
 
-function LiveAdsNotice({ fact, message, clientId }: { fact: LiveAdsFact | null; message: LiveAdsMessage | null; clientId: string }) {
-  if (message) {
-    const tone = message.level === 'red' ? 'border-red-300 bg-red-50 text-red-800'
-      : message.level === 'amber' ? 'border-yellow-300 bg-yellow-50 text-yellow-900' : 'border-gray-200 bg-gray-50 text-gray-700'
-    return (
-      <p className={`mt-2 rounded-lg border px-3 py-2 text-sm ${tone}`}>
-        {message.text}{' '}
-        <a className="underline font-medium" href={`/dashboard/clients/${clientId}/ads-health`}>去作战地图看「已开投」</a>
-      </p>
-    )
-  }
-  if (!fact || !fact.ok) return <p className="text-xs text-gray-600 mt-1">读不到广告花费，没法确认 Meta 里有没有在跑的广告。</p>
-  return null
+function LiveAdsNotice({ fact, missing, message, clientId }: {
+  fact: LiveAdsFact | null; missing: LiveAdsMessage | null; message: LiveAdsMessage | null; clientId: string
+}) {
+  const tone = (level: LiveAdsMessage['level']) => level === 'red' ? 'border-red-300 bg-red-50 text-red-800'
+    : level === 'amber' ? 'border-yellow-300 bg-yellow-50 text-yellow-900' : 'border-gray-200 bg-gray-50 text-gray-700'
+  return (
+    <>
+      {missing && (
+        <p className={`mt-2 rounded-lg border px-3 py-2 text-sm ${tone(missing.level)}`}>
+          {missing.text}{' '}
+          <a className="underline font-medium" href={`/dashboard/clients/${clientId}/ads-health`}>去作战地图看「已开投」</a>
+        </p>
+      )}
+      {message && <p className={`mt-2 rounded-lg border px-3 py-2 text-sm ${tone(message.level)}`}>{message.text}</p>}
+      {!missing && !message && (!fact || !fact.ok) && (
+        <p className="text-xs text-gray-600 mt-1">读不到广告花费，没法确认 Meta 里有没有在跑的广告。</p>
+      )}
+    </>
+  )
 }

@@ -22,11 +22,13 @@ import {
 import type { AttributionItemKind } from './attribution-items'
 import type { ClientRosterItemKind } from './client-roster'
 import type { DailyPlanMeasurementItemKind } from './daily-plan-measurement-items'
+import type { SocialReadbackItemKind } from './social-readback-items'
 import type { EmailReplyItemKind } from './email-reply-items'
 import type { BindingRequestItemKind } from './binding-request-items'
 import type { PageBindingItemKind } from './page-binding-items'
 import type { CommentScopeTodoKind } from './comment-scope-items'
 import type { CommentReplyScopeTodoKind } from './comment-reply-scope-items'
+import type { CommentHumanTodoKind } from './comment-human-items'
 import type { CommentAutoreplyRunFailingTodo } from './comment-autoreply-run-failing-items'
 import type { MetaTokenHealthKind } from './meta-token-health-items'
 import type { DeployHealthItemKind } from './deploy-health-items'
@@ -41,11 +43,22 @@ import type { AdsRuleFindingItemKind } from './ads-rule-finding-items'
 import type { AdsCircuitItemKind } from './ads-circuit-items'
 import type { AdsServicePauseItemKind } from './ads-service-pause-items'
 import type { AdsAccountStatusItemKind } from './ads-account-status-items'
+import type {
+  AdsAgentDailyPullGapItemKind,
+  AdsAgentSyncStaleItemKind,
+  AdsDailySpendOverCapNoticeItemKind,
+  AdsPlanDailyCapMissingItemKind,
+} from './ads-agent-stale-items'
+import type { AdsPlanDeliveryStageMissingItemKind } from './ads-plan-delivery-stage-items'
+import type { AdsCircuitBreakerAlertKind, AdsCircuitBreakerPauseKind } from './ads-circuit-breaker-items'
 import type { GoalRolloverItemKind } from './goal-rollover-items'
 import type { MaliangItemKind } from './maliang-render-items'
 import type { LibaiItemKind } from './libai-items'
+import type { BaozhengItemKind } from './baozheng-items'
+import type { FactoryWinnerItemKind } from './factory-winner-items'
 import type { SimaqianItemKind } from './simaqian-review-items'
 import type { ToolLeadItemKind } from './tool-lead-items'
+import type { DistributorApplicationItemKind } from './distributor-application-items'
 import type { PmKind } from './five-kinds'
 
 /**
@@ -63,6 +76,8 @@ import type { PmKind } from './five-kinds'
 //   我们的探活 fetch 很可能拿到 403 → 整条被当坏链接丢掉。而这两条恰恰是
 //   「全站 AI 在空跑」和「这套告警自己瞎了」—— 宁可让人自己找入口，也不能让它静默消失。
 export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
+  // distributor_application_pending：链接是登录后的经销商页，探活易判坏链接；丢了 = 有人申请了没人知道。
+  'distributor_application_pending',
   // 标题效果判定的两条欠账：链接是要登录的后台页，探活会判坏链接——不能因此静默消失（2026-10-29）。
   'seo_rank_verdict_overdue',
   'seo_rank_baseline_missing',
@@ -105,10 +120,30 @@ export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
   'promo_plan_watch',
   'promo_plan_watch_broken',
   'plan_draft_auto_failed',
+  // 整包批准：链接是要登录的后台页，探活多半判成坏链接。没人看见 = 这一周不会批。
+  'week_pack_needs_approval',
+  'week_pack_items_held',
+  // 社媒每周出稿：链接是要登录的后台页，探活多半判成坏链接。没人看见 = 下周的卡是空的。
+  'social_weekly_loop_needs_human',
+  // Reel 按日公开：链接是要登录的后台页。没人看见 = 批过的片到日没发，也没人知道。
+  'reel_scheduled_needs_human',
+  // 社媒账号自检：链接是要登录的后台页。没人看见 = 账号越来越像，没人知道。
+  'social_account_audit',
+  // 社媒每周回看建议：链接是要登录的后台页。没人看见 = 发出去的片效果好坏没人知道，配比不会调。
+  'social_readback_suggestion',
+  'social_post_readback_missing',
+  'social_post_readback_unreadable',
+  'social_post_readback_retries_exhausted',
+  'social_story_readback_unsupported',
+  // Reel 每日清单：链接是要登录的后台页。没人看见 = 排了日子的片没人批，到日不发。
+  'reel_daily_list_pending',
   // 广告开投前追踪检查：链接是 Events Manager / GA4 / Inngest 这类要登录的后台页，探活多半判成坏链接——
   // 这条里还有「检查自己没跑成」，绝不能因为链接问题静默消失。
   'ads_tracking_preflight_fix',
   'ads_tracking_preflight_broken',
+  // 熔断只出暂停卡：链接是登录后的广告页，探活容易判坏。没人看见 = 异常花钱没人点确认。
+  'ads_circuit_breaker_pause',
+  'ads_circuit_breaker_alert',
 ])
 
 /** Meta queued this long without being applied = the applier is stuck. */
@@ -233,6 +268,24 @@ export type ManualItemKind =
   | 'story_unknown_outcome'
   /** Story 自动发布：已授权的周包到点了，却没有任何发布 / 演练记录 —— 发布器可能没在跑 */
   | 'story_unarmed'
+  /** 下一周的社媒整包该批了，或确认卡快过期 */
+  | 'week_pack_needs_approval'
+  /** 整包里有条目被单独拦住，没有整包撤回 */
+  | 'week_pack_items_held'
+  /** 社媒每周出稿：没东西可排 / 全被刷掉 / 读不到团目录 / 马良没审（读写库模式的回执） */
+  | 'social_weekly_loop_needs_human'
+  /** Reel 按日公开：批后内容 / 日子变了、错过、发失败、结果不明（读流量记录里的授权状态） */
+  | 'reel_scheduled_needs_human'
+  /** 社媒账号自检：哪些项超线或量不出来（读每周自检的回执） */
+  | 'social_account_audit'
+  /** 社媒每周回看建议：公开满 72 小时的 Reel 成绩，多做 / 少做建议（读每周回看的回执） */
+  | 'social_readback_suggestion'
+  | 'social_post_readback_missing'
+  | 'social_post_readback_unreadable'
+  | 'social_post_readback_retries_exhausted'
+  | 'social_story_readback_unsupported'
+  /** Reel 每日清单：今天到后天排了日子、还没放行的（开了社媒 Agent 的客户） */
+  | 'reel_daily_list_pending'
   | 'auto_run_blocked'
   | 'auto_run_stuck'
   /** 被一句「不打算去」误判成永久拒联 —— 只有人能看一眼原话再决定 */
@@ -261,8 +314,11 @@ export type ManualItemKind =
   | 'paid_signal_needs_review'
   /** 工具实验室有人留资（自助开通 / 网站诊断留邮箱）—— 这张表以前写完没人读，见 tool-lead-items.ts */
   | ToolLeadItemKind
+  | DistributorApplicationItemKind
   | CommentScopeTodoKind
   | CommentReplyScopeTodoKind
+  /** 主页评论分流后仍要 FDE 公开回复（不含评论原文） */
+  | CommentHumanTodoKind
   /** 评论自动回复连续多轮整轮没扫完 —— 以前被记成「完成」，约一个月没人发现 */
   | CommentAutoreplyRunFailingTodo['kind']
   /** 写在 Render 里的 Meta 钥匙被 Meta 作废（错误码 190）—— 只有人能重新授权 */
@@ -290,10 +346,19 @@ export type ManualItemKind =
   | AdsServicePauseItemKind
   /** Meta 广告账户状态不是正常超过 24 小时 / 状态读不到 / 账户已关闭（每周提醒一次） */
   | AdsAccountStatusItemKind
+  | AdsAgentSyncStaleItemKind
+  | AdsAgentDailyPullGapItemKind
+  | AdsDailySpendOverCapNoticeItemKind
+  | AdsPlanDailyCapMissingItemKind
+  | AdsPlanDeliveryStageMissingItemKind
+  | AdsCircuitBreakerPauseKind
+  | AdsCircuitBreakerAlertKind
   /** 月循环目标过了月底没自动续上 —— 广告自治 / 日报会失去目标口径 */
   | GoalRolloverItemKind
   /** Facebook 删除数据请求处理失败 —— 用户在 Facebook 里要求删数据，我们答应了却没做到，不许只写日志 */
   | 'meta_data_deletion_failure'
+  /** CRM 邮件点击追踪疑似坏了（7 天带追踪的信 ≥5 封却 0 回传，或写编号失败 >3 次）—— 开发欠账（2026-11-10 B2）。 */
+  | 'crm_link_tracking_silent'
   /** 有成交/咨询等着人核对要不要告诉广告平台 —— 撤不回，所以必须人点 */
   | 'conversion_needs_review'
   /** 公司回信确认收到款，但缺金额/疑似重复/有取消字样，系统没法自动记成交 —— 要人核对（2026-10-04） */
@@ -304,6 +369,8 @@ export type ManualItemKind =
   | 'conversion_capi_token_dead'
   /** D3 诊断建议暂停广告组，Kernel 待批准——PM 不点头不暂停 */
   | 'ads_auto_pause_pending'
+  /** D3 暂停建议被内核或安全闸拦下，没进「等你点头」，广告照常花钱（2026-11-04） */
+  | 'ads_auto_pause_blocked'
   /** AI 全自动审核发现异常，已经自动暂停发送（PM 拍板 2026-09-15："要有异常刹车"） */
   | 'ai_auto_review_circuit_breaker'
   /** AI 客服回复草稿写好了，等人批准发送（issue #1589） */
@@ -325,6 +392,8 @@ export type ManualItemKind =
   | PageBindingItemKind
   /** 排期发的 Facebook 帖子发出去了，但一直拿不到帖子编号 —— 成绩收不回来 */
   | DailyPlanMeasurementItemKind
+  /** 读回链拒绝开始记成绩（草稿 / 时间对不上 / 多条流量记录）。开关关掉时不会产出。 */
+  | SocialReadbackItemKind
   /** 私信客服健康心跳查出问题（issue #1587）：消息量骤降 / 验证器拦截率过高 / 退订登记写入失败 */
   | 'conversation_health_alert'
   /** 同一个心跳查出「AI 起草回复一直报错」—— 这条只有我们能修（开发的活） */
@@ -342,6 +411,9 @@ export type ManualItemKind =
   | MaliangItemKind
   /** 李白 · 文案溯源：「未证实」句待改 / 检不了 / 没检；提示词库月检疑似过期（只报告不改） */
   | LibaiItemKind
+  | BaozhengItemKind
+  /** 视频工厂 · 广告赢家（工厂照着学的样板片）复核过、等人点「认 / 不认」 */
+  | FactoryWinnerItemKind
   /** 司马迁 · 口碑周巡：每周四起草的 Google 评价回复草稿（一律没发）/ 本周没巡成 */
   | SimaqianItemKind
   /** Facebook 私信 / 表单留资同步连续失败（授权失效时要有主页管理员重新「连接 Meta」） */

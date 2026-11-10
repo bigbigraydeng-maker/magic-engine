@@ -122,6 +122,7 @@ describe('the first settings', () => {
       footer: null,
       limits: { per_user_per_hour: 30, per_user_per_day: 100, per_mailbox_per_day: 200 },
       frequency_cap: { max: 2, window_days: 7 },
+      cap_exempt_template_keys: [],
       recipient_allowlist: [],
       same_template_cooldown_hours: 24,
       call_prompt_hours: 24,
@@ -331,5 +332,109 @@ describe('when the save does not go through', () => {
     await ready()
     fireEvent.click(saveButton())
     expect(await screen.findByText('网络出错，保存状态不明。请重新载入后再确认。')).toBeInTheDocument()
+  })
+})
+
+describe('templates that do not use up a place in the weekly cap', () => {
+  const exemptBox = () => screen.getByLabelText('不占频次名额的模板代号') as HTMLTextAreaElement
+
+  it('shows the stored template keys, one per line', async () => {
+    routes([{ body: okPayload({ settings: stored({ cap_exempt_template_keys: ['tour-enquiry-reply', 'catalogue-request-reply'] }) }) }])
+    render(<EmailSettingsPanel clientId="c1" />)
+    await ready()
+    expect(exemptBox().value).toBe('tour-enquiry-reply\ncatalogue-request-reply')
+  })
+
+  it('saving without touching it sends the same list', async () => {
+    const { sent } = routes(
+      [{ body: okPayload({ settings: stored({ cap_exempt_template_keys: ['tour-enquiry-reply', 'catalogue-request-reply'] }) }) }, { body: okPayload({ version: 5 }) }],
+      [{ body: { ok: true, version: 5 } }],
+    )
+    render(<EmailSettingsPanel clientId="c1" />)
+    await ready()
+    fireEvent.click(saveButton())
+    await waitFor(() => expect(sent).toHaveLength(1))
+    expect(settingsOf(sent).cap_exempt_template_keys).toEqual(['tour-enquiry-reply', 'catalogue-request-reply'])
+  })
+
+  it('lines are trimmed and empty lines are dropped', async () => {
+    const { sent } = routes(
+      [{ body: okPayload({ settings: stored({ cap_exempt_template_keys: ['tour-enquiry-reply'] }) }) }, { body: okPayload({ version: 5 }) }],
+      [{ body: { ok: true, version: 5 } }],
+    )
+    render(<EmailSettingsPanel clientId="c1" />)
+    await ready()
+    fireEvent.change(exemptBox(), { target: { value: ' a-one \n\n b-two\n' } })
+    fireEvent.click(saveButton())
+    await waitFor(() => expect(sent).toHaveLength(1))
+    expect(settingsOf(sent).cap_exempt_template_keys).toEqual(['a-one', 'b-two'])
+  })
+
+  it('an older payload without the key shows an empty box and saves an empty list', async () => {
+    const { sent } = routes([{ body: okPayload() }, { body: okPayload({ version: 5 }) }], [{ body: { ok: true, version: 5 } }])
+    render(<EmailSettingsPanel clientId="c1" />)
+    await ready()
+    expect(exemptBox().value).toBe('')
+    fireEvent.click(saveButton())
+    await waitFor(() => expect(sent).toHaveLength(1))
+    expect(settingsOf(sent)).toHaveProperty('cap_exempt_template_keys')
+    expect(settingsOf(sent).cap_exempt_template_keys).toEqual([])
+  })
+
+  it('clearing the box saves an empty list', async () => {
+    const { sent } = routes(
+      [{ body: okPayload({ settings: stored({ cap_exempt_template_keys: ['tour-enquiry-reply'] }) }) }, { body: okPayload({ version: 5 }) }],
+      [{ body: { ok: true, version: 5 } }],
+    )
+    render(<EmailSettingsPanel clientId="c1" />)
+    await ready()
+    fireEvent.change(exemptBox(), { target: { value: '' } })
+    fireEvent.click(saveButton())
+    await waitFor(() => expect(sent).toHaveLength(1))
+    expect(settingsOf(sent).cap_exempt_template_keys).toEqual([])
+  })
+})
+
+describe('the catalogue (one-click catalogue mail)', () => {
+  const catalogue = { template_key: 'catalogue-send', version_label: 'v9', url: 'https://www.example.com/b.pdf', valid_until: '2026-12-31' }
+  const withCatalogue = (extra: Record<string, unknown> = {}) =>
+    okPayload({ settings: stored({ providers: { ...stored().providers, catalogue, ...extra } }) })
+  const box = (label: string) => screen.getByLabelText(label) as HTMLInputElement
+
+  it('shows the stored catalogue in its four boxes', async () => {
+    routes([{ body: withCatalogue() }])
+    render(<EmailSettingsPanel clientId="c1" />)
+    await ready()
+    expect(box('目录信用哪个模板（模板代号）').value).toBe('catalogue-send')
+    expect(box('手册版本号').value).toBe('v9')
+    expect(box('手册网址').value).toBe('https://www.example.com/b.pdf')
+    expect(box('有效期到（含当天）').value).toBe('2026-12-31')
+  })
+
+  it('saving without touching it keeps the catalogue, and any provider this panel does not know about', async () => {
+    const future = { some_new_provider: { a: 1 } }
+    const { sent } = routes([{ body: withCatalogue(future) }, { body: okPayload({ version: 5 }) }], [{ body: { ok: true, version: 5 } }])
+    render(<EmailSettingsPanel clientId="c1" />)
+    await ready()
+    fireEvent.click(saveButton())
+    await waitFor(() => expect(sent).toHaveLength(1))
+    expect(settingsOf(sent).providers).toEqual({ ...stored().providers, catalogue, ...future })
+  })
+
+  it('emptying all four boxes saves no catalogue; filling one sends all four for the server to judge', async () => {
+    const { sent } = routes([{ body: withCatalogue() }, { body: okPayload({ version: 5 }) }], [{ body: { ok: true, version: 5 } }])
+    render(<EmailSettingsPanel clientId="c1" />)
+    await ready()
+    for (const label of ['目录信用哪个模板（模板代号）', '手册版本号', '手册网址', '有效期到（含当天）']) {
+      fireEvent.change(box(label), { target: { value: '' } })
+    }
+    fireEvent.click(saveButton())
+    await waitFor(() => expect(sent).toHaveLength(1))
+    expect(settingsOf(sent).providers).toEqual(stored().providers)
+
+    fireEvent.change(box('手册版本号'), { target: { value: 'v10' } })
+    fireEvent.click(saveButton())
+    await waitFor(() => expect(sent).toHaveLength(2))
+    expect((settingsOf(sent, 1).providers as Record<string, unknown>).catalogue).toEqual({ template_key: '', version_label: 'v10', url: '', valid_until: '' })
   })
 })

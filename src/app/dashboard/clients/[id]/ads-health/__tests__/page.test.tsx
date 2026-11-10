@@ -22,6 +22,8 @@ let searchParamsValue = new URLSearchParams()
 vi.mock('next/navigation', () => ({
   useParams: () => ({ id: 'd5c98811-1c1d-4ded-bdf0-4cefec6afb84' }),
   useSearchParams: () => searchParamsValue,
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  usePathname: () => '/dashboard/clients/d5c98811-1c1d-4ded-bdf0-4cefec6afb84/ads-health',
 }))
 
 vi.mock('next/link', () => ({
@@ -29,6 +31,7 @@ vi.mock('next/link', () => ({
 }))
 
 import AdsHealthPage from '../page'
+import { PAGE_TABS } from '../tabs'
 
 /** Oztop's real 2026-07-23 alert, the one card that mattered. */
 const OZTOP_ALERT = {
@@ -116,14 +119,9 @@ describe('the money question is answered before any diagnosis', () => {
     vi.stubGlobal('fetch', mockFetch({ '/ad-health': respond([OZTOP_ALERT, HEALTHY]) }))
     render(<AdsHealthPage />)
 
-    // $628 spent, 33 results → $19.0 each. Plain sums of the card figures.
-    await waitFor(() => expect(screen.getByText(/过去 7 天花了/)).toBeTruthy())
-    const summary = screen.getByText(/过去 7 天花了/).textContent ?? ''
-    expect(summary).toContain('628')
-    expect(summary).toContain('33')
-
-    // Oztop's alert pays $40.6/lead vs the $19.0 average → named.
-    expect(screen.getByText(/最贵的是/).textContent).toContain('Lead Form')
+    await waitFor(() => expect(screen.getByText('$628')).toBeTruthy())
+    expect(document.body.textContent).toContain('33')
+    expect(screen.getByText('每条广告 · 最紧要的排最前')).toBeTruthy()
   })
 
   it('says so plainly when the money bought nothing', async () => {
@@ -148,9 +146,7 @@ describe('the money question is answered before any diagnosis', () => {
       '/ad-health': { ...respond([OZTOP_ALERT, HEALTHY]), industry: 'travel' },
     }))
     render(<AdsHealthPage />)
-    await waitFor(() => expect(screen.getByText(/过去 7 天花了/)).toBeTruthy())
-    expect(screen.getByText(/过去 7 天花了/).textContent).toContain('个咨询')
-    expect(screen.getByText(/最贵的是/).textContent).toContain('一个咨询')
+    await waitFor(() => expect(document.body.textContent).toMatch(/个咨询/))
     await userEvent.click(screen.getByText('每条广告'))
     await waitFor(() => expect(screen.getAllByText(/实付每个咨询/).length).toBe(2))
     expect(screen.getAllByText(/近 7 天咨询/).length).toBeGreaterThan(0)
@@ -346,9 +342,9 @@ describe('no reply may end without a next step, and there is no "团队"', () =>
     await waitFor(() => expect(screen.getByText('执行')).toBeTruthy())
 
     await userEvent.click(screen.getByText('执行'))
-    await waitFor(() => expect(screen.getByText(/已补 2 条新素材/)).toBeTruthy())
-    const msg = screen.getByText(/已补 2 条新素材/).textContent ?? ''
-    expect(msg).toContain('一分钱不花')
+    await waitFor(() => expect(screen.getByText(/已出 2 张确认卡/)).toBeTruthy())
+    const msg = screen.getByText(/已出 2 张确认卡/).textContent ?? ''
+    expect(msg).toContain('不会直接开投')
     expect(msg).not.toContain('团队')
   })
 })
@@ -483,6 +479,60 @@ describe('「等你点头」标签', () => {
     expect(body).toEqual({ resolution: 'reject', expectedDecisionId: 'dec-1', reason: '这个组我要留着' })
   })
 
+  it('批准暂停后在等你点头标签刷新列表', async () => {
+    let autoPauseItems = 1
+    const fn = vi.fn((url: string, init?: RequestInit) => {
+      if (url.includes('/ad-health/auto-pause/') && init?.method === 'POST') {
+        autoPauseItems = 0
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ ok: true, kind: 'done' }) })
+      }
+      if (url.includes('/ad-health/auto-pause')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            items: autoPauseItems > 0
+              ? [{
+                runId: 'run-1',
+                expectedDecisionId: 'dec-1',
+                adsetId: '123',
+                adsetName: '物流组',
+                adAccountId: 'act_1',
+                diagnosisTitle: '花钱没结果',
+                insightDate: '2026-10-17',
+                createdAt: '2026-10-17T00:00:00Z',
+              }]
+              : [],
+            hasMore: false,
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(respond([])) })
+    })
+    vi.stubGlobal('fetch', fn)
+    render(<AdsHealthPage />)
+    await userEvent.click(await screen.findByText('等你点头'))
+    await waitFor(() => expect(screen.getByText('物流组', { exact: false })).toBeTruthy())
+    await userEvent.click(screen.getByText('批准（立刻暂停）'))
+    await waitFor(() => expect(screen.getByText('目前没有等你点头的暂停建议。')).toBeTruthy())
+  })
+
+
+  it('标签栏里「广告样板」排在「每条广告」之后，点进去才出现样板面板', async () => {
+    vi.stubGlobal('fetch', mockFetch({ '/api/factory/winners': { success: true, winners: [] }, '/ad-health': respond([]) }))
+    render(<AdsHealthPage />)
+    const labels = PAGE_TABS.map(t => t.label)
+    expect(labels.indexOf('广告样板')).toBe(labels.indexOf('每条广告') + 1)
+    expect(screen.queryByText('当前广告样板（赢家）')).toBeNull()
+    await userEvent.click(screen.getByText('广告样板'))
+    await waitFor(() => expect(screen.getByText('当前广告样板（赢家）')).toBeTruthy())
+  })
+
+  it('网址带 ?tab=winners（待办链接的落点）时直接落在样板面板上', async () => {
+    searchParamsValue = new URLSearchParams('tab=winners')
+    vi.stubGlobal('fetch', mockFetch({ '/api/factory/winners': { success: true, winners: [] }, '/ad-health': respond([]) }))
+    render(<AdsHealthPage />)
+    await waitFor(() => expect(screen.getByText('当前广告样板（赢家）')).toBeTruthy())
+  })
 
   it('网址带 ?tab=approvals 时直接落在这个标签上', async () => {
     searchParamsValue = new URLSearchParams('tab=approvals')
@@ -499,18 +549,150 @@ describe('「等你点头」标签', () => {
    * 可是给一个认不出的标签名时，那段本来就不会渲染 —— 无论 `tabFromQuery`
    * 落不落回 'today'，断言都成立。变异验证（把判据改成「什么值都认」）
    * 16 条全绿，才发现它什么都没测。
-   * 所以改成**正向**断言：必须真的落在「今天看这里」上，看到那个标签的内容。
+   * 所以改成**正向**断言：必须真的落在「今天」上，看到那个标签的内容。
    */
-  it('?tab= 给了认不出的值，落回「今天看这里」而不是空白', async () => {
+  it('?tab= 给了认不出的值，落回「今天」而不是空白', async () => {
     searchParamsValue = new URLSearchParams('tab=nonsense')
-    vi.stubGlobal('fetch', mockFetch({ '/ad-health': respond([]) }))
+    vi.stubGlobal('fetch', mockFetch({
+      '/ad-health': respond([]),
+    }))
     render(<AdsHealthPage />)
 
     // 断言「哪个标签是选中态」，而不是断言某块面板的文字 ——
     // 选中态是这条用例真正要测的事，而面板内容会随取数结果变。
-    const active = await screen.findByTitle('三句话：池子、频率、今天调什么')
-    expect(active.className).toContain('border-gray-800')
+    const active = await screen.findByTitle('先看花费、确认卡和要紧的广告')
+    expect(active.className).toContain('border-me-ochre')
     expect(screen.getByTitle('这个客户等人点头的广告动作').className).toContain('border-transparent')
     expect(screen.queryByText(/系统发现这些广告组连续花钱没结果/)).toBeNull()
+  })
+
+  it('searchParams 的 ?tab= 变化后标签状态跟着更新（合并卡 deep link 回归）', async () => {
+    searchParamsValue = new URLSearchParams('tab=today')
+    vi.stubGlobal('fetch', mockFetch({
+      '/ad-health': respond([]),
+    }))
+    const { rerender } = render(<AdsHealthPage />)
+    await screen.findByTitle('先看花费、确认卡和要紧的广告')
+
+    searchParamsValue = new URLSearchParams('tab=settings')
+    rerender(<AdsHealthPage />)
+
+    await waitFor(() => {
+      expect(screen.getByTitle('每天预算上限、自动化、可投视频').className).toContain('border-me-ochre')
+    })
+  })
+})
+
+describe('每日广告成绩单（第 1 刀 ②）', () => {
+  const SCORECARD = {
+    window: { start: '2026-10-26', end: '2026-11-01' }, completeness: 'complete', accountsSkipped: [],
+    units: [{ adAccountId: 'act_7274', level: 'adset', id: 'A', name: '组A', role: 'acquisition', spend: 398.12, resultType: 'lead', results: 67, costPerResult: 5.94, targetCost: 11, vsTarget: 'at_or_below', sampleGap: 0, separate: null }],
+    budget: [{ adAccountId: 'act_7274', role: 'acquisition', state: 'not_comparable', reason: 'single_unit', threshold: 0.15, fdrQ: 0.1, maxGap: null, under: [], over: [], overHeld: [], thin: [], notLikeForLike: [] }],
+  }
+  const staffGrowth = { date: '2026-11-01', data_completeness: 'complete', goal_pace: null, payload: { headline: 'h', scorecard: SCORECARD } }
+
+  it('内部员工在「今天」看到成绩单', async () => {
+    vi.stubGlobal('fetch', mockFetch({ '/ad-health': { ...respond([HEALTHY]), growth: staffGrowth } }))
+    render(<AdsHealthPage />)
+    expect(await screen.findByText('每个组这 7 天的成绩')).toBeTruthy()
+    expect(screen.getByText('获客：只有一个组在花钱，没得比')).toBeTruthy()
+  })
+
+  it('客户账号（客户版接口）看不到成绩单', async () => {
+    const clientGrowth = { viewer: 'client', date: '2026-11-01', goal: null, goal_pace: null, adCards: null, adNote: null }
+    vi.stubGlobal('fetch', mockFetch({ '/ad-health': { ...respond([HEALTHY]), growth: clientGrowth } }))
+    render(<AdsHealthPage />)
+    await waitFor(() => expect(screen.getByText('过去 7 天')).toBeTruthy())
+    expect(screen.queryByText('每个组这 7 天的成绩')).toBeNull()
+  })
+
+  it('成绩单带「合格客人」那一块时，员工在下面看到它', async () => {
+    const qualified = { window: { start: '2026-10-04', end: '2026-11-02' }, observeDays: 14, configured: false, staleStageKeys: [], rows: [], unattributedQualified: 0 }
+    vi.stubGlobal('fetch', mockFetch({ '/ad-health': { ...respond([HEALTHY]), growth: { ...staffGrowth, payload: { headline: 'h', scorecard: { ...SCORECARD, qualified } } } } }))
+    render(<AdsHealthPage />)
+    expect(await screen.findByText('近 30 天带来的客人质量')).toBeTruthy()
+  })
+
+  it('7 天汇总按结果种类分开写：留资和开聊不相加（RL-12）', async () => {
+    const mixed = { ...SCORECARD, units: [
+      { ...SCORECARD.units[0], id: 'A', spend: 300, resultType: 'lead', results: 100 },
+      { ...SCORECARD.units[0], id: 'W', name: '组W', spend: 50, resultType: 'messaging_started', results: 7 },
+    ] }
+    vi.stubGlobal('fetch', mockFetch({ '/ad-health': { ...respond([HEALTHY]), growth: { ...staffGrowth, payload: { headline: 'h', scorecard: mixed } } } }))
+    render(<AdsHealthPage />)
+    await screen.findByText('每个组这 7 天的成绩')
+    await waitFor(() => {
+      const t = document.body.textContent ?? ''
+      expect(t).toContain('100 个留资')
+      expect(t).toContain('7 个开聊')
+      expect(t).not.toMatch(/\b107 个/)
+    })
+  })
+
+  const liveAdset = (id: string, dailyBudget: number) => ({
+    adsetId: id, name: id, status: 'ACTIVE', spendToday: 1, impressionsToday: 10, dailyBudget, budgetLevel: 'adset', createdToday: false, adCount: 1,
+  })
+  const liveView = (...active: ReturnType<typeof liveAdset>[]) => ({
+    view: { readAtIso: '2026-11-05T12:15:00Z', accounts: [{ adAccountId: 'act_1', readState: 'ok', reason: null, currency: 'NZD', accountDay: '2026-11-06', active, newToday: [] }] },
+  })
+  const snapshotWith = (...stopped: string[]) => ({ tree: { snapshotAt: '2026-11-05T06:31:00Z', campaigns: [
+    { id: 'c', name: 'c', state: 'running', dailyBudget: null, currency: 'NZD', adsets: [
+      { id: 'A', name: 'A', state: 'running', dailyBudget: 100, currency: 'NZD' },
+      { id: 'B', name: 'B', state: stopped.includes('B') ? 'stopped' : 'running', dailyBudget: 30, currency: 'NZD' },
+    ] },
+  ] } })
+  const twoUnits = { ...SCORECARD, units: [
+    { ...SCORECARD.units[0], id: 'A', name: '组A' },
+    { ...SCORECARD.units[0], id: 'B', name: '组B' },
+  ] }
+
+  it('快照说已停、实时也没在投的组：成绩单不再给「调预算」，在投的照旧有', async () => {
+    vi.stubGlobal('fetch', mockFetch({
+      '/ad-health/entities': snapshotWith('B'),
+      '/ad-health/live': liveView(liveAdset('A', 100)),
+      '/ad-health': { ...respond([HEALTHY]), growth: { ...staffGrowth, payload: { headline: 'h', scorecard: twoUnits } } },
+    }))
+    render(<AdsHealthPage />)
+    await screen.findByText('已停，没得调')
+    expect(screen.getAllByRole('button', { name: '调预算' }).length).toBe(1)
+  })
+
+  it('快照说已停、但实时读数里它正在投（刚重新打开）：不藏「调预算」', async () => {
+    vi.stubGlobal('fetch', mockFetch({
+      '/ad-health/entities': snapshotWith('B'),
+      '/ad-health/live': liveView(liveAdset('A', 100), liveAdset('B', 30)),
+      '/ad-health': { ...respond([HEALTHY]), growth: { ...staffGrowth, payload: { headline: 'h', scorecard: twoUnits } } },
+    }))
+    render(<AdsHealthPage />)
+    await screen.findByTestId('budget-headroom')
+    expect(screen.queryByText('已停，没得调')).toBeNull()
+    expect(screen.getAllByRole('button', { name: '调预算' }).length).toBe(2)
+  })
+
+  it('在投预算合计顶到客户总上限时，页面提前写「再加预算会被系统拦下」', async () => {
+    vi.stubGlobal('fetch', mockFetch({
+      '/ad-health/live': liveView(liveAdset('A', 100), liveAdset('E', 100)),
+      '/ad-accounts': { accounts: [], client_total_cap_cents: 20001 },
+      '/ad-health': { ...respond([HEALTHY]), growth: { ...staffGrowth, payload: { headline: 'h', scorecard: SCORECARD } } },
+    }))
+    render(<AdsHealthPage />)
+    const box = await screen.findByTestId('budget-headroom')
+    expect(box.textContent).toContain('在投每天预算合计 NZD 200.00')
+    expect(box.textContent).toContain('还剩 NZD 0.01')
+    expect(box.textContent).toContain('再加预算会被系统拦下')
+  })
+
+  it('读不到快照 / 总上限时不画预算提示，也不藏「调预算」', async () => {
+    vi.stubGlobal('fetch', mockFetch({ '/ad-health': { ...respond([HEALTHY]), growth: staffGrowth } }))
+    render(<AdsHealthPage />)
+    await screen.findByText('每个组这 7 天的成绩')
+    expect(screen.queryByTestId('budget-headroom')).toBeNull()
+    expect(screen.getAllByRole('button', { name: '调预算' }).length).toBe(1)
+  })
+
+  it('老的巡察行没有成绩单 → 说还没有，不画空表', async () => {
+    vi.stubGlobal('fetch', mockFetch({ '/ad-health': { ...respond([HEALTHY]), growth: { ...staffGrowth, payload: { headline: 'h' } } } }))
+    render(<AdsHealthPage />)
+    expect(await screen.findByText('今天还没有成绩单：每天的广告巡察跑过一次才会出现。')).toBeTruthy()
   })
 })

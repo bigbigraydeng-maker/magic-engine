@@ -20,7 +20,7 @@ export const EmailDraftSchema = z.object({
 })
 export type EmailDraft = z.infer<typeof EmailDraftSchema>
 
-const EMAIL_DRAFT_JSON_SCHEMA = {
+export const EMAIL_DRAFT_JSON_SCHEMA = {
   type: 'object',
   additionalProperties: false,
   required: ['subject', 'body'],
@@ -51,7 +51,7 @@ const MAX_MESSAGES = 12
 const MAX_CALLS = 3
 const MAX_FACTS_PER_CALL = 8
 
-interface TouchRow {
+export interface TouchRow {
   channel: string
   direction: string
   occurred_at: string
@@ -60,7 +60,7 @@ interface TouchRow {
   metadata: Record<string, unknown> | null
 }
 
-interface MessageRow {
+export interface MessageRow {
   direction: string
   sender_name: string | null
   body: string | null
@@ -97,6 +97,8 @@ export function renderKnownContext(
     channel: t.channel,
     occurredAt: t.occurred_at,
     metadata: t.metadata,
+    source: (t as { source?: string | null }).source ?? null,
+    raw: (t as { raw?: string | null }).raw ?? null,
   }))
   const tour = extractCustomColumns(forColumns).tour_interest
   const lines: string[] = [`Customer name on file: ${contactName?.trim() || '(unknown)'}`]
@@ -284,7 +286,7 @@ export function callAskedNoContact(calls: CallNote[]): boolean {
 }
 
 /** 这位客人的触点 + 各渠道对话原文（都按客户收口）。 */
-async function loadThread(clientId: string, contactId: string): Promise<{ touches: TouchRow[]; messages: MessageRow[] }> {
+export async function loadThread(clientId: string, contactId: string): Promise<{ touches: TouchRow[]; messages: MessageRow[] }> {
   const [{ data: touches }, { data: convs }] = await Promise.all([
     supabaseAdmin
       .from('contact_touchpoints')

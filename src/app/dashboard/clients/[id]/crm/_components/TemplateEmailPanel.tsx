@@ -46,6 +46,7 @@ const SOURCE_LABEL: Record<string, string> = {
   audit: '系统发送记录',
   touchpoint: '邮件记录',
   mailchimp: '群发',
+  me_send: 'ME 自动信',
 }
 
 const MAX_PICKS = 3
@@ -568,6 +569,13 @@ function PickList(props: {
 function FrequencyLine(props: { frequency: PreviewFrequency }): JSX.Element | null {
   const { frequency } = props
   if (frequency.state === 'off') return null
+  if (frequency.state === 'exempt') {
+    return (
+      <p className="mt-2 text-xs text-me-charcoal/60">
+        这封是回复客人自己的来信：不受「每 {frequency.windowDays} 天最多 {frequency.max} 封」的限制，也不占名额（改过字就按普通邮件算）
+      </p>
+    )
+  }
   if (frequency.state === 'ok') {
     return (
       <p className="mt-2 text-xs text-me-charcoal/60">

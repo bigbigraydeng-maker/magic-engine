@@ -35,7 +35,7 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { getValidTokenForConnection } from '@/lib/platform-oauth/token-manager'
 import { fetchMailSince, type MailFolder, type MailMessage } from '@/lib/microsoft/mail-graph'
-import { classifySender } from '@/lib/microsoft/mail-sender'
+import { classifySender, isOwnAddress } from '@/lib/microsoft/mail-sender'
 import { applyFormNotices, emptyFormStats, mirrorFormThread, type FormEnquiryStats } from '@/lib/microsoft/mail-form-ingest'
 import type { FormNoticeLead } from '@/lib/microsoft/mail-form-notice'
 import { resolveContact } from '@/lib/crm/identity'
@@ -58,6 +58,8 @@ export interface PlannedMessage {
   automated: boolean
   /** 网站表单通知里提取出的客人（见 mail-form-ingest）。有它时对方已被改写成这位客人。 */
   formLead?: FormNoticeLead
+  /** 这封信的发件人其实是自己人（同事 / 点名的员工地址）：虽然躺在收件箱里，但不是客人说的话，已按「我们发出的」记。值为发件地址。 */
+  staffSender?: string
 }
 
 export interface PlannedThread {
@@ -162,22 +164,35 @@ export function planMailIngest(messages: MailMessage[], opts: PlanOptions): Mail
     }
 
     const thread = threads.get(key)!
+    // 方向本来由文件夹决定（收件箱 = 客人来信），但同事从自己的邮箱发信、抄送到
+    // 公司收件箱时也躺在收件箱里；若只看文件夹，会把同事的报价当成客人回了话
+    // （CTS 出票同事的机票报价事故）。线程的第一封信仍按原规则判（自己人发起的
+    // 线程整条丢，见上面 `if (!existing)`）。
+    const staffSent = m.direction === 'inbound' && isOwnAddress(m.counterparty.address, opts.ownDomains)
+    const direction: 'inbound' | 'outbound' = staffSent ? 'outbound' : m.direction
     thread.messages.push({
       id: m.id,
-      direction: m.direction,
+      direction,
       subject: m.subject,
       preview: m.preview,
       receivedAt: m.receivedAt,
       // 只有出站才可能是自动回执；客人那边发来的自动回复不归我们管，
       // 而且把它标成 automated 会让一条真的来信从「他回话了」里消失。
-      automated: m.direction === 'outbound' && isAutoReply(m.subject),
+      // 同事发的信一律标 automated：同步看不到收件人，没法证明这封信真的发给了客人
+      // （例如回复全部时去掉了客人的内部往来），不能算「有人跟进过他」。信照存。
+      automated: staffSent || (direction === 'outbound' && isAutoReply(m.subject)),
       formLead: m.formLead,
+      staffSender: staffSent ? m.counterparty.address : undefined,
     })
-    if (m.direction === 'inbound') thread.hasInbound = true
+    if (direction === 'inbound') thread.hasInbound = true
     // 主题以**最新一封**为准 —— 线程标题跟着最后一次来回走，跟邮箱里看到的一致。
     if (m.subject) thread.subject = m.subject
-    thread.lastAt = m.receivedAt
-    thread.lastFrom = m.direction === 'inbound' ? 'customer' : 'page'
+    // 同事的信只存触点，不动线程的「最后一句是谁说的 / 几点」：否则同事内部往来会让
+    // 「客人写了超过一天没人回」这条提醒把客人丢掉（子牙复审 P1）。
+    if (!staffSent) {
+      thread.lastAt = m.receivedAt
+      thread.lastFrom = direction === 'inbound' ? 'customer' : 'page'
+    }
   }
 
   return { threads: Array.from(threads.values()), skipped: Array.from(skipped.values()) }
@@ -582,6 +597,8 @@ async function writeTouchpoints(
           automated: m.automated,
           // 邮件同步不知道是哪位同事按的发送 —— 留空，不假装。
           logged_by: null,
+          // 同事发的信（不是客人说的话），留下发件地址方便回查。
+          ...(m.staffSender ? { staff_sender: m.staffSender } : {}),
         },
         source: 'microsoft_mail',
         source_ref: m.id,
@@ -669,7 +686,8 @@ export async function syncMailbox(target: MailboxTarget): Promise<MailSyncResult
     token,
     mailbox: target.mailbox,
     clientId: target.clientId,
-    ownDomains,
+    // 表单通知认证只认真域名；点名的员工地址（含 @）不能当成整个域名交过去。
+    ownDomains: ownDomains.filter((d) => !d.includes('@')),
     messages: all,
     stats: formStats,
   })

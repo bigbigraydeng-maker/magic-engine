@@ -34,6 +34,7 @@ function outcome(over: Partial<OutcomeForSend> = {}): OutcomeForSend {
     clientId: CONFIG.clientId,
     contactId: null,
     outcomeKind: 'purchase',
+    leadStage: null,
     customerEmail: 'rosalind@example.com',
     customerPhone: null,
     customerFirst: null,

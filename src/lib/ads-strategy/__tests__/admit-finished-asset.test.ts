@@ -116,28 +116,20 @@ describe('admitFinishedAsset', () => {
     expect(remember).not.toHaveBeenCalled()
   })
 
-  it('uploads to the primary account and returns the video id without writing the pool', async () => {
-    const { d, upload, remember } = deps()
+  it('refuses a new upload because acceptance has no confirmation card', async () => {
+    const { d, upload, remember, token } = deps()
     const result = await admitFinishedAsset(order(), d)
-    expect(result).toEqual({ ok: true, action: 'uploaded', videoId: '555', accountId: ACCOUNT })
-    expect(upload).toHaveBeenCalledWith(
-      ACCOUNT,
-      'https://files.example.test/storage/v1/object/public/content-factory/renders/c-1/wo-1/final.mp4',
-      'tok',
-      'asset wo-1',
-    )
-    expect(remember).toHaveBeenCalledWith('555', ACCOUNT)
-  })
-
-  it('does not remember a non-numeric video id', async () => {
-    const { d, remember } = deps({ upload: vi.fn(async () => ({ ok: true as const, videoId: 'clip.mp4' })) })
-    const result = await admitFinishedAsset(order(), d)
-    expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.status).toBe(422)
+    expect(result).toEqual({
+      ok: false,
+      status: 409,
+      error: '成片验收不能直接传到广告账户。这里没有确认卡，没有上传。',
+    })
+    expect(upload).not.toHaveBeenCalled()
     expect(remember).not.toHaveBeenCalled()
+    expect(token).not.toHaveBeenCalled()
   })
 
-  it('refuses a path that is not this order’s render file', async () => {
+  it('refuses a path that is not this order’s render file without uploading', async () => {
     const { d, upload } = deps()
     const result = await admitFinishedAsset(order({ videoPath: 'https://evil.example/renders/c-1/wo-1/final.mp4' }), d)
     expect(result.ok).toBe(false)
@@ -169,11 +161,13 @@ describe('admitFinishedAsset', () => {
     expect(token).not.toHaveBeenCalled()
   })
 
-  it('stops before remembering when Meta rejects the upload', async () => {
-    const { d, remember } = deps({ upload: vi.fn(async () => ({ ok: false as const, error: 'HTTP 500' })) })
+  it('does not call the uploader when Meta would have rejected it', async () => {
+    const upload = vi.fn(async () => ({ ok: false as const, error: 'HTTP 500' }))
+    const { d, remember } = deps({ upload })
     const result = await admitFinishedAsset(order(), d)
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.status).toBe(502)
+    if (!result.ok) expect(result.status).toBe(409)
+    expect(upload).not.toHaveBeenCalled()
     expect(remember).not.toHaveBeenCalled()
   })
 })

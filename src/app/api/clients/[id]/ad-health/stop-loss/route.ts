@@ -6,7 +6,7 @@
  *                          what a 20% cut becomes, and whether a cut is possible
  *                          at all. Read-only; called when the PM opens the menu
  *                          so the confirm dialog can show real numbers.
- *   POST { campaign_id, action: 'cut' | 'pause', request_id }  → execute.
+ *   POST { campaign_id, action: 'cut' | 'pause', request_id }  → a confirmation card. Nothing is written until that card is confirmed.
  *
  * Responses carry FACTS, not prose: all PM-facing wording lives in the page so
  * copy stays in one reviewable place.
@@ -32,7 +32,11 @@ import {
   STOP_LOSS_CUT_RATIO,
 } from '@/lib/ads-strategy/stop-loss'
 import { createKernel } from '@/lib/kernel'
-import { submitStopLossThroughKernel, requireStopLossAccess } from '@/lib/action-submission/stop-loss'
+import { requireStopLossAccess } from '@/lib/action-submission/stop-loss'
+import { requestCampaignStatusCard } from '@/lib/action-submission/campaign-status-card'
+import { CLIENT_BUDGET_FACT_FRESH_MS } from '@/lib/capabilities/ads/envelope-facts'
+import { clickerFromAccess, issueMoneyBudget } from '@/lib/action-submission/money-card'
+import { loadMoneyBudgetLive } from '@/lib/ads-budget-card/money-live'
 import { resolveAccountTimezone, accountDayKey } from '@/lib/ads-strategy/account-timezone'
 import { toActAccountId } from '@/lib/meta/ad-account-binding'
 
@@ -150,41 +154,72 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
   }
 
   const adAccountId = toActAccountId(ownership.campaign.account_id)
-  if (!adAccountId) return NextResponse.json({ error: 'account_id_unreadable' }, { status: 503 })
+  if (!adAccountId) return NextResponse.json({ error: 'account_id_unreadable', wroteMeta: false }, { status: 503 })
   const timezone = await resolveAccountTimezone(adAccountId)
-  if (!timezone) return NextResponse.json({ error: 'timezone_unreadable' }, { status: 503 })
-  const submitted = await submitStopLossThroughKernel(createKernel(supabaseAdmin), {
-    clientId, access, goalId, campaignId, adAccountId, requestId,
-    cycleDate: accountDayKey(timezone, new Date()), action: kernelAction, targets,
-  })
-  const kinds = submitted.runs.map(run => run.kind)
-  const executed = kinds.length > 0 && kinds.every(kind => kind === 'succeeded' || kind === 'idempotent_hit')
-  const succeededCount = kinds.filter(kind => kind === 'succeeded' || kind === 'idempotent_hit').length
-  const pendingCount = kinds.filter(kind => kind === 'pending_approval').length
-  const inProgressCount = kinds.filter(kind => kind === 'in_progress').length
-  const refusedCount = kinds.length - succeededCount - pendingCount - inProgressCount
-  const warnings = submitted.runs.flatMap(run => run.warnings ?? [])
-  const awaitingApproval = pendingCount > 0 && succeededCount === 0 && refusedCount === 0 && inProgressCount === 0
-  const status = executed ? 'executed' : awaitingApproval ? 'awaiting_approval'
-    : inProgressCount > 0 && succeededCount === 0 && pendingCount === 0 && refusedCount === 0 ? 'in_progress'
-      : succeededCount === 0 && pendingCount === 0 && inProgressCount === 0 ? 'refused' : 'partial'
+  if (!timezone) return NextResponse.json({ error: 'timezone_unreadable', wroteMeta: false }, { status: 503 })
+  if (kernelAction === 'pause_campaign') {
+    const asked = await requestCampaignStatusCard(supabaseAdmin, {
+      clientId,
+      access,
+      kind: 'pause',
+      campaignId,
+      adAccountId,
+      name: ownership.campaign.name,
+      liveStatus: ownership.campaign.status,
+      dailyBudget: ownership.campaign.daily_budget ?? null,
+      objective: ownership.campaign.objective ?? null,
+      executionItemId: null,
+    })
+    return NextResponse.json({ ...asked.body, action: 'pause_campaign', wroteMeta: false }, { status: asked.status })
+  }
+  const cycleDate = accountDayKey(timezone, new Date())
+  const kernel = createKernel(supabaseAdmin)
+  const cards = []
+  for (const target of targets) {
+    if (target.afterCents === undefined) {
+      return NextResponse.json({ error: '降后的日预算算不出来，没有出卡。', wroteMeta: false }, { status: 409 })
+    }
+    const issued = await issueMoneyBudget({
+      kernel,
+      sb: supabaseAdmin,
+      clientId,
+      clicker: clickerFromAccess(access, clientId),
+      source: 'stop_loss',
+      level: kernelAction === 'cut_campaign' ? 'campaign' : 'adset',
+      entityId: target.id,
+      adAccountId,
+      campaignId,
+      scaleAdsetId: null,
+      name: target.name,
+      beforeCents: target.currentCents,
+      afterCents: target.afterCents,
+      snapshotAt: new Date().toISOString(),
+      goalId: goalId ?? null,
+      cycleDate,
+      requestId,
+      freshMs: CLIENT_BUDGET_FACT_FRESH_MS,
+      readLive: () => loadMoneyBudgetLive(supabaseAdmin, clientId, {
+        level: kernelAction === 'cut_campaign' ? 'campaign' : 'adset',
+        entityId: target.id,
+        adAccountId,
+        name: target.name,
+        beforeCents: target.currentCents,
+        afterCents: target.afterCents ?? target.currentCents,
+      }),
+    })
+    if (!issued.card) return NextResponse.json({ error: issued.reason, wroteMeta: false }, { status: 409 })
+    cards.push(issued.card)
+  }
   const currentDaily = targets.reduce((sum, target) => sum + target.currentCents, 0) / 100
-  const newDaily = kernelAction === 'pause_campaign'
-    ? 0
-    : targets.reduce((sum, target) => sum + (target.afterCents ?? target.currentCents), 0) / 100
+  const newDaily = targets.reduce((sum, target) => sum + (target.afterCents ?? target.currentCents), 0) / 100
   return NextResponse.json({
-    ok: executed || awaitingApproval,
-    executed,
-    status,
+    ok: false,
+    executed: false,
+    status: 'awaiting_confirmation',
+    wroteMeta: false,
     action: kernelAction,
-    runs: submitted.runs,
-    succeeded_count: succeededCount,
-    pending_count: pendingCount,
-    refused_count: refusedCount,
-    in_progress_count: inProgressCount,
-    warnings,
+    cards,
     current_daily: currentDaily,
     new_daily: newDaily,
-    reason: submitted.runs.find(run => run.humanReason)?.humanReason ?? null,
-  })
+  }, { status: 202 })
 }

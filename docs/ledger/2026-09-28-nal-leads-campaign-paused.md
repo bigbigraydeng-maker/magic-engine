@@ -1,16 +1,17 @@
 ---
 id: 2026-09-28-nal-leads-campaign-paused
 title: 停掉 NAL 那个「买留资却送去私信」的广告系列：换素材后开聊到留资的转化显著变差、单个留资成本显著上涨
-status: done
+status: verified
 owner: agent
 decided_on: 2026-09-28
 done_on: 2026-09-28
 done_ref: pr:2151
 source: session:e78010ff
-last_checked: 2026-10-10
-check_note: 到期核查（verify_by 10-01）还没做，2026-10-10 补盖章：待人按 verify_how 的写死窗口核对。
+last_checked: 2026-11-04
+check_note: 夜巡 11-04：①Meta 实查被停系列 effective_status=PAUSED、9/28 后无人重开；②9 月开聊 291 次对目标 300 差约 3%；③WhatsApp 系列暂停后 2 天 29 次开聊（够样本），每次开聊成本比 9/21–9/27 基线低约 10%，没涨
 verify_by: 2026-10-01
 verify_how: 查三件，账期和窗口都写死日期（10/01 验的时候「本月」会指向 10 月、「最近 6 天」会跨过 9/28 那次暂停，所以不许用相对说法；Codex 复审指出，已改）。数字只从 fde_work_logs 该客户 2026-09-28 那条和 ad_daily_insights 取，本卡不留客户经营数据。①那个系列有没有被谁重新打开——看真实投放状态（`effective_status`），名字和 `status` 不作数；②结算 **9 月（9/01–9/30）** 最终开聊次数对当月目标差多少（月目标见客户记忆；暂停时还剩 9/28、9/29、9/30 三天）；③WhatsApp 那个系列独自承担后每次开聊成本有没有变贵——**暂停前基线取 9/21–9/27，暂停后取 9/29–9/30**（9/28 当天含暂停前的花费，两段都不算它），两段不许混算；暂停后两天合计开聊少于 10 次时只在 check_note 记数、不做成败或预算判断，够了再看涨没涨过基线一半，涨过就回头看是不是不该停。②差得多且③没涨 = 停对了但要补量，交回 PM 决定加不加预算
+verified_ref: doc:docs/ledger/evidence/2026-09-28-nal-leads-campaign-paused--2026-11-04.md
 ---
 PM 2026-09-28 在本窗口看后台截图后授权停投，卫青用 Graph 接口执行：只改该系列 `status=PAUSED`，未动预算 / 定向 / 素材，未碰 WhatsApp 那个系列。
 **为什么停**：系列目标是「留资」，两个在投广告组是「优化目标 LEAD_GENERATION + 落点 MESSENGER」——这个组合本身是有效配置、不是错配（见 `src/lib/ads-strategy/rules/core-metric.ts` 的消歧规则，此前也确实收到过留资）；但 9/08 换素材后「开聊到留资」的转化率和单个留资成本明显恶化（具体数字见 [2026-09-22 诊断记录](../clients/new-asian-logistics/2026-09-22-meta-ads-lead-cost-diagnosis.md)），近几天几乎归零；同期 WhatsApp 系列每次开聊成本明显更低。具体花费、留资数、单次开聊成本见当日 `fde_work_logs` 与 `ad_daily_insights`。

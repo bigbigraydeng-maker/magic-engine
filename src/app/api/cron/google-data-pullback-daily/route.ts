@@ -63,6 +63,9 @@ import { hasVideoColumns, syncAdDailyInsights, syncAdsetDailyInsights, syncCampa
 import { buildGrowthState } from '@/lib/ads-strategy/agents/patrol'
 import { reconcileAutonomyMode } from '@/lib/ads-strategy/autonomy/notify'
 import { probeClientCircuit, type ClientProbe } from '@/lib/ads-strategy/circuit-probe'
+import { runAdsCircuitBreaker } from '@/lib/ads-strategy/circuit-breaker/run'
+import { runCreativeStateDaily } from '@/lib/creative-state/daily'
+import { runScaleFallback } from '@/lib/ads-strategy/scale-fallback/run'
 import { resolveClientEvaluationDate } from '@/lib/ads-strategy/account-timezone'
 import { evaluateClientAdHealth } from '@/lib/ads-strategy/evaluate'
 import { sendAdHealthDigest } from '@/lib/ads-strategy/digest'
@@ -129,6 +132,12 @@ interface ClientResult {
    * 因为 HTTP 响应体 Render 直接丢掉（`render.yaml` 那条 curl 不留 body）。
    */
   circuit_probe?: ClientProbe | { error: string }
+  /** 异常只出暂停确认卡。paused 恒为 false：这一步不改广告。 */
+  circuit_breaker?: { paused: false; cards: number; alerts: number; error?: string }
+  /** 素材建议只出确认卡。wroteMeta 恒为 false：这一步不改预算、不改广告。 */
+  creative_state?: { cards: number; wroteMeta: false; error?: string }
+  /** 放量收回稳住只出确认卡。wroteMeta 恒为 false：不暂停、不加预算、不改预算。 */
+  scale_fallback?: { cards: number; wroteMeta: false; error?: string }
   /**
    * 2026-09-13: `ad_daily`/`ad_level` above stay the PRIMARY account's result
    * (unchanged shape, unchanged tallying). Any additional registered accounts
@@ -630,6 +639,25 @@ export async function GET(req: NextRequest) {
       result.google_ads = await syncGoogleAds(client.client_id, client.google_ads_customer_id)
     }
 
+    if (client.meta_ad_account_id) {
+      result.circuit_breaker = await runAdsCircuitBreaker(supabaseAdmin, client.client_id).catch((e: unknown) => ({
+        paused: false as const,
+        cards: 0,
+        alerts: 0,
+        error: e instanceof Error ? e.message : String(e),
+      }))
+      result.creative_state = await runCreativeStateDaily(supabaseAdmin, client.client_id).catch((e: unknown) => ({
+        cards: 0,
+        wroteMeta: false as const,
+        error: e instanceof Error ? e.message : String(e),
+      }))
+      result.scale_fallback = await runScaleFallback(supabaseAdmin, client.client_id).catch((e: unknown) => ({
+        cards: 0,
+        wroteMeta: false as const,
+        error: e instanceof Error ? e.message : String(e),
+      }))
+    }
+
     results.push(result)
   }
 
@@ -664,7 +692,7 @@ export async function GET(req: NextRequest) {
   // Collect per-client errors so postmortem is possible without Render logs.
   // Diagnostic only — no behavior change.
   const errors = results.flatMap(r => {
-    const out: Array<{ client_id: string; source: 'gsc'|'ga4'|'meta'|'google_ads'|'ad_daily'|'ad_level'|'adset_level'|'ad_health'|'ad_digest'|'ad_diagnostics'|'ads_growth_state'|'ad_daily_secondary'|'ad_config'|'circuit_probe'; error: string }> = []
+    const out: Array<{ client_id: string; source: 'gsc'|'ga4'|'meta'|'google_ads'|'ad_daily'|'ad_level'|'adset_level'|'ad_health'|'ad_digest'|'ad_diagnostics'|'ads_growth_state'|'ad_daily_secondary'|'ad_config'|'circuit_probe'|'circuit_breaker'|'creative_state'|'scale_fallback'; error: string }> = []
     if (r.gsc?.success === false && r.gsc.error)               out.push({ client_id: r.client_id, source: 'gsc',        error: r.gsc.error })
     if (r.ga4?.success === false && r.ga4.error)               out.push({ client_id: r.client_id, source: 'ga4',        error: r.ga4.error })
     if (r.meta?.success === false && r.meta.error)             out.push({ client_id: r.client_id, source: 'meta',       error: r.meta.error })
@@ -684,6 +712,15 @@ export async function GET(req: NextRequest) {
     // 跟 ad_level 一样 best-effort，不进 `failed`、不当邮件头条，但必须在这里出现。
     if (r.circuit_probe && 'error' in r.circuit_probe && r.circuit_probe.error) {
       out.push({ client_id: r.client_id, source: 'circuit_probe', error: r.circuit_probe.error })
+    }
+    if (r.circuit_breaker?.error) {
+      out.push({ client_id: r.client_id, source: 'circuit_breaker', error: r.circuit_breaker.error })
+    }
+    if (r.creative_state?.error) {
+      out.push({ client_id: r.client_id, source: 'creative_state', error: r.creative_state.error })
+    }
+    if (r.scale_fallback?.error) {
+      out.push({ client_id: r.client_id, source: 'scale_fallback', error: r.scale_fallback.error })
     }
     // 2026-09-13 (魏征 review): a secondary account's sync failure used to be
     // completely invisible — not in `failed`, not here, not console.error'd —
@@ -714,7 +751,7 @@ export async function GET(req: NextRequest) {
   // 常年 meta 报错盖住、没人注意到（2026-09-25 事故）。
   const headlineError =
     errors.find(e => e.source === 'ad_config') ??
-    errors.find(e => e.source !== 'ad_level' && e.source !== 'adset_level' && e.source !== 'ad_daily_secondary' && e.source !== 'circuit_probe')
+    errors.find(e => e.source !== 'ad_level' && e.source !== 'adset_level' && e.source !== 'ad_daily_secondary' && e.source !== 'circuit_probe' && e.source !== 'circuit_breaker' && e.source !== 'creative_state' && e.source !== 'scale_fallback')
   const errorMessage = failed > 0 && headlineError
     ? `${headlineError.source}: ${headlineError.error}${errors.length > 1 ? ` (+${errors.length - 1} more)` : ''}`
     : undefined
@@ -735,7 +772,7 @@ export async function GET(req: NextRequest) {
     completed: results.length - failed,
     error: errorMessage,
     failed,
-    summary: { gsc_synced: gscSynced, ga4_synced: ga4Synced, meta_synced: metaSynced, meta_idle: metaIdle, google_ads_synced: googleAdsSynced, ad_daily_synced: adDailySynced, ad_daily_rows: adDailyRows, ad_level_synced: adLevelSynced, ad_level_rows: adLevelRows, ad_health_synced: adHealthSynced, ad_health_alerts: adHealthAlerts, video_columns_written: withVideo, errors, circuit_probe: circuitProbes },
+    summary: { gsc_synced: gscSynced, ga4_synced: ga4Synced, meta_synced: metaSynced, meta_idle: metaIdle, google_ads_synced: googleAdsSynced, ad_daily_synced: adDailySynced, ad_daily_rows: adDailyRows, ad_level_synced: adLevelSynced, ad_level_rows: adLevelRows, ad_health_synced: adHealthSynced, ad_health_alerts: adHealthAlerts, video_columns_written: withVideo, errors, circuit_probe: circuitProbes, creative_state_cards: results.reduce((sum, row) => sum + (row.creative_state?.cards ?? 0), 0), scale_fallback_cards: results.reduce((sum, row) => sum + (row.scale_fallback?.cards ?? 0), 0) },
   })
   return NextResponse.json({
     success:           true,

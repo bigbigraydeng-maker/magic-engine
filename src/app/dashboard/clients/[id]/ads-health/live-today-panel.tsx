@@ -9,7 +9,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react'
-import type { LiveAdset, LiveAccountView, LiveTodayView } from '@/lib/ads-strategy/heartbeat/live-view'
+import { liveAccountEmptyLine, type LiveAdset, type LiveAccountView, type LiveTodayView } from '@/lib/ads-strategy/heartbeat/live-view'
 
 function fmtTime(iso: string): string {
   return new Intl.DateTimeFormat('zh-CN', {
@@ -44,7 +44,7 @@ function AccountBlock({ acc, part }: { acc: LiveAccountView; part: 'today' | 'ne
         </p>
       )}
       {acc.readState !== 'unreadable' && rows.length === 0 && (
-        <p className="mt-1 text-sm text-gray-500">{part === 'today' ? '现在没有状态为「投放中」的广告组。' : '今天没有新建或重建的广告组。'}</p>
+        <p className="mt-1 text-sm text-gray-500">{liveAccountEmptyLine(part, acc.reason)}</p>
       )}
       {rows.length > 0 && (
         <table className="mt-1 w-full text-sm">

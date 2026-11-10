@@ -18,6 +18,7 @@ import {
   STAGE_INFER_ACTOR,
   AUTOMATED_SENDER_EMAILS,
   stageReasonForDisplay,
+  classifyStageWriter,
 } from '../actors'
 import { AUTO_TAG_ACTOR } from '../qualified-buyer'
 
@@ -149,4 +150,34 @@ describe('stageReasonForDisplay —— 剥掉「谁改的」那一格已经说�
     const out = stageReasonForDisplay('读往来记录判的：读往来记录判的：奇怪但合法')
     expect(out).toBe('读往来记录判的：奇怪但合法')
   })
+})
+
+describe('classifyStageWriter（广告成绩单「合格客人」：谁把客人推进了这个阶段）', () => {
+  // 生产 contact_stage_events.changed_by 出现过的每一种写法（2026-11-03 查库），外加代码里存在的机器写法
+  const cases: Array<[string | null, string]> = [
+    ['ai:conversation-read', 'ai'],
+    ['ai:enquiry-screen', 'ai'],
+    ['system:call-reached', 'system'],
+    ['system:new-lead', 'system'],
+    ['system:qualified-buyer', 'system'],
+    ['system:quote-email-sent', 'system'],
+    ['system:junk-sender-cleanup', 'system'],
+    ['system:enquiry-revived', 'system'],
+    ['system', 'system'],
+    ['auto:payment-detect', 'system'],
+    ['writeback-resend@system', 'system'],
+    ['governed-reply-agent@magicengine.cloud', 'system'],
+    ['human:someone@example.com', 'human'],
+    ['someone@example.com', 'human'],
+    ['  Someone@Example.com ', 'human'],
+    ['PM-2026-10-12 via claude (74号 邮箱核对)', 'unknown'],
+    ['PM-2026-10-06 via claude', 'unknown'],
+    ['', 'unknown'],
+    [null, 'unknown'],
+  ]
+  for (const [actor, kind] of cases) {
+    it(`${JSON.stringify(actor)} → ${kind}`, () => {
+      expect(classifyStageWriter(actor)).toBe(kind)
+    })
+  }
 })

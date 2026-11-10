@@ -16,8 +16,11 @@ import { loadGoal, loadLatestClientPrescription, loadLatestGoalPrescription, loa
 import type { GoalPrescriptionView } from '@/lib/marketing-plan/promo/goal-prescription'
 import { planLinkedGoalId } from '@/lib/marketing-plan/promo/plan-pick'
 import { loadLiveAds } from '@/lib/marketing-plan/promo/live-ads'
+import { loadLiveAdLink } from '@/lib/marketing-plan/promo/live-ad-link-load'
 import { loadPromoOptions } from '@/lib/marketing-plan/promo/options'
-import { allAdsSteps, type PromoSpec, type PromoValidationIssue } from '@/lib/marketing-plan/promo/spec'
+import { dailyTotalCapCents } from '@/lib/marketing-plan/promo/daily-total-cap'
+import { loadDeliveryView } from '@/lib/marketing-plan/promo/stage-evidence'
+import { allAdsSteps, readPromoSpec, type PromoSpec, type PromoValidationIssue } from '@/lib/marketing-plan/promo/spec'
 import { validatePlanDraft } from '@/lib/marketing-plan/promo/plan-draft-validate'
 import { isPlanContentLocked, PLAN_CONTENT_LOCKED_MESSAGE } from '@/lib/marketing-plan/plan-guard'
 import type { MarketingPlan } from '@/lib/marketing-plan/types'
@@ -54,17 +57,24 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
     if (!plan) return NextResponse.json({ success: false, error: 'Plan not found' }, { status: 404 })
     const goalId = planLinkedGoalId(plan)
     // 下拉选项只有草稿填表才用；读不到时页面照常显示（选项为空，表格里会提示）
-    const [board, options, liveAds, prescription] = await Promise.all([
+    const internal = access.tier === 'admin'
+    const [board, options, liveAds, liveLink, prescription] = await Promise.all([
       // 页面上的「批准」按钮是否可点由这份清单决定，所以预算门存档过期 / 没过时要现读（不然晚上永远灰、点不了）
       buildPromoBoard(plan, new Date(), { liveBudget: 'if_needed' }),
       plan.status === 'draft' ? loadPromoOptions(ctx.params.id).catch(() => null) : Promise.resolve(null),
-      // 只在计划还没批准、且是管理员账号时才读（FDE 按付费客户处理，不返回）：账户编号、标签、花费是内部口径，付费客户账号不给。
-      // 数据来自快照表（每 6 小时抓一次）和日花费表（次日才到），读不到时回 ok:false。
-      plan.status === 'draft' && access.tier === 'admin' ? loadLiveAds(ctx.params.id) : Promise.resolve(null),
+      // 管理员才读（付费客户账号不给）：草稿和已批准都读，用来点名没有开投回执的广告组。
+      // 数据来自快照表和日花费表，不调用 Meta。读不到时回 ok:false。
+      internal ? loadLiveAds(ctx.params.id) : Promise.resolve(null),
+      // 管理员在草稿和已批准计划上都读对上关系。只读本库回执，不调用 Meta，不改广告和预算。
+      internal ? loadLiveAdLink(ctx.params.id) : Promise.resolve(null),
       // 推广表单或空白草稿上的目标 → 该目标最新一版。都没有 → 客户最近一份还在用的处方。
       loadPlanPrescription(ctx.params.id, goalId),
     ])
-    return NextResponse.json({ success: true, board, options, live_ads: liveAds, live_ads_visible: access.tier === 'admin', prescription })
+    const spec = board.spec_valid ? readPromoSpec(plan.plan_data) : null
+    const delivery = spec ? await loadDeliveryView(supabaseAdmin, ctx.params.id, spec, board.today) : null
+    return NextResponse.json({
+      success: true, board, options, live_ads: liveAds, live_link: liveLink, live_ads_visible: internal, prescription, delivery,
+    })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     return NextResponse.json({ success: false, error: message }, { status: 500 })
@@ -121,12 +131,14 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
       return NextResponse.json({ success: false, error: '目标不存在或不属于这个客户' }, { status: 400 })
     }
 
-    // 广告账户归属 + 确定的超限（读不到只是未核实，不在这里拒绝）
+    // 广告账户归属 + 确定的超限。客户每天总上限只认计划上填写的数。
+    // 草稿可以先不填；没填时批准会被挡住，这里不拿旧客户总闸或各步骤预算来顶上。
     if (allAdsSteps(spec).length > 0) {
+      const planCap = dailyTotalCapCents({ promo: spec })
       const facts = await loadPromoFacts(ctx.params.id, spec, plan.generation_meta?.promo_checks ?? [])
       const verdict = validatePlanDraft(body?.promo, {
         accounts: facts.gate.accounts,
-        clientCapCents: facts.gate.config?.daily_budget_cap_cents ?? null,
+        clientCapCents: planCap,
       })
       if (!verdict.ok && verdict.code === 'invalid_spec') return shapeError(verdict.issues)
       if (!verdict.ok) return budgetError(verdict.problems)

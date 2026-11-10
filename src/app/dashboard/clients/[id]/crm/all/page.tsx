@@ -354,8 +354,19 @@ export default function CrmAllContactsPage() {
         openContactFromNudge(deepLinkId, stashedName)
         return
       }
-      setToast('这个人不在这份名单里了 —— 用上面的搜索框找找看')
-      window.setTimeout(() => setToast(null), 4000)
+      // 日历 / 摘要邮件的直达链接没有存名字：名单只装了第一页，客人在后面几页很常见。
+      // 先按编号单独读这一位再开抽屉，真读不到（换客户 / 记录被删）才提示。
+      const wantedId = deepLinkId
+      readContactById(wantedId)
+        .then((found) => {
+          setQuickRow(found)
+          setDrawerSectionKey(null)
+          setDrawerContactId(found.contactId)
+        })
+        .catch(() => {
+          setToast('这个人不在这份名单里了 —— 用上面的搜索框找找看')
+          window.setTimeout(() => setToast(null), 4000)
+        })
       return
     }
     openDrawer(deepLinkId)
@@ -816,7 +827,7 @@ export default function CrmAllContactsPage() {
                         total={s.total}
                         // 段收起时 items=null——没数据就不算「今天进度」，等展开了再算，
                         // 不能拿 0 冒充「今天一个都没处理」。
-                        progress={s.items ? dayProgress(s.items.map((r) => ({ handled: isToday(r.lastTouchAt) }))) : undefined}
+                        progress={s.items ? dayProgress(s.items.map((r) => ({ handled: r.handled ?? isToday(r.lastTouchAt) }))) : undefined}
                         open={open}
                         colSpan={colCount}
                         onToggle={() => toggleSection(s.key)}

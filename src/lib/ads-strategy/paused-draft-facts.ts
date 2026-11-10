@@ -4,20 +4,50 @@
  */
 
 import { canonicalHashOfInput } from '@/lib/kernel/canonical-hash'
-import type { AccountCapFacts } from '@/lib/marketing-plan/promo/budget-caps'
+import type { AccountCapFacts, LiveSpendByAccount } from '@/lib/marketing-plan/promo/budget-caps'
 import { confirmBlockReason, contentFingerprint, type CardFacts, type HardCheck } from '@/lib/confirmation-card/facts'
-import { MAX_AD_SETS, type AdDraft } from './ad-draft'
+import {
+  isKnownDraftKind,
+  MAX_AD_SETS,
+  metaTripletFor,
+  type AdDraft,
+  inheritedSpendOf,
+  inheritedScheduleText,
+  draftUsingInheritedBudget,
+} from './ad-draft'
 import { draftNotYetBuildable, reviewDraftAgainstCaps, reviewDraftForBuild } from './ad-draft-expansion'
 import { PAUSED_DRAFT_WHAT } from './paused-draft-copy'
+import { partnerPageScopeNote } from './partner-page'
+import { REELS_LEAD_KIND } from './reels-lead'
 
 export const PAUSED_DRAFT_SUBJECT_PREFIX = 'meta-paused-draft:'
 export const PAUSED_DRAFT_HOLD = 'ads.paused_draft_hold'
+
+export interface CampaignShape {
+  readonly entityId: string
+  readonly objective: string | null
+  readonly budgetLevel: 'cbo' | 'abo' | null
+}
 
 export interface PausedDraftReview {
   readonly adAccountId: string
   /** null = the cap list did not load. An empty list loaded and is empty. */
   readonly accounts: readonly AccountCapFacts[] | null
   readonly clientCapCents: number | null
+  /** null = delivering daily spend was not read. 0 = read, nothing is delivering. */
+  readonly liveDeliveringCents: number | null
+  /**
+   * Every client ad account. null = the client total could not be read.
+   * Absent = older callers, which only have liveDeliveringCents for this account.
+   */
+  readonly liveByAccount?: LiveSpendByAccount
+  /**
+   * Daily budget already inside liveDeliveringCents, by delivering ad set.
+   * Absent or null = do not subtract. An id here is not a second new budget.
+   */
+  readonly deliveringAdSetCents?: Readonly<Record<string, number>> | null
+  /** null = campaign snapshots were not read. Empty = read, no campaigns. */
+  readonly campaignShapes: readonly CampaignShape[] | null
 }
 
 export interface PriorPausedFailure {
@@ -41,14 +71,13 @@ export function pausedDraftFacts(
   accountLabel: string,
   review: PausedDraftReview,
 ): CardFacts {
-  const count = adSetCount(draft)
   return {
     subjectKey: pausedDraftSubjectKey(draft),
     what: PAUSED_DRAFT_WHAT,
     account: safeLabel(accountLabel),
     amount: amountLine(draft, review),
-    date: `一共 ${durationDays(draft)} 天，从点确认当天算起`,
-    scope: `1 个暂停系列，${count} 个广告组，不开启。稿 ${draftMark(draft)}`,
+    date: dateLine(draft),
+    scope: scopeLine(draft),
     hardChecks: hardChecks(draft, review),
   }
 }
@@ -84,7 +113,10 @@ export function plainMetaError(error: string): string {
 }
 
 function hardChecks(draft: AdDraft, review: PausedDraftReview): HardCheck[] {
-  return [reviewCheck(draft), capCheck(draft, review), countCheck(draft), buildableCheck(draft)]
+  const checks = [reviewCheck(draft), capCheck(draft, review), countCheck(draft), buildableCheck(draft)]
+  const campaign = campaignCheck(draft, review)
+  if (campaign) checks.push(campaign)
+  return checks
 }
 
 function reviewCheck(draft: AdDraft): HardCheck {
@@ -94,13 +126,70 @@ function reviewCheck(draft: AdDraft): HardCheck {
 }
 
 function capCheck(draft: AdDraft, review: PausedDraftReview): HardCheck {
+  if (draft.existingAdSetId && !inheritedSpendOf(draft)) {
+    return { label: '日预算上限', state: 'unread', reason: '还没读到这个广告组的真实每天预算' }
+  }
   if (!review.accounts) return { label: '日预算上限', state: 'unread', reason: '上限没读到' }
   const known = review.accounts.some((account) => account.ad_account_id === review.adAccountId && account.owned_by_client)
   if (!known) return { label: '日预算上限', state: 'unread', reason: '广告账户没读到' }
-  const verdict = reviewDraftAgainstCaps(draft, review.adAccountId, review.accounts, review.clientCapCents)
+  const priced = draftUsingInheritedBudget(draft)
+  const compared = withoutDoubleCountedSpend(priced, review)
+  const verdict = reviewDraftAgainstCaps(
+    compared.draft,
+    review.adAccountId,
+    review.accounts,
+    review.clientCapCents,
+    capLive(review),
+    compared.allowZero,
+  )
   if (verdict.verdict === 'ok') return { label: '日预算上限', state: 'green', reason: '' }
-  if (verdict.verdict === 'unknown') return { label: '日预算上限', state: 'unread', reason: '上限没核成' }
-  return { label: '日预算上限', state: 'red', reason: '每天要花的超过了这张卡上的上限' }
+  if (verdict.verdict === 'unknown') {
+    const unreadLive = verdict.reasons.some((reason) => reason.includes('已在投'))
+    return { label: '日预算上限', state: 'unread', reason: unreadLive ? '读不到在投预算' : '上限没核成' }
+  }
+  return { label: '日预算上限', state: 'red', reason: '已在投的日预算加上这份草稿，超过了上限' }
+}
+
+function capLive(review: PausedDraftReview): number | LiveSpendByAccount {
+  if (Object.prototype.hasOwnProperty.call(review, 'liveByAccount')) return review.liveByAccount ?? null
+  if (Object.prototype.hasOwnProperty.call(review, 'liveDeliveringCents')) return review.liveDeliveringCents
+  return null
+}
+
+function withoutDoubleCountedSpend(
+  draft: AdDraft,
+  review: PausedDraftReview,
+): { draft: AdDraft; allowZero: boolean } {
+  const already = countedAdSetCents(draft, review)
+  if (already === null) return { draft, allowZero: false }
+  const extra = Math.max(0, Math.round(draft.dailyBudget * 100) - already)
+  return { draft: { ...draft, dailyBudget: extra / 100 }, allowZero: extra === 0 }
+}
+
+function countedAdSetCents(draft: AdDraft, review: PausedDraftReview): number | null {
+  if (!draft.existingAdSetId || !review.deliveringAdSetCents) return null
+  const already = review.deliveringAdSetCents[draft.existingAdSetId]
+  if (!Number.isSafeInteger(already) || already < 0) return null
+  return already
+}
+
+function campaignCheck(draft: AdDraft, review: PausedDraftReview): HardCheck | null {
+  if (!draft.existingCampaignId) return null
+  const shape = review.campaignShapes?.find((row) => row.entityId === draft.existingCampaignId)
+  if (!review.campaignShapes || !shape?.objective || !shape.budgetLevel) {
+    return { label: '系列目标和预算', state: 'unread', reason: '这个系列的目标或预算方式没读到' }
+  }
+  if (shape.budgetLevel === 'cbo') {
+    return {
+      label: '系列目标和预算',
+      state: 'red',
+      reason: '这个系列用的是系列预算，这次不能加一个自己带日预算的广告组',
+    }
+  }
+  if (!isKnownDraftKind(draft.kind) || metaTripletFor(draft.kind).objective !== shape.objective) {
+    return { label: '系列目标和预算', state: 'red', reason: '系列目标和这份草稿不一致' }
+  }
+  return { label: '系列目标和预算', state: 'green', reason: '' }
 }
 
 function countCheck(draft: AdDraft): HardCheck {
@@ -110,15 +199,20 @@ function countCheck(draft: AdDraft): HardCheck {
 }
 
 function buildableCheck(draft: AdDraft): HardCheck {
+  // 这张卡只建单个广告组。多个广告组没有认多组的卡，起草接口也直接拒绝。
+  if (Array.isArray(draft.adSets)) {
+    return { label: '能按草稿建成暂停', state: 'red', reason: '多个广告组还没有一张认多个组的确认卡，这一步没有去建' }
+  }
   if (!draftNotYetBuildable(draft)) return { label: '能按草稿建成暂停', state: 'green', reason: '' }
   return { label: '能按草稿建成暂停', state: 'red', reason: '这份草稿现在还不能原样建成暂停' }
 }
 
 function amountLine(draft: AdDraft, review: PausedDraftReview): string {
-  const daily = money(draft.dailyBudget)
+  const daily = shownDaily(draft)
   const cap = capMajor(review)
-  if (!cap) return `每天 ${daily}，上限读不到`
-  return `每天 ${daily} ${cap.currency}，上限 ${cap.amount} ${cap.currency}`
+  if (daily === null) return '每天多少要等读到这个广告组'
+  if (!cap) return `每天 ${money(daily)}，上限读不到`
+  return `每天 ${money(daily)} ${cap.currency}，上限 ${cap.amount} ${cap.currency}`
 }
 
 function capMajor(review: PausedDraftReview): { amount: string; currency: string } | null {
@@ -129,6 +223,32 @@ function capMajor(review: PausedDraftReview): { amount: string; currency: string
 
 function adSetCount(draft: AdDraft): number {
   return Array.isArray(draft.adSets) ? draft.adSets.length : 1
+}
+
+function scopeLine(draft: AdDraft): string {
+  const mark = draftMark(draft)
+  const base = draft.existingAdSetId
+    ? `在已有广告组里加暂停广告，不新建系列、不开。稿 ${mark}`
+    : draft.existingCampaignId
+      ? `在已有系列里加 1 个暂停广告组，不新建系列、不开。稿 ${mark}`
+      : `1 个暂停系列，${adSetCount(draft)} 个广告组，不开启。稿 ${mark}`
+  const noted = `${base}${partnerPageScopeNote(draft)}`
+  if (draft.kind !== REELS_LEAD_KIND) return noted
+  return `${noted} 类型：短视频留资，只锁两条 Reels。`
+}
+
+function dateLine(draft: AdDraft): string {
+  if (draft.existingAdSetId) {
+    const spend = inheritedSpendOf(draft)
+    if (!spend) return '结束日读不到'
+    return inheritedScheduleText(spend)
+  }
+  return `一共 ${durationDays(draft)} 天，从点确认当天算起`
+}
+
+function shownDaily(draft: AdDraft): number | null {
+  if (!draft.existingAdSetId) return draft.dailyBudget
+  return inheritedSpendOf(draft)?.dailyBudget ?? null
 }
 
 function durationDays(draft: AdDraft): number {

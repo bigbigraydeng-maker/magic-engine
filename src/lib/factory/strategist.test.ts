@@ -45,6 +45,7 @@ function makeCtx(over: Partial<GateContext> = {}): GateContext {
     recentAngles: [],
     blocklist: [],
     activeWinners: [],
+    winnerThemeGuards: [],
     balanceUsd: 20,
     dailyOrderCount: 0,
     dailyCostUsd: 0,
@@ -169,17 +170,19 @@ describe('角度溯源 + 去重(护栏 2/7)', () => {
       cta_segment: {},
       win_reason_tags: ['scenery_first'],
       cost_per_thruplay: 0.01,
+      cost_per_result: 5,
+      result_type: 'lead' as const,
       status: 'active',
     }
     // new_campaign 强制 fresh angle(不挂骨架),避免 winner 被选为骨架
     const signal = makeSignal({ signal_type: 'new_campaign', evidence: { campaign_name: 'Spring Sale' } })
     const locked = decideSignal(
-      makeCtx({ signal, activeWinners: [{ ...winnerBase, current_frequency: 2.0 }] }),
+      makeCtx({ signal, winnerThemeGuards: [{ hook_segment: winnerBase.hook_segment, current_frequency: 2.0 }] }),
     )
     expect((locked as { workOrder: { angle: string } }).workOrder.angle).toBe('Silk Road adventure')
 
     const unlocked = decideSignal(
-      makeCtx({ signal, activeWinners: [{ ...winnerBase, current_frequency: 3.0 }] }),
+      makeCtx({ signal, winnerThemeGuards: [{ hook_segment: winnerBase.hook_segment, current_frequency: 3.0 }] }),
     )
     expect((unlocked as { workOrder: { angle: string } }).workOrder.angle).toBe('Best of China group tours')
   })
@@ -197,6 +200,8 @@ describe('骨架 + 工单组装', () => {
             cta_segment: {},
             win_reason_tags: ['price_hook'],
             cost_per_thruplay: 0.0148,
+            cost_per_result: 4.57,
+            result_type: 'lead',
             current_frequency: 1.2,
             status: 'active',
           },

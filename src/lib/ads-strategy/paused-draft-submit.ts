@@ -10,9 +10,14 @@ import { assertMayClick, contentFingerprint, decideConfirmationCard, issueConfir
 import { notesFor } from '@/lib/confirmation-card/records'
 import { voidStaleCard } from '@/lib/confirmation-card/settle'
 import { ConfirmationCardError } from '@/lib/confirmation-card/errors'
+import type { CardFacts } from '@/lib/confirmation-card/facts'
+import { markOrHold } from './independent-review-gate'
+import { draftProposalText } from './independent-review'
 import { isExpired, readStoredCard } from '@/lib/confirmation-card/view'
-import type { AdDraft } from './ad-draft'
+import type { AdDraft, InheritedAdSetSpend } from './ad-draft'
+import { withInheritedSpend, withoutInheritedSpend } from './ad-draft'
 import { createDraftForApproval, type CreateDraftDeps, type CreateDraftOutcome } from './draft-and-gate'
+import { isCleanPartnerRefusal } from './partner-page'
 import {
   PAUSED_DRAFT_HOLD,
   metaErrorClass,
@@ -68,6 +73,21 @@ export interface PausedDraftSubmitResult {
 
 type CreatePaused = (draft: AdDraft, deps: CreateDraftDeps) => Promise<CreateDraftOutcome>
 
+async function factsAfterReview(
+  sb: KernelDeps['supabase'],
+  draft: AdDraft,
+  accountLabel: string,
+  review: PausedDraftReview,
+): Promise<CardFacts> {
+  const facts = pausedDraftFacts(draft, accountLabel, review)
+  const blocked = pausedDraftBlock(draft, accountLabel, review) !== null
+  const marked = await markOrHold(sb, draft.clientId, facts.hardChecks, blocked, draftProposalText(draft))
+  if (marked.kind === 'return') {
+    throw new ConfirmationCardError('rule_blocked', `独立复核退回：${marked.reason}`)
+  }
+  return { ...facts, hardChecks: marked.checks }
+}
+
 export async function issuePausedDraftCard(args: {
   kernel: KernelDeps
   clientId: string
@@ -76,9 +96,10 @@ export async function issuePausedDraftCard(args: {
   accountLabel: string
   review: PausedDraftReview
   now?: Date
+  readSpend?: (draft: AdDraft) => Promise<{ ok: true; spend: InheritedAdSetSpend } | { ok: false; error: string }>
 }): Promise<ConfirmationCardView> {
-  const draft = { ...args.draft, clientId: args.clientId }
-  const facts = pausedDraftFacts(draft, args.accountLabel, args.review)
+  const draft = await draftShownOnCard(args)
+  const facts = await factsAfterReview(args.kernel.supabase, draft, args.accountLabel, args.review)
   const draftHash = canonicalHashOfInput(draft)
   const fingerprint = contentFingerprint(normalizeFacts(facts))
   const now = args.now ?? args.kernel.now()
@@ -106,6 +127,17 @@ export async function issuePausedDraftCard(args: {
     accountLabel: args.accountLabel,
   })
   return card
+}
+
+async function draftShownOnCard(args: Parameters<typeof issuePausedDraftCard>[0]): Promise<AdDraft> {
+  const clean = withoutInheritedSpend({ ...args.draft, clientId: args.clientId })
+  if (!clean.existingAdSetId) return clean
+  if (!args.readSpend) {
+    throw new ConfirmationCardError('invalid', '还没读到这个广告组的真实预算，没有出卡。')
+  }
+  const read = await args.readSpend(clean)
+  if (!read.ok) throw new ConfirmationCardError('invalid', read.error)
+  return withInheritedSpend(clean, read.spend)
 }
 
 export async function submitPausedDraftCard(args: {
@@ -253,6 +285,7 @@ function outcomeLine(who: string | null, outcome: CreateDraftOutcome): string {
   const name = who ?? '有人'
   if (outcome.status === 'awaiting_approval') return `${name} 点了确认。暂停草稿已进审批队列。`
   if (outcome.status === 'blocked') return `${name} 点了确认。已经建成暂停，回读对不上，保持暂停，不删除。`
+  if (isCleanPartnerRefusal(outcome.error)) return `${name} 点了确认。${outcome.error}`
   return `${name} 点了确认。${plainMetaError(outcome.error ?? '没有建成')}`
 }
 
@@ -332,7 +365,7 @@ function holdFate(
   if (run.status !== 'pending_approval') return 'settled'
   if (!incoming) return 'live'
   const stored = readStoredCard(run.input)
-  if (stored && isExpired(stored.issuedAt, now)) return 'expired'
+  if (stored && isExpired(stored.issuedAt, now, stored.lifetime)) return 'expired'
   const replaced = payload.subjectKey === incoming.subjectKey && payload.fingerprint !== incoming.fingerprint
   return stored && replaced ? 'replaced' : 'live'
 }

@@ -19,15 +19,18 @@
 
 import type { PlayKey } from './play-vocabulary'
 import { dominantScript } from './launch-readback'
+import { reelsLeadCreativeProblems, reelsLeadDraftProblems } from './reels-lead'
 
-/** 目前 ME 会发的三种广告。要加第四种，先在 PLAY_CATALOG 里有对应打法。 */
-export type DraftKind = 'lead_form' | 'video_thruplay' | 'messenger_conversation'
+/** 目前 ME 会发的五种广告。短视频留资和伙伴主页都复用留资打法，不另开一套打法。 */
+export type DraftKind = 'lead_form' | 'video_thruplay' | 'messenger_conversation' | 'reels_lead' | 'partner_page'
 
 /** 打法 → 这个草案要走哪套 Meta 参数。两边必须对得上，别各自加。 */
 export const DRAFT_PLAY: Readonly<Record<DraftKind, PlayKey>> = {
   lead_form: 'lead_form_harvest',
   video_thruplay: 'thruplay_pool_build',
   messenger_conversation: 'messenger_direct',
+  reels_lead: 'lead_form_harvest',
+  partner_page: 'lead_form_harvest',
 }
 
 export function isKnownDraftKind(k: unknown): k is DraftKind {
@@ -45,6 +48,9 @@ export function isKnownDraftKind(k: unknown): k is DraftKind {
 export const APPROVABLE_KINDS: ReadonlySet<DraftKind> = new Set<DraftKind>([
   'lead_form',
   'video_thruplay',
+  // 短视频留资和伙伴主页可以进开投卡。旧的开按钮在 approveDraft 里按入口拒绝。
+  'reels_lead',
+  'partner_page',
 ])
 
 export function isApprovableKind(k: unknown): boolean {
@@ -128,6 +134,19 @@ export interface AdDraftAdSet {
   urlTags?: string
   /** 首评。不写 = 不发首评。 */
   firstComment?: string
+  /** 计划步骤上的投放位置。不写 = 不另锁。多个广告组时写在组上，发布时再提到草稿根上。 */
+  placements?: string[]
+}
+
+/**
+ * 已有广告组真实在花的钱。
+ * `endTime` 是广告组上的绝对结束时间，原样保留，不按跨度重算、也不平移。
+ * `null` 表示这个组没有结束日。缺这个字段的是更早的确认，只剩 `durationDays`。
+ */
+export interface InheritedAdSetSpend {
+  dailyBudget: number
+  durationDays: number | null
+  endTime?: string | null
 }
 
 export interface AdDraft {
@@ -135,7 +154,22 @@ export interface AdDraft {
   clientId: string
   /** 广告系列名 —— 会出现在 Meta 后台，写人看得懂的。 */
   campaignName: string
+  /**
+   * 已有系列的编号。写了就不再新建系列，只在这个系列下加一个暂停广告组。
+   * 必须是这张卡上的广告账户里的数字编号，对不上就不建。
+   */
+  existingCampaignId?: string
   adSetName: string
+  /**
+   * 已有广告组的编号。写了就不再新建系列和广告组，只在这个组里加暂停广告。
+   * 和已有系列编号不能同时写，两件事要分成两张卡。
+   */
+  existingAdSetId?: string
+  /**
+   * 服务端读到的已有广告组预算和排期。确认信息和上限检查用它。
+   * 浏览器自己带上来的值不算数，要等服务端读过再写上。
+   */
+  inheritedSpend?: InheritedAdSetSpend
   /**
    * 每天多少钱，客户账户的货币单位（元，不是分）。
    * 单个广告组时，这就是这一组的日预算。
@@ -155,8 +189,13 @@ export interface AdDraft {
   leadFormId?: string
   /** 落地页 —— 表单广告的隐私政策/后续跳转用。 */
   linkUrl?: string
-  /** 广告主页 id。 */
+  /** 广告主页 id。伙伴主页广告由服务端按客户配置写上，不信请求体。 */
   pageId: string
+  /**
+   * 伙伴主页广告的身份。不写 = 客户自己的主页。
+   * `partner` = 用这位客户配置里的伙伴主页。请求体里的值不作数。
+   */
+  partnerIdentity?: 'own' | 'partner'
   /** 一个草案下可以有多条创意；**同一个组里语言必须一致**（闸门会查）。多个广告组时文案写在组上，这里留空数组。 */
   creatives: AdDraftCreative[]
   /** 包含的自定义受众编号（Meta 自定义受众的数字 id）。给了就等于声明这个广告组是重定向。 */
@@ -167,6 +206,8 @@ export interface AdDraft {
   budgetMode?: DraftBudgetMode
   /** 系列日预算（元）。`budgetMode === 'campaign'` 时必填，且要等于 `dailyBudget`。 */
   campaignDailyBudget?: number
+  /** 系列花费上限，账户币种最小单位（分）。不写 = 不设上限（和以前一样）。建系列时传给 Meta 的 spend_cap。 */
+  campaignSpendCapMinor?: number
   /** 多个广告组。不写 = 根上的字段就是那一个组。 */
   adSets?: AdDraftAdSet[]
   /** 单个广告组的扩量开关。多个广告组时写在每个组上。 */
@@ -174,6 +215,11 @@ export interface AdDraft {
   ctaType?: string
   urlTags?: string
   firstComment?: string
+  /**
+   * 计划步骤上的投放位置。不写或空 = 不另锁：看完类视频仍锁 Facebook 和 Instagram，
+   * 其它类型仍不写版位。写了就按这些词锁，并且回读必须对得上。
+   */
+  placements?: string[]
 }
 
 /** 每天最多敢自动花多少 —— 超过这个数不是 ME 该自己决定的事。 */
@@ -262,10 +308,29 @@ function isCreativeShape(c: unknown): boolean {
   return OPTIONAL_TEXT_FIELDS.every((k) => o[k] === undefined || typeof o[k] === 'string')
 }
 
+/** 金额恰好能换算成整数分（Meta 按分收预算；9.505 这种会被悄悄四舍五入，建出来和草稿不是一个数）。 */
+export function isWholeCents(n: number): boolean {
+  return Math.abs(n * 100 - Math.round(n * 100)) < 1e-6
+}
+
+/** 年龄：下限不低于 18、上限不高于 65（Meta 的 65 岁以上是 65+，这里只允许写 65）、下限不超过上限。 */
+export function ageProblems(ageMin: number | undefined, ageMax: number | undefined, prefix: string): DraftProblem[] {
+  const p: DraftProblem[] = []
+  if (ageMin !== undefined && ageMin < 18) p.push({ field: `${prefix}ageMin`, message: 'Meta 不允许投给 18 岁以下' })
+  if (ageMin !== undefined && ageMin > 65) p.push({ field: `${prefix}ageMin`, message: '年龄下限不能超过 65' })
+  if (ageMax !== undefined && ageMax > 65) p.push({ field: `${prefix}ageMax`, message: '年龄上限不能超过 65（Meta 的 65 就是 65 岁以上）' })
+  if (ageMin !== undefined && ageMax !== undefined && ageMin > ageMax) {
+    p.push({ field: `${prefix}ageMax`, message: '年龄下限比上限还大' })
+  }
+  return p
+}
+
 function moneyAndSpanProblems(d: AdDraft): DraftProblem[] {
   const p: DraftProblem[] = []
   if (!Number.isFinite(d.dailyBudget) || d.dailyBudget <= 0) {
     p.push({ field: 'dailyBudget', message: '每天预算必须是大于 0 的数' })
+  } else if (!isWholeCents(d.dailyBudget)) {
+    p.push({ field: 'dailyBudget', message: '每天预算最多写到分（两位小数），多出来的位数会被 Meta 悄悄四舍五入' })
   } else if (d.dailyBudget > MAX_AUTO_DAILY_BUDGET) {
     p.push({
       field: 'dailyBudget',
@@ -302,19 +367,15 @@ function validateCommon(d: AdDraft): DraftProblem[] {
     }
     p.push(...creativeProblems(d.kind, d.creatives, ''))
 
-    if (d.ageMin !== undefined && d.ageMin < 18) {
-      p.push({ field: 'ageMin', message: 'Meta 不允许投给 18 岁以下' })
-    }
-    if (d.ageMin !== undefined && d.ageMax !== undefined && d.ageMin > d.ageMax) {
-      p.push({ field: 'ageMax', message: '年龄下限比上限还大' })
-    }
+    p.push(...ageProblems(d.ageMin, d.ageMax, ''))
 
     p.push(...audienceListProblems(d.audienceIds, d.excludedAudienceIds, ''))
   }
 
-  if (d.kind === 'lead_form' && !d.leadFormId) {
+  if ((d.kind === 'lead_form' || d.kind === 'partner_page') && !d.leadFormId) {
     p.push({ field: 'leadFormId', message: '留资广告没挂表单 —— 那它收不到任何联系方式' })
   }
+  p.push(...reelsLeadDraftProblems(d))
 
   p.push(...expandedDraftProblems(d))
 
@@ -330,12 +391,13 @@ export function creativeProblems(kind: DraftKind, creatives: AdDraftCreative[], 
     if ((kind === 'video_thruplay' || kind === 'messenger_conversation') && !c.videoId) {
       p.push({ field: `${prefix}creatives[${i}].videoId`, message: '视频广告没给视频' })
     }
-    if (kind === 'lead_form' && !c.imageHash && !c.videoId) {
+    if ((kind === 'lead_form' || kind === 'partner_page') && !c.imageHash && !c.videoId) {
       p.push({ field: `${prefix}creatives[${i}].imageHash`, message: '表单广告没给图也没给视频' })
     }
-    if (kind === 'lead_form' && c.videoId && !hasThumbnail(c)) {
+    if ((kind === 'lead_form' || kind === 'partner_page') && c.videoId && !hasThumbnail(c)) {
       p.push({ field: `${prefix}creatives[${i}].thumbnail`, message: THUMBNAIL_MISSING })
     }
+    if (kind === 'reels_lead') p.push(...reelsLeadCreativeProblems(c, prefix, i))
   })
   return p
 }
@@ -467,6 +529,18 @@ const META_TRIPLET: Readonly<Record<DraftKind, MetaObjectiveTriplet>> = {
     billingEvent: 'IMPRESSIONS',
     destinationType: 'MESSENGER',
   },
+  reels_lead: {
+    objective: 'OUTCOME_LEADS',
+    optimizationGoal: 'LEAD_GENERATION',
+    billingEvent: 'IMPRESSIONS',
+    destinationType: 'ON_AD',
+  },
+  partner_page: {
+    objective: 'OUTCOME_LEADS',
+    optimizationGoal: 'LEAD_GENERATION',
+    billingEvent: 'IMPRESSIONS',
+    destinationType: 'ON_AD',
+  },
 }
 
 /**
@@ -479,18 +553,178 @@ export function metaTripletFor(kind: DraftKind): MetaObjectiveTriplet {
   return META_TRIPLET[kind]
 }
 
+/** 浏览器带上来的残缺对象不算读到。绝对结束时间原样留下，不改写成另一时区。 */
+export function inheritedSpendOf(d: AdDraft): InheritedAdSetSpend | null {
+  const raw = d.inheritedSpend
+  if (!raw || typeof raw.dailyBudget !== 'number' || !Number.isFinite(raw.dailyBudget) || raw.dailyBudget <= 0) {
+    return null
+  }
+  const endTime = readEndTime(raw)
+  if (endTime === 'bad') return null
+  const days = readDays(raw.durationDays)
+  if (days === 'bad' && endTime === undefined) return null
+  const spend: InheritedAdSetSpend = {
+    dailyBudget: raw.dailyBudget,
+    durationDays: days === 'bad' ? null : days,
+  }
+  if (endTime !== undefined) spend.endTime = endTime
+  return spend
+}
+
+/** 两边都有绝对结束时间时只比它。同一跨度、结束日被平移，不算同一份排期。 */
+export function sameInheritedSpend(a: InheritedAdSetSpend, b: InheritedAdSetSpend): boolean {
+  if (Math.round(a.dailyBudget * 100) !== Math.round(b.dailyBudget * 100)) return false
+  if (hasEndTime(a) && hasEndTime(b)) return a.endTime === b.endTime
+  if (hasEndTime(a) || hasEndTime(b)) return openEnded(a) && openEnded(b)
+  return a.durationDays === b.durationDays
+}
+
+function openEnded(spend: InheritedAdSetSpend): boolean {
+  return spend.endTime === null || (!hasEndTime(spend) && spend.durationDays === null)
+}
+
+/** 确认卡上的结束说明。有绝对结束时间就写那一天，不用起止相减得到的天数。 */
+export function inheritedScheduleText(spend: InheritedAdSetSpend): string {
+  if (typeof spend.endTime === 'string') {
+    const day = /^(\d{4}-\d{2}-\d{2})/.exec(spend.endTime)?.[1] ?? spend.endTime
+    return `跟这个广告组一起，到 ${day} 结束`
+  }
+  if (spend.endTime === null || spend.durationDays === null) return '这个广告组没有结束日'
+  return `跟这个广告组一起跑 ${spend.durationDays} 天`
+}
+
+function hasEndTime(spend: InheritedAdSetSpend): boolean {
+  return Object.prototype.hasOwnProperty.call(spend, 'endTime')
+}
+
+function readDays(days: number | null): number | null | 'bad' {
+  if (days === null) return null
+  if (!Number.isInteger(days) || days < 1) return 'bad'
+  return days
+}
+
+function readEndTime(raw: InheritedAdSetSpend): string | null | undefined | 'bad' {
+  if (!hasEndTime(raw)) return undefined
+  if (raw.endTime === null) return null
+  if (typeof raw.endTime !== 'string' || !Number.isFinite(Date.parse(raw.endTime))) return 'bad'
+  return raw.endTime
+}
+
+export function withoutInheritedSpend(d: AdDraft): AdDraft {
+  if (d.inheritedSpend === undefined) return d
+  const next = { ...d }
+  delete next.inheritedSpend
+  return next
+}
+
+export function withInheritedSpend(d: AdDraft, spend: InheritedAdSetSpend): AdDraft {
+  return { ...withoutInheritedSpend(d), inheritedSpend: spend }
+}
+
+/** 上限和最低日预算只看已经读到的真实每天金额。 */
+export function draftUsingInheritedBudget(d: AdDraft): AdDraft {
+  const spend = inheritedSpendOf(d)
+  return spend ? { ...d, dailyBudget: spend.dailyBudget } : d
+}
+
 /** 一句话说清这条广告在做什么 —— 审批页第一行。 */
 const DRAFT_WHAT: Readonly<Record<DraftKind, string>> = {
   lead_form: '收联系方式（填表单）',
   video_thruplay: '养受众（让人看完视频，之后可以再投给他们）',
   messenger_conversation: '私信开聊（让人点广告直接进 Messenger 和我们对话）',
+  reels_lead: '短视频留资（用已上传的视频在 Reels 上收表单）',
+  partner_page: '伙伴主页广告（身份主页按客户配置，先暂停）',
 }
 
 export function describeDraft(d: AdDraft): string {
+  const inherited = d.existingAdSetId ? describeInheritedAdSet(d) : null
+  if (inherited) return inherited
   const total = d.dailyBudget * d.durationDays
   // 这一步在 `validateDraft` 之前就会被调（账本的摘要），所以 kind 可能是请求体里的任何值。
-  const what = isKnownDraftKind(d.kind) ? DRAFT_WHAT[d.kind] : '（不认识的广告类型）'
+  const what = draftWhat(d)
   const budget = d.budgetMode === 'campaign' ? '（系列预算）' : ''
-  const sets = Array.isArray(d.adSets) ? `，${d.adSets.length} 个广告组` : ''
-  return `${what}，每天 $${d.dailyBudget}${budget}、跑 ${d.durationDays} 天，最多花 $${total}${sets}`
+  const sets = Array.isArray(d.adSets)
+    ? `，${d.adSets.length} 个广告组（${d.adSets.map((s) => { const v = asSet(s); return `${v.name ?? '?'} $${v.dailyBudget ?? '?'}` }).join('、')}）`
+    : ''
+  const attached = d.existingCampaignId ? '，加到已有系列' : ''
+  return `${what}，每天 $${d.dailyBudget}${budget}、跑 ${d.durationDays} 天，最多花 $${total}${sets}${attached}`
+}
+
+function draftWhat(d: AdDraft): string {
+  if (!isKnownDraftKind(d.kind)) return '（不认识的广告类型）'
+  if (d.kind === 'partner_page') {
+    return d.partnerIdentity === 'partner'
+      ? '伙伴主页广告（身份用已配置的伙伴主页）'
+      : '伙伴主页广告（身份用客户自己的主页）'
+  }
+  return DRAFT_WHAT[d.kind]
+}
+
+/** 草稿上的每天金额和天数不会写进已有广告组，不能拿来当实际花费。 */
+function describeInheritedAdSet(d: AdDraft): string {
+  const spend = inheritedSpendOf(d)
+  const what = draftWhat(d)
+  if (!spend) return `${what}，加到已有广告组，每天多少和结束日还没读到`
+  if (typeof spend.endTime === 'string') {
+    return `${what}，加到已有广告组，每天 $${spend.dailyBudget}，${inheritedScheduleText(spend)}`
+  }
+  if (spend.durationDays === null || spend.endTime === null) {
+    return `${what}，加到已有广告组，每天 $${spend.dailyBudget}，没有结束日`
+  }
+  const total = spend.dailyBudget * spend.durationDays
+  return `${what}，加到已有广告组，每天 $${spend.dailyBudget}、跟原组 ${spend.durationDays} 天，最多 $${total}`
+}
+
+/**
+ * 一份草稿里每一个要建的广告组，压成「单组草稿」的样子 —— 建组、回读、受众检查都按这个形状走，
+ * 不需要各自再认一遍 `adSets`。没有 `adSets` 时就是它自己（一个元素）。
+ * 注意：多组时组预算缺失会变成 NaN，调用方必须先过 `validateDraft`，不要拿没验过的草稿来建。
+ */
+export function adSetViews(d: AdDraft): AdDraft[] {
+  if (!Array.isArray(d.adSets)) return [d]
+  return d.adSets.map((raw) => {
+    const set = asSet(raw)
+    return {
+      ...d,
+      adSets: undefined,
+      adSetName: set.name ?? '',
+      dailyBudget: set.dailyBudget ?? Number.NaN,
+      geoCountries: set.geoCountries ?? [],
+      geoCityKeys: set.geoCityKeys,
+      ageMin: set.ageMin,
+      ageMax: set.ageMax,
+      audienceIds: set.audienceIds,
+      excludedAudienceIds: set.excludedAudienceIds,
+      expansion: set.expansion,
+      creatives: set.creatives ?? [],
+      ctaType: set.ctaType,
+      urlTags: set.urlTags,
+      firstComment: set.firstComment,
+      placements: set.placements,
+    }
+  })
+}
+
+/**
+ * 请求体里 `adSets` 的元素没人保证过形状（null、数字、缺字段都可能）；账本摘要和红线扫描在 `validateDraft` 之前就会走到这里，
+ * 所以读不懂的元素按「空组」处理（创意为空数组），绝不抛错 —— 抛错会变成 500 且不留账。
+ */
+function asSet(raw: unknown): Partial<AdDraftAdSet> {
+  if (typeof raw !== 'object' || raw === null) return { creatives: [] }
+  const o = raw as Partial<AdDraftAdSet>
+  return { ...o, creatives: Array.isArray(o.creatives) ? o.creatives : [] }
+}
+
+/** 所有广告组的所有创意（单组 = 根上的创意）。 */
+export function allCreatives(d: AdDraft): AdDraftCreative[] {
+  return adSetViews(d).flatMap((v) => v.creatives)
+}
+
+/** 所有广告组里出现过的包含 / 排除受众编号，各自去重。 */
+export function unionAudienceIds(d: AdDraft): { included: string[]; excluded: string[] } {
+  const views = adSetViews(d)
+  return {
+    included: [...new Set(views.flatMap((v) => v.audienceIds ?? []))],
+    excluded: [...new Set(views.flatMap((v) => v.excludedAudienceIds ?? []))],
+  }
 }

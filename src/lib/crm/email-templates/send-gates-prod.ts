@@ -4,11 +4,12 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { readEmailUnsubscribed } from '@/lib/crm/email-unsubscribe'
 import { supabaseAdmin } from '@/lib/supabase'
 import { loadPublishedTourFacts } from '@/lib/tour-catalog/store-publish'
 import { findConnectedCallEvidence, type PhoneTouch } from './call-evidence'
 import { createFrequencySources, type FrequencySourceDeps, type MailboxRef } from './frequency-sources-prod'
-import { findSentTemplateReceiptsSince } from './receipt-store'
+import { findSentMessageIdsOfTemplates, findSentTemplateReceiptsSince } from './receipt-store'
 import {
   GATE_MESSAGES,
   createSendGates,
@@ -104,7 +105,9 @@ export function createSendGateData(
     loadContactView: (clientId, contactId, hours, now) => loadContactView(db, clientId, contactId, hours, now),
     loadSenderName: (clientId, email) => loadSenderName(db, clientId, email),
     sentTemplateReceiptsSince: (clientId, contactId, sinceIso) => findSentTemplateReceiptsSince(db, clientId, contactId, sinceIso),
+    exemptMessageIdsSince: (clientId, contactId, keys, sinceIso) => findSentMessageIdsOfTemplates(db, clientId, contactId, keys, sinceIso),
     loadTimeZone: (clientId) => loadClientTimeZone(db, clientId),
+    loadEmailUnsubscribed: (clientId, contactId, addresses) => readEmailUnsubscribed(db, clientId, { contactId, addresses }),
     frequencySources: createFrequencySources({
       db,
       clientId: args.clientId,

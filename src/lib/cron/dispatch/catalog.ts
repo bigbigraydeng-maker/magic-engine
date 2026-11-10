@@ -1,3 +1,4 @@
+import { META_LEADS_SYNC_SCHEDULE } from '@/lib/meta/leads-sync-schedule'
 import type { DispatchJob } from './types'
 
 /**
@@ -54,9 +55,10 @@ export const DISPATCH_CATALOG: readonly DispatchJob[] = [
   { service: 'factory-publish-sweeper', route: 'factory-publish-sweeper', method: 'GET', auth: 'bearer', schedule: '25 * * * *' },
   { service: 'factory-worker-sweeper', route: 'factory-worker-sweeper', method: 'GET', auth: 'bearer', schedule: '*/5 * * * *' },
   { service: 'messenger-hourly', route: 'messenger-sync-hourly', method: 'GET', auth: 'bearer', schedule: '10 * * * *' },
-  { service: 'meta-leads-hourly', route: 'meta-leads-sync', method: 'GET', auth: 'bearer', schedule: '25 */2 * * *' },
+  { service: 'meta-leads-hourly', route: 'meta-leads-sync', method: 'GET', auth: 'bearer', schedule: META_LEADS_SYNC_SCHEDULE },
   { service: 'ad-readback-sweep-daily', route: 'ad-readback-sweep', method: 'GET', auth: 'bearer', schedule: '40 20 * * *' },
   { service: 'ad-entity-snapshot', route: 'ad-entity-snapshot', method: 'GET', auth: 'bearer', schedule: '30 */6 * * *' },
+  { service: 'ad-intraday-spend-sample', route: 'ad-intraday-spend-sample', method: 'GET', auth: 'bearer', schedule: '*/10 * * * *' },
   { service: 'mailchimp-activity-daily', route: 'mailchimp-activity-sync', method: 'GET', auth: 'bearer', schedule: '40 4 * * *' },
   { service: 'mailchimp-paid-tagging-daily', route: 'mailchimp-paid-tagging', method: 'GET', auth: 'bearer', schedule: '10 5 * * *' },
   { service: 'mailchimp-suppression-sync-daily', route: 'mailchimp-suppression-sync', method: 'GET', auth: 'bearer', schedule: '20 5 * * *' },

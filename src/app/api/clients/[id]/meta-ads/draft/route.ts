@@ -1,14 +1,12 @@
 /**
  * POST /api/clients/[id]/meta-ads/draft
  *
- * ME 起草一条广告 → 在 Meta 上**建成暂停状态** → 回读过闸门 → 落账等人点头。
+ * Asks for the paused-draft card. Does not build the ad.
+ * A person confirms that card before anything is created on Meta.
+ * Several ad sets are refused here: the existing card cannot build them.
  *
- * 这个接口**不会让任何广告开始花钱**。开是另一个接口，而且必须有人点。
- *
- * 200 { actionId, status, summary, findings, readback }
- *   status = 'awaiting_approval' 才轮到人看；'blocked' 是 ME 自己没干完；
- *   'failed' 是建都没建出来。
- * 424 客户没配广告账户 / 拿不到 Meta 授权
+ * 202 { wroteMeta: false, status: 'awaiting_confirmation', card }
+ * 424 客户没配广告账户 / 主页 / 拿不到 Meta 授权
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -16,9 +14,14 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { rejectAgentAdsBearer } from '@/lib/auth/agent-ads-guard'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
-import { createDraftForApproval } from '@/lib/ads-strategy/draft-and-gate'
+import { createKernel } from '@/lib/kernel'
+import { publicError } from '@/lib/confirmation-card/http'
 import type { AdDraft } from '@/lib/ads-strategy/ad-draft'
-import { loadDraftRedlines } from '@/lib/ads-strategy/draft-redlines'
+import { draftStampedWithIdentity } from '@/lib/ads-strategy/partner-page'
+import { askerFromAccess } from '@/lib/ads-strategy/card-asker'
+import { askDirectPausedDraft } from '@/lib/ads-strategy/direct-draft-card'
+import { loadPausedDraftContext } from '@/lib/ads-strategy/paused-draft-context'
+import { issuePausedDraftCard } from '@/lib/ads-strategy/paused-draft-submit'
 
 export const maxDuration = 120
 
@@ -42,7 +45,7 @@ export async function POST(
 
   const { data: client } = await supabaseAdmin
     .from('clients')
-    .select('meta_ad_account_id, facebook_page_id, country, industry')
+    .select('meta_ad_account_id, facebook_page_id, country, industry, leads_config')
     .eq('id', clientId)
     .maybeSingle()
 
@@ -71,24 +74,34 @@ export async function POST(
       { status: 424 },
     )
   }
-  const draft: AdDraft = {
-    ...(body as AdDraft),
-    clientId,
-    pageId: registeredPageId,
+  const stamped = draftStampedWithIdentity(
+    { ...(body as AdDraft), clientId },
+    registeredPageId,
+    (client as { leads_config?: unknown }).leads_config,
+  )
+  if (!stamped.ok) {
+    return NextResponse.json({ error: stamped.reason, wroteMeta: false }, { status: 409 })
   }
+  const draft = stamped.draft
 
-  // 客户禁用词：读库失败返回 null → 当「没加载」传下去（私信类型会因此拒建，
-  // 其它类型沿用旧行为），绝不退化成「空名单 = 查过没有」。
-  const brandRedlines = await loadDraftRedlines(supabaseAdmin, clientId)
-
-  const outcome = await createDraftForApproval(draft, {
-    supabase: supabaseAdmin,
-    adAccountId,
-    accessToken,
-    brandRedlines: brandRedlines ?? undefined,
-    expectedGeo: (client as { country?: string } | null)?.country ?? null,
-    industry: (client as { industry?: string | null } | null)?.industry ?? null,
-  })
-
-  return NextResponse.json(outcome)
+  try {
+    const asked = await askDirectPausedDraft({
+      draft,
+      issue: async () => {
+        const context = await loadPausedDraftContext(supabaseAdmin, clientId, adAccountId)
+        return issuePausedDraftCard({
+          kernel: createKernel(supabaseAdmin),
+          clientId,
+          clicker: askerFromAccess(access, clientId, req.headers.get('x-me-actor') === 'agent'),
+          draft,
+          accountLabel: context.accountLabel,
+          review: context.review,
+        })
+      },
+    })
+    return NextResponse.json(asked.body, { status: asked.status })
+  } catch (error) {
+    const mapped = publicError(error)
+    return NextResponse.json({ error: mapped.message, wroteMeta: false }, { status: mapped.status })
+  }
 }

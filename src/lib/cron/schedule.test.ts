@@ -20,9 +20,24 @@ describe('expectedIntervalHours —— 只认本仓真正用到的写法', () =>
     expect(expectedIntervalHours('0 */6 * * *')).toBe(6)
   })
 
-  it('每小时第 N 分钟（messenger / meta-leads 这样写，避开整点拥堵）', () => {
+  it('每月固定一天（经销商月结 0 9 1 * *）按 31 天算；29–31 号这类不是每月都有的日子认不了', () => {
+    expect(expectedIntervalHours('0 9 1 * *')).toBe(31 * 24)
+    expect(expectedIntervalHours('30 6 28 * *')).toBe(31 * 24)
+    expect(expectedIntervalHours('0 9 31 * *')).toBeNull()
+    expect(expectedIntervalHours('0 9 1 * 1')).toBeNull()
+  })
+
+  it('每小时第 N 分钟（messenger 这样写，避开整点拥堵）', () => {
     expect(expectedIntervalHours('10 * * * *')).toBe(1)
     expect(expectedIntervalHours('25 * * * *')).toBe(1)
+  })
+
+  it('每小时两个固定分钟（表单同步：25 分和 55 分）', () => {
+    expect(expectedIntervalHours('25,55 * * * *')).toBe(0.5)
+    expect(overdueThresholdHours('25,55 * * * *')).toBe(1.5)
+    expect(expectedIntervalHours('25,99 * * * *')).toBeNull()
+    expect(expectedIntervalHours('25,55 1 * * *')).toBeNull()
+    expect(expectedIntervalHours('25,25 * * * *')).toBeNull()
   })
 
   it('每天固定时刻', () => {
@@ -40,7 +55,7 @@ describe('expectedIntervalHours —— 只认本仓真正用到的写法', () =>
   })
 
   it('🔴 看不懂的一律返回 null，不猜一个数字糊过去', () => {
-    expect(expectedIntervalHours('0 0 1 * *')).toBeNull()
+    expect(expectedIntervalHours('0 0 31 * *')).toBeNull() // 31 号不是每月都有；每月 1–28 号已支持
     expect(expectedIntervalHours('乱写')).toBeNull()
     expect(expectedIntervalHours('* * * *')).toBeNull()
   })
@@ -127,7 +142,7 @@ describe('judgeJob', () => {
   })
 
   it('看不懂的表达式 → 单独标出来让人看，不静默放行', () => {
-    const h = judgeJob({ ...base, schedule: '0 0 1 * *' }, NOW)
+    const h = judgeJob({ ...base, schedule: '0 0 31 * *' }, NOW)
     expect(h.state).toBe('unknown_schedule')
   })
 })

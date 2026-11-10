@@ -30,6 +30,7 @@ export type NotComparableReason =
   | 'target_cost_not_configured'
   | 'outcome_not_configured'
   | 'primary_result_unknown'
+  | 'result_type_mismatch' // 广告组自己出的结果（开聊 / 留资）跟客户主结果不是一种
   | 'primary_not_attributable'
   | 'audience_below_floor'
   | 'audience_too_new'

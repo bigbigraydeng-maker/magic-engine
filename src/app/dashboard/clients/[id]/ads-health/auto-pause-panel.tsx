@@ -16,6 +16,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react'
+import { ApprovalContextNotes } from './approval-context-notes'
 
 interface PendingItem {
   runId: string
@@ -28,7 +29,13 @@ interface PendingItem {
   createdAt: string
 }
 
-export default function AutoPausePanel({ clientId }: { readonly clientId: string }) {
+export default function AutoPausePanel({
+  clientId,
+  onPendingAdsChanged,
+}: {
+  readonly clientId: string
+  readonly onPendingAdsChanged?: () => void
+}) {
   const [items, setItems] = useState<PendingItem[] | null>(null)
   const [hasMore, setHasMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -68,9 +75,16 @@ export default function AutoPausePanel({ clientId }: { readonly clientId: string
         body: JSON.stringify({ resolution, expectedDecisionId: it.expectedDecisionId, ...(reason ? { reason } : {}) }),
       })
       const json = await res.json().catch(() => ({}))
+      if (res.status === 202 || json.status === 'awaiting_confirmation') {
+        setError(typeof json.humanReason === 'string' ? json.humanReason : '确认卡已出，还没暂停。')
+        await load()
+        onPendingAdsChanged?.()
+        return
+      }
       if (res.status === 409) {
         setError(`${json.error ?? '这条已经变了'}（列表已刷新，请再看一遍）`)
         await load()
+        onPendingAdsChanged?.()
         return
       }
       if (!res.ok || json.error) {
@@ -85,6 +99,7 @@ export default function AutoPausePanel({ clientId }: { readonly clientId: string
         setError(`没暂停成：${json.humanReason ?? '原因未知'}——广告还在投`)
       }
       await load()
+      onPendingAdsChanged?.()
     } finally {
       setBusyRunId(null)
     }
@@ -108,7 +123,7 @@ export default function AutoPausePanel({ clientId }: { readonly clientId: string
   return (
     <div style={{ maxWidth: 720 }}>
       <p style={{ fontSize: 13, color: '#64748b', marginBottom: 16 }}>
-        系统发现这些广告组连续花钱没结果，建议暂停。点「批准」立刻暂停（不用去 Meta 后台），点「驳回」就不停。
+        系统发现这些广告组连续花钱没结果，建议暂停。点「批准」会先出一张确认卡，确认后才暂停。点「驳回」就不停。
       </p>
       {error && <div style={{ color: '#b91c1c', marginBottom: 12 }}>{error}</div>}
       {items.length === 0 && <div style={{ color: '#64748b' }}>目前没有等你点头的暂停建议。</div>}
@@ -121,6 +136,7 @@ export default function AutoPausePanel({ clientId }: { readonly clientId: string
           <div style={{ fontSize: 12, color: '#64748b', marginBottom: 12 }}>
             广告组：{it.adsetName ?? '（名字没记下）'}（编号 {it.adsetId ?? '未知'}）· 诊断日：{it.insightDate ?? '未知'}
           </div>
+          <ApprovalContextNotes clientId={clientId} adsetId={it.adsetId} runId={it.runId} runStatus="pending_approval" />
           {!it.expectedDecisionId && (
             <div style={{ fontSize: 12, color: '#b91c1c', marginBottom: 8 }}>
               这条的审批记录对不上，先别点——它不会自己执行。回我一句「查一下这条暂停建议」我来理顺。

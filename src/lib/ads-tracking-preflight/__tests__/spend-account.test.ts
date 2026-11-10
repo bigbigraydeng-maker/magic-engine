@@ -42,7 +42,9 @@ function makeFetcher() {
 
 function makeDb(): SupabaseClient {
   const finish = (table: string) => {
-    if (table === 'ad_strategy_configs') return { data: { daily_budget_cap_cents: 15000 }, error: null }
+    if (table === 'marketing_plans') {
+      return { data: [{ status: 'approved', plan_data: { promo: { daily_total_cap_cents: 15000 } } }], error: null }
+    }
     if (table === 'client_meta_ad_accounts') {
       return {
         data: [

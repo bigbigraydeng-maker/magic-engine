@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   DEDUPE_WINDOW_MS,
   dedupeItems,
@@ -34,6 +34,7 @@ type Overrides = Partial<{
   audit: () => Promise<SourceResult>
   touchpoints: () => Promise<SourceResult>
   mailchimp: () => Promise<SourceResult>
+  meSends: FrequencySources['meSends']
 }>
 
 function sources(overrides: Overrides = {}): FrequencySources {
@@ -43,6 +44,7 @@ function sources(overrides: Overrides = {}): FrequencySources {
     audit: overrides.audit ?? empty,
     touchpoints: overrides.touchpoints ?? empty,
     mailchimp: overrides.mailchimp ?? empty,
+    meSends: overrides.meSends ?? empty,
   }
 }
 
@@ -439,10 +441,11 @@ describe('evaluateFrequency', () => {
         audit: captureContact,
         touchpoints: captureContact,
         mailchimp: capture,
+        meSends: capture,
       },
     })
     const after = Date.now()
-    expect(calls).toHaveLength(4)
+    expect(calls).toHaveLength(5)
     for (const c of calls) {
       const t = Date.parse(c.since)
       const expectedMin = before - 7 * DAY - 5000
@@ -504,5 +507,374 @@ describe('contact-scoped items (audit rows and touchpoints carry no address)', (
       }),
     )
     expect(v.ok).toBe(false)
+  })
+})
+
+describe('evaluateFrequency: exempt mails (loadExemptIds)', () => {
+  const G = 'graph-exempt-1'
+  const H1 = 'graph-normal-1'
+  const H2 = 'graph-normal-2'
+
+  function runWith(
+    s: FrequencySources,
+    loadExemptIds: (sinceIso: string) => Promise<readonly string[]>,
+    cap = CAP,
+    now = new Date(),
+  ) {
+    return evaluateFrequency({
+      cap,
+      now,
+      addresses: ADDR,
+      contactId: 'c1',
+      sources: s,
+      loadExemptIds,
+    })
+  }
+
+  it('without a loader the exempt mail counts like any other', async () => {
+    const v = await evaluateFrequency({
+      cap: CAP,
+      now: new Date(),
+      addresses: ADDR,
+      contactId: 'c1',
+      sources: sources({
+        sentItems: async () => ({
+          ok: true,
+          items: [
+            item({ source: 'sent_items', id: H1, at: ago(1 * DAY) }),
+            item({ source: 'sent_items', id: G, at: ago(2 * DAY) }),
+          ],
+        }),
+      }),
+    })
+    expect(v).toMatchObject({ ok: false, reason: 'frequency_cap', count: 2 })
+  })
+
+  it('an exempt mail neither counts nor uses up a place', async () => {
+    const v = await runWith(
+      sources({
+        sentItems: async () => ({
+          ok: true,
+          items: [
+            item({ source: 'sent_items', id: H1, at: ago(1 * DAY) }),
+            item({ source: 'sent_items', id: G, at: ago(2 * DAY) }),
+          ],
+        }),
+      }),
+      async () => [G],
+    )
+    expect(v.ok).toBe(true)
+    if (v.ok) {
+      expect(v.count).toBe(1)
+      expect(v.items.map((i) => i.id)).toEqual([H1])
+    }
+  })
+
+  it('the same exempt mail is left out wherever it shows up', async () => {
+    const v = await runWith(
+      sources({
+        sentItems: async () => ({
+          ok: true,
+          items: [
+            item({ source: 'sent_items', id: G, at: ago(2 * DAY) }),
+            item({ source: 'sent_items', id: H1, at: ago(1 * DAY) }),
+          ],
+        }),
+        audit: async () => ({
+          ok: true,
+          items: [item({ source: 'audit', id: G, at: ago(2 * DAY), address: '' })],
+        }),
+        touchpoints: async () => ({
+          ok: true,
+          items: [item({ source: 'touchpoint', id: G, at: ago(2 * DAY), address: '' })],
+        }),
+      }),
+      async () => [G],
+    )
+    expect(v.ok).toBe(true)
+    if (v.ok) expect(v.count).toBe(1)
+  })
+
+  it('two normal mails still reach the cap even with an exempt mail around', async () => {
+    const v = await runWith(
+      sources({
+        sentItems: async () => ({
+          ok: true,
+          items: [
+            item({ source: 'sent_items', id: H1, at: ago(1 * DAY) }),
+            item({ source: 'sent_items', id: H2, at: ago(2 * DAY) }),
+            item({ source: 'sent_items', id: G, at: ago(3 * DAY) }),
+          ],
+        }),
+      }),
+      async () => [G],
+    )
+    expect(v).toMatchObject({ ok: false, reason: 'frequency_cap', count: 2 })
+  })
+
+  it('a record without an id still counts', async () => {
+    const v = await runWith(
+      sources({
+        touchpoints: async () => ({
+          ok: true,
+          items: [item({ source: 'touchpoint', id: null, at: ago(1 * DAY), address: '' })],
+        }),
+        sentItems: async () => ({
+          ok: true,
+          items: [item({ source: 'sent_items', id: H1, at: ago(2 * DAY) })],
+        }),
+      }),
+      async () => [G],
+    )
+    expect(v).toMatchObject({ ok: false, reason: 'frequency_cap', count: 2 })
+  })
+
+  it('an id nobody has sent has no effect', async () => {
+    const v = await runWith(
+      sources({
+        sentItems: async () => ({
+          ok: true,
+          items: [item({ source: 'sent_items', id: H1, at: ago(1 * DAY) })],
+        }),
+      }),
+      async () => ['graph-unknown'],
+    )
+    expect(v.ok).toBe(true)
+    if (v.ok) expect(v.count).toBe(1)
+  })
+
+  it('a loader that throws makes the count unverifiable and names the cause', async () => {
+    const v = await runWith(
+      sources(),
+      async () => {
+        throw new Error('db down')
+      },
+    )
+    expect(v).toMatchObject({
+      ok: false,
+      reason: 'frequency_unverifiable',
+      error: expect.stringContaining('exempt ids'),
+    })
+    expect(v).toMatchObject({ error: expect.stringContaining('db down') })
+  })
+
+  it('a loader that rejects with a plain string is still unverifiable', async () => {
+    const v = await runWith(sources(), () => Promise.reject('plain'))
+    expect(v).toMatchObject({
+      ok: false,
+      reason: 'frequency_unverifiable',
+      error: expect.stringContaining('exempt ids'),
+    })
+  })
+
+  it('the loader is asked from the start of the window', async () => {
+    const now = new Date('2026-10-28T02:00:00.000Z')
+    const loadExemptIds = vi.fn(async () => [] as readonly string[])
+    await runWith(sources(), loadExemptIds, { max: 2, windowDays: 7 }, now)
+    expect(loadExemptIds).toHaveBeenCalledTimes(1)
+    expect(loadExemptIds).toHaveBeenCalledWith(
+      new Date(now.getTime() - 7 * DAY).toISOString(),
+    )
+  })
+
+  it('the next free time is worked out from the mails that count', async () => {
+    const h1 = item({ source: 'sent_items', id: H1, at: ago(1 * DAY) })
+    const v = await runWith(
+      sources({
+        sentItems: async () => ({
+          ok: true,
+          items: [h1, item({ source: 'sent_items', id: G, at: ago(5 * DAY) })],
+        }),
+      }),
+      async () => [G],
+      { max: 1, windowDays: 7 },
+    )
+    expect(v).toMatchObject({
+      ok: false,
+      reason: 'frequency_cap',
+      count: 1,
+      nextAllowedAt: new Date(Date.parse(h1.at) + 7 * DAY).toISOString(),
+    })
+  })
+
+  it('a counted mail seen only as a touchpoint 30 s after an exempt mail still counts', async () => {
+    const now = new Date()
+    const t0 = now.getTime() - 1 * DAY
+    const v = await runWith(
+      sources({
+        sentItems: async () => ({
+          ok: true,
+          items: [
+            item({
+              source: 'sent_items',
+              id: 'graph-exempt-1',
+              at: new Date(t0).toISOString(),
+              subject: 'Re: your tour question',
+              address: ADDR[0],
+            }),
+          ],
+        }),
+        touchpoints: async () => ({
+          ok: true,
+          items: [
+            item({
+              source: 'touchpoint',
+              id: 'other-ref',
+              at: new Date(t0 + 30_000).toISOString(),
+              subject: null,
+              address: '',
+            }),
+          ],
+        }),
+      }),
+      async () => ['graph-exempt-1'],
+      { max: 1, windowDays: 7 },
+      now,
+    )
+    // reading A keeps the touchpoint; reading B alone would fold it into the exempt mail
+    expect(v).toMatchObject({ ok: false, reason: 'frequency_cap', count: 1 })
+  })
+
+  it('a stray audit row of the exempt mail cannot swallow two real mailings', async () => {
+    const now = new Date()
+    const t0 = now.getTime() - 1 * DAY
+    const s = sources({
+      sentItems: async () => ({
+        ok: true,
+        items: [
+          item({
+            source: 'sent_items',
+            id: 'graph-exempt-1',
+            at: new Date(t0).toISOString(),
+            subject: 'Re: your tour question',
+            address: ADDR[0],
+          }),
+        ],
+      }),
+      audit: async () => ({
+        ok: true,
+        items: [
+          item({
+            source: 'audit',
+            id: null,
+            at: new Date(t0 + 5_000).toISOString(),
+            subject: null,
+            address: '',
+          }),
+        ],
+      }),
+      mailchimp: async () => ({
+        ok: true,
+        items: [
+          item({
+            source: 'mailchimp',
+            id: 'mc:c1:guest@example.com',
+            at: new Date(t0 + 30_000).toISOString(),
+            subject: 'News one',
+            address: ADDR[0],
+          }),
+          item({
+            source: 'mailchimp',
+            id: 'mc:c2:guest@example.com',
+            at: new Date(t0 + 60_000).toISOString(),
+            subject: 'News two',
+            address: ADDR[0],
+          }),
+        ],
+      }),
+    })
+
+    const withoutLoader = await evaluateFrequency({
+      cap: { max: 2, windowDays: 7 },
+      now,
+      addresses: ADDR,
+      contactId: 'c1',
+      sources: s,
+    })
+    expect(withoutLoader).toMatchObject({
+      ok: false,
+      reason: 'frequency_cap',
+      count: 3,
+    })
+
+    const withLoader = await runWith(
+      s,
+      async () => ['graph-exempt-1'],
+      { max: 2, windowDays: 7 },
+      now,
+    )
+    // reading A alone would give 1 and let a third mail through
+    expect(withLoader).toMatchObject({
+      ok: false,
+      reason: 'frequency_cap',
+      count: 2,
+    })
+  })
+
+  it('a loader that returns something that is not a list of ids makes the count unverifiable', async () => {
+    const notAList = await runWith(
+      sources(),
+      (async () => ({ not: 'a list' })) as never,
+    )
+    expect(notAList).toMatchObject({
+      ok: false,
+      reason: 'frequency_unverifiable',
+      error: expect.stringContaining('exempt ids'),
+    })
+
+    const notStrings = await runWith(
+      sources(),
+      (async () => [1, 2]) as never,
+    )
+    expect(notStrings).toMatchObject({
+      ok: false,
+      reason: 'frequency_unverifiable',
+      error: expect.stringContaining('exempt ids'),
+    })
+  })
+})
+
+
+// ---- ME's own automated mails (send gate P2-2a) ------------------------------------------------------------
+
+describe("ME's automated mails are never folded into another record", () => {
+  // One ME mail claimed at t0, and a second, unrelated record within the 120-second window. Every case is two mails.
+  const t0 = Date.now() - 10 * MIN
+  const meMail = item({ source: 'me_send', id: 'ts-1', at: new Date(t0).toISOString(), subject: 'ME 自动发的信', address: '', automated: true })
+
+  it.each([
+    ['a sales mail whose audit row has no subject (90 s later)', item({ source: 'audit', id: null, at: new Date(t0 + 90_000).toISOString(), subject: null, address: '' })],
+    ['a human touchpoint without a subject (60 s earlier)', item({ source: 'touchpoint', id: 'M9', at: new Date(t0 - 60_000).toISOString(), subject: null, address: '' })],
+    ['a mailbox mail whose subject is only "RE:" (30 s later)', item({ source: 'sent_items', id: 'G1', at: new Date(t0 + 30_000).toISOString(), subject: 'RE:', address: 'guest@example.com' })],
+    ['a mailbox mail with an empty subject (10 s later)', item({ source: 'sent_items', id: 'G2', at: new Date(t0 + 10_000).toISOString(), subject: '', address: 'guest@example.com' })],
+  ])('%s', async (_label, other) => {
+    for (const order of [[meMail, other], [other, meMail]]) {
+      expect(dedupeItems(order)).toHaveLength(2)
+    }
+    const v = await run(
+      sources({
+        meSends: async () => ({ ok: true, items: [meMail] }),
+        audit: async () => ({ ok: true, items: other.source === 'audit' ? [other] : [] }),
+        touchpoints: async () => ({ ok: true, items: other.source === 'touchpoint' ? [other] : [] }),
+        sentItems: async () => ({ ok: true, items: other.source === 'sent_items' ? [other] : [] }),
+      }),
+    )
+    expect(v.ok === false && v.reason === 'frequency_cap' ? v.count : v.ok ? v.count : -1).toBe(2)
+  })
+
+  it('two records of the same ME mail (same id) are still one mail', () => {
+    const twin = { ...meMail, at: new Date(t0 + 5 * MIN).toISOString() }
+    expect(dedupeItems([meMail, twin])).toHaveLength(1)
+  })
+
+  it('a failing ME-mail source makes the count unverifiable, never zero', async () => {
+    const v = await run(sources({ meSends: async () => ({ ok: false, error: 'ledger down' }) }))
+    expect(v).toMatchObject({ ok: false, reason: 'frequency_unverifiable' })
+  })
+
+  it('the ME-mail source is asked with the guest addresses', async () => {
+    const meSends = vi.fn<FrequencySources['meSends']>(async () => ({ ok: true, items: [] }))
+    await run(sources({ meSends }))
+    expect(meSends.mock.calls[0]?.[0]).toEqual(ADDR)
   })
 })

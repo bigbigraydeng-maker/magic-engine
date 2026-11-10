@@ -116,6 +116,42 @@ describe('lead_form 视频创意写法（实测过审的 video_data）', () => {
     })
   })
 
+  it('短视频留资用同一段 video_data，三层暂停，并只锁两条 Reels', async () => {
+    vi.stubGlobal('fetch', mockGraph())
+    const r = await publishDraftPaused({
+      ...VID,
+      kind: 'reels_lead',
+      placements: ['facebook_reels', 'instagram_reels'],
+    }, 'act_1', 'tok')
+    expect(r.ok).toBe(true)
+    const spec = JSON.parse(calls.find((c) => c.url.includes('/adcreatives'))!.body.get('object_story_spec')!)
+    expect(spec.video_data.call_to_action).toEqual({ type: 'SIGN_UP', value: { lead_gen_form_id: 'f1' } })
+    expect(spec.link_data).toBeUndefined()
+    const targeting = JSON.parse(calls.find((c) => c.url.includes('/adsets'))!.body.get('targeting')!)
+    expect(targeting.publisher_platforms).toEqual(['facebook', 'instagram'])
+    expect(targeting.facebook_positions).toEqual(['facebook_reels'])
+    expect(targeting.instagram_positions).toEqual(['reels'])
+    const statuses = calls.filter((c) => c.method === 'POST' && c.body.has('status')).map((c) => c.body.get('status'))
+    expect(statuses.every((status) => status === 'PAUSED')).toBe(true)
+    expect(calls.some((c) => c.body.get('status') === 'ACTIVE')).toBe(false)
+  })
+
+  it('短视频留资缺视频或版位时一次都不写', async () => {
+    const fetchMock = mockGraph()
+    vi.stubGlobal('fetch', fetchMock)
+    const missingVideo = await publishDraftPaused({
+      ...DRAFT,
+      kind: 'reels_lead',
+      placements: ['facebook_reels', 'instagram_reels'],
+    }, 'act_1', 'tok')
+    expect(missingVideo.ok).toBe(false)
+    expect(fetchMock).not.toHaveBeenCalled()
+    calls = []
+    const missingPlacement = await publishDraftPaused({ ...VID, kind: 'reels_lead' }, 'act_1', 'tok')
+    expect(missingPlacement.ok).toBe(false)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('只给图 → 仍然是 link_data（老写法不变）', async () => {
     vi.stubGlobal('fetch', mockGraph())
     await publishDraftPaused(DRAFT, 'act_1', 'tok')
@@ -390,7 +426,7 @@ describe('publishDraftPaused — 私信类型失败要收拾干净', () => {
     expect(deletes).toEqual(['as1', 'camp1']) // 逆序
   })
 
-  it('第二条创意失败 → 第一条已建的创意 / 广告也要一起删', async () => {
+  it('第二条创意失败 → 第一条已建的广告 / 组 / 系列一起删；创意不删（可能被别的广告共用）', async () => {
     let n = 0
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       calls.push({ url, method: init?.method ?? 'GET', body: new URLSearchParams(String(init?.body ?? '')) })
@@ -407,7 +443,7 @@ describe('publishDraftPaused — 私信类型失败要收拾干净', () => {
     )
     expect(r.ok).toBe(false)
     const deleted = calls.filter((c) => c.method === 'DELETE').map((c) => c.url.split('/').pop()!.split('?')[0])
-    expect(deleted).toEqual(['ad1', 'cr1', 'as1', 'camp1'])
+    expect(deleted).toEqual(['ad1', 'as1', 'camp1'])
   })
 
   it('请求超时 / 断网（不知道 Meta 建成没有）→ 回滚已建的，并把名字记进 orphans', async () => {
@@ -648,5 +684,78 @@ describe('targetingFor — 自定义受众（包含 / 排除）', () => {
       'publisher_platforms', 'targeting_automation',
     ])
     expect(targetingOf().custom_audiences).toBeUndefined()
+  })
+})
+
+describe('partner_page stays paused and refuses a partner page without sharing', () => {
+  const partner: AdDraft = {
+    ...DRAFT,
+    kind: 'partner_page',
+    pageId: '22222',
+    partnerIdentity: 'partner',
+  }
+
+  function json(body: unknown, status = 200): Response {
+    return { ok: status < 300, status, text: async () => JSON.stringify(body) } as Response
+  }
+
+  it('client-page identity does not ask Meta about sharing, and every new object is paused', async () => {
+    vi.stubGlobal('fetch', mockGraph())
+    const result = await publishDraftPaused({ ...DRAFT, kind: 'partner_page', partnerIdentity: 'own' }, 'act_1', 'tok')
+    expect(result.ok).toBe(true)
+    expect(calls.every((call) => call.method === 'POST')).toBe(true)
+    expect(calls.some((call) => call.body.get('status') === 'ACTIVE')).toBe(false)
+    for (const call of calls) {
+      if (call.body.has('status')) expect(call.body.get('status')).toBe('PAUSED')
+    }
+    const spec = JSON.parse(calls.find((call) => call.url.includes('/adcreatives'))!.body.get('object_story_spec')!)
+    expect(spec.page_id).toBe('p1')
+    expect(spec.facebook_branded_content).toBeUndefined()
+  })
+
+  it('partner identity writes the configured page only after sharing is readable, still paused', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      const body = new URLSearchParams(String(init?.body ?? ''))
+      calls.push({ url: String(url), method: init?.method ?? 'GET', body })
+      if ((init?.method ?? 'GET') !== 'POST') {
+        if (String(url).includes('promote_pages')) return json({ data: [{ id: '22222' }] })
+        return json({ id: '22222', tasks: ['ADVERTISE'] })
+      }
+      const id = String(url).includes('/campaigns') ? 'camp1'
+        : String(url).includes('/adsets') ? 'as1'
+        : String(url).includes('/adcreatives') ? 'cr1'
+        : 'ad1'
+      return json({ id })
+    }))
+    const result = await publishDraftPaused(partner, 'act_1', 'tok')
+    expect(result.ok).toBe(true)
+    const firstPost = calls.findIndex((call) => call.method === 'POST')
+    expect(firstPost).toBeGreaterThan(0)
+    const posts = calls.filter((call) => call.method === 'POST')
+    for (const call of posts) {
+      if (call.body.has('status')) expect(call.body.get('status')).toBe('PAUSED')
+    }
+    const creative = posts.find((call) => call.url.includes('/adcreatives'))!
+    const spec = JSON.parse(creative.body.get('object_story_spec')!)
+    expect(spec.page_id).toBe('22222')
+    expect(creative.body.get('facebook_branded_content')).toBeNull()
+    const adSet = posts.find((call) => call.url.includes('/adsets'))!
+    expect(JSON.parse(adSet.body.get('promoted_object')!)).toEqual({ page_id: '22222' })
+  })
+
+  it('missing asset sharing returns the Chinese reason and does not create anything', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      calls.push({ url: String(url), method: 'GET', body: new URLSearchParams() })
+      if (String(url).includes('promote_pages')) return json({ data: [] })
+      return json({ error: { code: 10, message: 'permission secret-token' } }, 400)
+    }))
+    const result = await publishDraftPaused(partner, 'act_1', 'tok')
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error).toBe('伙伴主页还没有投放权限，或还没有分享到这个广告账户。这次没有去建。')
+      expect(result.error).not.toContain('secret-token')
+      expect(result.orphans).toEqual([])
+    }
+    expect(calls.every((call) => call.method === 'GET')).toBe(true)
   })
 })

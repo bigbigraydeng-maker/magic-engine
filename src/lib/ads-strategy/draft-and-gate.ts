@@ -19,22 +19,43 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { AdDraft } from './ad-draft'
-import { validateDraft, describeDraft, DRAFT_PLAY, metaTripletFor, isApprovableKind } from './ad-draft'
+import {
+  validateDraft,
+  describeDraft,
+  DRAFT_PLAY,
+  metaTripletFor,
+  isApprovableKind,
+  adSetViews,
+  allCreatives,
+  draftUsingInheritedBudget,
+  inheritedSpendOf,
+  sameInheritedSpend,
+  withInheritedSpend,
+  withoutInheritedSpend,
+} from './ad-draft'
 import { draftNotYetBuildable } from './ad-draft-expansion'
+import { alignPartnerDraft, isCleanPartnerRefusal, partnerPageOpenBlocked, PARTNER_PAGE_OPEN_REFUSAL } from './partner-page'
+import { reelsLeadOpenBlocked } from './reels-lead'
 import { publishDraftPaused, activatePublished, pausePublished, type PublishedDraft } from '@/lib/meta/ad-publisher'
+import { readExistingAdSetSpend } from '@/lib/meta/existing-adset-spend'
+import { attachReadbackFindings } from './attach-readback'
 import { waitForVideoReady } from '@/lib/meta/asset-upload'
-import { fetchAdSetReadback, fetchAdCreativesReadback, fetchCampaignStatus, fetchAccountMinDailyBudget } from '@/lib/meta/readback'
+import { fetchAdSetReadback, fetchAdCreativesReadback, fetchCampaignReadback, fetchCampaignStatus, fetchAccountMinDailyBudget } from '@/lib/meta/readback'
 import { checkAudiences, renderAudienceSummary, type AudienceFact, type AudiencesChecked } from './draft-audiences'
 import { adaptMetaAdSet } from './meta-readback-adapter'
 import { checkLaunch, renderReadback, type LaunchFinding, type LaunchReadbackReport } from './launch-readback'
+import { expectedPlacement } from './placement-lock'
+import { plannedPlacements } from './readback-sweep'
 import { checkDraftRedlines, unusableRedlinePhrases } from './draft-redlines'
 import { checkCreatedAsExpected } from './created-as-expected'
+import { checkMultiCreated, fetchMultiReadback, mergeMultiReports, spendCapFindings } from './draft-gate-multi'
 import {
   buildSpendActivationReceipt,
   type SpendActivationAuthority,
   type SpendActivationEntry,
   type SpendActivationReceipt,
 } from '@/lib/ads/spend-activation'
+import { bindDraftLaunch } from '@/lib/ads-launch/plan-gate'
 
 /**
  * 一条广告动作在账本里的状态。
@@ -82,6 +103,11 @@ export interface DraftRecord {
   summary: string
   campaignId?: string
   adSetId?: string
+  /**
+   * 多个广告组的草稿记在这里，**不写 adSetId**：开投、go-live 卡都只认单个 adSetId，
+   * 没有它们就读不出 id、开不了——多组草稿不走「开」按钮，只能由 PM 点名到层逐层开。
+   */
+  adSetIds?: string[]
   adIds?: string[]
   findings?: LaunchFinding[]
   /** 买家会看到的每一句，原样存下来给人过目。 */
@@ -149,6 +175,21 @@ const BUDGET = {
   giveUpPauseMs: 92_000,
 } as const
 
+/**
+ * 多个广告组要写的次数多（1 个系列 + 每组 1 次组 + 每条广告 2 次），时间预算按组数放宽：
+ * 每多一组多 15 秒，最多多 25 秒。总有顶：补暂停的截止点最坏 117 秒，在路由 120 秒上限之内。
+ * 单组 = 原来的数，一点没变。
+ */
+function budgetFor(draft: AdDraft) {
+  const extra = Math.min((adSetViews(draft).length - 1) * 15_000, 25_000)
+  return {
+    stopWritingMs: BUDGET.stopWritingMs + extra,
+    skipReadbackAfterMs: BUDGET.skipReadbackAfterMs + extra,
+    giveUpRollbackMs: BUDGET.giveUpRollbackMs + extra,
+    giveUpPauseMs: BUDGET.giveUpPauseMs + extra,
+  }
+}
+
 async function record(
   supabase: SupabaseClient,
   clientId: string,
@@ -184,57 +225,111 @@ export interface CreateDraftOutcome {
  * 返回的 `status` 就是它现在的处境：`awaiting_approval` 才轮到人看。
  */
 export async function createDraftForApproval(
-  draft: AdDraft,
+  input: AdDraft,
   deps: CreateDraftDeps,
 ): Promise<CreateDraftOutcome> {
   const now = deps.now ?? Date.now
   const startedAt = now()
+  const clean = withoutInheritedSpend(input)
   const base: RecordBase = {
-    summary: describeDraft(draft),
+    summary: describeDraft(clean),
     redlinesChecked: deps.brandRedlines === undefined ? null : deps.brandRedlines.length,
     redlinesSkipped: skippedRedlines(deps.brandRedlines),
   }
 
   // 发布器今天只会建单个广告组、预算在组上。新字段对不上时，在任何 Meta 读取或写入之前停下。
   // 不删除、不修改已经存在的广告对象。
-  const held = draftNotYetBuildable(draft)
-  if (held) return failedOutcome(deps, draft, { ...base, error: held })
+  const held = draftNotYetBuildable(clean)
+  if (held) return failedOutcome(deps, clean, { ...base, error: held })
 
   // ── 0. ME 自己就能判的错，不要浪费一次真实创建 ────────────────────────
-  const problems = [...validateDraft(draft), ...checkDraftRedlines(draft, deps.brandRedlines)]
+  const problems = [...validateDraft(clean), ...checkDraftRedlines(clean, deps.brandRedlines)]
   if (problems.length > 0) {
     const error = problems.map((p) => `${p.field}：${p.message}`).join('；')
-    return failedOutcome(deps, draft, { ...base, error })
+    return failedOutcome(deps, clean, { ...base, error })
   }
 
-  // ── 0.3 受众：属不属于这个账户、准备好没有（失败关闭）─────────────
+  const aligned = await alignPartnerDraft(input, (clientId) => readPartnerClient(deps.supabase, clientId))
+  if (!aligned.ok) return failedOutcome(deps, clean, { ...base, error: aligned.reason })
+
+  const prepared = await draftForBuild(aligned.draft, deps)
+  if (!prepared.ok) return failedOutcome(deps, clean, { ...base, error: prepared.error })
+  const draft = prepared.draft
+  base.summary = describeDraft(draft)
+  return publishPrepared(draft, deps, base, startedAt, now)
+}
+
+async function readPartnerClient(
+  sb: SupabaseClient,
+  clientId: string,
+): Promise<{ ok: true; ownPageId: string; leadsConfig: unknown } | { ok: false }> {
+  try {
+    const { data, error } = await sb
+      .from('clients')
+      .select('facebook_page_id, leads_config')
+      .eq('id', clientId)
+      .maybeSingle()
+    if (error || !data) return { ok: false }
+    const own = (data as { facebook_page_id?: unknown }).facebook_page_id
+    if (typeof own !== 'string' || own.trim() === '') return { ok: false }
+    return {
+      ok: true,
+      ownPageId: own.trim(),
+      leadsConfig: (data as { leads_config?: unknown }).leads_config,
+    }
+  } catch {
+    return { ok: false }
+  }
+}
+
+async function publishPrepared(
+  draft: AdDraft,
+  deps: CreateDraftDeps,
+  base: RecordBase,
+  startedAt: number,
+  now: () => number,
+): Promise<CreateDraftOutcome> {
   const audiences = await checkAudiences(draft, deps)
   base.audiencesChecked = audiences.checked
   if (audiences.error) return failedOutcome(deps, draft, { ...base, error: audiences.error })
 
-  // ── 0.4 日预算低于账户最低日预算 → Meta 一定拒，别浪费一次真实创建 ──────
-  const budget = await checkMinDailyBudget(draft, deps)
+  const budget = await checkMinDailyBudget(draftUsingInheritedBudget(draft), deps)
   base.minBudgetChecked = budget.checked
   if (budget.error) return failedOutcome(deps, draft, { ...base, error: budget.error })
 
-  // ── 0.5 私信类型：视频上传完还要转码，转码没完就建会失败 ───────────────
   const waitError = await waitForTranscode(draft, deps, now)
   if (waitError) return failedOutcome(deps, draft, { ...base, error: waitError })
 
-  // ── 1. 建（全程暂停）────────────────────────────────────────────────
   const published = await publishDraftPaused(
     draft, deps.adAccountId, deps.accessToken, publishBudgetFor(draft, startedAt, now),
   )
   if (!published.ok) {
-    const error = `建到「${published.step}」这步失败：${published.error}`
+    const error = isCleanPartnerRefusal(published.error)
+      ? published.error
+      : `建到「${published.step}」这步失败：${published.error}`
     const orphans = published.orphans.length > 0 ? published.orphans : undefined
     return failedOutcome(deps, draft, { ...base, error, orphans })
   }
 
-  // ── 2+3. 回读 → 闸门 ────────────────────────────────────────────────
   return gateReadback(draft, published, deps, {
-    ...base, startedAt, now, tooLateToRead: now() > startedAt + BUDGET.skipReadbackAfterMs,
+    ...base, startedAt, now, tooLateToRead: now() > startedAt + budgetFor(draft).skipReadbackAfterMs,
   })
+}
+
+/** 已有广告组先读真实预算。对不上确认卡上已经读过的数，就不建。 */
+async function draftForBuild(
+  input: AdDraft,
+  deps: CreateDraftDeps,
+): Promise<{ ok: true; draft: AdDraft } | { ok: false; error: string }> {
+  const clean = withoutInheritedSpend(input)
+  if (!clean.existingAdSetId) return { ok: true, draft: clean }
+  const read = await readExistingAdSetSpend(clean.existingAdSetId, deps.adAccountId, deps.accessToken)
+  if (!read.ok) return read
+  const confirmed = inheritedSpendOf(input)
+  if (confirmed && !sameInheritedSpend(confirmed, read.spend)) {
+    return { ok: false, error: '这个广告组的每天预算或结束日已经变了，和确认卡上的不一样，没有去建。' }
+  }
+  return { ok: true, draft: withInheritedSpend(clean, read.spend) }
 }
 
 interface RecordBase {
@@ -271,12 +366,14 @@ async function checkMinDailyBudget(
 ): Promise<{ error: string | null; checked: number | null }> {
   const min = await fetchAccountMinDailyBudget(deps.adAccountId, deps.accessToken)
   if (!min) return { error: null, checked: null }
-  const draftMinor = Math.round(draft.dailyBudget * 100)
+  // 多个广告组：每一组各自要够，按最低的那一组比。单组 = 草稿自己。
+  const lowest = adSetViews(draft).reduce((a, v) => (v.dailyBudget < a.dailyBudget ? v : a))
+  const draftMinor = Math.round(lowest.dailyBudget * 100)
   if (draftMinor >= min.minDailyBudgetMinor) return { error: null, checked: min.minDailyBudgetMinor }
   const shown = (min.minDailyBudgetMinor / 100).toFixed(2)
   return {
     checked: min.minDailyBudgetMinor,
-    error: `每天预算 ${draft.dailyBudget} ${min.currency} 低于这个广告账户 Meta 要求的最低日预算 ${shown} ${min.currency}，Meta 一定会拒收；请把日预算调到不低于 ${shown}。`,
+    error: `每天预算 ${lowest.dailyBudget} ${min.currency} 低于这个广告账户 Meta 要求的最低日预算 ${shown} ${min.currency}，Meta 一定会拒收；请把日预算调到不低于 ${shown}。`,
   }
 }
 
@@ -286,7 +383,7 @@ async function waitForTranscode(
   deps: CreateDraftDeps,
   now: () => number,
 ): Promise<string | null> {
-  const videoIds = draft.creatives.map((c) => c.videoId).filter((v): v is string => !!v)
+  const videoIds = [...new Set(allCreatives(draft).map((c) => c.videoId).filter((v): v is string => !!v))]
   if (videoIds.length === 0) return null
   const ready = await waitForVideoReady(
     videoIds,
@@ -296,13 +393,13 @@ async function waitForTranscode(
   return ready.ok ? null : ready.error
 }
 
-/** 私信类型和任一创意带视频的草案有整次请求的时间预算（与 waitForTranscode 同口径）；其它沿用旧行为（不限）。 */
+/** 私信类型、任一创意带视频、多个广告组的草案有整次请求的时间预算（多组写的次数多，不能不限时）；其它沿用旧行为（不限）。 */
 function publishBudgetFor(draft: AdDraft, startedAt: number, now: () => number) {
-  const hasVideo = draft.creatives.some((c) => !!c.videoId)
-  if (draft.kind !== 'messenger_conversation' && !hasVideo) return undefined
+  const hasVideo = allCreatives(draft).some((c) => !!c.videoId)
+  if (draft.kind !== 'messenger_conversation' && !hasVideo && !Array.isArray(draft.adSets)) return undefined
   return {
-    stopWritingAt: startedAt + BUDGET.stopWritingMs,
-    giveUpRollbackAt: startedAt + BUDGET.giveUpRollbackMs,
+    stopWritingAt: startedAt + budgetFor(draft).stopWritingMs,
+    giveUpRollbackAt: startedAt + budgetFor(draft).giveUpRollbackMs,
     now,
   }
 }
@@ -334,6 +431,9 @@ function expectedFindings(
 ): LaunchFinding[] {
   if (draft.kind !== 'messenger_conversation' || readback.campaignStatus === undefined) return []
   const t = metaTripletFor(draft.kind)
+  const ads = published.reusedAdSet
+    ? readback.ads.filter((ad) => published.adIds.includes(ad.adId))
+    : readback.ads
   return checkCreatedAsExpected(
     {
       optimizationGoal: t.optimizationGoal,
@@ -341,8 +441,20 @@ function expectedFindings(
       adCount: published.adIds.length,
       brandRedlines: deps.brandRedlines ?? [],
     },
-    { campaignStatus: readback.campaignStatus, adSet: readback.adSet, ads: readback.ads },
+    { campaignStatus: readback.campaignStatus, adSet: readback.adSet, ads },
+    { campaign: !(published.reusedCampaign || published.reusedAdSet), adSet: !published.reusedAdSet },
   )
+}
+
+/** 账本里记 Meta 对象编号的写法：多个广告组只记 adSetIds（不写 adSetId，见 `DraftRecord.adSetIds`）。 */
+function publishedIds(
+  draft: AdDraft,
+  published: PublishedDraft,
+): Pick<DraftRecord, 'campaignId' | 'adSetId' | 'adSetIds' | 'adIds'> {
+  if (Array.isArray(draft.adSets)) {
+    return { campaignId: published.campaignId, adSetIds: published.adSetIds, adIds: published.adIds }
+  }
+  return { campaignId: published.campaignId, adSetId: published.adSetId, adIds: published.adIds }
 }
 
 /** 回读不出来 ≠ 没问题。建都建出来了，但没人能保证它是干净的 —— 不进审批队列。 */
@@ -359,18 +471,21 @@ async function blockedUnreadable(
     redlinesChecked: base.redlinesChecked, redlinesSkipped: base.redlinesSkipped,
     minBudgetChecked: base.minBudgetChecked ?? null,
     audiencesChecked: base.audiencesChecked ?? null,
-    campaignId: published.campaignId, adSetId: published.adSetId, adIds: published.adIds,
+    ...publishedIds(draft, published),
   })
   return { actionId: id, status: 'blocked', summary: base.summary, findings: [], error }
 }
 
 /** 已有的闸门（多语言混放、重定向被放宽……）。 */
-function launchReportFor(
+async function launchReportFor(
   draft: AdDraft,
   deps: CreateDraftDeps,
   rawAdSet: NonNullable<Awaited<ReturnType<typeof fetchAdSetReadback>>>,
   ads: NonNullable<Awaited<ReturnType<typeof fetchAdCreativesReadback>>>,
-): LaunchReadbackReport {
+): Promise<LaunchReadbackReport> {
+  const planned = draft.existingAdSetId
+    ? await plannedPlacements(deps.supabase, draft.clientId, [rawAdSet.id])
+    : null
   return checkLaunch({
     ...adaptMetaAdSet(rawAdSet, ads, {
       expectedGeo: deps.expectedGeo ?? null,
@@ -383,6 +498,8 @@ function launchReportFor(
     }),
     industry: deps.industry ?? null,
     expectedOptimizationGoal: metaTripletFor(draft.kind).optimizationGoal,
+    ...expectedPlacement(planned ? planned.get(rawAdSet.id) : draft.placements),
+    ...(draft.existingAdSetId ? { reuseExistingAdSet: true } : {}),
     ...(draft.audienceIds && draft.audienceIds.length > 0 ? { expectedAudienceIds: draft.audienceIds } : {}),
     ...(draft.excludedAudienceIds && draft.excludedAudienceIds.length > 0 ? { expectedExcludedAudienceIds: draft.excludedAudienceIds } : {}),
   })
@@ -398,21 +515,30 @@ async function gateReadback(
   if (ctx.tooLateToRead) {
     return blockedUnreadable(draft, published, deps, ctx, '这次请求已经用掉太多时间，没来得及回读它的真实设置')
   }
+  if (Array.isArray(draft.adSets)) return gateReadbackMulti(draft, published, deps, ctx)
   const wantsExpected = draft.kind === 'messenger_conversation'
-  const [rawAdSet, ads, campaignStatus] = await Promise.all([
+  const wantsCap = draft.campaignSpendCapMinor !== undefined
+  const [rawAdSet, ads, campaignStatus, campaignRb] = await Promise.all([
     fetchAdSetReadback(published.adSetId, deps.accessToken),
     fetchAdCreativesReadback(published.adSetId, deps.accessToken),
     wantsExpected ? fetchCampaignStatus(published.campaignId, deps.accessToken) : undefined,
+    wantsCap ? fetchCampaignReadback(published.campaignId, deps.accessToken) : undefined,
   ])
   if (!rawAdSet || !ads) {
     return blockedUnreadable(draft, published, deps, ctx, '回读不到它的真实设置')
   }
 
-  const report = launchReportFor(draft, deps, rawAdSet, ads)
-  const extra = expectedFindings(draft, published, { campaignStatus, adSet: rawAdSet, ads }, deps)
+  const report = await launchReportFor(draft, deps, rawAdSet, ads)
+  // 单组草稿带了系列花费上限：和多组一样，必须读回到同一个数（读不到也算没落到）。
+  const capFindings = wantsCap ? spendCapFindings(draft, campaignRb?.spendCap ?? null) : []
+  const extra = [
+    ...expectedFindings(draft, published, { campaignStatus, adSet: rawAdSet, ads }, deps),
+    ...attachReadbackFindings(draft, published, rawAdSet, ads),
+    ...capFindings,
+  ]
   const autoPause = extra.some((f) => f.code === 'not_paused')
     ? await pausePublished(published, deps.accessToken, {
-        deadlineAt: ctx.startedAt + BUDGET.giveUpPauseMs, now: ctx.now,
+        deadlineAt: ctx.startedAt + budgetFor(draft).giveUpPauseMs, now: ctx.now,
       })
     : undefined
 
@@ -422,6 +548,28 @@ async function gateReadback(
     safeToActivate: report.safeToActivate && !extra.some((f) => f.severity === 'blocker'),
   }
   return recordGate(draft, published, deps, ctx, merged, autoPause)
+}
+
+/** 多个广告组：逐组回读、逐组过已有的闸门，再加上「建出来的是不是我们要的」那一层，合成一份。 */
+async function gateReadbackMulti(
+  draft: AdDraft,
+  published: PublishedDraft,
+  deps: CreateDraftDeps,
+  ctx: GateContext,
+): Promise<CreateDraftOutcome> {
+  const rb = await fetchMultiReadback(draft, published, deps.accessToken)
+  if (!rb) return blockedUnreadable(draft, published, deps, ctx, '回读不到系列或某个广告组的真实设置')
+  const reports = await Promise.all(rb.sets.map(async (s) => ({
+    setName: s.view.adSetName,
+    report: await launchReportFor(s.view, deps, s.adSet, s.ads),
+  })))
+  const extra = checkMultiCreated(draft, rb, ctx.now())
+  const autoPause = extra.some((f) => f.code === 'not_paused')
+    ? await pausePublished(published, deps.accessToken, {
+        deadlineAt: ctx.startedAt + budgetFor(draft).giveUpPauseMs, now: ctx.now,
+      })
+    : undefined
+  return recordGate(draft, published, deps, ctx, mergeMultiReports(reports, extra), autoPause)
 }
 
 async function recordGate(
@@ -440,7 +588,7 @@ async function recordGate(
     (audienceSummary ? `\n\n${audienceSummary}` : '')
   const id = await record(deps.supabase, draft.clientId, {
     status, draft, summary: ctx.summary, readback,
-    campaignId: published.campaignId, adSetId: published.adSetId, adIds: published.adIds,
+    ...publishedIds(draft, published),
     findings: merged.findings,
     buyerWillSee: merged.buyerWillSee,
     redlinesChecked: ctx.redlinesChecked,
@@ -468,6 +616,13 @@ function renderAutoPause(r: { ok: boolean; failed: string[] } | undefined): stri
  * 审批页开失败会马上退回 awaiting_approval。确认卡不能这么做：回读和补暂停还没完，
  * 退回之后另一次确认会占走，这次再去暂停就会把对方正在开的广告关掉。确认卡占到失败结束。
  */
+function activationSkipIds(draft: AdDraft, campaignId: string, adSetId: string): string[] {
+  const skip: string[] = []
+  if (draft.existingCampaignId || draft.existingAdSetId) skip.push(campaignId)
+  if (draft.existingAdSetId) skip.push(adSetId)
+  return skip
+}
+
 export async function approveDraft(
   actionId: string,
   supabase: SupabaseClient,
@@ -496,12 +651,29 @@ export async function approveDraft(
         '在那之前它只能是暂停状态（账本里没写类型的旧草案同样不能开）。',
     }
   }
+  if (reelsLeadOpenBlocked(p.draft.kind, entry)) {
+    return { ok: false, error: '短视频留资只能从开投确认卡打开。这里没有开。' }
+  }
+  if (partnerPageOpenBlocked(p.draft.kind, entry)) {
+    return { ok: false, error: PARTNER_PAGE_OPEN_REFUSAL }
+  }
   if (p.status !== 'awaiting_approval') {
     return { ok: false, error: `这条现在是「${p.status}」，只有等待批准的才能开` }
+  }
+  // 账本里的草稿内容也看（不只看 adSetIds）：草稿写了多个组、账本却只记了单个 adSetId 的形状，开一次只会开其中一个组。
+  if ((Array.isArray(p.adSetIds) && p.adSetIds.length > 0) || Array.isArray(p.draft?.adSets)) {
+    return {
+      ok: false,
+      error: '这条草案有多个广告组，「开」按钮现在不能开它。多个广告组要由 PM 点名到层、逐层开，不走这个按钮。',
+    }
   }
   if (!p.campaignId || !p.adSetId || !p.adIds) {
     return { ok: false, error: '这条草案没记下 Meta 那边的 id，开不了' }
   }
+
+  const clientId = (data as { client_id: string }).client_id
+  const bound = await bindDraftLaunch(supabase, clientId, p.draft)
+  if (!bound.ok) return { ok: false, error: bound.reason }
 
   const hasAudiences =
     (p.draft.audienceIds?.length ?? 0) > 0 || (p.draft.excludedAudienceIds?.length ?? 0) > 0
@@ -510,13 +682,13 @@ export async function approveDraft(
     if (audienceError) return { ok: false, error: audienceError }
   }
 
-  const clientId = (data as { client_id: string }).client_id
   const receipt = buildSpendActivationReceipt({
     authority,
     entry,
     clientId,
     campaignId: p.campaignId,
     draftActionId: actionId,
+    planId: bound.planId,
   })
 
   // 占位：只有还在等待批准的才占得到。占不到说明别处已经动过它（并发批准 / 否决），不开。
@@ -538,9 +710,11 @@ export async function approveDraft(
     return { ok: false, error: '这条刚被别处处理过（可能已经被开启或否决），这次没有再开。' }
   }
 
+  const skipIds = activationSkipIds(p.draft, p.campaignId, p.adSetId)
   const r = await activatePublished(
     { campaignId: p.campaignId, adSetId: p.adSetId, adIds: p.adIds },
     accessToken,
+    skipIds.length > 0 ? { skipIds } : undefined,
   )
   if (!r.ok && entry === 'go-live-card') return noteHeldActivation(actionId, supabase, p, receipt, r.error)
   if (!r.ok) {

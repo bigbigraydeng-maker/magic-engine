@@ -59,7 +59,9 @@ function matched(now: string, insights: InsightRef[] = series(), targets: KpiRef
     missingCampaign: false,
   })
   if (found.kind !== 'matched') throw new Error(found.kind)
-  return judgeLaunch({ launch: found.launch, insights, kpis: targets, now: new Date(now), accountTimezone: NZ_ZONE })
+  const chosen = found.launches[0]
+  if (!chosen) throw new Error('missing launch')
+  return judgeLaunch({ launch: chosen, insights, kpis: targets, now: new Date(now), accountTimezone: NZ_ZONE })
 }
 
 // Launch exactly at NZ midnight (2026-10-26 00:00 NZDT), so 24h / 48h line up with whole days.
@@ -319,16 +321,16 @@ describe('prescription launch check', () => {
     expect(day7?.sentence).toContain('缺 1 天的每日数据：2026-11-01')
   })
 
-  it('does not pick one ad when two live ads match', () => {
+  it('keeps every campaign when two live ads match, instead of giving up', () => {
     const match = matchLaunch({
       prescription: prescription(),
-      launches: [launch(), launch({ id: 'act-2', campaignId: 'camp-2' })],
+      launches: [launch(), launch({ id: 'act-2', campaignId: 'camp-2', authorizedAt: '2026-10-26T08:00:00.000Z' })],
       plans: [plan()],
       siblings: [sibling()],
       missingCampaign: false,
     })
-    expect(match.kind).toBe('unmatched')
-    if (match.kind === 'unmatched') expect(match.lines[0]).toContain('对上了不止一条已开投的广告')
+    expect(match.kind).toBe('matched')
+    if (match.kind === 'matched') expect(match.launches.map(item => item.campaignId)).toEqual(['camp-1', 'camp-2'])
   })
 
   it('keeps the prescription that was passed later', () => {
@@ -408,7 +410,7 @@ describe('prescription launch check', () => {
     ]
     const leadsOnly: KpiRef[] = [{ metric: '线索', target: 10, unit: '条' }]
     for (const zone of ['Australia/Brisbane', null]) {
-      const view = judgeAtMidnight('2026-11-02T00:00:00.000Z', rows, leadsOnly, zone)
+      const view = judgeAtMidnight('2026-11-09T00:00:00.000Z', rows, leadsOnly, zone)
       for (const point of view.checkpoints) {
         expect(point).toMatchObject({ due: true, verdict: 'unknown' })
         expect(point.sentence).toContain('不能下结论')

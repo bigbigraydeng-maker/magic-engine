@@ -9,6 +9,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { EMAIL_SETTINGS_SAVED_EVENT } from '@/lib/crm/email-templates/settings-events'
 import type { SettingsHistoryEntry } from '@/lib/crm/email-templates/settings-store'
+import {
+  CatalogueFields,
+  EMPTY_CATALOGUE_FORM,
+  catalogueFormFrom,
+  catalogueFromForm,
+  otherProviders,
+  type CatalogueForm,
+  type StoredCatalogue,
+} from './email-settings-catalogue'
 
 interface StoredSettings {
   enabled: boolean
@@ -17,6 +26,7 @@ interface StoredSettings {
   footer: string | null
   limits: { per_user_per_hour: number; per_user_per_day: number; per_mailbox_per_day: number }
   frequency_cap: { max: number; window_days: number } | null
+  cap_exempt_template_keys?: string[]
   recipient_allowlist: string[] | null
   same_template_cooldown_hours: number
   call_prompt_hours: number
@@ -24,7 +34,8 @@ interface StoredSettings {
     allowed_link_hosts: string[]
     rules: Array<{ id: string; phrases: string[]; message: string; severity: 'block' | 'warn' }>
   }
-  providers: { published_tours?: { url_pattern: string; all_tours_url: string } }
+  // Keys this panel has no fields for are carried back unchanged (see email-settings-catalogue.tsx).
+  providers: { published_tours?: { url_pattern: string; all_tours_url: string }; catalogue?: StoredCatalogue; [key: string]: unknown }
 }
 
 interface LoadPayload {
@@ -49,7 +60,7 @@ interface RuleDraft {
   phrasesText: string
 }
 
-interface FormState {
+interface FormState extends CatalogueForm {
   enabled: boolean
   sendMailbox: string
   allowUnsolicited: boolean
@@ -60,6 +71,7 @@ interface FormState {
   frequencyOn: boolean
   frequencyMax: string
   frequencyWindowDays: string
+  capExemptText: string
   allowlistMode: 'list' | 'anyone'
   allowlistText: string
   sameTemplateCooldownHours: string
@@ -68,6 +80,7 @@ interface FormState {
   rules: RuleDraft[]
   urlPattern: string
   allToursUrl: string
+  otherProviders: Record<string, unknown>
 }
 
 const DEFAULT_FORM: FormState = {
@@ -81,6 +94,7 @@ const DEFAULT_FORM: FormState = {
   frequencyOn: true,
   frequencyMax: '2',
   frequencyWindowDays: '7',
+  capExemptText: '',
   allowlistMode: 'list',
   allowlistText: '',
   sameTemplateCooldownHours: '24',
@@ -89,6 +103,8 @@ const DEFAULT_FORM: FormState = {
   rules: [],
   urlPattern: '',
   allToursUrl: '',
+  ...EMPTY_CATALOGUE_FORM,
+  otherProviders: {},
 }
 
 function linesToList(text: string): string[] {
@@ -110,6 +126,7 @@ function formFromSettings(s: StoredSettings): FormState {
     frequencyOn: s.frequency_cap !== null,
     frequencyMax: s.frequency_cap ? String(s.frequency_cap.max) : '2',
     frequencyWindowDays: s.frequency_cap ? String(s.frequency_cap.window_days) : '7',
+    capExemptText: (s.cap_exempt_template_keys ?? []).join('\n'),
     allowlistMode: s.recipient_allowlist === null ? 'anyone' : 'list',
     allowlistText: s.recipient_allowlist ? s.recipient_allowlist.join('\n') : '',
     sameTemplateCooldownHours: String(s.same_template_cooldown_hours),
@@ -123,6 +140,8 @@ function formFromSettings(s: StoredSettings): FormState {
     })),
     urlPattern: s.providers.published_tours?.url_pattern ?? '',
     allToursUrl: s.providers.published_tours?.all_tours_url ?? '',
+    ...catalogueFormFrom(s.providers),
+    otherProviders: otherProviders(s.providers),
   }
 }
 
@@ -177,7 +196,9 @@ function buildSettings(form: FormState): BuildResult {
 
   const urlPattern = form.urlPattern.trim()
   const allToursUrl = form.allToursUrl.trim()
-  const providers: StoredSettings['providers'] = {}
+  const providers: StoredSettings['providers'] = { ...form.otherProviders }
+  const catalogue = catalogueFromForm(form)
+  if (catalogue !== null) providers.catalogue = catalogue
   if (urlPattern !== '' || allToursUrl !== '') {
     providers.published_tours = { url_pattern: urlPattern, all_tours_url: allToursUrl }
   }
@@ -195,6 +216,7 @@ function buildSettings(form: FormState): BuildResult {
         per_mailbox_per_day: perMailboxPerDay,
       },
       frequency_cap: frequencyCap,
+      cap_exempt_template_keys: linesToList(form.capExemptText),
       recipient_allowlist: allowlist,
       same_template_cooldown_hours: sameTemplateCooldownHours,
       call_prompt_hours: callPromptHours,
@@ -480,6 +502,16 @@ export function EmailSettingsPanel(props: { clientId: string }): JSX.Element {
           </div>
         )}
         <Help>按这个客人名下所有邮箱地址、含群发邮件一起数。</Help>
+        <p className="mt-3 font-medium">不占名额的模板（回复客人自己来信的）</p>
+        <textarea
+          value={form.capExemptText}
+          onChange={(e) => update('capExemptText', e.target.value)}
+          rows={3}
+          aria-label="不占频次名额的模板代号"
+          placeholder="一行一个模板代号"
+          className="w-full rounded-lg border border-me-stone bg-white px-3 py-2 text-sm"
+        />
+        <Help>这些模板发出去：不受上面的次数限制，也不算进别的邮件的次数里。只填回复客人自己来信的模板。</Help>
       </Section>
 
       <Section title="试跑名单">
@@ -636,6 +668,10 @@ export function EmailSettingsPanel(props: { clientId: string }): JSX.Element {
             className="w-full rounded-lg border border-me-stone bg-white px-2 py-1.5 text-sm"
           />
         </label>
+      </Section>
+
+      <Section title="一键发目录">
+        <CatalogueFields form={form} onChange={(key, value) => update(key, value)} />
       </Section>
 
       <Section title="变更说明">

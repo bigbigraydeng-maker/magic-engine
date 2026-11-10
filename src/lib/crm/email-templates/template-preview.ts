@@ -5,17 +5,22 @@
  * 预览不写任何东西、不碰 Graph 之外的外部服务。
  */
 
+import { sanitizeBody, sanitizeSubject } from '@/lib/crm/email-compose/validate'
 import { getProvider } from './facts/registry'
 import type { FactProvider, PickInput, PickOption, RenderFacts } from './facts/types'
 import type { EffectiveEmailConfig } from './effective-config'
 import { evaluateContentGates } from './gates/content-gates'
 import { evaluateFrequency } from './gates/frequency'
 import type { GateViolation } from './gates/types'
-import { renderTemplate } from './render'
+import { catalogueRenderFields, renderTemplate } from './render'
+import { isAutomatedTemplateKey } from './automated-template-key'
 import {
   DEFAULT_TIME_ZONE,
+  GATE_MESSAGES,
   computeCallWhen,
   decideCallBasis,
+  exemptIdLoaderFor,
+  isCapExempt,
   resolveTimeZone,
   todayInZone,
   type SendGateData,
@@ -43,7 +48,7 @@ export interface PreviewArgs {
 }
 
 export interface PreviewFrequency {
-  state: 'off' | 'ok' | 'capped' | 'unverifiable'
+  state: 'off' | 'ok' | 'capped' | 'unverifiable' | 'exempt'
   count: number | null
   max: number | null
   windowDays: number | null
@@ -79,13 +84,23 @@ export function clearPreviewCache(): void {
 
 const refuse = (status: 404 | 409 | 503, reason: string, error: string): PreviewResult => ({ ok: false, status, reason, error })
 
-async function frequencyFor(args: PreviewArgs, addresses: string[], data: SendGateData): Promise<PreviewFrequency> {
+async function frequencyFor(args: PreviewArgs, addresses: string[], data: SendGateData, unedited: boolean): Promise<PreviewFrequency> {
   const cap = args.config.frequencyCap
   if (cap === null) return { state: 'off', count: null, max: null, windowDays: null, nextAllowedAt: null, items: [], error: null }
-  const key = `${args.clientId}:${args.contactId}`
+  if (isCapExempt(args.config, args.request.key, unedited)) {
+    return { state: 'exempt', count: null, max: cap.max, windowDays: cap.windowDays, nextAllowedAt: null, items: [], error: null }
+  }
+  const key = `${args.clientId}:${args.contactId}:${args.config.capExemptTemplateKeys.join(',')}`
   const cached = frequencyCache.get(key)
   if (cached !== undefined && args.now.getTime() - cached.at < FREQUENCY_CACHE_MS) return cached.value
-  const verdict = await evaluateFrequency({ cap, now: args.now, addresses, contactId: args.contactId, sources: data.frequencySources })
+  const verdict = await evaluateFrequency({
+    cap,
+    now: args.now,
+    addresses,
+    contactId: args.contactId,
+    sources: data.frequencySources,
+    loadExemptIds: exemptIdLoaderFor(args.config, data, args.clientId, args.contactId),
+  })
   let value: PreviewFrequency
   if (verdict.ok) {
     value = { state: 'ok', count: verdict.count, max: cap.max, windowDays: cap.windowDays, nextAllowedAt: null, items: [], error: null }
@@ -166,6 +181,8 @@ export async function previewTemplate(
   data: SendGateData,
   opts: { timeZone?: string } = {},
 ): Promise<PreviewResult> {
+  // Same rule as the send path: the template of an automated letter (auto-…) is not for staff, not even to preview.
+  if (isAutomatedTemplateKey(args.request.key)) return refuse(409, 'template_automated', GATE_MESSAGES.template_automated)
   const tz = await resolveTimeZone(data, args.clientId, opts.timeZone ?? DEFAULT_TIME_ZONE)
   const tpl = await data.loadTemplate(args.clientId, args.request.key)
   const sendable = checkTemplateSendable(tpl, tpl === null ? 0 : tpl.version)
@@ -186,6 +203,7 @@ export async function previewTemplate(
     inputs: args.request.inputs,
     facts: state.facts,
     provider: state.provider,
+    ...catalogueRenderFields(args.config.providers.catalogue, todayInZone(args.now, tz)),
   })
   const checked = evaluateContentGates({
     subject: args.request.subject ?? rendered.subject,
@@ -195,7 +213,14 @@ export async function previewTemplate(
     provider: state.provider,
     facts: state.facts,
   })
-  const frequency = await frequencyFor(args, view.addresses, data)
+  // Same notion as the real send (attachRenderHash in send-gates.ts): "unedited" = a clean render, built without staff-typed input boxes,
+  // equal to the text that goes out after the same cleaning the real send applies (sanitizeSubject / sanitizeBody).
+  const clean = rendered.missing.length === 0 && rendered.problems.length === 0
+  const usesTypedInputs = rendered.usedVariables.some((name) => name.startsWith('input.'))
+  const finalSubject = sanitizeSubject(args.request.subject ?? rendered.subject)
+  const finalBody = sanitizeBody(args.request.body ?? rendered.body)
+  const unedited = clean && !usesTypedInputs && finalSubject === rendered.subject && finalBody === rendered.body
+  const frequency = await frequencyFor(args, view.addresses, data, unedited)
 
   return {
     ok: true,

@@ -4,6 +4,7 @@ import { publicError } from '@/lib/confirmation-card/http'
 import { createKernel } from '@/lib/kernel'
 import { supabaseAdmin } from '@/lib/supabase'
 import { openReader } from './access'
+import { blockStaleReusedSpend } from './recheck-existing-spend'
 
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   const gate = await openReader(req, params.id)
@@ -18,6 +19,10 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     const draftId = parseGoLiveIssue(raw)
     const loaded = await loadGoLive(supabaseAdmin, params.id, draftId, new Date())
     if (!loaded.ok) return NextResponse.json({ error: loaded.error }, { status: loaded.status })
+    if (loaded.reusedSpend) {
+      const stale = await blockStaleReusedSpend(supabaseAdmin, params.id, loaded.reusedSpend)
+      if (stale) return NextResponse.json({ error: stale }, { status: 409 })
+    }
     const body = await issueGoLive({
       kernel: createKernel(supabaseAdmin),
       clientId: params.id,

@@ -9,12 +9,15 @@ import {
 } from '@/lib/diagnostic/manual-prescription'
 import { attachPlanSeed } from '@/lib/ads-strategy/plan-seed/attach'
 import { afterPrescriptionDraftSaved } from '@/lib/marketing-plan/promo/plan-draft-hook'
+import { prepareBudgetIntake } from '@/lib/ads/budget-currency'
+import { resolveIntakeClientKind } from '@/lib/huatuo/client-kind'
+import type { PrescriptionIntake } from '@/types/diagnostic'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 type Fail = { ok: false; status: number; error: string }
-type Ready = { ok: true; runId: string | null; version: number }
+type Ready = { ok: true; runId: string | null; version: number; supersedesId: string | null }
 
 function jsonError(status: number, error: string): NextResponse {
   return NextResponse.json({ success: false, error }, { status })
@@ -45,6 +48,24 @@ async function nextVersionForGoal(goalId: string): Promise<number | Fail> {
   return (data?.version ?? 0) + 1
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+async function resolveOptionalIntake(
+  body: unknown,
+  clientId: string,
+): Promise<{ ok: true; intake: PrescriptionIntake | null } | Fail> {
+  if (!isRecord(body) || body.intake == null) return { ok: true, intake: null }
+  const prepared = prepareBudgetIntake(body.intake)
+  if (!prepared.ok) return { ok: false, status: 400, error: prepared.error }
+  const intake = await resolveIntakeClientKind(supabaseAdmin, clientId, prepared.intake)
+  if (!intake.business_goal || typeof intake.monthly_budget_aud !== 'number') {
+    return { ok: false, status: 400, error: 'intake must include business_goal and monthly_budget_aud' }
+  }
+  return { ok: true, intake }
+}
+
 async function loadInsertContext(clientId: string, goalId: string): Promise<Ready | Fail> {
   const goal = await getGoalById(supabaseAdmin, goalId)
   if (!goal || goal.client_id !== clientId) {
@@ -54,13 +75,34 @@ async function loadInsertContext(clientId: string, goalId: string): Promise<Read
   if (!('runId' in run)) return run
   const version = await nextVersionForGoal(goalId)
   if (typeof version !== 'number') return version
-  return { ok: true, runId: run.runId, version }
+  const predecessor = await approvedPredecessor(clientId, goalId)
+  if (!predecessor.ok) return predecessor
+  return { ok: true, runId: run.runId, version, supersedesId: predecessor.id }
+}
+
+/** Pointer only. Does not update the approved row. A read failure does not insert. */
+async function approvedPredecessor(
+  clientId: string,
+  goalId: string,
+): Promise<{ ok: true; id: string | null } | Fail> {
+  const { data, error } = await supabaseAdmin
+    .from('prescriptions')
+    .select('id')
+    .eq('client_id', clientId)
+    .eq('goal_id', goalId)
+    .eq('status', 'approved')
+    .order('approved_at', { ascending: false })
+    .limit(1)
+    .maybeSingle<{ id: string }>()
+  if (error) return { ok: false, status: 500, error: '读取已批准处方失败' }
+  return { ok: true, id: data?.id ?? null }
 }
 
 async function insertDraft(
   clientId: string,
   parsed: ManualParseSuccess,
   ready: Ready,
+  intake: PrescriptionIntake | null,
 ): Promise<NextResponse> {
   const row = {
     client_id: clientId,
@@ -71,9 +113,9 @@ async function insertDraft(
     version: ready.version,
     agent_name: MANUAL_PRESCRIPTION_AGENT,
     content: parsed.content,
-    intake: null,
+    intake,
     generation_meta: parsed.generationMeta,
-    supersedes_id: null,
+    supersedes_id: ready.supersedesId,
     supplements_id: null,
   }
   const { data, error } = await supabaseAdmin
@@ -116,9 +158,11 @@ export async function POST(
 
   const parsed = parseManualPrescriptionBody(body, clientId)
   if (!parsed.ok) return jsonError(parsed.status, parsed.error)
+  const intakeResult = await resolveOptionalIntake(body, clientId)
+  if (!intakeResult.ok) return jsonError(intakeResult.status, intakeResult.error)
   const ready = await loadInsertContext(clientId, parsed.goalId)
   if (!ready.ok) return jsonError(ready.status, ready.error)
   // 种子构建失败不能挡住保存草稿：attachPlanSeed 自己不抛错，这里再兜一层
   parsed.content = await attachPlanSeed(parsed.content, { clientId, goalId: parsed.goalId }).catch(() => parsed.content)
-  return insertDraft(clientId, parsed, ready)
+  return insertDraft(clientId, parsed, ready, intakeResult.intake)
 }

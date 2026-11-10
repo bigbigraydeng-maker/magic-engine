@@ -1,6 +1,7 @@
 'use client'
 
 import { cleanDisplayName } from '@/lib/crm/clean-display-name'
+import { AiTakeoverTag } from '../../_components/AiTakeoverTag'
 import { preserveOriginalName } from '@/lib/crm/brief-display-name'
 import {
   LIST_CLS,
@@ -108,6 +109,7 @@ function NameCell({ r, grouped }: { r: ContactRow; grouped: boolean }) {
             📞 刚聊过
           </span>
         )}
+        <AiTakeoverTag aiTakeover={r.aiTakeover} cameBack={r.customerCameBack} />
         {/* 「今天先联系」不画来源小标签：一行只留名字和「回头」这类最该先看的东西。 */}
         {!grouped && (r.sources ?? []).slice(0, 1).map((k) => (
           <span
@@ -169,6 +171,15 @@ function StageCell({ r, grouped }: { r: ContactRow; grouped: boolean }) {
           >
             {r.nextAction.verbLabel}
           </span>
+          {r.handled === true && (
+            <span
+              data-testid="handled-tick"
+              title={r.handledWhy ?? '今天已处理'}
+              className="shrink-0 text-xs font-bold text-emerald-700"
+            >
+              ✓ {r.handledWhy ?? '今天已处理'}
+            </span>
+          )}
           {aiSummary ? (
             <span className="truncate text-xs text-me-charcoal/70" title={aiSummary} data-testid="ai-summary">
               <span className="mr-1 rounded bg-me-charcoal/10 px-1 text-[10px] font-bold text-me-charcoal/50">AI</span>
@@ -211,7 +222,8 @@ export function ContactTableRow(props: {
       // 直达链接靠它定位（?contact=<id> 打开对应抽屉）
       id={`contact-${r.contactId}`}
       onClick={() => onToggle(r.contactId)}
-      className={`border-b border-me-charcoal/5 cursor-pointer hover:bg-me-ivory/40 ${active ? 'bg-me-ivory/50' : ''}`}
+      data-handled={r.handled === true ? 'true' : undefined}
+      className={`border-b border-me-charcoal/5 cursor-pointer hover:bg-me-ivory/40 ${active ? 'bg-me-ivory/50' : ''} ${r.handled === true ? 'opacity-60' : ''}`}
     >
       <PinCell r={r} onTogglePin={onTogglePin} />
       <NameCell r={r} grouped={grouped} />

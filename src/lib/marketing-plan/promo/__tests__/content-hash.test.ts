@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createHash } from 'node:crypto'
-import { promoContentHash, __sha256HexForTest } from '../content-hash'
+import { promoContentHash, promoContentMatches, __promoContentHashWithDeliveryForTest, __sha256HexForTest } from '../content-hash'
 import { baseSpec } from './fixtures'
 import type { PromoSpec } from '../spec'
 
@@ -25,10 +25,24 @@ describe('promoContentHash', () => {
     const reordered = {
       checks: parsed.checks,
       phases: parsed.phases,
+      daily_total_cap_cents: parsed.daily_total_cap_cents,
       goal_id: parsed.goal_id,
       schema: parsed.schema,
     } as unknown as PromoSpec
     expect(promoContentHash(reordered)).toBe(promoContentHash(spec))
+  })
+
+  it('改每天总上限会换指纹；没填这个键则不进指纹', () => {
+    const spec = baseSpec()
+    const changed = clone(spec)
+    changed.daily_total_cap_cents = (spec.daily_total_cap_cents ?? 0) + 100
+    expect(promoContentHash(changed)).not.toBe(promoContentHash(spec))
+    const dropped = clone(spec)
+    delete dropped.daily_total_cap_cents
+    const never = clone(spec)
+    delete never.daily_total_cap_cents
+    expect(promoContentHash(dropped)).toBe(promoContentHash(never))
+    expect(JSON.stringify(dropped)).not.toContain('daily_total_cap_cents')
   })
 
   it('checks 内容不同 → 同一指纹', () => {
@@ -77,6 +91,23 @@ describe('promoContentHash', () => {
     const changed = clone(spec)
     changed.phases[0].start_date = '2026-11-02'
     expect(promoContentHash(changed)).not.toBe(promoContentHash(spec))
+  })
+
+  it('只改投放阶段不换指纹；旧回执把阶段算进去时仍然认', () => {
+    const spec = baseSpec()
+    const changed = clone(spec)
+    changed.delivery = {
+      stage: 'steady', goal: '按已经证明的比例稳住。这次不提案加预算。', started_on: '2026-11-10',
+    }
+    expect(promoContentHash(changed)).toBe(promoContentHash(spec))
+    expect(promoContentMatches(promoContentHash(spec), changed)).toBe(true)
+    const legacy = __promoContentHashWithDeliveryForTest(changed)
+    expect(legacy).not.toBe(promoContentHash(changed))
+    expect(promoContentMatches(legacy, changed)).toBe(true)
+    const budget = clone(changed)
+    budget.daily_total_cap_cents = (budget.daily_total_cap_cents ?? 0) + 100
+    expect(promoContentMatches(legacy, budget)).toBe(false)
+    expect(promoContentMatches(promoContentHash(spec), budget)).toBe(false)
   })
 
   it('改 goal_id → 指纹变化', () => {

@@ -105,4 +105,25 @@ describe('RecentSends', () => {
     fireEvent.click(screen.getByRole('button', { name: '刷新' }))
     expect(await screen.findByText('Amy Lee')).toBeInTheDocument()
   })
+
+  it('shows what the guest clicked (human clicks only, from the server), and the catalogue refusals in words', async () => {
+    stub({
+      body: {
+        receipts: [
+          receipt({ clicks: [{ label: '目录', firstClickedAt: '2026-11-11T07:03:00Z' }, { label: 'Best of China（11 Mar 出发）', firstClickedAt: '2026-11-11T07:10:00Z' }] }),
+          receipt({ id: 'r2', clicks: [] }),
+          receipt({ id: 'r3', clicks: null }),
+          receipt({ id: 'r4', outcome: 'blocked', blockReason: 'catalogue_expired', clicks: [] }),
+        ],
+      },
+    })
+    render(<RecentSends clientId="c1" />)
+    const rows = await screen.findAllByRole('row')
+    expect(rows[0]).toHaveTextContent('点了什么')
+    expect(rows[1]).toHaveTextContent('目录')
+    expect(rows[1]).toHaveTextContent('Best of China（11 Mar 出发）')
+    expect(rows[2]).toHaveTextContent('—')
+    expect(rows[3]).toHaveTextContent('—')
+    expect(rows[4]).toHaveTextContent('手册已过期')
+  })
 })

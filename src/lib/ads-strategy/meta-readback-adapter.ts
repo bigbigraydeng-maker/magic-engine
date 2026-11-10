@@ -35,6 +35,10 @@ export interface RawMetaTargeting {
   targeting_relaxation_types?: { custom_audience?: unknown; lookalike?: unknown }
   targeting_automation?: { advantage_audience?: unknown }
   publisher_platforms?: unknown[]
+  facebook_positions?: unknown[]
+  instagram_positions?: unknown[]
+  age_min?: unknown
+  age_max?: unknown
 }
 
 export interface RawMetaAdSet {
@@ -45,7 +49,13 @@ export interface RawMetaAdSet {
   destination_type?: unknown
   /** 配置的开关状态（ACTIVE / PAUSED…）。缺失 = 没读到，不是「暂停着」。 */
   status?: unknown
+  /** 这个广告组属于哪个系列。缺失 = 没读到。 */
+  campaign_id?: unknown
   targeting?: RawMetaTargeting
+  /** 组的日预算，账户币种最小单位（Meta 返回字符串）。缺失 = 没读到。 */
+  daily_budget?: unknown
+  /** 组的结束时间（ISO 字符串）。缺失 = 没读到。 */
+  end_time?: unknown
 }
 
 /** 一条广告的买家可见文案，由调用方从 creative 里摘出来。 */
@@ -56,6 +66,8 @@ export interface RawMetaAdCreative {
   status?: unknown
   /** 正文 / 标题 / 描述 / 聊天模板问候语 / 建议回复按钮 —— 有几条给几条。 */
   texts: (string | null | undefined)[]
+  /** 创意里挂的即时表单编号（lead_gen_form_id）。缺失 = 没读到（Meta 不一定回显），不是「没挂」。 */
+  leadFormId?: string
 }
 
 /** Meta 的 0/1 → 布尔。**缺失返回 undefined，不是 false** —— 见文件头第 3 条。 */
@@ -140,6 +152,8 @@ export function adaptMetaAdSet(
       implicitLookalikeIds:  strList(t?.expanded_implicit_custom_audiences, (a) => (a as { id?: unknown })?.id),
       geoNames:              geoNames(t),
       publisherPlatforms:    strList(t?.publisher_platforms, (p) => p),
+      facebookPositions:     Array.isArray(t?.facebook_positions) ? strList(t.facebook_positions, (p) => p) : undefined,
+      instagramPositions:    Array.isArray(t?.instagram_positions) ? strList(t.instagram_positions, (p) => p) : undefined,
     },
     creatives: creatives.map<CreativeReadback>((c) => ({
       adId: c.adId,

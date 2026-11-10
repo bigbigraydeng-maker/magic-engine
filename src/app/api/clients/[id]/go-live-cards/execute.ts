@@ -7,10 +7,15 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { SpendActivationAuthority } from '@/lib/ads/spend-activation'
 import type { ExecutionOutcome, SettleResult } from '@/lib/ads-go-live'
 import { settleGoLive, type ActivateAttempt, type LayerRead } from '@/lib/ads-go-live'
-import type { GoLiveIds } from '@/lib/ads-go-live/draft'
+import { reusedSpendGate, type GoLiveIds } from '@/lib/ads-go-live/draft'
+import { existingAdSetCountsAsLive } from '@/lib/ads-go-live/existing-ad-set-live'
+import { goLiveSpendReason } from '@/lib/ads-go-live/spend-recheck'
+import { readReusedAdSetSpend } from './recheck-existing-spend'
+import type { SpendRead } from '@/lib/meta/existing-adset-spend'
+import { assertLaunchAllowed } from '@/lib/ads-launch/plan-gate'
 import { approveDraft } from '@/lib/ads-strategy/draft-and-gate'
 import { activatePublished, pausePublished } from '@/lib/meta/ad-publisher'
-import { fetchCampaignStatus } from '@/lib/meta/readback'
+import { fetchCampaignStatus, fetchEffectiveStatus } from '@/lib/meta/readback'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 
 function held(reason: string): ExecutionOutcome {
@@ -43,19 +48,42 @@ async function ownsGoLive(
   return activationRunId(current) === cardRunId
 }
 
-function targets(ids: GoLiveIds): { name: string; id: string }[] {
+type LiveTarget = { name: string; id: string; existingAdSet?: boolean }
+
+function targets(ids: GoLiveIds): LiveTarget[] {
   const ads = ids.adIds.map((id, index) => ({
     name: ids.adIds.length === 1 ? '广告' : `第${index + 1}条广告`,
     id,
   }))
-  return [...ads, { name: '广告组', id: ids.adSetId }, { name: '广告系列', id: ids.campaignId }]
+  // A reused campaign stays out of this read. A reused ad set stays switched as it was,
+  // but its effective status still decides whether the new ad is actually live.
+  const adSet: LiveTarget[] = [{
+    name: '广告组',
+    id: ids.adSetId,
+    ...(ids.reusedAdSet ? { existingAdSet: true } : {}),
+  }]
+  const campaign = ids.reusedCampaign || ids.reusedAdSet ? [] : [{ name: '广告系列', id: ids.campaignId }]
+  return [...ads, ...adSet, ...campaign]
+}
+
+function skipIds(ids: GoLiveIds): string[] {
+  const skip: string[] = []
+  if (ids.reusedCampaign || ids.reusedAdSet) skip.push(ids.campaignId)
+  if (ids.reusedAdSet) skip.push(ids.adSetId)
+  return skip
+}
+
+async function layerStatus(target: LiveTarget, token: string): Promise<string | null> {
+  if (!target.existingAdSet) return fetchCampaignStatus(target.id, token)
+  const actual = await fetchEffectiveStatus(target.id, token)
+  return existingAdSetCountsAsLive(actual) ? 'ACTIVE' : actual
 }
 
 async function readLayers(ids: GoLiveIds, token: string): Promise<LayerRead[] | null> {
   try {
     return await Promise.all(targets(ids).map(async (target) => ({
       name: target.name,
-      status: await fetchCampaignStatus(target.id, token),
+      status: await layerStatus(target, token),
     })))
   } catch {
     return null
@@ -150,10 +178,21 @@ async function runSettle(
     claimAndActivate: async () => fromWrite(await approveDraft(
       args.draftId, args.supabase, token, args.authority, 'go-live-card',
     )),
-    activateOnly: async () => fromWrite(await activatePublished(ids, token)),
+    activateOnly: async () => fromWrite(await activatePublished(
+      ids,
+      token,
+      skipIds(args.ids).length > 0 ? { skipIds: skipIds(args.ids) } : undefined,
+    )),
     readBack: () => readLayers(args.ids, token),
     stillOwns,
-    keepPaused: () => pausePublished(ids, token),
+    keepPaused: () => pausePublished(
+      {
+        ...ids,
+        ...(args.ids.reusedCampaign ? { reusedCampaign: true } : {}),
+        ...(args.ids.reusedAdSet ? { reusedAdSet: true } : {}),
+      },
+      token,
+    ),
   }
   try {
     return await settleGoLive(ports)
@@ -174,6 +213,45 @@ async function runSettle(
   }
 }
 
+/** A reused campaign is left as it is. If it is paused, nothing spends, so this is not a launch. */
+async function reusedCampaignPaused(ids: GoLiveIds, token: string): Promise<ExecutionOutcome | null> {
+  if (!ids.reusedCampaign) return null
+  let status: string | null = null
+  try {
+    status = await fetchCampaignStatus(ids.campaignId, token)
+  } catch {
+    status = null
+  }
+  if (status === 'ACTIVE') return null
+  if (status === 'PAUSED') {
+    return {
+      settle: {
+        outcome: 'held',
+        readback: '系列暂停，不会花钱',
+        reason: '系列暂停，不会花钱。',
+        paused: false,
+      },
+      note: null,
+    }
+  }
+  return held('读不到原系列是不是开着，没有开。')
+}
+
+async function reusedSpendDrift(
+  args: { supabase: SupabaseClient; clientId: string; draftId: string; readSpend?: (adSetId: string) => Promise<SpendRead> },
+  ids: GoLiveIds,
+  token: string,
+): Promise<string | null> {
+  if (!ids.reusedAdSet) return null
+  const payload = await readPayload(args.supabase, args.clientId, args.draftId)
+  const gate = payload ? reusedSpendGate(payload) : null
+  if (!gate) return '读不到这份草稿挂的广告组，没有开。'
+  const fresh = args.readSpend
+    ? await args.readSpend(gate.adSetId)
+    : await readReusedAdSetSpend(args.supabase, args.clientId, gate.adSetId, token)
+  return goLiveSpendReason(gate.spend, fresh)
+}
+
 function allowed(authority: SpendActivationAuthority): boolean {
   return authority.basis === 'go_live_card' && authority.actorEmail.trim().length > 0 && !!authority.cardRunId
 }
@@ -185,12 +263,34 @@ export async function executeConfirmedGoLive(args: {
   authority: SpendActivationAuthority
   ids: GoLiveIds | null
   now?: Date
+  readSpend?: (adSetId: string) => Promise<SpendRead>
 }): Promise<ExecutionOutcome> {
   const ids = args.ids
   if (!ids) return held('没记下广告编号，没有开，系列保持暂停。')
   if (!allowed(args.authority)) return held('这次确认对不上，没有开，系列保持暂停。')
+  const bound = await assertLaunchAllowed(
+    args.supabase,
+    args.clientId,
+    await readPayload(args.supabase, args.clientId, args.draftId),
+    args.now ?? new Date(),
+  )
+  if (!bound.ok) return held(bound.reason)
   const token = await getMetaTokenForClient(args.clientId)
   if (!token) return held('拿不到这个客户的广告授权，没有开，系列保持暂停。')
+  const blocked = await reusedCampaignPaused(ids, token)
+  const drift = blocked ? null : await reusedSpendDrift(args, ids, token)
+  const stop = blocked ?? (drift ? held(drift) : null)
+  if (stop) {
+    const note = await writeMark(
+      args.supabase,
+      args.clientId,
+      args.draftId,
+      stop.settle,
+      (args.now ?? new Date()).toISOString(),
+      args.authority.cardRunId ?? '',
+    )
+    return { settle: stop.settle, note }
+  }
   const settled = await runSettle({ ...args, ids }, token)
   const note = await writeMark(
     args.supabase,

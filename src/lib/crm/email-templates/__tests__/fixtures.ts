@@ -36,6 +36,7 @@ export function settingsObj(over: Partial<EmailSettings> = {}): EmailSettings {
     footer: null,
     limits: { perUserPerHour: 30, perUserPerDay: 100, perMailboxPerDay: 200 },
     frequencyCap: { max: 2, windowDays: 7 },
+    capExemptTemplateKeys: [],
     recipientAllowlist: null,
     sameTemplateCooldownHours: 24,
     callPromptHours: 24,
@@ -83,7 +84,7 @@ export function template(over: Partial<EmailTemplateVersion> = {}): EmailTemplat
 
 export function emptySources(): FrequencySources {
   const empty = async () => ({ ok: true as const, items: [] as OutboundItem[] })
-  return { sentItems: vi.fn(empty), audit: vi.fn(empty), touchpoints: vi.fn(empty), mailchimp: vi.fn(empty) }
+  return { sentItems: vi.fn(empty), audit: vi.fn(empty), touchpoints: vi.fn(empty), mailchimp: vi.fn(empty), meSends: vi.fn(empty) }
 }
 
 export function makeData(over: Partial<SendGateData> = {}): SendGateData {
@@ -97,6 +98,8 @@ export function makeData(over: Partial<SendGateData> = {}): SendGateData {
     })),
     loadSenderName: vi.fn(async () => 'Lisa Zhang'),
     sentTemplateReceiptsSince: vi.fn(async () => [] as StoredReceipt[]),
+    exemptMessageIdsSince: vi.fn(async () => [] as string[]),
+    loadEmailUnsubscribed: vi.fn(async () => ({ ok: true as const, unsubscribed: false })),
     frequencySources: emptySources(),
     ...over,
   }

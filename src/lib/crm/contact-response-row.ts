@@ -47,6 +47,8 @@ export interface ContactRow {
    * 抽屉透出来，让员工看得见 + 改得动（issue #3158）。
    */
   assigned_to: string | null
+  /** 「AI 跟进中」镜像列（lib/crm/ai-takeover）；空 = 不在接管中。 */
+  ai_takeover_since?: string | null
 }
 
 export interface TouchRow {
@@ -122,6 +124,8 @@ export function responseRowFor(
     channel: t.channel,
     occurredAt: t.occurred_at,
     metadata: t.metadata,
+    source: t.source,
+    raw: t.raw,
   }))
   const custom = extractCustomColumns(forColumns)
 
@@ -140,6 +144,8 @@ export function responseRowFor(
        * 展开却照旧能一点就拨。销售会以为其中一边是过时的，而两边他都不再信。
        */
       phoneUnusable: seg.phoneUnusable ?? false,
+      /** 客人说过不要电话（只关电话，邮件照常）—— 抽屉据此藏拨号、显示撤销条。 */
+      doNotCall: seg.doNotCall === true,
       /**
        * 被标成「别再联系」—— 页面据此给出**取消**那条路。
        *

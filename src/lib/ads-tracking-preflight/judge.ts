@@ -33,6 +33,8 @@ export const MIN_POST_CLICKS_FOR_LEAD_CHECK = 50
 export const CRM_FRESH_WINDOW_HOURS = 48
 /** 线索时间比「现在」晚多少以内算时钟误差（5 分钟）；更晚就是未来的时间，是脏数据 / 时钟偏差，不能判绿。 */
 export const CRM_CLOCK_SKEW_HOURS = 5 / 60
+/** 统计接口成功了，但一个事件名都没带回。这不是「次数是 0」。 */
+export const EMPTY_STATS_REASON = '读不到数据，判不了'
 
 export const GATE_LABELS: Record<TrackingGateKey, string> = {
   'tracking.account_dataset_aligned': '数据集对齐（广告账户 / 官网像素 / 回传目标）',
@@ -154,10 +156,16 @@ function judgeAccountDatasetAligned(input: JudgeInput): TrackingGateReceipt {
 
 // ─── 2. 像素在线 ────────────────────────────────────────────────────────────
 
-type PixelState = 'alive' | 'lagging' | 'dead' | 'unknown'
+type PixelState = 'alive' | 'lagging' | 'dead' | 'unknown' | 'empty'
+
+/** 读成功但映射是空的：接口没带回任何事件。有键且值为 0 才是「读到了零」。 */
+function statsMapEmpty(counts: Record<string, number> | null): boolean {
+  return counts !== null && Object.keys(counts).length === 0
+}
 
 function pixelState(d: MetaDatasetFact | undefined, now: Date): PixelState {
   if (!d || d.events_24h === null) return 'unknown'
+  if (statsMapEmpty(d.events_24h)) return 'empty'
   const pv = d.events_24h['PageView'] ?? 0
   if (pv === 0) return 'dead'
   const firedRecently = d.last_fired_at !== null && ageHours(d.last_fired_at, now) <= PIXEL_ALIVE_WINDOW_HOURS
@@ -179,22 +187,33 @@ function judgePixelAlive(input: JudgeInput): TrackingGateReceipt {
   const lagging = states.filter(s => s === 'lagging').length
   const dead = states.filter(s => s === 'dead').length
   const unknown = states.filter(s => s === 'unknown').length
+  const empty = states.filter(s => s === 'empty').length
   evidence.alive = alive
   evidence.lagging = lagging
   evidence.dead = dead
   evidence.unknown = unknown
+  evidence.empty = empty
 
+  if (empty === states.length) {
+    return receipt(key, 'gray', EMPTY_STATS_REASON, '确认 Meta 事件统计能读到', evidence, as_of)
+  }
   if (alive === states.length) {
     return receipt(key, 'green', '官方数据集 24 小时内触发过，且有 PageView', '', evidence, as_of)
   }
   if (dead === states.length) {
     return receipt(key, 'red', '官方数据集 24 小时内没有 PageView', '检查官网像素是否还在加载、是否被拦截', evidence, as_of)
   }
+  if (dead === 0 && empty > 0 && alive + lagging > 0) {
+    return receipt(key, 'yellow', '部分官方数据集在线，其余读不到数据，判不了', '确认 Meta 事件统计能读到', evidence, as_of)
+  }
   if (alive + lagging > 0) {
     return receipt(key, 'yellow', '部分官方数据集在线、部分已死', '逐个核对官网在发的数据集，停掉不用的', evidence, as_of)
   }
   if (dead > 0) {
     return receipt(key, 'red', '官方数据集 24 小时内没有 PageView', '检查官网像素是否还在加载、是否被拦截', evidence, as_of)
+  }
+  if (empty > 0) {
+    return receipt(key, 'gray', EMPTY_STATS_REASON, '确认 Meta 事件统计能读到', evidence, as_of)
   }
   return receipt(key, 'gray', '事件统计没读到，没法判断像素是否在线', '确认 Meta 事件统计能读到', evidence, as_of)
 }
@@ -218,7 +237,11 @@ function judgeLeadEventSeen(input: JudgeInput): TrackingGateReceipt {
   if (total >= 1) {
     return receipt(key, 'green', `近 7 天收到 ${total} 条留资事件`, '', evidence, as_of)
   }
+  const empty = ds.filter(d => !!d && statsMapEmpty(d.events_7d)).length
   const unknown = ds.filter(d => !d || d.events_7d === null).length
+  if (ds.length > 0 && empty + unknown === ds.length && empty > 0) {
+    return receipt(key, 'gray', EMPTY_STATS_REASON, '确认 Meta 事件统计能读到', evidence, as_of)
+  }
   if (unknown > 0) {
     return receipt(key, 'gray', '事件统计没读到，没法确认是否收到留资事件', '确认 Meta 事件统计能读到', evidence, as_of)
   }

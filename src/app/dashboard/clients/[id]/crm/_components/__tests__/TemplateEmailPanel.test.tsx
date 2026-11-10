@@ -507,3 +507,30 @@ describe('call line', () => {
     expect(screen.queryByText(/📞/)).toBeNull()
   })
 })
+
+describe('an exempt template', () => {
+  const exemptFrequency = { state: 'exempt', count: null, max: 2, windowDays: 7, nextAllowedAt: null, items: [], error: null }
+
+  it('says it is not limited by the weekly cap and does not lock sending', async () => {
+    routeFetch({ preview: [{ body: previewOk({ frequency: exemptFrequency }) }] })
+    draw()
+    await pickTemplate('Thank you')
+    expect(screen.getByText(/这封是回复客人自己的来信/)).toBeInTheDocument()
+    expect(screen.getByText(/每 7 天最多 2 封/)).toBeInTheDocument()
+    expect(sendButton()).not.toBeDisabled()
+  })
+
+  it('the normal count line is not shown for it', async () => {
+    routeFetch({ preview: [{ body: previewOk({ frequency: exemptFrequency }) }] })
+    draw()
+    await pickTemplate('Thank you')
+    expect(screen.queryByText(/最近 7 天已给他发了/)).toBeNull()
+  })
+
+  it('the normal count line is still shown for a normal preview', async () => {
+    routeFetch({ preview: [{ body: previewOk() }] })
+    draw()
+    await pickTemplate('Thank you')
+    expect(screen.getByText(/最近 7 天已给他发了/)).toBeInTheDocument()
+  })
+})

@@ -9,7 +9,7 @@ export interface PlaceholderRef {
   end: number
 }
 
-export const COMMON_VARIABLES: readonly string[] = ['first_name', 'sender_name', 'call_when']
+export const COMMON_VARIABLES: readonly string[] = ['first_name', 'sender_name', 'call_when', 'catalogue_url']
 
 export const INPUT_VARIABLE_RE: RegExp = /^input\.[a-z][a-z0-9_]{0,30}$/
 

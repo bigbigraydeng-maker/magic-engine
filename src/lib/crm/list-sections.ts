@@ -53,6 +53,14 @@ export interface RankedContact {
   pinnedAt: string | null
   /** conversation_briefs.intent_level（最新一张）；null = 没有 AI 摘要。只能把人往上抬，见 next-action.ts。 */
   intent: IntentLevel | null
+  /** 今天我们已经动过他了 —— 卡片就地变灰打勾，位置不动（day-list 的承诺）。不传 = 没做当天冻结。 */
+  handled?: boolean
+  /** 已处理的话，一句人话说明做了什么。 */
+  handledWhy?: string | null
+  /** 「AI 跟进中」（lib/crm/ai-takeover）。不传 = 不在接管中。 */
+  aiTakeover?: boolean
+  /** 接管期间客人回来了（回信 / 填表 / 来电 / 私信）—— 名单上标「客人回来了」。 */
+  customerCameBack?: boolean
 }
 
 export interface SectionResult<T> {

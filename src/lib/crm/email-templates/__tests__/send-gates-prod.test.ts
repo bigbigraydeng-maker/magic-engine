@@ -14,6 +14,7 @@ import {
   type PreLockArgs,
 } from '@/lib/crm/email-templates/send-gates'
 import type { PublishedTourFactsRead } from '@/lib/tour-catalog/publish-contract'
+import { createFakeDb } from './fake-db'
 import { createQueryStub, fail, ok } from './query-stub'
 
 const CLIENT = 'client-1'
@@ -170,5 +171,46 @@ describe('guardClient', () => {
     expect(during).toMatchObject({ ok: false, status: 503, reason: 'internal_error' })
     expect(pre).not.toHaveBeenCalled()
     expect(inLock).not.toHaveBeenCalled()
+  })
+})
+
+describe('exemptMessageIdsSince', () => {
+  const base = {
+    client_id: CLIENT,
+    contact_id: 'contact-1',
+    template_key: 'exempt-a',
+    outcome: 'sent',
+    edited_after_render: false,
+    created_at: '2026-10-27T00:00:00.000Z',
+  }
+
+  it('asks the receipts of this client and this guest, for the listed templates, sent unedited, from the cut-off, and returns the message ids', async () => {
+    const rows = [
+      { ...base, id: 'a1', provider_message_id: 'm1' },
+      { ...base, id: 'a2', contact_id: 'contact-2', provider_message_id: 'm2' },
+      { ...base, id: 'a3', client_id: 'client-other', provider_message_id: 'm3' },
+      { ...base, id: 'a4', template_key: 'other-template', provider_message_id: 'm4' },
+      { ...base, id: 'a5', created_at: '2026-10-01T00:00:00.000Z', provider_message_id: 'm5' },
+      { ...base, id: 'a6', outcome: 'failed', provider_message_id: 'm6' },
+      { ...base, id: 'a7', edited_after_render: true, provider_message_id: 'm7' },
+      { ...base, id: 'a8', edited_after_render: null, provider_message_id: 'm8' },
+    ]
+    const fake = createFakeDb({ seed: { crm_email_send_receipts: rows } })
+    const data = createSendGateData(fake.db, args, {
+      loadPublishedTourFacts: vi.fn(async () => ({ published: false as const })),
+    })
+    expect(
+      await data.exemptMessageIdsSince(CLIENT, 'contact-1', ['exempt-a'], '2026-10-21T00:00:00.000Z'),
+    ).toEqual(['m1'])
+  })
+
+  it('a failing receipts read throws, so the cap check can say it cannot count', async () => {
+    const fake = createFakeDb({ failTable: 'crm_email_send_receipts' })
+    const data = createSendGateData(fake.db, args, {
+      loadPublishedTourFacts: vi.fn(async () => ({ published: false as const })),
+    })
+    await expect(
+      data.exemptMessageIdsSince(CLIENT, 'contact-1', ['exempt-a'], '2026-10-21T00:00:00.000Z'),
+    ).rejects.toThrow()
   })
 })
