@@ -155,6 +155,8 @@
 |---|---|---|---|
 | `RESEND_API_KEY` | 全部事务邮件 | Render-web | ✅ |
 | `RESEND_WEBHOOK_SECRET_SYSTEM` | Resend 回调验签（`/api/webhooks/resend/system`，ME 系统邮件账号的送达回执入库口）。值是 Resend 后台建回调后给出的 `whsec_…`；**缺了或格式不对，回调一律回 503**。**Render 里尚未配**（等 PM 放行，只能 PM 本人填），设计稿 `docs/specs/2026-11-01-me-provider-event-intake-p1-design-v0.md` §6 | Render-web | ✅ |
+| `RESEND_API_KEY_<账号>`（如 `RESEND_API_KEY_CTS`） | ME 自动发给客人的信（欢迎信等）用的发信钥匙，按发信账号分开；**缺了宁可不发，绝不借系统那把**。PM 11-10 回「共用」：CTS 这把是 ME 系统 Resend 账号里新建、只限 news. 域名的钥匙。只能 PM 本人填 | Render-web | ✅ |
+| `UNSUBSCRIBE_SIGNING_SECRET` / `_PREV` | 自动信里一键退订链接的签名密钥（至少 32 位；`_PREV` 只在换密钥时短暂保留旧的）。缺了退订页显示「Sorry, that did not work」、自动信不会发 | Render-web | ✅ |
 | `ME_MAIL_FROM` / `ME_MAIL_TO` | ME 内部通知收发件人 | Render-web | ❌ |
 | `FACTORY_REVIEWER_EMAILS` | Factory 审核通知收件人 | Render-web | ❌ |
 | `OUTREACH_FROM_EMAIL` / `_REPLY_EMAIL` | 线索外联邮件收发地址（P35） | Render-web | ❌ |
@@ -198,6 +200,9 @@
 | `FACTORY_PUBLISH_LIVE` | 🔴 Factory 是否真发布。**未配 = 静默发 DRAFT**（片子落库全绿但 FB 上没人看得见） | Render-web |
 | `DAILY_PLAN_AUTO_PUBLISH_LIVE` | 🔴 每日计划图文 Post 自动发布是否**真发**。必须严格等于 `true`。**未配 = 只演练**（走完全部发布闸门、什么都不发也不写库，只在 cron_run_logs 留一行）。第一次真发必须 PM 明确说 go | Render-web |
 | `STORY_AUTO_PUBLISH_LIVE` | 🔴 Story 自动发布是否**真发**。必须严格等于 `true`。**未配 = 只演练**（走完全部检查、什么都不发，只记检查结果）。真发还要客户在 `STORY_AUTO_PUBLISH_CLIENTS` 名单里；第一次真发必须 PM 明确说 go | Render-web |
+| `TRIGGERED_SEND_LIVE` / `TRIGGERED_SEND_CLIENTS` | 🔴 ME 自动信（欢迎信等）是否**真发**：`TRIGGERED_SEND_LIVE` 必须严格等于 `true`，且客户在 `TRIGGERED_SEND_CLIENTS`（逗号分隔 client id）名单里，两者都满足才真发；**未配 = 只演练**。这只是「武装」不是刹车：刹车是在「欢迎信自动发送」页点撤销。只能 PM 本人改，改完要手动部署 | Render-web |
+| `TRIGGERED_SEND_APPROVER_EMAILS` | 🔴 谁能在「欢迎信自动发送」页点**授权**（逗号分隔、精确邮箱）。**未配或为空 = 谁都不能授权**，不回落到 `ADMIN_EMAILS`（那张名单有好几个人）。只放 PM 本人；提案、撤销、查看仍是全局管理员 | Render-web |
+| `TRIGGERED_SEND_TRIAL_DOMAINS` | 🔴 只发内部邮箱的「试跑」允许发到哪些域名（逗号分隔、精确域名，如 `magicengine.cloud`）。**未配 = 不能提、不能批任何试跑**；试跑名单最多 3 个地址，每个都必须落在这些域名里 | Render-web |
 | `STORY_AUTO_PUBLISH_CLIENTS` | Story 自动发布允许真发的客户 id，逗号分隔、小写。**未配或不在名单 = 只演练** | Render-web |
 | `SOCIAL_STORY_PUBLISH_REGISTER_ENABLED` | 新发 Story 登记进读回链。必须严格等于 `true`。**未配 = 关**：监听函数不查库、不写动作行，和现在一样 | Render-web |
 | `SOCIAL_STORY_PUBLISH_RECONCILE_ENABLED` | 补登记最近已发、但还没有动作行的 Story。必须严格等于 `true`。**未配 = 关**：发布扫一遍不发补登记事件，补登记函数即使被投递也不查库、不写行。写历史数据前要另批 | Render-web |

@@ -10,7 +10,7 @@ import { MeButton } from '@/components/ui/me-primitives'
 import type { TriggeredSendRule } from '@/lib/messaging/triggered-send/rule'
 import { describeRule } from '@/lib/messaging/triggered-send/rule-summary'
 import { postCommand } from './api'
-import { errorText } from './welcome-letter-text'
+import { errorText, type Notice } from './welcome-letter-text'
 
 interface Draft {
   account: string
@@ -29,7 +29,7 @@ function parseDraft(text: string): Draft | null {
   }
 }
 
-export function ProposeBox({ clientId, onDone }: { clientId: string; onDone: () => void }): JSX.Element {
+export function ProposeBox({ clientId, onDone }: { clientId: string; onDone: (notice: Notice) => void }): JSX.Element {
   const [text, setText] = useState('')
   const [lines, setLines] = useState<string[] | null>(null)
   const [busy, setBusy] = useState(false)
@@ -47,7 +47,9 @@ export function ProposeBox({ clientId, onDone }: { clientId: string; onDone: () 
     setBusy(false)
     if (!answer.ok) {
       setLines(null)
-      setMessage({ tone: 'bad', text: errorText(answer.body) })
+      // A failed preview changed nothing: say it here. A failed submit may have taken the old proposal down: reload.
+      if (confirm) onDone({ tone: 'bad', text: errorText(answer.body) })
+      else setMessage({ tone: 'bad', text: errorText(answer.body) })
       return
     }
     if (!confirm) {
@@ -57,8 +59,7 @@ export function ProposeBox({ clientId, onDone }: { clientId: string; onDone: () 
     }
     setLines(null)
     setText('')
-    setMessage({ tone: 'ok', text: '提案已提交。它还不是授权，不会发任何信。' })
-    onDone()
+    onDone({ tone: 'ok', text: '提案已提交。它还不是授权，不会发任何信。' })
   }
 
   return (

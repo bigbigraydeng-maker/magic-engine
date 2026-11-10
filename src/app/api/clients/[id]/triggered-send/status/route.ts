@@ -19,7 +19,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     return gate.response
   }
   try {
-    return respond(await statusQuery(createAuthorizationStatusDeps(supabaseAdmin), params.id))
+    return respond(await statusQuery(createAuthorizationStatusDeps(supabaseAdmin), params.id, { canAuthorize: gate.canAuthorize }))
   } catch (error: unknown) {
     console.error('[triggered-send status] failed', error instanceof Error ? error.name : 'unknown')
     return internalError()

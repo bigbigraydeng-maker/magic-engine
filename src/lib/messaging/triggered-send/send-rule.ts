@@ -1,6 +1,6 @@
 /**
  * The "real send" block of a rule snapshot (`rule.send`): everything the PM authorizes on top of the rehearsal rule —
- * who the letter comes from, where replies go, which template, the quiet hours, and the sender's own stop lines.
+ * who the letter comes from, where replies go, which template, the hours it may go out, and the sender's own stop lines.
  *
  * Optional in `parseRule`, so rehearsal proposals written before it existed stay valid (their fingerprint does not
  * change: an absent block is not written as a key). Required by `parseSendRule`: an authorization is only ever written
@@ -20,8 +20,12 @@ export interface SendRuleBlock {
   }
   /** The 127 template the letter is rendered from. Must be an automated (`auto-`) template. */
   template: { key: string }
-  /** Local hours (rule time zone) outside which nothing is sent. `HH:MM`, start before end. */
-  quiet_hours: { start: string; end: string }
+  /**
+   * The hours a letter may go out, `HH:MM`, start before end, in the rule's own time zone (`schedule.timezone`, the
+   * client's zone: the design's "recipient local time" (§5.2 G) points at `time-zone.ts`, which is per client, not per
+   * guest). Outside it the letter waits (retryable). Named a window, not "quiet hours": it is when sending is allowed.
+   */
+  send_window: { start: string; end: string }
   /** The sender's own stop lines (§4.3): crossing one revokes the authorization. */
   health_breaker: {
     window_days: number
@@ -35,10 +39,10 @@ export interface SendRuleBlock {
 
 export type SendBlockParse = { ok: true; send: SendRuleBlock } | { ok: false; error: string }
 
-const SEND_KEYS = ['identity', 'template', 'quiet_hours', 'health_breaker']
+const SEND_KEYS = ['identity', 'template', 'send_window', 'health_breaker']
 const IDENTITY_KEYS = ['from', 'reply_to']
 const TEMPLATE_KEYS = ['key']
-const QUIET_KEYS = ['start', 'end']
+const WINDOW_KEYS = ['start', 'end']
 const BREAKER_KEYS = ['window_days', 'bounce_min_sent', 'bounce_min_count', 'bounce_rate_pct', 'complaint_max', 'provider_reject_streak']
 
 const DOMAIN_LABEL = '[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?'
@@ -98,15 +102,15 @@ function parseTemplate(raw: unknown): SendRuleBlock['template'] | string {
   return { key: raw.key }
 }
 
-function parseQuietHours(raw: unknown): SendRuleBlock['quiet_hours'] | string {
-  if (!isPlainObject(raw)) return 'send.quiet_hours must be a plain object'
-  const err = exactKeys(raw, QUIET_KEYS, 'send.quiet_hours')
+function parseSendWindow(raw: unknown): SendRuleBlock['send_window'] | string {
+  if (!isPlainObject(raw)) return 'send.send_window must be a plain object'
+  const err = exactKeys(raw, WINDOW_KEYS, 'send.send_window')
   if (err) return err
-  if (typeof raw.start !== 'string' || typeof raw.end !== 'string') return 'send.quiet_hours.start and end must be HH:MM'
+  if (typeof raw.start !== 'string' || typeof raw.end !== 'string') return 'send.send_window.start and end must be HH:MM'
   const start = minutesOf(raw.start)
   const end = minutesOf(raw.end)
-  if (start < 0 || end < 0) return 'send.quiet_hours.start and end must be HH:MM'
-  if (start >= end) return 'send.quiet_hours.start must be before end'
+  if (start < 0 || end < 0) return 'send.send_window.start and end must be HH:MM'
+  if (start >= end) return 'send.send_window.start must be before end'
   return { start: raw.start, end: raw.end }
 }
 
@@ -138,9 +142,9 @@ export function parseSendBlock(raw: unknown): SendBlockParse {
   if (typeof identity === 'string') return { ok: false, error: identity }
   const template = parseTemplate(raw.template)
   if (typeof template === 'string') return { ok: false, error: template }
-  const quiet = parseQuietHours(raw.quiet_hours)
-  if (typeof quiet === 'string') return { ok: false, error: quiet }
+  const window = parseSendWindow(raw.send_window)
+  if (typeof window === 'string') return { ok: false, error: window }
   const breaker = parseBreaker(raw.health_breaker)
   if (typeof breaker === 'string') return { ok: false, error: breaker }
-  return { ok: true, send: { identity, template, quiet_hours: quiet, health_breaker: breaker } }
+  return { ok: true, send: { identity, template, send_window: window, health_breaker: breaker } }
 }

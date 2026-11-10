@@ -23,7 +23,7 @@ function rule(over: Partial<TriggeredSendRule> = {}): TriggeredSendRule {
     send: {
       identity: { from: 'Example <news@news.example.com>', reply_to: 'info@example.com' },
       template: { key: 'auto-welcome' },
-      quiet_hours: { start: '08:00', end: '20:00' },
+      send_window: { start: '08:00', end: '20:00' },
       health_breaker: { window_days: 30, bounce_min_sent: 50, bounce_min_count: 3, bounce_rate_pct: 4, complaint_max: 2, provider_reject_streak: 3 },
     },
     ...over,

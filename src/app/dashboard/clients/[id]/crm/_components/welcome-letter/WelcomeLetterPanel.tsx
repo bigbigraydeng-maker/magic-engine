@@ -22,6 +22,7 @@ import {
   stateText,
   warningText,
   type AuthorizationView,
+  type Notice,
   type ProposalView,
   type StatusPayload,
   type TemplateViewData,
@@ -57,7 +58,7 @@ function Letter({ template }: { template: TemplateViewData }): JSX.Element {
   )
 }
 
-function AuthorizationSection({ clientId, auth, onDone }: { clientId: string; auth: AuthorizationView | null; onDone: () => void }): JSX.Element {
+function AuthorizationSection({ clientId, auth, onDone }: { clientId: string; auth: AuthorizationView | null; onDone: (notice: Notice) => void }): JSX.Element {
   if (auth === null) return <Section title="① 现在生效的授权" testId="authorization"><p className="text-sm text-me-charcoal/70">还没有生效的授权：不会自动发欢迎信。</p></Section>
   const r = auth.record
   return (
@@ -70,12 +71,31 @@ function AuthorizationSection({ clientId, auth, onDone }: { clientId: string; au
         {r.authorized_by_email ?? '—'} 在 {nzTime(r.authorized_at)} 批准；{nzTime(r.live_from)} 之后进来的新客人才会收到；有效到 {nzTime(r.expires_at)}。
       </p>
       <Summary lines={auth.summary} />
-      <div className="mt-3"><RevokeButton clientId={clientId} id={r.id} label="撤销授权" onDone={onDone} /></div>
+      <div className="mt-3"><RevokeButton clientId={clientId} id={r.id} label="撤销授权" doneText="已撤销授权：从下一封信起就停。" onDone={onDone} /></div>
     </Section>
   )
 }
 
-function ProposalSection({ clientId, proposal, onDone }: { clientId: string; proposal: ProposalView | null; onDone: () => void }): JSX.Element {
+interface ProposalProps {
+  clientId: string
+  proposal: ProposalView | null
+  canAuthorize: boolean
+  replacing: boolean
+  onDone: (notice: Notice) => void
+}
+
+function AuthorizeOrWhyNot({ clientId, proposal, canAuthorize, replacing, onDone }: ProposalProps & { proposal: ProposalView }): JSX.Element {
+  if (proposal.problem !== null) {
+    return <p className="mt-3 rounded-lg bg-[rgba(194,69,58,.08)] p-2 text-sm text-[#C2453A]" data-testid="proposal-problem">{problemText(proposal.problem)}</p>
+  }
+  if (!canAuthorize) {
+    return <p className="mt-3 text-sm text-me-charcoal/70" data-testid="not-approver">这份提案可以授权，但只有 PM 本人能点「授权」。</p>
+  }
+  return <AuthorizeBox clientId={clientId} proposal={proposal} replacing={replacing} onDone={onDone} />
+}
+
+function ProposalSection(props: ProposalProps): JSX.Element {
+  const { clientId, proposal, onDone } = props
   if (proposal === null) return <Section title="② 待批的提案" testId="proposal"><p className="text-sm text-me-charcoal/70">现在没有待批的提案。</p></Section>
   const r = proposal.record
   return (
@@ -87,12 +107,8 @@ function ProposalSection({ clientId, proposal, onDone }: { clientId: string; pro
         {proposal.rehearsal !== null ? <RehearsalTable clientId={clientId} evidence={proposal.rehearsal} /> : <p className="text-sm text-me-charcoal/70">暂时读不到彩排对照。</p>}
       </div>
       {proposal.warnings.map((w) => <p key={w} className="mt-2 text-sm font-semibold text-[#C2453A]">{warningText(w)}</p>)}
-      {proposal.problem !== null ? (
-        <p className="mt-3 rounded-lg bg-[rgba(194,69,58,.08)] p-2 text-sm text-[#C2453A]" data-testid="proposal-problem">{problemText(proposal.problem)}</p>
-      ) : (
-        <AuthorizeBox clientId={clientId} proposal={proposal} onDone={onDone} />
-      )}
-      <div className="mt-3"><RevokeButton clientId={clientId} id={r.id} label="撤下提案" onDone={onDone} /></div>
+      <AuthorizeOrWhyNot {...props} proposal={proposal} />
+      <div className="mt-3"><RevokeButton clientId={clientId} id={r.id} label="撤下提案" doneText="已撤下提案（彩排会停到新提案交上为止）。" onDone={onDone} /></div>
     </Section>
   )
 }
@@ -110,6 +126,8 @@ function Prerequisites({ data, mode }: { data: StatusPayload['prerequisites']; m
         {row(mode === 'live', mode === 'live' ? '真发开关：已打开（Render 上两个开关都开着）' : '真发开关：关着，只演练、不会真发（要你在 Render 打开两个开关并重新部署）')}
         {data != null && row(data.account_key, `发信账号「${data.account}」的钥匙已放进 Render`)}
         {data != null && row(data.unsubscribe_secret, '一键退订链接的签名密钥已放进 Render')}
+        {data != null && row(data.events, '系统的事件通道配好了（授权要靠它留回执）')}
+        {data != null && row(data.trial_domains, '已设好哪些邮箱算内部邮箱（只发内部邮箱的试跑要用）')}
       </ul>
       <p className="mt-2 text-xs text-me-charcoal/60">这里只显示有没有，不显示任何密钥。每封信的送达、退信、投诉能不能记回来，要在只发内部邮箱的试跑里实测。</p>
     </Section>
@@ -119,6 +137,7 @@ function Prerequisites({ data, mode }: { data: StatusPayload['prerequisites']; m
 export function WelcomeLetterPanel({ clientId }: { clientId: string }): JSX.Element {
   const [status, setStatus] = useState<StatusPayload | null>(null)
   const [loading, setLoading] = useState(true)
+  const [notice, setNotice] = useState<Notice | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -129,6 +148,15 @@ export function WelcomeLetterPanel({ clientId }: { clientId: string }): JSX.Elem
   useEffect(() => {
     void load()
   }, [load])
+
+  /** After any command, whatever its outcome: say what happened and read the page again. */
+  const after = useCallback(
+    (n: Notice) => {
+      setNotice(n)
+      void load()
+    },
+    [load],
+  )
 
   const header = (
     <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
@@ -147,10 +175,21 @@ export function WelcomeLetterPanel({ clientId }: { clientId: string }): JSX.Elem
   return (
     <main className="p-4" data-testid="welcome-letter-panel">
       {header}
-      <AuthorizationSection clientId={clientId} auth={status.authorization ?? null} onDone={() => void load()} />
-      <ProposalSection clientId={clientId} proposal={status.proposal ?? null} onDone={() => void load()} />
+      {notice !== null && (
+        <p className={`mb-4 rounded-lg p-2 text-sm ${notice.tone === 'ok' ? 'bg-[rgba(92,138,74,.10)] text-[#3F6B33]' : 'bg-[rgba(194,69,58,.08)] font-semibold text-[#C2453A]'}`} role="status" data-testid="notice">
+          {notice.text}
+        </p>
+      )}
+      <AuthorizationSection clientId={clientId} auth={status.authorization ?? null} onDone={after} />
+      <ProposalSection
+        clientId={clientId}
+        proposal={status.proposal ?? null}
+        canAuthorize={status.can_authorize === true}
+        replacing={(status.authorization ?? null) !== null}
+        onDone={after}
+      />
       <Prerequisites data={status.prerequisites ?? null} mode={status.mode} />
-      <ProposeBox clientId={clientId} onDone={() => void load()} />
+      <ProposeBox clientId={clientId} onDone={after} />
     </main>
   )
 }

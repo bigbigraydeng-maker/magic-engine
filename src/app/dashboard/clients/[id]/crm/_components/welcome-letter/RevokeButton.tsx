@@ -2,31 +2,39 @@
 
 /**
  * 「撤销」= 紧急刹车：数据库里写一条撤销，从下一封信起就停（已经交给发信服务的那一封收不回来）。
- * 要写一句原因，再点一次确认。
+ * 要写一句原因，再点一次确认。不管成没成，之后都重新读一次页面：旧页面上的这一份可能早被别的替换了，
+ * 真正生效的那一份要让 PM 看见。
  */
 import { useState } from 'react'
 import { MeButton } from '@/components/ui/me-primitives'
 import { postCommand } from './api'
-import { errorText } from './welcome-letter-text'
+import { revokeErrorText, type Notice } from './welcome-letter-text'
 
-export function RevokeButton({ clientId, id, label, onDone }: { clientId: string; id: string; label: string; onDone: () => void }): JSX.Element {
+export function RevokeButton({
+  clientId,
+  id,
+  label,
+  doneText,
+  onDone,
+}: {
+  clientId: string
+  id: string
+  label: string
+  /** What the PM is told when it worked, e.g. 「已撤销授权：从下一封信起就停。」 */
+  doneText: string
+  onDone: (notice: Notice) => void
+}): JSX.Element {
   const [open, setOpen] = useState(false)
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
-  const [message, setMessage] = useState<string | null>(null)
 
   const revoke = async () => {
     setBusy(true)
-    setMessage(null)
     const answer = await postCommand(clientId, 'revoke', { authorization_id: id, reason: reason.trim() })
     setBusy(false)
-    if (!answer.ok) {
-      setMessage(errorText(answer.body))
-      return
-    }
     setOpen(false)
     setReason('')
-    onDone()
+    onDone(answer.ok ? { tone: 'ok', text: doneText } : { tone: 'bad', text: revokeErrorText(answer.body) })
   }
 
   if (!open) {
@@ -52,7 +60,6 @@ export function RevokeButton({ clientId, id, label, onDone }: { clientId: string
       <MeButton variant="ghost" size="sm" disabled={busy} onClick={() => setOpen(false)}>
         先不
       </MeButton>
-      {message !== null && <p className="w-full text-sm font-semibold text-[#C2453A]" role="status">{message}</p>}
     </div>
   )
 }

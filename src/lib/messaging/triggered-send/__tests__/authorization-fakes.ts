@@ -5,10 +5,11 @@
  */
 import type { EmailTemplateVersion } from '@/lib/crm/email-templates/types'
 import type { AuthorizationChangedEvent } from '@/lib/inngest/triggered-send-events'
-import type { AuthorizationStorePort, CommandDeps, SalesCapRead, TemplateRead } from '../authorization-commands'
+import type { AuthorizationStorePort, CommandDeps, SalesCapRead, TemplateRead } from '../authorization-core'
 import type { AuthorizationRecord, NewProposal, OpenAuthorizations, StoreError } from '../authorization-store'
 import type { RehearsalEvidence, RehearsalRead } from '../rehearsal-evidence'
 import { ruleSha256, type SendableRule, type TriggeredSendRule } from '../rule'
+import type { MailboxCheck } from '../types'
 import { templateContentSha256 } from '../welcome-template'
 
 export const CLIENT = 'c0000000-0000-0000-0000-000000000000'
@@ -29,7 +30,7 @@ export function sendableRule(over: Partial<TriggeredSendRule> = {}): SendableRul
     send: {
       identity: { from: 'Example <news@news.example.com>', reply_to: 'info@example.com' },
       template: { key: 'auto-welcome' },
-      quiet_hours: { start: '08:00', end: '20:00' },
+      send_window: { start: '08:00', end: '20:00' },
       health_breaker: { window_days: 30, bounce_min_sent: 50, bounce_min_count: 3, bounce_rate_pct: 4, complaint_max: 2, provider_reject_streak: 3 },
     },
     ...over,
@@ -56,8 +57,20 @@ export function template(over: Partial<EmailTemplateVersion> = {}): EmailTemplat
   }
 }
 
-export function evidence(consecutiveDays: number): RehearsalEvidence {
-  return { requiredDays: 5, consecutiveDays, days: [], rowsCounted: consecutiveDays * 10, proposalsCounted: 1 }
+export function evidence(consecutiveDays: number, over: Partial<RehearsalEvidence> = {}): RehearsalEvidence {
+  return {
+    requiredDays: 5,
+    consecutiveDays,
+    runFrom: consecutiveDays > 0 ? '2026-11-14' : null,
+    runTo: consecutiveDays > 0 ? '2026-11-18' : null,
+    calendar: [],
+    undatedRows: 0,
+    batches: [],
+    batchGap: 0,
+    rowsCounted: consecutiveDays * 10,
+    proposalsCounted: 1,
+    ...over,
+  }
 }
 
 let seq = 0
@@ -188,6 +201,8 @@ export interface FakeWorld {
     rehearsal(read: RehearsalRead): void
     emitFails(change?: string): void
     canEmit(value: boolean): void
+    mailboxes(check: MailboxCheck): void
+    env(values: Record<string, string>): void
   }
 }
 
@@ -199,6 +214,8 @@ export function fakeWorld(): FakeWorld {
   let rehearsalRead: RehearsalRead = { ok: true, evidence: evidence(5) }
   let failingChange: string | null = null
   let emitConfigured = true
+  let mailboxCheck: MailboxCheck = { ok: true }
+  let envValues: Record<string, string> = { TRIGGERED_SEND_TRIAL_DOMAINS: 'example.com' }
   const deps: CommandDeps = {
     store,
     loadTemplate: async () => templateRead,
@@ -209,6 +226,8 @@ export function fakeWorld(): FakeWorld {
       events.push(event)
     },
     canEmit: () => emitConfigured,
+    checkMailboxes: async () => mailboxCheck,
+    env: (name) => envValues[name],
     now: () => NOW,
     newRequestId: () => nextId(),
   }
@@ -222,6 +241,8 @@ export function fakeWorld(): FakeWorld {
       rehearsal: (read) => (rehearsalRead = read),
       emitFails: (change = '*') => (failingChange = change),
       canEmit: (value) => (emitConfigured = value),
+      mailboxes: (check) => (mailboxCheck = check),
+      env: (values) => (envValues = values),
     },
   }
 }

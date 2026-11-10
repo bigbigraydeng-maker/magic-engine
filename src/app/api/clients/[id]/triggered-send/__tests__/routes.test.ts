@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 
 vi.mock('@/lib/auth/client-access', () => ({ requireDashboardClientAccess: vi.fn() }))
@@ -67,8 +67,12 @@ function getStatus(clientId = CLIENT) {
   return statusGET(new NextRequest(`http://localhost/api/clients/${clientId}/triggered-send/status`), { params: { id: clientId } })
 }
 
+let originalApprovers: string | undefined
+
 beforeEach(() => {
   vi.clearAllMocks()
+  originalApprovers = process.env.TRIGGERED_SEND_APPROVER_EMAILS
+  process.env.TRIGGERED_SEND_APPROVER_EMAILS = ' pm@example.com '
   mockedAccess.mockResolvedValue(globalAdmin as never)
   mockedAdmin.mockReturnValue(true)
   for (const c of [commands.propose, commands.authorize, commands.revoke, commands.status]) {
@@ -125,6 +129,39 @@ describe('🔴 who may call the four endpoints', () => {
   })
 })
 
+afterEach(() => {
+  if (originalApprovers === undefined) delete process.env.TRIGGERED_SEND_APPROVER_EMAILS
+  else process.env.TRIGGERED_SEND_APPROVER_EMAILS = originalApprovers
+})
+
+describe('🔴 authorizing: the PM himself only (the approver list), never just any global administrator', () => {
+  it('a global administrator who is not on the approver list cannot authorize, but can still propose and revoke', async () => {
+    mockedAccess.mockResolvedValue({ ...globalAdmin, user: { id: USER_ID, email: 'other-admin@example.com' } } as never)
+    const res = await post('authorize', bodies.authorize)
+    expect(res.status).toBe(403)
+    expect((await res.json()).error).toBe('APPROVER_REQUIRED')
+    expect(commands.authorize).not.toHaveBeenCalled()
+    expect((await post('revoke', bodies.revoke)).status).toBe(200)
+    expect((await post('propose', bodies.propose)).status).toBe(200)
+    await getStatus()
+    expect(commands.status).toHaveBeenCalledWith({ marker: 'status-deps' }, CLIENT, { canAuthorize: false })
+  })
+
+  it('no approver list configured = nobody may authorize (no fall-back to the admin list)', async () => {
+    delete process.env.TRIGGERED_SEND_APPROVER_EMAILS
+    expect((await post('authorize', bodies.authorize)).status).toBe(403)
+    process.env.TRIGGERED_SEND_APPROVER_EMAILS = ''
+    expect((await post('authorize', bodies.authorize)).status).toBe(403)
+    expect(commands.authorize).not.toHaveBeenCalled()
+  })
+
+  it('the PM on the list may authorize, and the page is told so', async () => {
+    expect((await post('authorize', bodies.authorize)).status).toBe(200)
+    await getStatus()
+    expect(commands.status).toHaveBeenCalledWith({ marker: 'status-deps' }, CLIENT, { canAuthorize: true })
+  })
+})
+
 describe('the write endpoints', () => {
   it('🔴 refuse a body that is not declared JSON (a cross-site form cannot post here)', async () => {
     for (const name of WRITES) {
@@ -165,6 +202,6 @@ describe('the status endpoint', () => {
     const res = await getStatus()
     expect(await res.json()).toEqual({ success: true, can_manage: true, proposal: null })
     expect(res.headers.get('cache-control')).toBe('no-store')
-    expect(commands.status).toHaveBeenCalledWith({ marker: 'status-deps' }, CLIENT)
+    expect(commands.status).toHaveBeenCalledWith({ marker: 'status-deps' }, CLIENT, { canAuthorize: true })
   })
 })

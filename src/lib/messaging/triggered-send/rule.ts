@@ -7,6 +7,8 @@ export const GATE_CONTRACT_VERSION = 1
 // Only sources whose lead-form touchpoints are known to exist. A source for hand-made test contacts is added with the
 // controlled-trial batch, once the exact name the CRM writes for them has been verified.
 export const ALLOWED_AUDIENCE_SOURCES = ['meta_lead_form'] as const
+/** A recipient allow-list is a controlled trial to internal inboxes: a handful, never a list of guests. */
+export const MAX_TRIAL_RECIPIENTS = 3
 
 export interface TriggeredSendRule {
   gate_contract_version: number
@@ -279,6 +281,11 @@ export function parseRule(input: unknown): RuleParseResult {
       }
       if (!isUniqueEmailArray(allowlistRaw)) {
         return fail('recipient_allowlist must contain unique lower-case e-mail addresses')
+      }
+      // A controlled trial to a few internal inboxes, never a list of guests (it skips the rehearsal and the consent
+      // check). Which domains count as internal is checked where the rule may be sent (trial-recipients.ts).
+      if (allowlistRaw.length > MAX_TRIAL_RECIPIENTS) {
+        return fail(`recipient_allowlist must have at most ${MAX_TRIAL_RECIPIENTS} addresses`)
       }
       allowlist = allowlistRaw.slice()
     }

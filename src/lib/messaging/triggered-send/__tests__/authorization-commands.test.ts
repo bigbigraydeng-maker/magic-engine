@@ -43,7 +43,7 @@ describe('propose — what may be proposed', () => {
     const rule: Record<string, unknown> = { ...sendableRule() }
     delete rule.send
     const res = await proposeCommand(w.deps, CLIENT, ACTOR, propose({ rule }))
-    expect(res).toMatchObject({ status: 422, body: { error: 'RULE_INVALID' } })
+    expect(res).toMatchObject({ status: 422, body: { error: 'RULE_HAS_NO_SEND_BLOCK' } })
     expect(w.store.rows).toHaveLength(0)
   })
 
@@ -58,6 +58,25 @@ describe('propose — what may be proposed', () => {
     expect((await proposeCommand(w.deps, CLIENT, ACTOR, propose())).body).toMatchObject({ error: 'TEMPLATE_NOT_SENDABLE', reason: 'template_missing' })
     w.set.template({ ok: false })
     expect(await proposeCommand(w.deps, CLIENT, ACTOR, propose())).toMatchObject({ status: 503, body: { error: 'TEMPLATE_UNREADABLE' } })
+    expect(w.store.rows).toHaveLength(0)
+  })
+
+  it('🔴 a trial goes only to internal domains configured on the deploy, and to at most 3 addresses', async () => {
+    const trial = (list: string[]) => propose({ rule: sendableRule({ recipient_allowlist: list }) })
+    expect((await proposeCommand(w.deps, CLIENT, ACTOR, trial(['hello@example.com']))).body.mode).toBe('PROPOSED')
+    expect((await proposeCommand(w.deps, CLIENT, ACTOR, trial(['guest@gmail.com']))).body).toMatchObject({ error: 'TRIAL_RECIPIENT_NOT_INTERNAL', outside: 1 })
+    expect((await proposeCommand(w.deps, CLIENT, ACTOR, trial(['a@example.com', 'b@example.com', 'c@example.com', 'd@example.com']))).body.error).toBe('RULE_INVALID')
+    w.set.env({})
+    expect((await proposeCommand(w.deps, CLIENT, ACTOR, trial(['hello@example.com']))).body.error).toBe('TRIAL_DOMAINS_NOT_CONFIGURED')
+    // A rule for real leads is not a trial: the trial domains do not matter for it.
+    expect((await proposeCommand(w.deps, CLIENT, ACTOR, propose())).body.mode).toBe('PROPOSED')
+  })
+
+  it('🔴 the salespeople\'s mailboxes must be connected (§5.2 F); a failed read is not "connected"', async () => {
+    w.set.mailboxes({ ok: false, reason: 'missing', detail: '1 of 1' })
+    expect(await proposeCommand(w.deps, CLIENT, ACTOR, propose())).toMatchObject({ status: 422, body: { error: 'REQUIRED_MAILBOXES_NOT_CONNECTED' } })
+    w.set.mailboxes({ ok: false, reason: 'unreadable', detail: 'x' })
+    expect(await proposeCommand(w.deps, CLIENT, ACTOR, propose())).toMatchObject({ status: 503, body: { error: 'REQUIRED_MAILBOXES_UNREADABLE' } })
     expect(w.store.rows).toHaveLength(0)
   })
 
@@ -112,6 +131,7 @@ describe('revoke — the brake', () => {
   it('revokes an open authorization by the logged-in person, whatever its template or rule', async () => {
     const live = w.store.seed({ rule: { broken: true }, authorizedAt: '2026-11-15T00:00:00.000Z', activatedAt: '2026-11-15T00:00:01.000Z' })
     w.set.template({ ok: false })
+    w.set.mailboxes({ ok: false, reason: 'unreadable', detail: 'x' })
     const res = await revokeCommand(w.deps, CLIENT, ACTOR, { client_id: CLIENT, authorization_id: live.id, reason: 'stop now' })
     expect(res.body).toMatchObject({ mode: 'REVOKED', event_status: 'sent', authorization: { revoked_by: ACTOR.email, revoked_reason: 'stop now' } })
     expect(w.events[0].data).toMatchObject({ change: 'revoked', actor: 'person' })
@@ -125,13 +145,24 @@ describe('revoke — the brake', () => {
     expect(w.store.rows[0].revokedAt).not.toBeNull()
   })
 
-  it("🔴 another client's row is not found here; a revoked row is reported, never written again", async () => {
+  it('🔴 a brake pressed on a stale page (a row already replaced) names the authorization that is really in force', async () => {
+    const trial = w.store.seed({ authorizedAt: '2026-11-10T00:00:00.000Z', revokedAt: '2026-11-15T00:00:00.000Z', revokedBy: 'system:SUPERSEDED' })
+    const real = w.store.seed({ authorizedAt: '2026-11-15T00:00:00.000Z', activatedAt: '2026-11-15T00:00:01.000Z' })
+    const res = await revokeCommand(w.deps, CLIENT, ACTOR, { client_id: CLIENT, authorization_id: trial.id, reason: 'stop' })
+    expect(res).toMatchObject({ status: 409, body: { error: 'ALREADY_REVOKED', current_authorization: { id: real.id } } })
+    expect(real.revokedAt).toBeNull()
+  })
+
+  it("🔴 another client's row, or a row of another trigger, is not found here; a revoked row is never written again", async () => {
     const foreign = w.store.seed({ clientId: OTHER_CLIENT })
     expect(await revokeCommand(w.deps, CLIENT, ACTOR, { client_id: CLIENT, authorization_id: foreign.id, reason: 'x' })).toMatchObject({
       status: 404,
       body: { error: 'AUTHORIZATION_NOT_FOUND' },
     })
+    const other = w.store.seed({ triggerKey: 'countdown' })
+    expect((await revokeCommand(w.deps, CLIENT, ACTOR, { client_id: CLIENT, authorization_id: other.id, reason: 'x' })).status).toBe(404)
     expect(foreign.revokedAt).toBeNull()
+    expect(other.revokedAt).toBeNull()
     const gone = w.store.seed({ revokedAt: '2026-11-18T00:00:00.000Z', revokedBy: 'system:SUPERSEDED' })
     expect((await revokeCommand(w.deps, CLIENT, ACTOR, { client_id: CLIENT, authorization_id: gone.id, reason: 'x' })).status).toBe(409)
     expect(gone.revokedBy).toBe('system:SUPERSEDED')

@@ -186,17 +186,18 @@ export async function insertProposal(db: SupabaseClient, p: NewProposal): Promis
 export async function listAuthorizationRules(
   db: SupabaseClient,
   key: { clientId: string; triggerKey: 'welcome'; channel: 'email' },
-): Promise<{ ok: true; rows: Array<{ id: string; rule: unknown }> } | StoreError> {
+): Promise<{ ok: true; rows: Array<{ id: string; rule: unknown; proposedAt: string }> } | StoreError> {
   const { data, error } = await db
     .from(TABLE)
-    .select('id, rule')
+    .select('id, rule, proposed_at')
     .eq('client_id', key.clientId)
     .eq('trigger_key', key.triggerKey)
     .eq('channel', key.channel)
     .order('proposed_at', { ascending: false })
     .limit(200)
   if (error) return { ok: false, code: codeOf(error) }
-  return { ok: true, rows: ((data as Array<{ id: string; rule: unknown }> | null) ?? []).map((r) => ({ id: r.id, rule: r.rule })) }
+  const rows = (data as Array<{ id: string; rule: unknown; proposed_at: string }> | null) ?? []
+  return { ok: true, rows: rows.map((r) => ({ id: r.id, rule: r.rule, proposedAt: r.proposed_at })) }
 }
 
 /** Revoke an open row. Writes once; a row already revoked is reported as `not_open`, never written again. */

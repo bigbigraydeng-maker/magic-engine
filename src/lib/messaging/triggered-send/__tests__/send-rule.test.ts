@@ -19,7 +19,7 @@ function sendBlock(): SendRuleBlock {
   return {
     identity: { from: 'Example Tours <news@news.example.com>', reply_to: 'info@example.com' },
     template: { key: 'auto-welcome' },
-    quiet_hours: { start: '08:00', end: '20:00' },
+    send_window: { start: '08:00', end: '20:00' },
     health_breaker: {
       window_days: 30,
       bounce_min_sent: 50,
@@ -48,7 +48,7 @@ describe('rule.send (the real-send block)', () => {
     if (!parsed.ok) return
     expect(parsed.rule.send).toEqual(sendBlock())
     expect(ruleSha256(parsed.rule)).not.toBe(ruleSha256(rehearsal()))
-    const other = parseRule({ ...rehearsal(), send: { ...sendBlock(), quiet_hours: { start: '09:00', end: '20:00' } } })
+    const other = parseRule({ ...rehearsal(), send: { ...sendBlock(), send_window: { start: '09:00', end: '20:00' } } })
     expect(other.ok && ruleSha256(other.rule)).not.toBe(ruleSha256(parsed.rule))
   })
 
@@ -91,7 +91,7 @@ describe('rule.send (the real-send block)', () => {
 
   it('refuses quiet hours that are not HH:MM or not in order', () => {
     for (const quiet of [{ start: '8:00', end: '20:00' }, { start: '20:00', end: '08:00' }, { start: '08:00', end: '08:00' }, { start: '24:00', end: '25:00' }]) {
-      expect(parseSendBlock({ ...sendBlock(), quiet_hours: quiet }).ok, JSON.stringify(quiet)).toBe(false)
+      expect(parseSendBlock({ ...sendBlock(), send_window: quiet }).ok, JSON.stringify(quiet)).toBe(false)
     }
   })
 
@@ -110,5 +110,31 @@ describe('rule.send (the real-send block)', () => {
     expect(parseSendBlock(missing).ok).toBe(false)
     expect(parseSendBlock({ ...sendBlock(), extra: true }).ok).toBe(false)
     expect(parseSendBlock(null).ok).toBe(false)
+  })
+})
+
+describe('a stored rule keeps its fingerprint', () => {
+  // The sender revokes an authorization whose rule no longer parses or no longer has its fingerprint (RULE_INVALID).
+  // A rule written by the propose command and read back from the database (JSON) must stay the same rule.
+  it('parse → JSON round trip (key order lost) → parse gives the same fingerprint', async () => {
+    const { parseSendRule, ruleSha256 } = await import('../rule')
+    const { sendableRule } = await import('./authorization-fakes')
+    const first = parseSendRule(sendableRule({ recipient_allowlist: ['hello@example.com'] }))
+    expect(first.ok).toBe(true)
+    if (!first.ok) return
+    // Every object's keys in reverse order, at every level: what a database may hand back.
+    const reverseKeys = (v: unknown): unknown =>
+      Array.isArray(v)
+        ? v.map(reverseKeys)
+        : v !== null && typeof v === 'object'
+          ? Object.fromEntries(Object.entries(v).reverse().map(([k, x]) => [k, reverseKeys(x)]))
+          : v
+    const stored: unknown = JSON.parse(JSON.stringify(first.rule))
+    const shuffled = reverseKeys(stored)
+    for (const raw of [stored, shuffled]) {
+      const again = parseSendRule(raw)
+      expect(again.ok).toBe(true)
+      if (again.ok) expect(ruleSha256(again.rule)).toBe(ruleSha256(first.rule))
+    }
   })
 })

@@ -20,7 +20,7 @@ function audienceLines(rule: TriggeredSendRule): string[] {
     `谁会收到：${list(sources)}；只看最近 ${rule.audience.max_age_days} 天进来的，进来第二天早上才发，历史老客人一个都不发`,
   ]
   if (rule.recipient_allowlist !== null) {
-    lines.push(`试跑：只发给 ${list(rule.recipient_allowlist)}，别的客人一个都不发`)
+    lines.push(`试跑：只发给这 ${rule.recipient_allowlist.length} 个地址：${list(rule.recipient_allowlist)}；别的客人一个都不发`)
   } else {
     lines.push('正式：所有符合条件的新客人都会收到')
   }
@@ -40,7 +40,7 @@ function sendLines(rule: TriggeredSendRule, dailyCap: number): string[] {
   return [
     `发件人：${send.identity.from}；客人回信到：${send.identity.reply_to}`,
     `用的模板：${send.template.key}`,
-    `只在当地时间 ${send.quiet_hours.start}–${send.quiet_hours.end} 之间发（时区 ${rule.schedule.timezone}）；每天最多 ${dailyCap} 封`,
+    `只在客户所在时区（${rule.schedule.timezone}）的 ${send.send_window.start}–${send.send_window.end} 之间发，不按每位客人自己的时区；每天最多 ${dailyCap} 封`,
     `自动停发：${b.window_days} 天内发满 ${b.bounce_min_sent} 封后硬退信 ≥ ${b.bounce_min_count} 个且超过 ${b.bounce_rate_pct}%；或投诉 ≥ ${b.complaint_max} 次；或连续 ${b.provider_reject_streak} 封被拒收`,
   ]
 }

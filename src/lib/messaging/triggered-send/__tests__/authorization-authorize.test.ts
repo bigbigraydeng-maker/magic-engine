@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it } from 'vitest'
+import { salesCapWarning } from '../authorization-assess'
 import {
   AuthorizeCommandSchema,
   CLOCK_MARGIN_MS,
   EXPIRY_MARGIN_MS,
   authorizationWindow,
   authorizeCommand,
-  salesCapWarning,
   type AuthorizeCommand,
 } from '../authorization-authorize'
 import type { AuthorizationRecord } from '../authorization-store'
@@ -27,6 +27,15 @@ function command(over: Partial<AuthorizeCommand> = {}): AuthorizeCommand {
     confirm: true,
     ...over,
   }
+}
+
+function seedLive(): AuthorizationRecord {
+  return w.store.seed({ authorizedAt: '2026-11-01T00:00:00.000Z', activatedAt: '2026-11-01T00:00:01.000Z' })
+}
+
+function onlyProposal(row: AuthorizationRecord): void {
+  w.store.rows = w.store.rows.filter((r) => r.id !== proposal.id || r.id === row.id)
+  proposal = row
 }
 
 beforeEach(() => {
@@ -55,11 +64,11 @@ describe('authorize — the window the database will accept', () => {
 
 describe('authorize — what the PM approves must be what he saw', () => {
   it('a preview writes nothing and shows the window, the rehearsal and the warnings', async () => {
-    const res = await authorizeCommand(w.deps, CLIENT, ACTOR, command({ confirm: false }))
+    const res = await authorizeCommand(w.deps, CLIENT, ACTOR, command({ confirm: false, backfill_hours: 24 }))
     expect(res.body).toMatchObject({
       mode: 'PREVIEW',
       authorization: 'NOT_AUTHORIZED',
-      preview: { trial: false, daily_cap: 20, replaces_authorization_id: null, rehearsal: { consecutiveDays: 5 }, warnings: [] },
+      preview: { trial: false, trial_recipients: null, backfill_hours: 24, daily_cap: 20, replaces_authorization_id: null, rehearsal: { consecutiveDays: 5 }, warnings: [] },
     })
     expect(proposal.authorizedAt).toBeNull()
     expect(w.events).toHaveLength(0)
@@ -71,36 +80,46 @@ describe('authorize — what the PM approves must be what he saw', () => {
     expect(proposal.authorizedAt).toBeNull()
   })
 
-  it('🔴 the template edited since the proposal (a new version or new content) is refused: propose again', async () => {
+  it('🔴 the template edited or disabled since the proposal is refused: propose again', async () => {
     w.set.template({ ok: true, template: template({ version: 4 }) })
     expect(await authorizeCommand(w.deps, CLIENT, ACTOR, command())).toMatchObject({ status: 409, body: { error: 'TEMPLATE_CHANGED' } })
     w.set.template({ ok: true, template: template({ body: 'Hi {{first_name}}, new text.' }) })
     expect((await authorizeCommand(w.deps, CLIENT, ACTOR, command())).body.error).toBe('TEMPLATE_CHANGED')
-    w.set.template({ ok: true, template: template({ status: 'disabled' }) })
+    w.set.template({ ok: true, template: template({ version: 4, status: 'disabled' }) })
     expect((await authorizeCommand(w.deps, CLIENT, ACTOR, command())).body.error).toBe('TEMPLATE_NOT_SENDABLE')
     expect(proposal.authorizedAt).toBeNull()
   })
 
-  it('🔴 a stored rule that no longer parses, or whose fingerprint does not match it, is refused', async () => {
-    const tampered = w.store.seed({ rule: { ...sendableRule(), frequency_cap: { max: 5, window_days: 7 } } })
-    w.store.rows = w.store.rows.filter((r) => r.id !== proposal.id)
-    const res = await authorizeCommand(w.deps, CLIENT, ACTOR, {
-      ...command(),
-      authorization_id: tampered.id,
-      rule_sha256: tampered.ruleSha256,
-    })
-    expect(res.body).toMatchObject({ error: 'RULE_INVALID' })
+  it('🔴 a stored rule whose fingerprint does not match it is refused', async () => {
+    onlyProposal(w.store.seed({ rule: { ...sendableRule(), frequency_cap: { max: 5, window_days: 7 } } }))
+    expect((await authorizeCommand(w.deps, CLIENT, ACTOR, command())).body).toMatchObject({ error: 'RULE_INVALID' })
   })
 
-  it('🔴 a proposal without a bound template, a revoked one, an authorized one and another client’s one are refused', async () => {
-    const noTemplate = w.store.seed({ templateVersion: null, templateSha256: null })
-    w.store.rows = w.store.rows.filter((r) => r.id !== proposal.id)
-    const res = await authorizeCommand(w.deps, CLIENT, ACTOR, { ...command(), authorization_id: noTemplate.id })
-    expect(res.body.error).toBe('PROPOSAL_HAS_NO_TEMPLATE')
+  it('🔴 no bound template, revoked, authorized, another client’s, another trigger’s: refused', async () => {
+    onlyProposal(w.store.seed({ templateVersion: null, templateSha256: null }))
+    expect((await authorizeCommand(w.deps, CLIENT, ACTOR, command({ template_sha256: 'a'.repeat(64) }))).body.error).toBe('PROPOSAL_HAS_NO_TEMPLATE')
     const revoked = w.store.seed({ revokedAt: '2026-11-19T00:00:00.000Z', revokedBy: 'system:SUPERSEDED' })
     expect((await authorizeCommand(w.deps, CLIENT, ACTOR, { ...command(), authorization_id: revoked.id })).body.error).toBe('PROPOSAL_REVOKED')
     const foreign = w.store.seed({ clientId: OTHER_CLIENT })
     expect((await authorizeCommand(w.deps, CLIENT, ACTOR, { ...command(), authorization_id: foreign.id })).status).toBe(404)
+    const other = w.store.seed({ triggerKey: 'countdown' })
+    expect((await authorizeCommand(w.deps, CLIENT, ACTOR, { ...command(), authorization_id: other.id })).status).toBe(404)
+  })
+
+  it('🔴 a trial to a non-internal address, or with no internal domains configured, is refused', async () => {
+    const rule = sendableRule({ recipient_allowlist: ['guest@gmail.com'] })
+    onlyProposal(w.store.seed({ rule, ruleSha256: ruleSha256(rule) }))
+    expect((await authorizeCommand(w.deps, CLIENT, ACTOR, command())).body).toMatchObject({ error: 'TRIAL_RECIPIENT_NOT_INTERNAL' })
+    const ok = sendableRule({ recipient_allowlist: ['hello@example.com'] })
+    onlyProposal(w.store.seed({ rule: ok, ruleSha256: ruleSha256(ok) }))
+    w.set.env({})
+    expect((await authorizeCommand(w.deps, CLIENT, ACTOR, command())).body.error).toBe('TRIAL_DOMAINS_NOT_CONFIGURED')
+    expect(proposal.authorizedAt).toBeNull()
+  })
+
+  it('🔴 a disconnected salesperson mailbox is refused (§5.2 F)', async () => {
+    w.set.mailboxes({ ok: false, reason: 'missing', detail: '1 of 1' })
+    expect((await authorizeCommand(w.deps, CLIENT, ACTOR, command())).body.error).toBe('REQUIRED_MAILBOXES_NOT_CONNECTED')
   })
 })
 
@@ -116,13 +135,17 @@ describe('authorize — the rehearsal gate (§5.4)', () => {
     expect(proposal.authorizedAt).toBeNull()
   })
 
-  it('a controlled trial (allow-list of internal addresses) does not need the rehearsal', async () => {
+  it('a controlled trial to internal inboxes does not need the rehearsal; the preview lists the addresses', async () => {
     const rule = sendableRule({ recipient_allowlist: ['hello@example.com'] })
-    const trial = w.store.seed({ rule, ruleSha256: ruleSha256(rule) })
-    w.store.rows = w.store.rows.filter((r) => r.id !== proposal.id)
+    onlyProposal(w.store.seed({ rule, ruleSha256: ruleSha256(rule) }))
     w.set.rehearsal({ ok: true, evidence: evidence(0) })
-    const res = await authorizeCommand(w.deps, CLIENT, ACTOR, { ...command(), authorization_id: trial.id, rule_sha256: trial.ruleSha256 })
-    expect(res.body).toMatchObject({ mode: 'AUTHORIZED', preview: { trial: true, rehearsal: null } })
+    const res = await authorizeCommand(w.deps, CLIENT, ACTOR, command())
+    expect(res.body).toMatchObject({ mode: 'AUTHORIZED', preview: { trial: true, trial_recipients: ['hello@example.com'], rehearsal: null } })
+  })
+
+  it('a gap in the old batch totals is a warning, not a block', async () => {
+    w.set.rehearsal({ ok: true, evidence: evidence(5, { batchGap: 3 }) })
+    expect((await authorizeCommand(w.deps, CLIENT, ACTOR, command())).body).toMatchObject({ mode: 'AUTHORIZED', preview: { warnings: ['LEGACY_BATCH_GAP'] } })
   })
 })
 
@@ -136,28 +159,51 @@ describe('authorize — writing and arming', () => {
     expect(proposal.activatedAt).not.toBeNull()
   })
 
-  it('replaces the authorization in force first (SUPERSEDED), so two are never in force', async () => {
-    const live = w.store.seed({ authorizedAt: '2026-11-01T00:00:00.000Z', activatedAt: '2026-11-01T00:00:01.000Z' })
+  it('replaces the authorization in force first (SUPERSEDED, naming the new proposal), so two are never in force', async () => {
+    const live = seedLive()
     const res = await authorizeCommand(w.deps, CLIENT, ACTOR, command())
-    expect(res.body).toMatchObject({ mode: 'AUTHORIZED', preview: { replaces_authorization_id: live.id } })
-    expect(live).toMatchObject({ revokedBy: 'system:SUPERSEDED' })
+    expect(res.body).toMatchObject({ mode: 'AUTHORIZED', preview: { replaces_authorization_id: live.id }, replaced_authorization_revoked: true })
+    expect(live).toMatchObject({ revokedBy: 'system:SUPERSEDED', revokedReason: `replaced by proposal ${proposal.id}` })
     expect(w.events.map((e) => e.data.change)).toEqual(['revoked', 'authorized'])
   })
 
-  it('🔴 events not configured at all: refused before the authorization in force is touched', async () => {
-    const live = w.store.seed({ authorizedAt: '2026-11-01T00:00:00.000Z', activatedAt: '2026-11-01T00:00:01.000Z' })
-    w.set.canEmit(false)
-    expect(await authorizeCommand(w.deps, CLIENT, ACTOR, command())).toMatchObject({ status: 503, body: { error: 'EVENTS_NOT_CONFIGURED' } })
+  it('🔴 the proposal is read again before the authorization in force is touched: taken down meanwhile = nothing stopped', async () => {
+    const live = seedLive()
+    const load = w.store.load.bind(w.store)
+    let calls = 0
+    w.store.load = async (id) => {
+      calls += 1
+      if (calls === 2) proposal.revokedAt = '2026-11-19T23:59:00.000Z'
+      return load(id)
+    }
+    expect(await authorizeCommand(w.deps, CLIENT, ACTOR, command())).toMatchObject({ status: 409, body: { error: 'PROPOSAL_NOT_OPEN' } })
     expect(live.revokedAt).toBeNull()
-    expect(proposal.authorizedAt).toBeNull()
-    // A preview still works: it writes nothing and sends nothing.
-    expect((await authorizeCommand(w.deps, CLIENT, ACTOR, command({ confirm: false }))).body.mode).toBe('PREVIEW')
   })
 
-  it('🔴 an event that cannot be sent: the row is revoked again and never armed', async () => {
+  it('🔴 a write that fails after the old authorization was stopped says so', async () => {
+    const live = seedLive()
+    w.store.fail.authorize = '23514'
+    expect(await authorizeCommand(w.deps, CLIENT, ACTOR, command())).toMatchObject({
+      status: 500,
+      body: { error: 'AUTHORIZE_WINDOW_REFUSED', replaced_authorization_revoked: true, replaced_authorization_id: live.id },
+    })
+    expect(live.revokedAt).not.toBeNull()
+  })
+
+  it('🔴 events not configured at all: refused (also in the preview) before the authorization in force is touched', async () => {
+    const live = seedLive()
+    w.set.canEmit(false)
+    expect(await authorizeCommand(w.deps, CLIENT, ACTOR, command())).toMatchObject({ status: 503, body: { error: 'EVENTS_NOT_CONFIGURED' } })
+    expect(await authorizeCommand(w.deps, CLIENT, ACTOR, command({ confirm: false }))).toMatchObject({ status: 503 })
+    expect(live.revokedAt).toBeNull()
+    expect(proposal.authorizedAt).toBeNull()
+  })
+
+  it('🔴 an event that cannot be sent: the row is revoked again, never armed, and the old one is said to be stopped', async () => {
+    seedLive()
     w.set.emitFails('authorized')
     const res = await authorizeCommand(w.deps, CLIENT, ACTOR, command())
-    expect(res).toMatchObject({ status: 500, body: { error: 'AUTHORIZATION_EVENT_NOT_SENT', rollback: 'OK' } })
+    expect(res).toMatchObject({ status: 500, body: { error: 'AUTHORIZATION_EVENT_NOT_SENT', rollback: 'OK', replaced_authorization_revoked: true } })
     expect(proposal).toMatchObject({ activatedAt: null, revokedBy: 'system:AUTHORIZE_FAILED' })
   })
 
@@ -170,7 +216,7 @@ describe('authorize — writing and arming', () => {
     w.store.fail.activate = '08006'
     w.store.fail.revoke = '08006'
     const res = await authorizeCommand(w.deps, CLIENT, ACTOR, { ...command(), authorization_id: second.id })
-    expect(res.body).toMatchObject({ error: 'AUTHORIZATION_NOT_ACTIVATED', rollback: 'FAILED', hint: expect.any(String) })
+    expect(res.body).toMatchObject({ error: 'AUTHORIZATION_NOT_ACTIVATED', rollback: 'FAILED' })
   })
 
   it('a row revoked while arming is reported, not re-armed', async () => {
