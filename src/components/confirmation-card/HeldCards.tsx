@@ -1,7 +1,11 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { pausedDraftClickUrl } from '@/lib/ads-strategy/paused-draft-copy'
+import {
+  GO_LIVE_CONFIRM_HREF,
+  GO_LIVE_CONFIRM_LABEL,
+  pausedDraftClickUrl,
+} from '@/lib/ads-strategy/paused-draft-copy'
 import { ConfirmationCard } from './ConfirmationCard'
 
 interface CardPayload {
@@ -96,8 +100,11 @@ function CardRow({ clientId, card }: { clientId: string; card: CardPayload }) {
   const [view, setView] = useState(card)
   const [note, setNote] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const clickUrl = pausedDraftClickUrl(clientId, view.runId, view.what)
+  const goLive = clickUrl === GO_LIVE_CONFIRM_HREF
 
   async function send(resolution: 'confirm' | 'decline') {
+    if (goLive) return
     setBusy(true)
     setNote(null)
     const result = await postDecision(clientId, view, resolution)
@@ -116,13 +123,18 @@ function CardRow({ clientId, card }: { clientId: string; card: CardPayload }) {
         scope={view.scope}
         expiresLabel={view.expiresLabel}
         statusLine={view.statusLine}
-        confirmEnabled={view.confirmEnabled}
-        declineEnabled={view.declineEnabled}
+        confirmEnabled={goLive ? false : view.confirmEnabled}
+        declineEnabled={goLive ? false : view.declineEnabled}
         blockedReason={view.blockedReason}
         busy={busy}
         onConfirm={() => { void send('confirm') }}
         onDecline={() => { void send('decline') }}
       />
+      {goLive ? (
+        <p className="mt-2 text-base">
+          <a className="text-neutral-900 underline" href={GO_LIVE_CONFIRM_HREF}>{GO_LIVE_CONFIRM_LABEL}</a>
+        </p>
+      ) : null}
       {note ? <p className="mt-2 text-base text-red-700">{note}</p> : null}
     </div>
   )

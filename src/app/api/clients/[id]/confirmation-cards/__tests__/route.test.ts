@@ -23,6 +23,8 @@ vi.mock('@/lib/confirmation-card', async (importOriginal) => {
   }
 })
 
+import { GO_LIVE_GENERIC_REFUSAL } from '@/lib/ads-go-live/generic-block'
+import { GO_LIVE_WHAT } from '@/lib/ads-strategy/paused-draft-copy'
 import { GET, POST } from '../route'
 import { POST as decidePOST } from '../[runId]/decision/route'
 
@@ -38,6 +40,26 @@ function access(role: 'admin' | 'client-viewer', allowedClientId: string | null)
     role,
     tier: role === 'admin' ? 'admin' as const : 'paid_client' as const,
     allowedClientId,
+  }
+}
+
+function kernelWithCard(what: string, subjectKey: string) {
+  return {
+    name: 'kernel',
+    requireRun: async () => ({
+      client_id: CLIENT,
+      input: {
+        subject_key: subjectKey,
+        content_fingerprint: FINGERPRINT,
+        what,
+        account_label: '演示账户',
+        amount_label: '金额读不到',
+        date_label: '开始日读不到',
+        scope_label: '只开这一条',
+        issued_at: '2026-11-10T00:00:00.000Z',
+        hard_checks: '[]',
+      },
+    }),
   }
 }
 
@@ -89,6 +111,7 @@ describe('confirmation card routes', () => {
       allowedClientId: CLIENT,
     })
     mocks.decideConfirmationCard.mockResolvedValue({ status: 'confirmed' })
+    mocks.createKernel.mockReturnValueOnce(kernelWithCard('记下要不要调每周预算', 'weekly-budget'))
     const res = await decidePOST(
       post(`http://localhost/api/clients/${CLIENT}/confirmation-cards/${RUN}/decision`, {
         resolution: 'decline',
@@ -99,7 +122,7 @@ describe('confirmation card routes', () => {
     )
     expect(res.status).toBe(200)
     expect(mocks.decideConfirmationCard).toHaveBeenCalledWith(
-      { name: 'kernel' },
+      expect.objectContaining({ name: 'kernel' }),
       expect.objectContaining({
         clicker: { kind: 'fde', email: 'fde@example.com', clientId: CLIENT },
       }),
@@ -109,6 +132,7 @@ describe('confirmation card routes', () => {
   it('lets OPC confirm through the decision record only', async () => {
     mocks.requirePaidClientAccess.mockResolvedValue(access('admin', null))
     mocks.decideConfirmationCard.mockResolvedValue({ status: 'confirmed', what: '记下' })
+    mocks.createKernel.mockReturnValueOnce(kernelWithCard('记下要不要调每周预算', 'weekly-budget'))
     const res = await decidePOST(
       post(`http://localhost/api/clients/${CLIENT}/confirmation-cards/${RUN}/decision`, {
         resolution: 'confirm',
@@ -119,7 +143,7 @@ describe('confirmation card routes', () => {
     )
     expect(res.status).toBe(200)
     expect(mocks.decideConfirmationCard).toHaveBeenCalledWith(
-      { name: 'kernel' },
+      expect.objectContaining({ name: 'kernel' }),
       expect.objectContaining({
         resolution: 'confirm',
         clicker: { kind: 'opc', email: 'opc@example.com' },
@@ -146,6 +170,33 @@ describe('confirmation card routes', () => {
     expect(chat.status).toBe(400)
     expect(mocks.decideConfirmationCard).not.toHaveBeenCalled()
     expect(mocks.issueConfirmationCard).not.toHaveBeenCalled()
+  })
+
+  it('refuses to authorize a go-live card on the generic decision route', async () => {
+    mocks.requirePaidClientAccess.mockResolvedValue(access('admin', null))
+    const kernel = kernelWithCard(GO_LIVE_WHAT, 'go-live:draft-1')
+    mocks.createKernel.mockReturnValueOnce(kernel)
+    mocks.createKernel.mockReturnValueOnce(kernel)
+    const res = await decidePOST(
+      post(`http://localhost/api/clients/${CLIENT}/confirmation-cards/${RUN}/decision`, {
+        resolution: 'confirm',
+        expectedDecisionId: DECISION,
+        fingerprint: FINGERPRINT,
+      }),
+      { params: { id: CLIENT, runId: RUN } },
+    )
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: GO_LIVE_GENERIC_REFUSAL })
+    const decline = await decidePOST(
+      post(`http://localhost/api/clients/${CLIENT}/confirmation-cards/${RUN}/decision`, {
+        resolution: 'decline',
+        expectedDecisionId: DECISION,
+        fingerprint: FINGERPRINT,
+      }),
+      { params: { id: CLIENT, runId: RUN } },
+    )
+    expect(decline.status).toBe(409)
+    expect(mocks.decideConfirmationCard).not.toHaveBeenCalled()
   })
 
   it('lets staff see the list, with their clicker marked as staff', async () => {
