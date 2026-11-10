@@ -16,6 +16,7 @@ describe('reasonTextFor', () => {
     expect(reasonTextFor('render_failed')).toBe('缺少名字，这封信排不出来')
     expect(reasonTextFor('stale')).toBe('超过 3 天没发出去，已作废')
     expect(reasonTextFor('bounced')).toBe('邮箱退回')
+    expect(reasonTextFor('soft_bounced')).toBe('暂时没送达')
   })
 
   it('says 系统出错 for anything it does not know, and never shows the raw code', () => {

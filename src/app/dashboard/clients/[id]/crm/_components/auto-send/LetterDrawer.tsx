@@ -11,7 +11,7 @@ import { useEffect, useId, useRef, useState, type RefObject } from 'react'
 import { MeChip } from '@/components/ui/me-primitives'
 import { loadErrorText, type AutoSendAdapter } from '@/lib/crm/auto-send/adapter'
 import type { LetterDetail, LetterSummary } from '@/lib/crm/auto-send/types'
-import { detailTiles, recipientsTabLabel } from '@/lib/crm/auto-send/view'
+import { detailTiles, recipientsTabLabel, statusNote } from '@/lib/crm/auto-send/view'
 import { useBodyScrollLock } from '../useBodyScrollLock'
 import { LetterContentTab } from './LetterContentTab'
 import { RecipientsTab } from './RecipientsTab'
@@ -140,6 +140,19 @@ function Tiles({ summary }: { summary: LetterSummary }): JSX.Element {
   )
 }
 
+/** 「没发出去」「结果不明」各是怎么回事，要不要动手：一句话放在数字下面，不藏。 */
+function StatusNote({ summary }: { summary: LetterSummary }): JSX.Element | null {
+  const note = statusNote(summary)
+  if (note === null) return null
+  // 不套边框和底色（抽屉里已经有一层卡片）：没发出去用红字，结果不明用深色粗体。
+  const tone = summary.status === 'not_sent' ? 'text-status-rej' : 'text-me-charcoal'
+  return (
+    <p role="note" data-testid="auto-send-status-note" className={`text-sm font-semibold ${tone}`}>
+      {note}
+    </p>
+  )
+}
+
 function Tabs({
   tab,
   onChange,
@@ -184,7 +197,7 @@ function ReleasePlaceholder(): JSX.Element {
       >
         放行这封信
       </button>
-      <span className="text-[11px] text-me-charcoal/55">稍后开放：现在这一页只用来看，不能发信。</span>
+      <span className="text-xs text-me-charcoal/55">稍后开放：现在这一页只用来看，不能发信。</span>
     </div>
   )
 }
@@ -202,6 +215,7 @@ function ReadyBody({
   return (
     <>
       <Tiles summary={detail.summary} />
+      <StatusNote summary={detail.summary} />
       <Tabs tab={tab} onChange={setTab} recipientsLabel={recipientsTabLabel(detail.summary)} />
       <div role="tabpanel">
         {tab === 'content' ? (
@@ -211,7 +225,7 @@ function ReadyBody({
         )}
       </div>
       {detail.summary.status === 'awaiting_release' && <ReleasePlaceholder />}
-      <p className="text-[11px] text-me-charcoal/55">
+      <p className="text-xs text-me-charcoal/55">
         这一页只用来看。要改信的内容，请找 Magic Lab 的同事；每一批发出之前仍然由你点头。
       </p>
     </>

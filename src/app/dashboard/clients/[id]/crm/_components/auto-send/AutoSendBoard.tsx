@@ -26,10 +26,19 @@ import { createDemoAdapter } from '@/lib/crm/auto-send/demo-data'
 import { formatSendDate } from '@/lib/crm/auto-send/format'
 import { FILTER_OPTIONS, nextBatchSentence, type LetterFilter } from '@/lib/crm/auto-send/status'
 import type { AutoSendOverview, NextBatch } from '@/lib/crm/auto-send/types'
-import { isOverviewEmpty, visibleSections } from '@/lib/crm/auto-send/view'
+import {
+  OPENED_NOTE,
+  VIEW_OPTIONS,
+  isOverviewEmpty,
+  lettersById,
+  resolveView,
+  visibleSections,
+  type ViewChoice,
+} from '@/lib/crm/auto-send/view'
 import { LetterDrawer } from './LetterDrawer'
 import { LetterSectionPanel } from './LetterSectionPanel'
 import { StatusLegend } from './StatusLegend'
+import { TourGroupPanel } from './TourGroupPanel'
 import { NoticeList, Panel, SmallButton } from './ui'
 
 type LoadState =
@@ -158,6 +167,26 @@ function FilterBar({ filter, onChange }: { filter: LetterFilter; onChange: (next
   )
 }
 
+/** 换个角度看：按团（每个团一行）/ 按信（每封信一行）。 */
+function ViewSwitch({ view, onChange }: { view: ViewChoice; onChange: (next: ViewChoice) => void }): JSX.Element {
+  return (
+    <div role="group" aria-label="换个角度看" className="mb-4 flex flex-wrap items-center gap-2">
+      <span className="text-xs font-semibold text-me-charcoal/55">看法：</span>
+      {VIEW_OPTIONS.map((option) => (
+        <button
+          key={option.key}
+          type="button"
+          aria-pressed={option.key === view}
+          onClick={() => onChange(option.key)}
+          className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-me-charcoal/40"
+        >
+          <MeChip gold={option.key === view}>{option.label}</MeChip>
+        </button>
+      ))}
+    </div>
+  )
+}
+
 interface PanelProps {
   onRefresh: () => void
   refreshing: boolean
@@ -231,26 +260,23 @@ function EmptyPanel({ nextBatch, ...panel }: PanelProps & { nextBatch: NextBatch
 
 interface ListProps extends PanelProps {
   overview: AutoSendOverview
+  /** 员工选的看法；还没选过是 null（有团就先按团看）。 */
+  viewChoice: ViewChoice | null
   filter: LetterFilter
   batchDate: string | null
+  onView: (next: ViewChoice) => void
   onFilter: (next: LetterFilter) => void
   onToggleBatch: () => void
   onOpen: (letterId: string) => void
 }
 
-function ReadyView(props: ListProps): JSX.Element {
-  const { overview, filter, batchDate, refreshing, onFilter, onToggleBatch, onOpen, onRefresh } = props
+/** 按信看：筛选 + 一个个面板（每封信一行）。 */
+function LettersView(props: ListProps): JSX.Element {
+  const { overview, filter, batchDate, refreshing, onFilter, onOpen, onRefresh } = props
   const sections = visibleSections(overview, filter, batchDate)
   const refreshKey = (sections.find((section) => section.kind === 'scheduled') ?? sections[0])?.key
   return (
     <>
-      {overview.nextBatch && (
-        <NextBatchCard
-          batch={overview.nextBatch}
-          focused={batchDate !== null && batchDate === overview.nextBatch.sendDate}
-          onToggle={onToggleBatch}
-        />
-      )}
       <FilterBar filter={filter} onChange={onFilter} />
       {sections.length === 0 && (
         <PlaceholderPanel onRefresh={onRefresh} refreshing={refreshing} testId="auto-send-no-match">
@@ -266,6 +292,30 @@ function ReadyView(props: ListProps): JSX.Element {
           refreshing={refreshing}
         />
       ))}
+      <p className="mb-4 text-xs text-me-charcoal/55">{OPENED_NOTE}</p>
+    </>
+  )
+}
+
+function ReadyView(props: ListProps): JSX.Element {
+  const { overview, viewChoice, batchDate, onView, onToggleBatch, onOpen } = props
+  const view = resolveView(viewChoice, overview)
+  const letters = useMemo(() => lettersById(overview), [overview])
+  return (
+    <>
+      {overview.nextBatch && (
+        <NextBatchCard
+          batch={overview.nextBatch}
+          focused={batchDate !== null && batchDate === overview.nextBatch.sendDate}
+          onToggle={onToggleBatch}
+        />
+      )}
+      {overview.groups.length > 0 && <ViewSwitch view={view} onChange={onView} />}
+      {view === 'groups' ? (
+        <TourGroupPanel groups={overview.groups} letters={letters} onOpen={onOpen} />
+      ) : (
+        <LettersView {...props} />
+      )}
     </>
   )
 }
@@ -318,6 +368,7 @@ export function AutoSendWorkspace({
   const { load, refreshing, refresh } = useOverview(adapter)
   const [filter, setFilter] = useState<LetterFilter>('all')
   const [batchDate, setBatchDate] = useState<string | null>(null)
+  const [viewChoice, setViewChoice] = useState<ViewChoice | null>(null)
   const [openId, setOpenId] = useState<string | null>(null)
   const closeDrawer = useCallback(() => setOpenId(null), [])
 
@@ -326,10 +377,14 @@ export function AutoSendWorkspace({
     setOpenId(null)
     setFilter('all')
     setBatchDate(null)
+    setViewChoice(null)
   }
   const toggleBatch = () => {
     const next = load.kind === 'ready' ? load.overview.nextBatch : null
-    if (next) setBatchDate((current) => (current === null ? next.sendDate : null))
+    if (!next) return
+    // 「看这批」是按信筛的：打开它的时候一定回到按信看，不然点了没反应。
+    if (batchDate === null) setViewChoice('letters')
+    setBatchDate((current) => (current === null ? next.sendDate : null))
   }
 
   return (
@@ -340,7 +395,15 @@ export function AutoSendWorkspace({
         load={load}
         panel={{ onRefresh: refresh, refreshing }}
         onShowDemo={() => switchDemo(true)}
-        list={{ filter, batchDate, onFilter: setFilter, onToggleBatch: toggleBatch, onOpen: setOpenId }}
+        list={{
+          viewChoice,
+          filter,
+          batchDate,
+          onView: setViewChoice,
+          onFilter: setFilter,
+          onToggleBatch: toggleBatch,
+          onOpen: setOpenId,
+        }}
       />
       {load.kind !== 'loading' && load.kind !== 'error' && <StatusLegend />}
       {openId !== null && (

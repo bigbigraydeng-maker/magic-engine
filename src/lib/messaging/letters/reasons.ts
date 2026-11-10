@@ -18,6 +18,7 @@ export const LETTER_REASON_TEXT: Readonly<Record<string, string>> = {
   render_failed: '缺少名字，这封信排不出来',
   stale: '超过 3 天没发出去，已作废',
   bounced: '邮箱退回',
+  soft_bounced: '暂时没送达',
   quiet_hours: '稍后自动再试',
   lock_busy: '稍后自动再试',
   cap_reached: '今天的发信上限到了，明天继续',

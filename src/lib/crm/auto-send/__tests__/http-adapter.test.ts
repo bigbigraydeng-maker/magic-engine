@@ -7,6 +7,8 @@ const LIST_BODY = {
   nextBatch: null,
   depositLetters: [],
   scheduledLetters: [],
+  pastLetters: [],
+  tourGroups: [],
   totalDistinctLetters: 0,
   cadence: { firstMonth: 6 },
 }
@@ -19,12 +21,12 @@ const DETAIL_BODY = {
     subject: null,
     status: 'draft',
     channel: 'me',
-    counts: { recipients: 1, sent: null, blocked: null, failed: null, rehearsal: 0 },
+    counts: { recipients: 1, sent: null, blocked: null, failed: null, rehearsal: 0, opened: null },
     previewText: null,
     bodyText: null,
     sampleFirstName: 'Alex',
   },
-  tiles: { recipients: 1, sent: null, blocked: null, failed: null, rehearsal: 0 },
+  tiles: { recipients: 1, sent: null, blocked: null, failed: null, rehearsal: 0, opened: null },
   mailchimpSummary: null,
   recipients: [],
 }
@@ -38,7 +40,24 @@ describe('createHttpAdapter', () => {
     const fetchImpl = vi.fn<FetchLike>(async () => json(LIST_BODY))
     const overview = await createHttpAdapter('client-1', fetchImpl).loadOverview()
     expect(fetchImpl).toHaveBeenCalledWith('/api/clients/client-1/crm/auto-letters')
-    expect(overview).toEqual({ nextBatch: null, sections: [] })
+    expect(overview).toEqual({ nextBatch: null, sections: [], groups: [] })
+  })
+
+  it('a list from a server that does not know history, groups or the rhythm yet is an error, never a half-empty page', async () => {
+    const { pastLetters: _past, ...withoutPast } = LIST_BODY
+    const { tourGroups: _groups, ...withoutGroups } = LIST_BODY
+    const { cadence: _cadence, ...withoutCadence } = LIST_BODY
+    void _past
+    void _groups
+    void _cadence
+    for (const body of [withoutPast, withoutGroups, withoutCadence, { ...LIST_BODY, cadence: 'six' }]) {
+      await expect(createHttpAdapter('c', async () => json(body)).loadOverview()).rejects.toThrow('读到的内容格式不对')
+    }
+  })
+
+  it('no rhythm (cadence null) is a normal list', async () => {
+    const overview = await createHttpAdapter('c', async () => json({ ...LIST_BODY, cadence: null })).loadOverview()
+    expect(overview.groups).toEqual([])
   })
 
   it('a list without the rhythm number (an older server) or with a nonsense one is an error, never a half-empty page', async () => {
@@ -47,11 +66,6 @@ describe('createHttpAdapter', () => {
     for (const body of [withoutCadence, { ...LIST_BODY, cadence: 'six' }]) {
       await expect(createHttpAdapter('c', async () => json(body)).loadOverview()).rejects.toThrow('读到的内容格式不对')
     }
-  })
-
-  it('no rhythm (cadence null) is a normal list', async () => {
-    const overview = await createHttpAdapter('c', async () => json({ ...LIST_BODY, cadence: null })).loadOverview()
-    expect(overview).toEqual({ nextBatch: null, sections: [] })
   })
 
   it('reads one letter with the key URL-encoded (it contains colons)', async () => {

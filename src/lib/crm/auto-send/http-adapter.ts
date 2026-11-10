@@ -31,6 +31,8 @@ function isList(value: unknown): value is AutoLettersList {
     isRecord(value) &&
     Array.isArray(value.depositLetters) &&
     Array.isArray(value.scheduledLetters) &&
+    Array.isArray(value.pastLetters) &&
+    Array.isArray(value.tourGroups) &&
     typeof value.totalDistinctLetters === 'number' &&
     isCadence(value.cadence)
   )

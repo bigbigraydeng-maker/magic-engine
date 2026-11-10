@@ -3,13 +3,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createHmac } from 'node:crypto'
 import { NextRequest } from 'next/server'
 
-// 用 vi.hoisted 提前声明 insertMock，避免 vi.mock 工厂提升后引用未初始化变量
-const { insertMock } = vi.hoisted(() => ({ insertMock: vi.fn() }))
+// 用 vi.hoisted 提前声明 insertMock / sendMock，避免 vi.mock 工厂提升后引用未初始化变量
+const { insertMock, sendMock } = vi.hoisted(() => ({ insertMock: vi.fn(), sendMock: vi.fn() }))
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
 vi.mock('@/lib/messaging/provider-events/store', () => ({
   supabaseProviderEventStore: { insert: (row: unknown) => insertMock(row) },
 }))
+// 入库后要叫醒回执消费方（P2-2b）：测试里换成替身，不连 Inngest。
+vi.mock('@/lib/inngest/client', () => ({ inngest: { send: (event: unknown) => sendMock(event) } }))
 
 import * as route from '../route'
 
@@ -53,6 +55,7 @@ let originalSecret: string | undefined
 
 beforeEach(() => {
   insertMock.mockReset().mockResolvedValue('inserted')
+  sendMock.mockReset().mockResolvedValue({ ids: ['evt_1'] })
   originalSecret = process.env.RESEND_WEBHOOK_SECRET_SYSTEM
   process.env.RESEND_WEBHOOK_SECRET_SYSTEM = SECRET
   vi.spyOn(console, 'info').mockImplementation(() => {})
@@ -79,6 +82,21 @@ describe('POST /api/webhooks/resend/[account]', () => {
     expect(insertMock).toHaveBeenCalledTimes(1)
     const row = insertMock.mock.calls[0][0] as Record<string, unknown>
     expect(row.providerEventId).toBe('msg_r1')
+    expect(sendMock).toHaveBeenCalledTimes(1)
+    expect(sendMock).toHaveBeenCalledWith({
+      id: 'provider_event:resend:system:msg_r1',
+      name: 'crm.provider_event.received',
+      data: { provider: 'resend', account: 'system', provider_event_id: 'msg_r1' },
+    })
+  })
+
+  it('answers 500 when the consumer cannot be woken, after the event is stored (the provider retries)', async () => {
+    sendMock.mockRejectedValue(new Error('inngest down'))
+    const ts = String(Math.floor(Date.now() / 1000))
+    const res = await route.POST(makeReq(body, validHeaders('msg_r1', ts, body)), ctx('system'))
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ ok: false, error: 'emit_failed' })
+    expect(insertMock).toHaveBeenCalledTimes(1)
   })
 
   it('preserves the raw request body for signature verification', async () => {
@@ -166,6 +184,8 @@ describe('POST /api/webhooks/resend/[account]', () => {
     const res = await route.POST(req, ctx('system'))
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ ok: true, duplicate: true })
+    // A retry after a failed wake-up lands here: it must wake the consumer again (same event id, Inngest de-duplicates).
+    expect(sendMock).toHaveBeenCalledTimes(1)
   })
 
   it('returns 500 when the store throws', async () => {
@@ -175,6 +195,7 @@ describe('POST /api/webhooks/resend/[account]', () => {
     const res = await route.POST(req, ctx('system'))
     expect(res.status).toBe(500)
     expect(await res.json()).toEqual({ ok: false, error: 'store_failed' })
+    expect(sendMock).not.toHaveBeenCalled()
   })
 
   it('only exports POST and sets dynamic to force-dynamic', () => {

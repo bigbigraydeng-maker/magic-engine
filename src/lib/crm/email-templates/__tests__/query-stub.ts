@@ -24,7 +24,7 @@ export interface QueryStub {
   touched(table: string): boolean
 }
 
-const CHAIN_METHODS = ['select', 'eq', 'neq', 'in', 'gt', 'gte', 'lt', 'lte', 'is', 'limit', 'order', 'upsert', 'update', 'or'] as const
+const CHAIN_METHODS = ['select', 'eq', 'neq', 'in', 'gt', 'gte', 'lt', 'lte', 'is', 'not', 'limit', 'order', 'range', 'insert', 'upsert', 'update', 'or'] as const
 
 export function ok(data: unknown): StubResult {
   return { data, error: null }
@@ -49,6 +49,10 @@ export function createQueryStub(tables: Record<string, StubResult>): QueryStub {
       }
       builder.maybeSingle = () => {
         calls.push({ table, method: 'maybeSingle', args: [] })
+        return Promise.resolve(result)
+      }
+      builder.single = () => {
+        calls.push({ table, method: 'single', args: [] })
         return Promise.resolve(result)
       }
       builder.then = (resolve: (value: StubResult) => unknown) => resolve(result)
