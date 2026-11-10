@@ -83,6 +83,14 @@ describe('parseCrmStageSignalsConfig', () => {
     expect(c?.stages).toEqual([{ eventName: 'Deposit Paid', stageKeys: [], bookingMilestone: 'deposit' }])
   })
 
+  it('客人阶段的 key 用了 booking: 开头（会跟订单里程碑的内部名字撞）→ 整体不生效', () => {
+    expect(
+      parseCrmStageSignalsConfig({
+        crm_stage_signals: { ...good.crm_stage_signals, stages: [{ event_name: 'X', stage_keys: ['booking:deposit'] }] },
+      }),
+    ).toBeNull()
+  })
+
   it('订单里程碑写了不认识的值 → 整体不生效（不猜成没写）', () => {
     expect(
       parseCrmStageSignalsConfig({
@@ -237,6 +245,19 @@ describe('planLeadStageEvents', () => {
       changes: [{ contactId: 'c1', toStage: 'deposit_paid', at: ago(1) }],
     })
     expect(stageOnly.events).toEqual([])
+  })
+
+  it('一档同时认客人阶段和订单里程碑 → 取两边最早的那一刻', () => {
+    const both = [{ eventName: 'Deposit Paid', stageKeys: ['deposit_paid'], bookingMilestone: 'deposit' as const }]
+    const r = plan({
+      config: { stages: both, initialEventName: null },
+      leads: [{ contactId: 'c1', leadId: LEAD_A, createdAt: ago(10) }],
+      changes: [
+        { contactId: 'c1', toStage: 'deposit_paid', at: ago(1) },
+        { contactId: 'c1', toStage: bookingStageKey('deposit'), at: ago(3) },
+      ],
+    })
+    expect(r.events).toEqual([expect.objectContaining({ eventName: 'Deposit Paid', occurredAt: ago(3) })])
   })
 
   it('同一条线索同一档只出一条（幂等键唯一）', () => {

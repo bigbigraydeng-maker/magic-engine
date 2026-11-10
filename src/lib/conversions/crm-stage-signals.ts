@@ -99,6 +99,8 @@ export function parseCrmStageSignalsConfig(leadsConfig: unknown): CrmStageSignal
     const stageKeys = (Array.isArray(s.stage_keys) ? s.stage_keys : []).filter(
       (k): k is string => typeof k === 'string' && k.trim().length > 0,
     )
+    // `booking:` 开头是订单里程碑的内部名字，客户管理页的阶段不许用，免得两种来源混在一起
+    if (stageKeys.some((k) => k.startsWith('booking:'))) return null
     let bookingMilestone: BookingMilestoneKind | null = null
     if (s.booking_milestone != null) {
       // 写了但不认识 = 配置写错，整体不生效（不猜成「没写」）

@@ -340,6 +340,24 @@ describe('runCrmStageSignalsForClient', () => {
       expect(db.tables.me_sale_outcomes.map((r) => r.lead_stage)).toEqual(['Quoted'])
     })
 
+    it('已经报过定金，员工取消又重新标了一次 → 不再报第二次', async () => {
+      seedBooking()
+      await run()
+      db.tables.crm_booking_events.push({ client_id: CLIENT, booking_id: 'b1', action: 'milestone_unpaid', milestone_kind: 'deposit', created_at: ago(0.5) })
+      db.tables.crm_booking_events.push({ client_id: CLIENT, booking_id: 'b1', action: 'milestone_paid', milestone_kind: 'deposit', created_at: ago(0.2) })
+      sendMock.mockClear()
+      const s2 = await run()
+      expect(s2).toMatchObject({ ran: true, inserted: 0 })
+      expect(db.tables.me_sale_outcomes.filter((r) => r.lead_stage === 'Deposit Paid')).toHaveLength(1)
+      expect(sendMock).not.toHaveBeenCalled()
+    })
+
+    it('第一次标在 9 天前、取消后昨天又标 → 按第一次算，已过窗口，不报（宁可漏报不重报）', async () => {
+      seedBooking({ markedDaysAgo: 9 })
+      db.tables.crm_booking_events.push({ client_id: CLIENT, booking_id: 'b1', action: 'milestone_paid', milestone_kind: 'deposit', created_at: ago(1) })
+      expect(await run()).toMatchObject({ ran: true, planned: 0 })
+    })
+
     it('别的客户的订单不会被读进来', async () => {
       seedBooking({ state: 'unpaid' })
       db.tables.crm_bookings.push({ id: 'b9', client_id: 'other', contact_id: 'c1', status: 'active' })
