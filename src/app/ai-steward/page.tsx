@@ -86,6 +86,16 @@ const STEPS = [
   { k: '04', t: '发布与复盘', p: '按时发出，每月看数据再调整' },
 ] as const
 
+/** A consult prompt placed between sections, so the reader never has to scroll back to the top to act. */
+function CtaBand({ title, note, cta = '预约免费咨询' }: { title: string; note: string; cta?: string }) {
+  return (
+    <div className="ctaband">
+      <div><div className="cb-t serif">{title}</div><div className="cb-n">{note}</div></div>
+      <Link href={CONTACT_HREF} className="btn gold-solid">{cta}</Link>
+    </div>
+  )
+}
+
 function Hero() {
   const plans = RULES.catalog.plans
   const minVideos = Math.min(...plans.map((p) => p.videosPerMonth))
@@ -247,6 +257,7 @@ function Pricing() {
               <div className="v">每月 {plan.videosPerMonth} 条</div>
               <div className={hl ? 'p goldgrad' : 'p'}>{formatDollars(plan.monthlyCents, true)}<small>/月</small></div>
               <div className="e">平均每条 {formatDollars(Math.round(plan.monthlyCents / plan.videosPerMonth))}</div>
+              <Link href={CONTACT_HREF} className="plan-cta">咨询这一档 →</Link>
             </div>
           )
         })}
@@ -278,10 +289,13 @@ export default function AiStewardPage() {
       <div className="inner">
         <Hero />
         <Pillars />
+        <CtaBand title="想知道你的行业在新西兰该怎么做内容？" note="先免费聊一次，听听我们怎么看你的账号。" />
         <LocalCraft />
         <Compare />
+        <CtaBand title="让本地团队帮你看一眼账号" note="哪里像外地写的、哪些本地节点漏了，一次说清楚。" cta="免费账号诊断" />
         <Hot />
         <Engine />
+        <CtaBand title="这个月的热点，你的账号跟上了吗？" note="定好方向后，3 个工作日出第一条。" />
         <Features />
         <Pricing />
         <Steps />
@@ -294,6 +308,7 @@ export default function AiStewardPage() {
             <div className="ctas"><Link href={CONTACT_HREF} className="btn gold-solid">预约免费咨询</Link></div>
           </div>
         </section>
+        <Link href={CONTACT_HREF} className="float-cta" aria-label="免费咨询">免费咨询</Link>
         <footer className="foot"><span>© Magic Engine · 新西兰</span><span>图片来自 Unsplash：{PHOTO_CREDITS.join('、')}</span></footer>
       </div>
     </main>
