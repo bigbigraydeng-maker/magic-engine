@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import { runAutoPublishSweep, type AutoPublishWorkerDeps, type PlanState, type RunPublishInput } from '../daily-plan-auto-publish-worker'
+import { lookupWeekPackApproval, weekStartOfScheduledDate } from '@/lib/social/weekly-plan/publish-gate'
+import { targetWeek } from '@/lib/social/week-pack/cadence'
 import type { AutoPublishAuthorization } from '../daily-plan-auto-publish'
 import type { AttemptRecord } from '../daily-plan-auto-publish-worker-store'
 
@@ -71,6 +73,8 @@ interface Setup {
   claim?: boolean
   finish?: boolean
   active?: AutoPublishAuthorization | null | 'same'
+  clientIds?: string[]
+  weekPack?: AutoPublishWorkerDeps['readWeekPackApproval']
 }
 
 function publishedBody(date: string) {
@@ -101,7 +105,7 @@ function build(setup: Setup = {}) {
   const deps: AutoPublishWorkerDeps = {
     now: setup.now ?? NOW,
     clock: () => setup.now ?? NOW,
-    switches: { live: setup.live ?? true, clientIds: [CLIENT] },
+    switches: { live: setup.live ?? true, clientIds: setup.clientIds ?? [CLIENT] },
     listLiveAuthorizations: async () => grants,
     isGlobalAdmin: () => true,
     getActiveAuthorization: async planId =>
@@ -121,6 +125,7 @@ function build(setup: Setup = {}) {
     claimAttempt,
     finishAttempt,
     runPublish,
+    readWeekPackApproval: setup.weekPack ?? (async () => 'approved'),
     emit,
   }
   return { deps, runPublish, claimAttempt, finishAttempt, emit }
@@ -585,3 +590,109 @@ describe('runAutoPublishSweep — what earlier attempts mean', () => {
     expect(sentDates(stale.runPublish)).not.toContain(TOMORROW)
   })
 })
+
+describe('runAutoPublishSweep — this week’s whole-pack card', () => {
+  const OTHER = 'c0000000-0000-0000-0000-000000000002'
+  const liveFor = (runPublish: ReturnType<typeof build>['runPublish'], clientId: string) =>
+    runPublish.mock.calls.filter(call => call[0].command.no_publish === false && call[0].clientId === clientId)
+
+  it('publishes when this week’s card is approved', async () => {
+    const { deps, runPublish } = build({ weekPack: async () => 'approved' })
+    const summary = await runAutoPublishSweep(deps)
+    expect(resultsOf(summary)).toEqual([`${TODAY}:published`, `${TOMORROW}:published`])
+    expect(liveFor(runPublish, CLIENT)).toHaveLength(2)
+  })
+
+  it('does not publish when the card is refused, and still publishes the next client', async () => {
+    const { deps, runPublish, claimAttempt } = build({
+      grants: [
+        grant(),
+        grant({ id: 'auth-2', request_id: 'req-auth-2', client_id: OTHER, plan_id: 'b0000000-0000-0000-0000-000000000002' }),
+      ],
+      clientIds: [CLIENT, OTHER],
+      weekPack: async (clientId) => (clientId === CLIENT ? 'unapproved' : 'approved'),
+    })
+    const summary = await runAutoPublishSweep(deps)
+    expect(summary.records.filter(row => row.client_id === CLIENT).map(row => row.reason)).toEqual([
+      'WEEK_PACK_NOT_APPROVED',
+      'WEEK_PACK_NOT_APPROVED',
+    ])
+    expect(liveFor(runPublish, CLIENT)).toHaveLength(0)
+    expect(claimAttempt.mock.calls.map(call => call[0].clientId)).not.toContain(CLIENT)
+    expect(liveFor(runPublish, OTHER).length).toBeGreaterThan(0)
+  })
+
+  it('does not publish when the card is missing or the lookup fails', async () => {
+    for (const [read, reason] of [['missing', 'WEEK_PACK_MISSING'], ['unreadable', 'WEEK_PACK_UNREADABLE']] as const) {
+      const { deps, runPublish } = build({ weekPack: async () => read })
+      const summary = await runAutoPublishSweep(deps)
+      expect(summary.records.every(row => row.reason === reason)).toBe(true)
+      expect(liveFor(runPublish, CLIENT)).toHaveLength(0)
+    }
+    const thrown = build({ weekPack: async () => { throw new Error('down') } })
+    const summary = await runAutoPublishSweep(thrown.deps)
+    expect(summary.records.every(row => row.reason === 'WEEK_PACK_UNREADABLE')).toBe(true)
+    expect(liveFor(thrown.runPublish, CLIENT)).toHaveLength(0)
+  })
+
+  it('does not publish an approval that belongs to another week', async () => {
+    const otherWeek = '2026-01-05'
+    const { deps, runPublish } = build({
+      weekPack: (clientId, scheduledDate) => lookupWeekPackApproval(otherWeekDb(otherWeek), clientId, scheduledDate),
+    })
+    const summary = await runAutoPublishSweep(deps)
+    expect(summary.records.every(row => row.reason === 'WEEK_PACK_MISSING')).toBe(true)
+    expect(liveFor(runPublish, CLIENT)).toHaveLength(0)
+  })
+
+  it('publishes this week when this week is approved and next week is not', async () => {
+    const nextWeek = targetWeek(NOW).weekStart
+    expect(nextWeek).toBe('2026-10-19')
+    expect(weekStartOfScheduledDate(TODAY)).toBe('2026-10-12')
+    const { deps, runPublish } = build({
+      weekPack: (clientId, scheduledDate) => lookupWeekPackApproval(otherWeekDb('2026-10-12'), clientId, scheduledDate),
+    })
+    const summary = await runAutoPublishSweep(deps)
+    expect(resultsOf(summary)).toEqual([`${TODAY}:published`, `${TOMORROW}:published`])
+    expect(liveFor(runPublish, CLIENT)).toHaveLength(2)
+
+    const nextOnly = build({
+      weekPack: (clientId, scheduledDate) => lookupWeekPackApproval(otherWeekDb(nextWeek), clientId, scheduledDate),
+    })
+    const blocked = await runAutoPublishSweep(nextOnly.deps)
+    expect(blocked.records.every(row => row.reason === 'WEEK_PACK_MISSING')).toBe(true)
+    expect(liveFor(nextOnly.runPublish, CLIENT)).toHaveLength(0)
+  })
+})
+
+function otherWeekDb(weekStart: string) {
+  const planData = {
+    planKind: 'weekly_slot_plan_v1', platform: 'facebook', weekStart, weekEnd: weekStart,
+    status: 'ready', counts: { story: 1, post: 1, reel: 0 }, items: [], slotDigest: 'abc',
+    approval: { status: 'confirmed', at: '2026-10-10T00:00:00.000Z' },
+  }
+  const row = { client_id: CLIENT, platform: 'facebook', plan_data: planData }
+  return {
+    from() {
+      const filters: Array<(item: typeof row) => boolean> = []
+      const chain = {
+        select: () => chain,
+        eq(column: string, value: unknown) {
+          filters.push((item) => {
+            const arrow = column.indexOf('->>')
+            if (arrow === -1) return (item as unknown as Record<string, unknown>)[column] === value
+            return item.plan_data[column.slice(arrow + 3) as 'weekStart'] === value
+          })
+          return chain
+        },
+        order: () => chain,
+        limit: () => chain,
+        maybeSingle: async () => {
+          const found = filters.every((keep) => keep(row))
+          return { data: found ? { id: 'row-1', plan_data: row.plan_data } : null, error: null }
+        },
+      }
+      return chain
+    },
+  } as unknown as import('@supabase/supabase-js').SupabaseClient
+}
