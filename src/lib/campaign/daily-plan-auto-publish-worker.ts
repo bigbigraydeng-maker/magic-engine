@@ -17,11 +17,14 @@
  *                   a claim with no result is UNKNOWN_OUTCOME and is never retried
  *   mode            practice (dry run) unless the live switch AND the client
  *                   allow-list both say so; practice writes nothing
+ *   week pack       a live send also needs this week's whole-pack approval;
+ *                   missing, refused, or unreadable skips the client and continues
  *
  * All I/O is injected so the sweep can be exercised end to end without a
  * network: see `__tests__/daily-plan-auto-publish-worker.test.ts`.
  */
 import { randomUUID } from 'node:crypto'
+import { weekPackSkipReason, type WeekPackApprovalRead } from '@/lib/social/weekly-plan/publish-gate'
 import {
   DAILY_PLAN_AUTO_PUBLISH_ATTEMPTED_EVENT,
   judgeAuthorization,
@@ -107,6 +110,8 @@ export interface AutoPublishWorkerDeps {
   }) => Promise<boolean>
   finishAttempt: (input: { planId: string; date: string; requestId: string; patch: AttemptPatch; now: Date }) => Promise<boolean>
   runPublish: (input: RunPublishInput) => Promise<{ status: number; body: Record<string, unknown> }>
+  /** This week's whole-pack card. Anything but approved refuses a live send. */
+  readWeekPackApproval: (clientId: string) => Promise<WeekPackApprovalRead>
   /** Best-effort machine-readable receipt; the attempts table is the source of truth. */
   emit: (event: { id: string; name: string; data: Record<string, unknown> }) => Promise<void>
 }
@@ -133,6 +138,14 @@ interface DatePlan {
   date: string
   existing: AttemptRecord | null
   decision: ReturnType<typeof decideClaim>
+}
+
+async function weekPackBlock(deps: AutoPublishWorkerDeps, clientId: string): Promise<string | null> {
+  try {
+    return weekPackSkipReason(await deps.readWeekPackApproval(clientId))
+  } catch {
+    return 'WEEK_PACK_UNREADABLE'
+  }
 }
 
 function patchFromOutcome(outcome: AttemptOutcome): AttemptPatch {
@@ -371,6 +384,12 @@ export async function runAutoPublishSweep(deps: AutoPublishWorkerDeps): Promise<
       // 4. Practice mode stops here: it proved every gate passes, and sends nothing.
       if (!live) {
         for (const item of sendable) note(item.date, 'would_publish')
+        continue
+      }
+
+      const packReason = await weekPackBlock(deps, auth.client_id)
+      if (packReason) {
+        for (const item of sendable) note(item.date, 'skipped', packReason)
         continue
       }
 
