@@ -56,7 +56,7 @@ describe('🔴 一条等批准的暂停，今日待办里恰好一条', () => {
     expect(kept[0]).toMatchObject({
       kind: 'ads_auto_pause_pending',
       client_id: CLIENT,
-      href: `https://app.magicengine.com.au/dashboard/clients/${CLIENT}/ads-health?tab=approvals`,
+      href: `https://app.magicengine.com.au/dashboard/clients/${CLIENT}/ad-health/auto-pause`,
     })
     expect(kept[0].what).toContain('圣诞团')
     expect(`${kept[0].what}${kept[0].how}`).not.toContain('还没上线')
@@ -246,7 +246,7 @@ describe('🔴 被拦下的暂停建议进今日待办（不再只躺在账表�
     const items: ManualItem[] = []
     await pushAdsAutoPauseItems(sb, items, () => 'CTS Tours NZ', BLOCKED_NOW)
     expect(items.map((i) => i.kind)).toEqual(['ads_auto_pause_pending', 'ads_auto_pause_blocked'])
-    expect(items[0].href).toBe(`https://app.magicengine.com.au/dashboard/clients/${CLIENT}/ads-health?tab=approvals`)
+    expect(items[0].href).toBe(`https://app.magicengine.com.au/dashboard/clients/${CLIENT}/ad-health/auto-pause`)
     expect(items[0].what).toContain('圣诞团')
   })
 })

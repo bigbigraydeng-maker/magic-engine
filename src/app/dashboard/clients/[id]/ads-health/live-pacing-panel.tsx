@@ -189,7 +189,7 @@ export default function LivePacingPanel({ clientId }: { clientId: string }) {
       )}
       <p className="mt-3 text-xs text-gray-500">
         需要处理投放问题？
-        <Link href={`/dashboard/clients/${clientId}/ads-health?tab=approvals`} className="ml-1 text-sky-700 hover:underline">
+        <Link href={`/dashboard/clients/${clientId}/ad-health/auto-pause`} className="ml-1 text-sky-700 hover:underline">
           去已有动作卡 / 待批准
         </Link>
       </p>
