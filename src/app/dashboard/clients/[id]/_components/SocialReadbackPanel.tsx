@@ -67,6 +67,9 @@ function ReadbackRow({ item }: { item: SocialReadbackItem }) {
           {item.story_registered ? '已登记发出' : '已发出，登记未读到'}
         </p>
       )}
+      {item.story_dm ? (
+        <p className="mt-1 text-xs text-me-charcoal/80 leading-relaxed">{item.story_dm}</p>
+      ) : null}
       <WindowMetrics item={item} />
     </li>
   )
@@ -132,7 +135,7 @@ export function SocialReadbackPanel({ clientId }: { clientId: string }) {
             发后成绩
           </h2>
           <p className="mt-1 text-xs text-me-charcoal/65 leading-relaxed">
-            最近发出内容的赞、评、转（发后 4 小时与 72 小时）。Story 目前只记录是否发出，观看数需要额外权限。
+            最近发出内容的赞、评、转（发后 4 小时与 72 小时）。Story 观看数需要额外权限。邀请私信那条会在窗口结束后显示新开私信数。
           </p>
         </div>
         <p className="text-[11px] text-me-charcoal/50">最近 {panel.limit} 条 · 新西兰时间</p>

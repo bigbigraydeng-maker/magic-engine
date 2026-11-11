@@ -185,4 +185,31 @@ describe('story publish action recorder', () => {
     expect(actions[0].row.payload).not.toHaveProperty('measure_at')
     expect(store.inserts.filter((row) => row.table === 'cron_run_logs')).toHaveLength(0)
   })
+
+  it('schedules a DM window only when the verdict switch is on, and still omits measure_at', async () => {
+    const scheduled: Array<Record<string, unknown>> = []
+    const store = db()
+    const step = { run: vi.fn(async (_id: string, fn: () => Promise<unknown>) => fn()) }
+    const fn = createStoryPublishActionRecorder({
+      supabase: store.supabase,
+      enabled: () => true,
+      clientLive: async () => true,
+      dmWindowEnabled: () => true,
+      scheduleDmWindow: async (input) => {
+        scheduled.push(input as unknown as Record<string, unknown>)
+      },
+    })
+    await expect(handlerOf(fn)({ event: { data: liveEvent() }, step })).resolves.toMatchObject({ ok: true, created: true })
+    expect(scheduled).toEqual([{
+      client_id: CLIENT,
+      action_id: 'action-1',
+      item_id: ITEM,
+      sent_at: '2026-11-02T07:00:00.000Z',
+      channel: 'facebook_story',
+    }])
+    expect(step.run.mock.calls.map((call) => call[0])).toContain('schedule-dm-window')
+    const off = run(liveEvent())
+    await off.done
+    expect(off.step.run.mock.calls.map((call) => call[0])).not.toContain('schedule-dm-window')
+  })
 })

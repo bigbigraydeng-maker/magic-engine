@@ -47,6 +47,7 @@ import { youtubeStaging, youtubePublicStep } from './youtube-publish'
 import { storyLitePublish } from './story-lite-publish'
 import { storyPublishActionRecorder } from './story-publish-action-recorder'
 import { storyPublishActionReconcile } from './story-publish-action-reconcile'
+import { storyDmWindow } from './story-dm-window'
 import { telephonyVoiplineProcess, telephonyVoiplineSweep } from './telephony-voipline'
 import { telephonyCallAnalysis, telephonyCallAnalysisSweep } from './telephony-analysis'
 import { planDraftFromPrescription } from './plan-draft-from-prescription'
@@ -123,6 +124,7 @@ export const cloudFunctions = [
   storyLitePublish,
   storyPublishActionRecorder,
   storyPublishActionReconcile,
+  storyDmWindow,
   telephonyVoiplineProcess,
   telephonyVoiplineSweep,
   telephonyCallAnalysis,

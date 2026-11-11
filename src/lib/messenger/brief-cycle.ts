@@ -39,6 +39,7 @@ import { advanceContactedAfterQuoteEmail, type QuoteAdvanceResult } from '@/lib/
 import { inferConversationFacts, type FactsRunResult } from '@/lib/crm/facts/infer'
 import { supabaseFactsIo } from '@/lib/crm/facts/io'
 import type { BriefChannel } from './brief-schema'
+import { hasCallSinceBrief, loadCallActivityOrEmpty, recentCallLines } from './brief-calls'
 import {
   hasAnythingToSummarise,
   resolveEmailBodies,
@@ -141,11 +142,13 @@ interface ExistingBrief {
   regen_count: number
   regen_count_date: string | null
   knowledge_status: string | null
+  generated_at: string | null
 }
 
 interface ConversationRow {
   id: string
   client_id: string
+  contact_id: string | null
   message_count: number
   last_message_at: string | null
   last_message_from: string | null
@@ -229,6 +232,8 @@ function toCandidate(row: ConversationRow): BriefCandidate {
     regenCount: brief?.regen_count ?? 0,
     regenCountDate: brief?.regen_count_date ?? null,
     existingKnowledgeStatus: brief?.knowledge_status === 'read_failed' ? 'read_failed' : null,
+    contactId: row.contact_id ?? null,
+    briefGeneratedAt: brief?.generated_at ?? null,
   }
 }
 
@@ -313,7 +318,7 @@ function withCandidateDeadline<T>(
  * 上游会把一次读库失败记成一次正常的空轮。
  */
 const CANDIDATE_COLUMNS =
-  'id, client_id, message_count, last_message_at, last_message_from, conversation_briefs(source_message_count, regen_count, regen_count_date, knowledge_status)'
+  'id, client_id, contact_id, message_count, last_message_at, last_message_from, conversation_briefs(source_message_count, regen_count, regen_count_date, knowledge_status, generated_at)'
 
 /** 一条渠道的候选池。私信不带客户名单（所有客户都写卡），邮件只给开了开关的客户。 */
 async function loadChannelCandidates(
@@ -334,11 +339,20 @@ async function loadChannelCandidates(
   // 读失败抛异常而不是返回空：返回空跟「今天真的没人要写卡」长得一模一样。
   if (error) throw new Error(error.message)
 
-  return (data ?? [])
-    .map((row) => {
-      const r = row as ConversationRow
-      return { ...toCandidate(r), awaitingReply: r.last_message_from === 'customer', channel }
-    })
+  const candidates = (data ?? []).map((row) => {
+    const r = row as ConversationRow
+    return { ...toCandidate(r), awaitingReply: r.last_message_from === 'customer', channel }
+  })
+
+  // A phone call finished after the stored brief makes the thread due although no message is new (`brief-calls.ts`).
+  // Only threads that already have a brief are looked at, and an unreadable call table leaves everything as it was.
+  const withBrief = candidates.filter((c) => c.briefGeneratedAt !== null && c.contactId)
+  const calls = await loadCallActivityOrEmpty(
+    withBrief.map((c) => c.contactId as string),
+    now,
+  )
+  return candidates
+    .map((c) => (hasCallSinceBrief(c.contactId ? calls.get(c.contactId) : undefined, c.briefGeneratedAt) ? { ...c, callsSinceBrief: true } : c))
     .filter((c) => shouldGenerateBrief(c, now))
 }
 
@@ -559,10 +573,13 @@ export async function generateDueBriefs(
             emptyThreads++
             return
           }
+          const callActivity = candidate.contactId ? await loadCallActivityOrEmpty([candidate.contactId], now) : new Map()
+          const recentCalls = recentCallLines(candidate.contactId ? callActivity.get(candidate.contactId) : undefined)
           const { brief, knowledgeStatus, answeredBy } = await generateBrief(
             prepared,
             candidate.clientId,
             {
+              ...(recentCalls.length > 0 ? { recentCalls } : {}),
               awaitingReply: candidate.awaitingReply,
               hoursSinceLastMessage: candidate.lastMessageAt
                 ? Math.round((now.getTime() - new Date(candidate.lastMessageAt).getTime()) / 3_600_000)

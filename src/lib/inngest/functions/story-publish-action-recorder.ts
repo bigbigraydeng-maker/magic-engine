@@ -16,6 +16,11 @@ import {
   type PublishDispatchReceipt,
 } from '@/lib/social/publish-gate/receipt'
 import {
+  scheduleStoryDmWindow,
+  storyDmWindowEnabled,
+  type StoryDmEventData,
+} from '@/lib/inngest/functions/story-dm-window'
+import {
   isLiveSentStoryAttempt,
   loadStoryItemForRegistration,
   parseLiveSentStoryAttempt,
@@ -36,6 +41,8 @@ export function createStoryPublishActionRecorder(deps: {
   /** Omitted means off. Both this and the master env must be on to write the action. */
   clientLive?: (clientId: string) => Promise<boolean>
   recordDryRun?: (receipt: PublishDispatchReceipt) => Promise<void>
+  dmWindowEnabled?: () => boolean
+  scheduleDmWindow?: (input: StoryDmEventData) => Promise<void>
 }) {
   return inngest.createFunction(
     {
@@ -64,7 +71,20 @@ export function createStoryPublishActionRecorder(deps: {
         return step.run('record-dry-run', () => recordDry(deps, attempt, 'dry_run', ready.input, reason))
       }
       const registration = await step.run('register-publish-action', () => recordStoryPublishAction(deps.supabase, ready.input))
-      if (registration.ok) return { ok: true as const, actionId: registration.actionId, created: registration.created }
+      if (registration.ok) {
+        if ((deps.dmWindowEnabled ?? storyDmWindowEnabled)()) {
+          const schedule = deps.scheduleDmWindow ?? scheduleStoryDmWindow
+          const input = ready.input
+          await step.run('schedule-dm-window', () => schedule({
+            client_id: input.clientId,
+            action_id: registration.actionId,
+            item_id: input.itemId,
+            sent_at: input.publishedAt,
+            channel: input.channel,
+          }))
+        }
+        return { ok: true as const, actionId: registration.actionId, created: registration.created }
+      }
       const field = `${registration.reason}:${registration.field}`
       return step.run('record-register-refusal', () => recordRefusal(deps.supabase, attempt, field))
     },

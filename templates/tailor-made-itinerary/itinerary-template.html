@@ -514,7 +514,7 @@ function coverSheet(d){
   const s = el(`<section class="sheet sheet--cover"></section>`);
   s.innerHTML = `
     <div class="cover__img" style="background-image:url('${hero}')">
-      <div class="cover__eyebrow">Tailor-made journey</div>
+      <div class="cover__eyebrow">${d.trip.productType === 'sic' ? 'Seat-in-coach (SIC) journey' : 'Tailor-made journey'}</div>
     </div>
     <div class="cover__panel">
       <img class="cover__logo" src="${CTS_ASSETS.logo}" alt="CTS Tours">

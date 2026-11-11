@@ -43,7 +43,7 @@ function pageFileFor(path: string): string {
 
 describe('登记表守卫：不许登记假入口', () => {
   it('至少登记了广告自动暂停', () => {
-    expect(dedicatedApprovalEntryFor(D3)?.label).toBe('广告门 ·「等你点头」')
+    expect(dedicatedApprovalEntryFor(D3)?.label).toBe('自动暂停')
   })
 
   it.each(DEDICATED_APPROVAL_ENTRIES.map((e) => [e.actionKey, e]))('%s 在动作注册表里', (_k, e) => {

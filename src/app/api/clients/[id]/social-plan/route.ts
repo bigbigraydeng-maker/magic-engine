@@ -36,6 +36,7 @@ import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { precheckCharge, commitCharge } from '@/lib/mtc/charge'
 import { MTC_RATES } from '@/lib/mtc/types'
 import { CAMPAIGN_DAILY_PLAN_KIND } from '@/lib/campaign/daily-plan'
+import { WEEKLY_SLOT_PLAN_KIND } from '@/lib/social/weekly-plan/types'
 
 // ─── Viral reference row shape (partial select) ────────────────────────────────
 
@@ -135,7 +136,9 @@ export async function GET(
       // read) must never receive. `.not('...->>plan_kind','eq',…)` would silently
       // drop every legacy row too, since NULL = value is NULL, not true — verified
       // empirically against production before writing this filter.
+      // Weekly slot plans use planKind, so a null plan_kind must not keep them.
       .or(`plan_data->>plan_kind.is.null,plan_data->>plan_kind.neq.${CAMPAIGN_DAILY_PLAN_KIND}`)
+      .or(`plan_data->>planKind.is.null,plan_data->>planKind.neq.${WEEKLY_SLOT_PLAN_KIND}`)
       .order('created_at', { ascending: false })
       .limit(5)
 

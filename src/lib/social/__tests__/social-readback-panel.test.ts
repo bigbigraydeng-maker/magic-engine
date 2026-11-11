@@ -73,6 +73,32 @@ describe('buildSocialReadbackPanel', () => {
     expect(panel.items[2].kind).toBe('story')
     expect(panel.items[2].story_registered).toBe(true)
     expect(panel.items[2].windows).toBeNull()
+    expect(panel.items[2].story_dm).toBeNull()
+  })
+
+  it('shows a story direct-message line only when a label was supplied', () => {
+    const panel = buildSocialReadbackPanel({
+      clientId: CLIENT,
+      since: '2026-10-01T00:00:00.000Z',
+      until: '2026-11-03T00:00:00.000Z',
+      limit: 10,
+      now: NOW,
+      actions: [],
+      receipts: [],
+      stories: [
+        {
+          item_id: 'story-1',
+          channel: 'facebook_story',
+          status: 'SENT',
+          sent_at: '2026-10-30T18:00:00.000Z',
+          slot_at: '2026-10-30T18:00:00.000Z',
+        },
+      ],
+      storyRegistrationRows: [],
+      storyDmByItemId: { 'story-1': '发后 12 小时新开私信 2 条（已去掉带来广告编号的会话）' },
+    })
+    expect(panel.items[0].story_dm).toContain('新开私信 2 条')
+    expect(panel.items[0].summary).toContain('观看数需要洞察权限')
   })
 
   it('marks a future window as pending and past missing receipt as missing', () => {
