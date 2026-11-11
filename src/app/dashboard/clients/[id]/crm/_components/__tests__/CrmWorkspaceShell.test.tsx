@@ -183,6 +183,7 @@ describe('CrmWorkspaceShell', () => {
       '销售进度',
       '到期日历',
       '邮件模板',
+      '发信统计',
       '自动发信',
       '设置',
     ])
@@ -195,6 +196,7 @@ describe('CrmWorkspaceShell', () => {
     })
     expect(screen.queryByText('邮件模板')).toBeNull()
     expect(screen.queryByText('自动发信')).toBeNull()
+    expect(screen.queryByText('发信统计')).toBeNull()
     unmount()
 
     resetCrmNavProbeCache()
@@ -209,6 +211,7 @@ describe('CrmWorkspaceShell', () => {
     expect(screen.getByText('自动发信').closest('a')?.getAttribute('href')).toMatch(
       /\/crm\/auto-letters$/,
     )
+    expect(screen.getByText('发信统计').closest('a')?.getAttribute('href')).toMatch(/\/crm\/send-stats$/)
     second.unmount()
 
     resetCrmNavProbeCache()
