@@ -79,6 +79,46 @@ function parseOwnershipTable(t: Table): ReadmeOwnershipRow[] | null {
   return t.rows.map((r) => ({ playbooksRaw: r[pb] ?? '', ownerRaw: r[owner] ?? '' }))
 }
 
+export interface RulesIndexRow {
+  source: string
+  owner: string
+  pathRaw: string
+  count: string
+  inPrompt: string
+  verified: string
+}
+
+export interface RulesIndexParse { rows: RulesIndexRow[]; skippedLines: number }
+
+const RULE_COLS: Array<[RegExp, keyof RulesIndexRow]> = [
+  [/规则来源/, 'source'],
+  [/归谁/, 'owner'],
+  [/路径/, 'pathRaw'],
+  [/条数/, 'count'],
+  [/进不进提示词/, 'inPrompt'],
+  [/最后核实/, 'verified'],
+]
+
+/** The agents page reads this table. A missing column or a short row is malformed, not a partial success. */
+export function parseRulesIndex(text: string): RulesIndexParse | null {
+  for (const table of collectTables(text)) {
+    const cols = RULE_COLS.map(([re]) => findCol(table.header, re))
+    if (cols.some((c) => c < 0)) continue
+    if (table.skipped > 0) return { rows: [], skippedLines: table.skipped }
+    const rows = table.rows.map((cells) => {
+      const row = {} as RulesIndexRow
+      RULE_COLS.forEach(([, key], i) => { row[key] = cells[cols[i]] ?? '' })
+      row.source = clean(row.source)
+      row.count = clean(row.count)
+      row.inPrompt = clean(row.inPrompt)
+      row.verified = clean(row.verified)
+      return row
+    }).filter((row) => row.source !== '')
+    return { rows, skippedLines: 0 }
+  }
+  return null
+}
+
 export function parseReadme(text: string): ReadmeParse {
   const out: ReadmeParse = { agents: [], ownership: [], skippedLines: 0 }
   for (const t of collectTables(text)) {
