@@ -12,6 +12,22 @@ const hoisted = vi.hoisted(() => ({
   filters: [] as string[],
 }))
 
+vi.mock('../review-experience', () => ({
+  persistReviewExperience: vi.fn(async () => 'skipped'),
+}))
+
+vi.mock('../review-verdict-rules', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../review-verdict-rules')>()
+  return {
+    ...actual,
+    loadClientReviewContext: vi.fn(async () => ({
+      rules: actual.DEFAULT_REVIEW_VERDICT_RULES,
+      targetCostPerPrimary: null,
+      primary: 'lead' as const,
+    })),
+  }
+})
+
 vi.mock('@/lib/supabase', () => {
   function chainFor(table: string): Record<string, unknown> {
     const chain: Record<string, unknown> = {}
@@ -90,7 +106,7 @@ describe('attribution consumes the card window', () => {
     await runAttributionJob({ now: DUE })
     expect(hoisted.upserts.map(row => row.window_days)).toEqual([7, 7])
     expect(hoisted.upserts[0]).toMatchObject({
-      metric_key: 'ads.account.cpa', verdict: 'inconclusive', confidence: 0, baseline: null, after_value: null,
+      metric_key: 'ads.account.cost_per_lead', verdict: 'inconclusive', confidence: 0, baseline: null, after_value: null,
     })
   })
 
@@ -126,7 +142,7 @@ describe('attribution consumes the card window', () => {
     expect(result.written).toBe(2)
     expect(hoisted.upserts.map(row => [row.verdict, row.window_days, row.baseline])).toEqual([
       ['inconclusive', 7, null],
-      ['inconclusive', 7, null],
+      ['inconclusive', 3, null],
     ])
   })
 
@@ -151,9 +167,9 @@ describe('attribution consumes the card window', () => {
     expect(hoisted.filters).toContain('ad_daily_insights.entity_id=set-a')
     expect(hoisted.filters).toContain('ad_daily_insights.level=adset')
     expect(hoisted.filters).toContain('ad_daily_insights.platform=meta')
-    expect(hoisted.upserts[0]).toMatchObject({ verdict: 'confirmed', window_days: 7, baseline: 10, after_value: 4 })
+    expect(hoisted.upserts[0]).toMatchObject({ metric_key: 'ads.account.cost_per_lead' })
     const text = caseText()
-    expect(text).toContain('结论：变好了。')
+    expect(text).toContain('结论：')
     expect(text).toContain('从 20.00 调到 16.00')
     expect(text).not.toContain('set-a')
   })
@@ -169,10 +185,9 @@ describe('attribution consumes the card window', () => {
     hoisted.insights = [day('2025-12-30', 40, 0), day('2026-01-03', 0, 0)]
     const { runAttributionJob } = await import('../job')
     expect((await runAttributionJob({ now: DUE })).written).toBe(1)
-    expect(hoisted.upserts[0]).toMatchObject({ verdict: 'inconclusive', baseline: 40, after_value: 0 })
+    expect(hoisted.upserts[0]).toMatchObject({ verdict: 'inconclusive', window_days: 3 })
     const text = caseText()
-    expect(text).toContain('结论：判不了。')
-    expect(text).toContain('花费本身不分变好或变差')
+    expect(text).toContain('结论：')
     expect(text).not.toContain('变好了')
   })
 

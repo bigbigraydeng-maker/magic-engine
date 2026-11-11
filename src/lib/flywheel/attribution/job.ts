@@ -19,7 +19,9 @@ import { dualWindowEnabled } from './dual-window-gate'
 import { isNotEvaluable } from './execution-evidence'
 import { getMetricPolarity } from '../polarity'
 import {
+  BUDGET_CARD_ACTION,
   observationDue,
+  PAUSE_CARD_ACTION,
   pairSpans,
   readExecutedReview,
   windowSpanOf,
@@ -28,6 +30,14 @@ import {
   type ReviewAction,
 } from './executed-review'
 import { asObjectDay, judgeObjectWindow, objectWindowDates, type ObjectDay } from './object-window'
+import {
+  countPrimaryOutcomesAfter,
+  loadClientReviewContext,
+  observationWindowForAction,
+  primaryCostMetric,
+  type ClientReviewContext,
+} from './review-verdict-rules'
+import { persistReviewExperience } from './review-experience'
 import {
   OUTCOME_CONFLICT_TARGET,
   OUTCOME_EVALUATOR,
@@ -183,49 +193,79 @@ function asReviewAction(action: ActionRow): ReviewAction {
  * A failed save is returned as failed so the next run retries it and the
  * cron's failure count reaches the existing to-do. It is not logged and dropped.
  */
+const clientReviewCache = new Map<string, Promise<ClientReviewContext>>()
+
+function reviewContextFor(clientId: string): Promise<ClientReviewContext> {
+  const existing = clientReviewCache.get(clientId)
+  if (existing) return existing
+  const loaded = loadClientReviewContext(clientId)
+  clientReviewCache.set(clientId, loaded)
+  return loaded
+}
+
 async function saveDueReview(
   action: ActionRow,
   review: ExecutedReview,
   pair: PairMark,
   now: Date,
 ): Promise<ActionOutcome> {
-  const reconcileErrors = await reconcileLegacyWindows(action.id, review.metric)
-  if (!observationDue(review.executedAt, review.observationWindowDays, now)) {
+  const ctx = await reviewContextFor(action.client_id)
+  const windowDays = observationWindowForAction(
+    action.action_type ?? '',
+    ctx.rules,
+    review.observationWindowDays,
+  )
+  const metric = primaryCostMetric(ctx.primary) ?? review.metric
+  const reconcileErrors = await reconcileLegacyWindows(action.id, metric)
+  if (!observationDue(review.executedAt, windowDays, now)) {
     return { kind: 'skipped', reconcileErrors }
   }
-  const rows = await loadObjectDays(action.client_id, review.objectId, review.executedAt, review.observationWindowDays)
+  const rows = await loadObjectDays(action.client_id, review.objectId, review.executedAt, windowDays)
   if (rows === 'error') return { kind: 'failed', message: 'object window read failed' }
+  const primaryOutcomeCount = countPrimaryOutcomesAfter(rows, review.executedAt, windowDays, ctx.primary)
   const judged = judgeObjectWindow({
-    metric: review.metric,
+    metric,
     direction: review.direction,
     expectedDelta: action.expected_delta,
     pair,
     rows,
     executedAt: review.executedAt,
-    windowDays: review.observationWindowDays,
+    windowDays,
     ...caseFacts(action.payload),
     verdictOf: computeOutcomeVerdict,
+    reviewRules: {
+      rules: ctx.rules,
+      targetCost: ctx.targetCostPerPrimary,
+      primaryOutcomeCount,
+    },
   })
   try {
     await upsertOutcome({
       action_id: action.id,
       client_id: action.client_id,
-      metric_key: review.metric,
+      metric_key: metric,
       baseline: judged.baseline,
       after_value: judged.after,
       delta: judged.delta,
       delta_pct: judged.deltaPct,
       confidence: judged.confidence,
       verdict: judged.storedVerdict,
-      window_days: review.observationWindowDays,
+      window_days: windowDays,
       evaluator_key: OUTCOME_EVALUATOR.FLYWHEEL_METRICS,
       computed_at: now.toISOString(),
     })
     await saveCase(action, judged.case)
+    const kindLabel = action.action_type === PAUSE_CARD_ACTION ? '暂停广告组' : '调日预算'
+    await persistReviewExperience(supabaseAdmin, {
+      clientId: action.client_id,
+      actionId: action.id,
+      kindLabel,
+      reviewCase: judged.case,
+    })
   } catch (err) {
     return { kind: 'failed', message: err instanceof Error ? err.message : String(err) }
   }
-  reconcileErrors.push(...await retireExtraWindows(action.id, review.metric, review.observationWindowDays))
+  reconcileErrors.push(...await retireExtraWindows(action.id, metric, windowDays))
   return { kind: 'written', reconcileErrors }
 }
 
@@ -389,6 +429,7 @@ async function attributeOne(
 export async function runAttributionJob(
   options: AttributionJobOptions = {}
 ): Promise<AttributionJobResult> {
+  clientReviewCache.clear()
   const windowDays = options.windowDays ?? DEFAULT_WINDOW_DAYS
   const now = options.now ?? new Date()
   const actions = await loadAttributableActions(options)

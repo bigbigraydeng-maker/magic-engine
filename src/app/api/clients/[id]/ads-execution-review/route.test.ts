@@ -10,9 +10,9 @@ const hoisted = vi.hoisted(() => ({
 }))
 
 vi.mock('@/lib/auth/client-access', () => ({
-  requirePaidClientAccess: vi.fn(async () => (
+  requireOperatorAccess: vi.fn(async () => (
     hoisted.accessOk
-      ? { ok: true as const, user: { email: 'a@b.c' }, role: 'admin' as const, allowedClientId: null }
+      ? { ok: true as const, user: { email: 'a@b.c' }, role: 'admin' as const, tier: 'admin' as const, allowedClientId: null }
       : { ok: false as const, status: hoisted.accessStatus }
   )),
 }))
@@ -24,12 +24,16 @@ vi.mock('@/lib/supabase', () => {
     for (const name of ['select', 'eq', 'in', 'not', 'order', 'limit']) {
       chain[name] = passthrough
     }
+    chain.maybeSingle = () => Promise.resolve({ data: { leads_config: null }, error: null })
     chain.then = (resolve: (v: { data: unknown; error: { message: string } | null }) => unknown) => {
       if (table === 'flywheel_actions') {
         return Promise.resolve({ data: hoisted.actions, error: hoisted.actionsError }).then(resolve)
       }
       if (table === 'flywheel_outcomes') {
         return Promise.resolve({ data: hoisted.outcomes, error: hoisted.outcomesError }).then(resolve)
+      }
+      if (table === 'clients') {
+        return Promise.resolve({ data: [{ leads_config: null }], error: null }).then(resolve)
       }
       return Promise.resolve({ data: [], error: null }).then(resolve)
     }
