@@ -25,6 +25,19 @@
 
 两条路都要改一处数据库约束；选现有这条是因为发件箱、回信和每周上限都跟员工手发同一套，而且不用等另一套正式开放。
 
+### 1.1 复用常设授权的硬约束（发信窗口 11-12 回复，按此执行）
+
+- **能直接用**：授权页的门和授权人（`requireTriggeredSendAdmin` + `isTriggeredSendApprover`，名单只放 PM 本人）；授权表「一份生效 / 一份待批」唯一索引按 `(client_id, trigger_key, channel)` 分，加新触发不跟欢迎信抢位；`live-switch.ts` 的写法。
+- **要改**：
+  1. `judgeStandingAuthorization` 现在用欢迎信的规则解析器和关口版本，目录规则进去一律判无效。拆成两层：通用层只管撤销 / 没批 / 没武装 / 过期 / 规则指纹 / 模板指纹；规则解析和关口版本由各触发自己传入；欢迎信那层原样包一层、行为不变（它的授权测试、真库 46 项、28 处变异原样全绿）。**这一小刀由发信窗口来拆**（他提出可以做），76 不碰。
+  2. 授权表 `trigger_key` 只许 `welcome`、`channel` 只许 `email`：加 `catalogue` 要迁移（A 级，Ray 亲手合）。`account` 列现在是 Resend 账号名；目录走 info@，这一列对目录写成发件邮箱的连接标签，或另加字段（第 2 刀定，跟发信窗口对）。
+  3. 授权事件 `crm.triggered_send.authorization_changed` 的 `trigger_key` 类型写死 `welcome`，要放开，消费方按触发分。
+  4. 授权页和四个命令（propose / authorize / revoke / status）现在只认欢迎信。按触发拆开前，**先跟发信窗口对文件归属**（`authorization-*.ts`、`welcome-letter/` 组件他正在写），不两边同时改。
+- **不做**：
+  - 目录信**不记进** `triggered_sends` 账本：它是「同一触发同一地址终身一次」，下一版目录就发不出；回执和退订是 Resend 那套；而且每周上限按地址读这张表，目录信又记在 CRM 发信记录表里，会被算两次，白白吃掉客人「7 天 2 封」的一个名额。每日名额照 §3 在 CRM 自己的表里锁着数。
+  - 不复用欢迎信的总开关 `TRIGGERED_SEND_LIVE / TRIGGERED_SEND_CLIENTS`（开欢迎信试跑就等于开了自动目录）。另起一对 `CATALOGUE_AUTO_LIVE / CATALOGUE_AUTO_CLIENTS`。
+- **退订（合规）**：自动发的目录是营销邮件，新西兰《垃圾邮件法》要求带能用的退订。info@ 这条路现在只在发信前**查**客人有没有退订，信里**没有**一键退订链接。第 3 刀要给自动目录信加退订链接（复用 ME 一键退订入口的做法，但令牌指向 CRM 发信记录，不指向 `triggered_sends`）；没有退订链接就不开自动发。员工手发的目录信要不要也加，另问 PM。
+
 ## 2. 规则（全部是客户配置，共享代码里不写 CTS）
 
 放进现有的「发信设置」（版本化、只有全局管理员能改）新增一块 `autoCatalogue`：
