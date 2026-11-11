@@ -45,7 +45,8 @@ export async function readLatestWeeklyPlan(
     .select('id, plan_data')
     .eq('client_id', clientId)
     .eq('platform', 'facebook')
-    .eq('plan_data->>plan_kind', WEEKLY_SLOT_PLAN_KIND)
+    // Stored JSON uses planKind and weekStart. plan_kind would never match a row.
+    .eq('plan_data->>planKind', WEEKLY_SLOT_PLAN_KIND)
     .eq('plan_data->>weekStart', weekStart)
     .order('created_at', { ascending: false })
     .limit(1)
