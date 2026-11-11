@@ -1,12 +1,14 @@
 /**
  * Whether this client's image posts may really go out.
- * Uses the same week and the same stored approval as the weekly plan card.
+ * A weekly card is stored by the Monday of its week. A post is not linked to a
+ * card, so the card is the one whose Monday–Sunday contains the scheduled date.
+ * The planning week (next Monday, or the one after) is not used here.
  * Anything other than a confirmed card for that week refuses the send.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 
-import { targetWeek } from '@/lib/social/week-pack/cadence'
+import { addCalendarDays, isoDate } from '@/lib/social/week-pack/cadence'
 
 import { readLatestWeeklyPlan, type StoredWeeklyPlan } from './db'
 
@@ -26,13 +28,28 @@ export function weekPackSkipReason(read: WeekPackApprovalRead): string | null {
   return 'WEEK_PACK_NOT_APPROVED'
 }
 
+/** Monday of the Monday–Sunday that contains a YYYY-MM-DD scheduled date. */
+export function weekStartOfScheduledDate(scheduledDate: string): string | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(scheduledDate)
+  if (!match) return null
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  const utc = new Date(Date.UTC(year, month - 1, day))
+  if (utc.getUTCFullYear() !== year || utc.getUTCMonth() + 1 !== month || utc.getUTCDate() !== day) return null
+  const weekday = utc.getUTCDay() === 0 ? 7 : utc.getUTCDay()
+  return isoDate(addCalendarDays(year, month, day, 1 - weekday))
+}
+
 export async function lookupWeekPackApproval(
   db: SupabaseClient,
   clientId: string,
-  now: Date,
+  scheduledDate: string,
 ): Promise<WeekPackApprovalRead> {
   try {
-    const found = await readLatestWeeklyPlan(db, clientId, targetWeek(now).weekStart)
+    const weekStart = weekStartOfScheduledDate(scheduledDate)
+    if (!weekStart) return 'unreadable'
+    const found = await readLatestWeeklyPlan(db, clientId, weekStart)
     return weekPackApprovalRead(found)
   } catch {
     return 'unreadable'

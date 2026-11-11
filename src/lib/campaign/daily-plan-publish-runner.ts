@@ -62,12 +62,17 @@ export function isRefusal(value: unknown): value is PublishRefusal {
   return typeof value === 'object' && value !== null && (value as { refusal?: unknown }).refusal === true
 }
 
-async function liveWeekPackReason(clientId: string, now: Date): Promise<string | null> {
-  try {
-    return weekPackSkipReason(await lookupWeekPackApproval(supabaseAdmin, clientId, now))
-  } catch {
-    return 'WEEK_PACK_UNREADABLE'
+async function liveWeekPackReason(clientId: string, dates: readonly string[]): Promise<string | null> {
+  if (dates.length === 0) return 'WEEK_PACK_MISSING'
+  for (const date of dates) {
+    try {
+      const reason = weekPackSkipReason(await lookupWeekPackApproval(supabaseAdmin, clientId, date))
+      if (reason) return reason
+    } catch {
+      return 'WEEK_PACK_UNREADABLE'
+    }
   }
+  return null
 }
 
 function conflict(error: string, extra: Record<string, unknown> = {}): PublishRefusal {
@@ -436,8 +441,10 @@ export async function runDailyPlanPublish(input: RunDailyPlanPublishInput): Prom
     }
   }
 
-  const packReason = await liveWeekPackReason(clientId, input.now ?? new Date())
-  if (packReason) return refuse(conflict(packReason))
+  if (pending.length > 0) {
+    const packReason = await liveWeekPackReason(clientId, pending.map(post => post.date))
+    if (packReason) return refuse(conflict(packReason))
+  }
 
   const page = await resolvePageToken(clientId, command.page_id)
   if (isRefusal(page)) return refuse(page)

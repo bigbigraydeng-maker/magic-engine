@@ -120,7 +120,7 @@ export function buildProductionDeps(now: Date, env: NodeJS.ProcessEnv = process.
     claimAttempt,
     finishAttempt,
     runPublish: input => runDailyPlanPublish(input),
-    readWeekPackApproval: clientId => lookupWeekPackApproval(supabaseAdmin, clientId, now),
+    readWeekPackApproval: (clientId, scheduledDate) => lookupWeekPackApproval(supabaseAdmin, clientId, scheduledDate),
     emit: async event => {
       await sendInngestEvent(event)
     },

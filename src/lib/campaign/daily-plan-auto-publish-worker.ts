@@ -17,8 +17,8 @@
  *                   a claim with no result is UNKNOWN_OUTCOME and is never retried
  *   mode            practice (dry run) unless the live switch AND the client
  *                   allow-list both say so; practice writes nothing
- *   week pack       a live send also needs this week's whole-pack approval;
- *                   missing, refused, or unreadable skips the client and continues
+ *   week pack       a live date needs the pack card for the week that contains
+ *                   that date; missing, refused, or unreadable skips that date
  *
  * All I/O is injected so the sweep can be exercised end to end without a
  * network: see `__tests__/daily-plan-auto-publish-worker.test.ts`.
@@ -110,8 +110,8 @@ export interface AutoPublishWorkerDeps {
   }) => Promise<boolean>
   finishAttempt: (input: { planId: string; date: string; requestId: string; patch: AttemptPatch; now: Date }) => Promise<boolean>
   runPublish: (input: RunPublishInput) => Promise<{ status: number; body: Record<string, unknown> }>
-  /** This week's whole-pack card. Anything but approved refuses a live send. */
-  readWeekPackApproval: (clientId: string) => Promise<WeekPackApprovalRead>
+  /** Pack card for the week containing this scheduled date. */
+  readWeekPackApproval: (clientId: string, scheduledDate: string) => Promise<WeekPackApprovalRead>
   /** Best-effort machine-readable receipt; the attempts table is the source of truth. */
   emit: (event: { id: string; name: string; data: Record<string, unknown> }) => Promise<void>
 }
@@ -140,9 +140,9 @@ interface DatePlan {
   decision: ReturnType<typeof decideClaim>
 }
 
-async function weekPackBlock(deps: AutoPublishWorkerDeps, clientId: string): Promise<string | null> {
+async function weekPackBlock(deps: AutoPublishWorkerDeps, clientId: string, scheduledDate: string): Promise<string | null> {
   try {
-    return weekPackSkipReason(await deps.readWeekPackApproval(clientId))
+    return weekPackSkipReason(await deps.readWeekPackApproval(clientId, scheduledDate))
   } catch {
     return 'WEEK_PACK_UNREADABLE'
   }
@@ -387,14 +387,19 @@ export async function runAutoPublishSweep(deps: AutoPublishWorkerDeps): Promise<
         continue
       }
 
-      const packReason = await weekPackBlock(deps, auth.client_id)
-      if (packReason) {
-        for (const item of sendable) note(item.date, 'skipped', packReason)
-        continue
+      const allowed: DatePlan[] = []
+      for (const item of sendable) {
+        const packReason = await weekPackBlock(deps, auth.client_id, item.date)
+        if (packReason) {
+          note(item.date, 'skipped', packReason)
+          continue
+        }
+        allowed.push(item)
       }
+      if (allowed.length === 0) continue
 
       // 5. Live: serial, one date at a time, re-checking the grant before each send.
-      for (const item of sendable) {
+      for (const item of allowed) {
         const stillGranted = await deps.getActiveAuthorization(auth.plan_id, auth.client_id)
         if (
           stillGranted === null ||

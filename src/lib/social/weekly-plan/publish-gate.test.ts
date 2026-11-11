@@ -4,7 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 import { targetWeek } from '@/lib/social/week-pack/cadence'
 
-import { lookupWeekPackApproval } from './publish-gate'
+import { lookupWeekPackApproval, weekStartOfScheduledDate } from './publish-gate'
 
 const CLIENT = '11111111-1111-4111-8111-111111111111'
 const NOW = new Date('2026-10-11T18:00:00Z')
@@ -55,22 +55,26 @@ function row(weekStart: string, approval: 'confirmed' | 'declined' | null) {
 }
 
 describe('lookupWeekPackApproval', () => {
-  const week = targetWeek(NOW).weekStart
+  const thisMonday = '2026-10-12'
+  const nextMonday = targetWeek(NOW).weekStart
 
-  it('reads a confirmed card for this week as approved', async () => {
-    const read = await lookupWeekPackApproval(memoryPlans([row(week, 'confirmed')]), CLIENT, NOW)
-    expect(read).toBe('approved')
+  it('uses the week that contains the scheduled date, not the planning week', async () => {
+    expect(nextMonday).toBe('2026-10-19')
+    expect(weekStartOfScheduledDate('2026-10-13')).toBe(thisMonday)
+    expect(weekStartOfScheduledDate(nextMonday)).toBe(nextMonday)
+    const db = memoryPlans([row(thisMonday, 'confirmed')])
+    expect(await lookupWeekPackApproval(db, CLIENT, '2026-10-13')).toBe('approved')
+    expect(await lookupWeekPackApproval(db, CLIENT, nextMonday)).toBe('missing')
   })
 
   it('treats a refused card, a missing card, another week, and a failed read as not approved', async () => {
-    const refused = await lookupWeekPackApproval(memoryPlans([row(week, 'declined')]), CLIENT, NOW)
-    const missing = await lookupWeekPackApproval(memoryPlans([]), CLIENT, NOW)
-    const otherWeek = await lookupWeekPackApproval(memoryPlans([row('2026-01-05', 'confirmed')]), CLIENT, NOW)
-    const failed = await lookupWeekPackApproval(memoryPlans([], true), CLIENT, NOW)
+    const refused = await lookupWeekPackApproval(memoryPlans([row(thisMonday, 'declined')]), CLIENT, '2026-10-13')
+    const missing = await lookupWeekPackApproval(memoryPlans([]), CLIENT, '2026-10-13')
+    const otherWeek = await lookupWeekPackApproval(memoryPlans([row('2026-01-05', 'confirmed')]), CLIENT, '2026-10-13')
+    const failed = await lookupWeekPackApproval(memoryPlans([], true), CLIENT, '2026-10-13')
     expect(refused).toBe('unapproved')
     expect(missing).toBe('missing')
     expect(otherWeek).toBe('missing')
     expect(failed).toBe('unreadable')
-    expect(week).not.toBe('2026-01-05')
   })
 })

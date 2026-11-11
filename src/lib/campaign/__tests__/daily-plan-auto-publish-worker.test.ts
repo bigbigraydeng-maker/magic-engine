@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import { runAutoPublishSweep, type AutoPublishWorkerDeps, type PlanState, type RunPublishInput } from '../daily-plan-auto-publish-worker'
-import { lookupWeekPackApproval } from '@/lib/social/weekly-plan/publish-gate'
+import { lookupWeekPackApproval, weekStartOfScheduledDate } from '@/lib/social/weekly-plan/publish-gate'
 import { targetWeek } from '@/lib/social/week-pack/cadence'
 import type { AutoPublishAuthorization } from '../daily-plan-auto-publish'
 import type { AttemptRecord } from '../daily-plan-auto-publish-worker-store'
@@ -637,13 +637,31 @@ describe('runAutoPublishSweep — this week’s whole-pack card', () => {
 
   it('does not publish an approval that belongs to another week', async () => {
     const otherWeek = '2026-01-05'
-    expect(targetWeek(NOW).weekStart).not.toBe(otherWeek)
     const { deps, runPublish } = build({
-      weekPack: (clientId) => lookupWeekPackApproval(otherWeekDb(otherWeek), clientId, NOW),
+      weekPack: (clientId, scheduledDate) => lookupWeekPackApproval(otherWeekDb(otherWeek), clientId, scheduledDate),
     })
     const summary = await runAutoPublishSweep(deps)
     expect(summary.records.every(row => row.reason === 'WEEK_PACK_MISSING')).toBe(true)
     expect(liveFor(runPublish, CLIENT)).toHaveLength(0)
+  })
+
+  it('publishes this week when this week is approved and next week is not', async () => {
+    const nextWeek = targetWeek(NOW).weekStart
+    expect(nextWeek).toBe('2026-10-19')
+    expect(weekStartOfScheduledDate(TODAY)).toBe('2026-10-12')
+    const { deps, runPublish } = build({
+      weekPack: (clientId, scheduledDate) => lookupWeekPackApproval(otherWeekDb('2026-10-12'), clientId, scheduledDate),
+    })
+    const summary = await runAutoPublishSweep(deps)
+    expect(resultsOf(summary)).toEqual([`${TODAY}:published`, `${TOMORROW}:published`])
+    expect(liveFor(runPublish, CLIENT)).toHaveLength(2)
+
+    const nextOnly = build({
+      weekPack: (clientId, scheduledDate) => lookupWeekPackApproval(otherWeekDb(nextWeek), clientId, scheduledDate),
+    })
+    const blocked = await runAutoPublishSweep(nextOnly.deps)
+    expect(blocked.records.every(row => row.reason === 'WEEK_PACK_MISSING')).toBe(true)
+    expect(liveFor(nextOnly.runPublish, CLIENT)).toHaveLength(0)
   })
 })
 
