@@ -277,8 +277,9 @@ async function handleDue(
   } else {
     const one = await runClient(deps, step, data.clientId, { today: nz_date, dryRun, executedBy, asOf: data.date ?? undefined })
     receipt.clients.push(one)
-    await noteClient(deps, step, data.clientId, one.results, true)
-    receipt.failures = collectFailures(receipt.clients)
+    const writeError = await noteClient(deps, step, data.clientId, one.results, true)
+    if (writeError) receipt.failures.push(`${data.clientId}:receipt_write_failed:${writeError}`)
+    receipt.failures.push(...collectFailures(receipt.clients))
   }
 
   await finishTick(deps, step, started, receipt)
@@ -316,17 +317,36 @@ async function publishDue(
 ): Promise<void> {
   let anyLive = false
   for (const client of due) {
-    const clientLive = await step.run(`live-${client.id}`, async () =>
-      deps.clientPublishLive ? deps.clientPublishLive(client.id) : false,
-    )
-    if (clientLive) anyLive = true
-    const one = await runClient(deps, step, client.id, { today: receipt.nz_date, dryRun: !clientLive, executedBy })
+    const read = await readLiveFlag(deps, step, client.id)
+    if (read.error) receipt.failures.push(`${client.id}:client_switch_unreadable:${read.error}`)
+    if (read.on) anyLive = true
+    const one = await runClient(deps, step, client.id, { today: receipt.nz_date, dryRun: !read.on, executedBy })
     receipt.clients.push(one)
-    await noteClient(deps, step, client.id, one.results, !clientLive)
+    const writeError = await noteClient(deps, step, client.id, one.results, !read.on)
+    if (writeError) receipt.failures.push(`${client.id}:receipt_write_failed:${writeError}`)
   }
-  receipt.failures = collectFailures(receipt.clients)
+  receipt.failures.push(...collectFailures(receipt.clients))
   receipt.dry_run = !anyLive
   receipt.no_publish = !anyLive
+}
+
+async function readLiveFlag(
+  deps: ReelScheduledDeps,
+  step: StepLike,
+  clientId: string,
+): Promise<{ on: boolean; error: string | null }> {
+  try {
+    return await step.run(`live-${clientId}`, async () => {
+      try {
+        const on = deps.clientPublishLive ? await deps.clientPublishLive(clientId) : false
+        return { on, error: null as string | null }
+      } catch (e) {
+        return { on: false, error: errorMessage(e, 160) }
+      }
+    })
+  } catch (e) {
+    return { on: false, error: errorMessage(e, 160) }
+  }
 }
 
 async function noteClient(
@@ -335,18 +355,26 @@ async function noteClient(
   clientId: string,
   results: ScheduledResult[],
   dryRun: boolean,
-): Promise<void> {
-  if (!deps.recordDispatch || results.length === 0) return
-  await step.run(`note-${clientId}`, async () => {
-    await noteReelResults({
-      clientId,
-      results,
-      dryRun,
-      record: deps.recordDispatch!,
-      loadRef: deps.loadPublishedRef,
+): Promise<string | null> {
+  if (!deps.recordDispatch || results.length === 0) return null
+  try {
+    return await step.run(`note-${clientId}`, async () => {
+      try {
+        await noteReelResults({
+          clientId,
+          results,
+          dryRun,
+          record: deps.recordDispatch!,
+          loadRef: deps.loadPublishedRef,
+        })
+        return null
+      } catch (e) {
+        return errorMessage(e, 160)
+      }
     })
-    return null
-  })
+  } catch (e) {
+    return errorMessage(e, 160)
+  }
 }
 
 export function createReelScheduledFunction(deps: ReelScheduledDeps) {

@@ -188,11 +188,20 @@ export async function runAutoPublishSweep(deps: AutoPublishWorkerDeps): Promise<
 
   for (const auth of grants) {
     const envLive = isLiveFor(deps.switches, auth.client_id)
-    const clientLive = deps.clientPublishLive ? await deps.clientPublishLive(auth.client_id) : true
-    const live = envLive && clientLive
+    const clientSwitch = await readClientSwitch(deps, auth.client_id)
+    const live = envLive && clientSwitch.on
     const mode: SweepDateRecord['mode'] = live ? 'live' : 'practice'
     const note = (date: string, result: string, reason?: string) =>
       records.push({ client_id: auth.client_id, plan_id: auth.plan_id, date, mode, result, ...(reason ? { reason } : {}) })
+
+    if (clientSwitch.error) {
+      note('*', 'error', clientSwitch.error)
+      await recordImage(deps, auth, '*', 'failed', null, null, false, clientSwitch.error).catch((writeError: unknown) => {
+        const detail = writeError instanceof Error ? writeError.message.slice(0, 120) : 'RECEIPT_WRITE_FAILED'
+        note('*', 'error', `receipt_write_failed ${detail}`)
+      })
+      continue
+    }
 
     try {
       const state = await deps.loadPlanState(auth.plan_id, auth.client_id)
@@ -543,6 +552,20 @@ async function claimFor(
     now: (deps.clock ?? (() => new Date()))(),
     ...(item.decision.action === 'reclaim' ? { fromStatus: item.decision.fromStatus } : {}),
   })
+}
+
+/** A missing reader keeps the old env-only rule. A thrown read is off, and the caller records it. */
+async function readClientSwitch(
+  deps: AutoPublishWorkerDeps,
+  clientId: string,
+): Promise<{ on: boolean; error: string | null }> {
+  if (!deps.clientPublishLive) return { on: true, error: null }
+  try {
+    return { on: await deps.clientPublishLive(clientId), error: null }
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message.slice(0, 200) : 'CLIENT_SWITCH_UNREADABLE'
+    return { on: false, error: message }
+  }
 }
 
 async function recordImage(

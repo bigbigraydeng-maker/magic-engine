@@ -170,6 +170,44 @@ describe('reel-scheduled-go-public function', () => {
     expect(src).not.toContain('graph.facebook.com')
   })
 
+  it('a client switch read that throws stays off, the next client still runs, and the tick finishes', async () => {
+    const deps = makeDeps({ WEEKLY_PACK_REEL_SCHEDULED_PUBLIC: 'true' }, {
+      clientPublishLive: async (clientId: string) => {
+        if (clientId === 'c1') throw new Error('db down')
+        return true
+      },
+    })
+    const fn = createReelScheduledFunction(deps)
+    const out = (await handlerOf(fn)({ event: cronEvent, step: fakeStep() })) as {
+      failures: string[]
+      clients: { client_id: string }[]
+    }
+    const calls = (deps.runOne as unknown as { mock: { calls: [string, { dryRun: boolean }][] } }).mock.calls
+    expect(calls.filter((call) => call[0] === 'o1' || call[0] === 'o2').every((call) => call[1].dryRun === true)).toBe(true)
+    expect(calls.find((call) => call[0] === 'o3')?.[1].dryRun).toBe(false)
+    expect(out.clients.map((client) => client.client_id)).toEqual(['c1', 'c2'])
+    expect(out.failures.some((row) => row.includes('c1') && row.includes('db down'))).toBe(true)
+    expect(deps.finishRun).toHaveBeenCalledTimes(1)
+  })
+
+  it('a receipt write that throws is recorded, the next client still runs, and the tick finishes', async () => {
+    const deps = makeDeps({ WEEKLY_PACK_REEL_SCHEDULED_PUBLIC: 'true' }, {
+      clientPublishLive: async () => true,
+      loadPublishedRef: async () => ({ postId: '55555', publishedAt: '2026-11-10T05:00:00.000Z' }),
+      recordDispatch: async (receipt) => {
+        if (receipt.clientId === 'c1') throw new Error('disk full')
+      },
+    })
+    const fn = createReelScheduledFunction(deps)
+    const out = (await handlerOf(fn)({ event: cronEvent, step: fakeStep() })) as { failures: string[] }
+    const calls = (deps.runOne as unknown as { mock: { calls: [string, { dryRun: boolean }][] } }).mock.calls
+    expect(calls.map((call) => call[0])).toEqual(['o1', 'o2', 'o3'])
+    expect(calls.every((call) => call[1].dryRun === false)).toBe(true)
+    expect(out.failures.some((row) => row.includes('c1') && row.includes('disk full'))).toBe(true)
+    expect(out.failures.some((row) => row.startsWith('c2:'))).toBe(false)
+    expect(deps.finishRun).toHaveBeenCalledTimes(1)
+  })
+
   it('a real publish with no stored post id is a failed receipt', async () => {
     const receipts: Array<{ mode: string; reason: string; calledPublishApi: boolean }> = []
     const deps = makeDeps({ WEEKLY_PACK_REEL_SCHEDULED_PUBLIC: 'true' }, {

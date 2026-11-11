@@ -218,6 +218,43 @@ describe('runAutoPublishSweep — per-client switch', () => {
       calledPublishApi: true,
     })
   })
+
+  it('a client switch read that throws is one failed row, and the next client still publishes', async () => {
+    const other = 'c0000000-0000-0000-0000-000000000002'
+    const receipts: PublishDispatchReceipt[] = []
+    const { deps, runPublish } = build({
+      grants: [grant(), grant({ id: 'auth-2', client_id: other, plan_id: 'b0000000-0000-0000-0000-000000000002' })],
+    })
+    deps.switches = { live: true, clientIds: [CLIENT, other] }
+    deps.clientPublishLive = async (clientId) => {
+      if (clientId === CLIENT) throw new Error('db down')
+      return true
+    }
+    deps.recordDispatch = async (receipt) => { receipts.push(receipt) }
+
+    const summary = await runAutoPublishSweep(deps)
+
+    expect(summary.records.filter((row) => row.client_id === CLIENT)).toEqual([
+      expect.objectContaining({ result: 'error', reason: 'db down' }),
+    ])
+    expect(receipts.filter((row) => row.clientId === CLIENT)).toEqual([
+      expect.objectContaining({ mode: 'failed', calledPublishApi: false, reason: 'db down' }),
+    ])
+    const live = runPublish.mock.calls.filter((call) => call[0].command.no_publish === false)
+    expect(live.length).toBeGreaterThan(0)
+    expect(live.every((call) => call[0].clientId === other)).toBe(true)
+  })
+
+  it('a revoked authorisation never publishes, even when the client switch is on', async () => {
+    const { deps, runPublish, claimAttempt } = build({
+      grants: [grant({ revoked_at: '2026-10-11T00:00:00.000Z' })],
+    })
+    deps.clientPublishLive = async () => true
+    const summary = await runAutoPublishSweep(deps)
+    expect(resultsOf(summary)).toEqual(['*:skipped(REVOKED)'])
+    expect(runPublish).not.toHaveBeenCalled()
+    expect(claimAttempt).not.toHaveBeenCalled()
+  })
 })
 
 describe('runAutoPublishSweep — live publishing', () => {
