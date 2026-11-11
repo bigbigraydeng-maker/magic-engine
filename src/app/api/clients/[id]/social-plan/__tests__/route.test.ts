@@ -46,14 +46,37 @@ function getRequest(campaignId?: string): NextRequest {
 }
 
 /** Thenable chainable query-builder stub matching how route.ts awaits `query` directly. */
-function socialPlansStub(rows: unknown[]) {
+function socialPlansStub(rows: Array<{ plan_data?: Record<string, unknown> | null }>) {
+  const ors: string[] = []
   const builder: Record<string, unknown> = {}
-  for (const m of ['select', 'eq', 'or', 'order', 'limit']) {
+  for (const m of ['select', 'eq', 'order', 'limit']) {
     builder[m] = vi.fn().mockReturnValue(builder)
   }
-  ;(builder as { then: (resolve: (v: { data: unknown[]; error: null }) => void) => void }).then = resolve =>
-    resolve({ data: rows, error: null })
+  builder.or = vi.fn((clause: string) => {
+    ors.push(clause)
+    return builder
+  })
+  ;(builder as { then: (resolve: (v: { data: unknown[]; error: null }) => void) => void }).then = resolve => {
+    const kept = rows.filter((row) => ors.every((clause) => matchesOr(row.plan_data ?? null, clause)))
+    resolve({ data: kept, error: null })
+  }
   return builder
+}
+
+function matchesOr(planData: Record<string, unknown> | null, clause: string): boolean {
+  return clause.split(',').some((part) => matchesOne(planData, part))
+}
+
+function matchesOne(planData: Record<string, unknown> | null, part: string): boolean {
+  const data = planData ?? {}
+  if (part.endsWith('.is.null')) {
+    const key = part.slice(0, -'.is.null'.length).split('->>')[1]
+    return data[key] == null
+  }
+  const marker = '.neq.'
+  const at = part.indexOf(marker)
+  const key = part.slice(0, at).split('->>')[1]
+  return data[key] != null && String(data[key]) !== part.slice(at + marker.length)
 }
 
 afterEach(() => {
@@ -93,14 +116,28 @@ describe('social-plan GET — isolates campaign_daily_v1 rows from the legacy pl
     expect(json.plans).toEqual([legacyRow])
 
     const orCalls = (stub.or as ReturnType<typeof vi.fn>).mock.calls
-    expect(orCalls).toHaveLength(1)
-    const clause = orCalls[0][0] as string
+    expect(orCalls).toHaveLength(2)
+    const daily = orCalls[0][0] as string
+    const weekly = orCalls[1][0] as string
     // Must exclude campaign_daily_v1 while explicitly keeping NULL plan_kind
     // rows (legacy plans never set plan_kind at all).
-    expect(clause).toContain('plan_data->>plan_kind.is.null')
-    expect(clause).toContain('plan_data->>plan_kind.neq.campaign_daily_v1')
-    expect(clause).toContain('plan_data->>plan_kind.neq.weekly_slot_plan_v1')
-    expect(clause).not.toMatch(/^plan_data->>plan_kind\.eq\./)
+    expect(daily).toContain('plan_data->>plan_kind.is.null')
+    expect(daily).toContain('plan_data->>plan_kind.neq.campaign_daily_v1')
+    expect(daily).not.toMatch(/^plan_data->>plan_kind\.eq\./)
+    expect(weekly).toContain('plan_data->>planKind.is.null')
+    expect(weekly).toContain('plan_data->>planKind.neq.weekly_slot_plan_v1')
+  })
+
+  it('does not return a weekly slot plan, which is stored under planKind', async () => {
+    allow()
+    const legacyRow = { id: 'p1', plan_data: { strategy: { theme: 'x' } } }
+    const weeklyRow = { id: 'p2', plan_data: { planKind: 'weekly_slot_plan_v1', items: [] } }
+    const stub = socialPlansStub([weeklyRow, legacyRow])
+    mockFrom.mockReturnValue(stub as never)
+
+    const json = await (await GET(getRequest(CAMPAIGN_ID), { params: { id: CTS } })).json()
+
+    expect(json.plans).toEqual([legacyRow])
   })
 
   it('never calls the bare .not(...) form of the filter — a stub without it must not throw', async () => {
