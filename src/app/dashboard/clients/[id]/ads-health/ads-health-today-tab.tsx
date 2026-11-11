@@ -9,6 +9,7 @@ import { CORE_METRIC_NOUN } from '@/lib/ads-strategy/rules/core-metric'
 import { summarizeResultsByType, type ResultSummary } from '@/lib/ads-strategy/portfolio/result-summary'
 import type { LiveTodayView } from '@/lib/ads-strategy/heartbeat/live-view'
 import { HeldCards } from '@/components/confirmation-card/HeldCards'
+import { AdsExecutionReviewPanel } from '../_components/AdsExecutionReviewPanel'
 import { MeButton, MePill, MeStatCard, MeTable } from '@/components/ui/me-primitives'
 import AdsNextStepCard from './ads-next-step-card'
 import { TodayGoalProgress } from './today-goal-progress'
@@ -234,6 +235,10 @@ export function AdsHealthTodayTab(props: TodayTabProps) {
         </div>
         <p className="mt-1 text-xs text-me-charcoal/55">在你点确认之前，预算和投放都不会改。</p>
         <HeldCards clientId={clientId} refreshKey={refreshKey} hideWhenEmpty />
+      </section>
+
+      <section className="mb-6">
+        <AdsExecutionReviewPanel clientId={clientId} />
       </section>
 
       <AdsNextStepCard clientId={clientId} refreshKey={refreshKey} />
