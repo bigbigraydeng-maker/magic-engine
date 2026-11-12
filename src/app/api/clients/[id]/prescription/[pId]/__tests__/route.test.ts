@@ -181,7 +181,26 @@ describe('PATCH prescription — 批准', () => {
       goalId: 'goal-1',
       content: FILLED,
     })
-    expect((await res.json()).promotion_signal).toMatchObject({ ok: true })
+    const body = await res.json()
+    expect(body.promotion_signal).toMatchObject({ ok: true })
+    expect(body.action_cards).toMatchObject({ wroteMeta: false, lifetime: 'nz_day', items: [] })
+  })
+
+  it('动作列表读不懂时，批准仍然成功，并记下没出卡', async () => {
+    const bad = { ...FILLED, action_list: [{ type: 'ads.pause_campaign' }] }
+    mockSupabase(
+      { data: { ...DRAFT, status: 'approved', version: 1, content: bad }, error: null },
+      { ...draftWithContent, content: bad },
+    )
+
+    const res = await PATCH(makeRequest({ status: 'approved' }), { params })
+    const body = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.action_cards.wroteMeta).toBe(false)
+    expect(body.action_cards.items[0].status).toBe('failed')
+    expect(body.action_cards.items[0].reason).toMatch(/action_list/)
   })
 
   it('信号没发出去时，批准仍然成功，并且不把失败写成成功', async () => {

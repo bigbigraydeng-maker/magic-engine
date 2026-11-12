@@ -9,7 +9,7 @@ import type { CardClicker } from '@/lib/confirmation-card/actor'
 import { assertMayClick } from '@/lib/confirmation-card/actor'
 import { decideConfirmationCard, issueConfirmationCard } from '@/lib/confirmation-card'
 import { ConfirmationCardError } from '@/lib/confirmation-card/errors'
-import type { ConfirmationCardView } from '@/lib/confirmation-card/view'
+import type { CardLifetime, ConfirmationCardView } from '@/lib/confirmation-card/view'
 import type { CardResolution } from '@/lib/confirmation-card/decide'
 import { budgetFacts, budgetOrderKey, budgetSubject } from './facts'
 import { guardBudget } from './guard'
@@ -49,6 +49,8 @@ export async function issueBudgetCard(args: {
   runtime: BudgetRuntime
   locks: VersionLockSource
   now?: Date
+  /** Omitted cards stay on the 30-minute clock. Daily auto cards pass nz_day. */
+  lifetime?: CardLifetime
 }): Promise<BudgetIssueResult> {
   assertMayClick(args.clicker, args.clientId)
   const locked = await args.locks.read(args.clientId, args.order.prescriptionId)
@@ -64,6 +66,7 @@ export async function issueBudgetCard(args: {
     clicker: args.clicker,
     facts: budgetFacts(args.order, live, guard.checks),
     now: args.now ?? args.kernel.now(),
+    lifetime: args.lifetime,
   })
   await retireStale(args.kernel.supabase, args.clientId, budgetSubject(args.order), card.fingerprint)
   await insertHold(args.kernel.supabase, args.clientId, holdFrom(args.order, live, locked.lock, key, card))
