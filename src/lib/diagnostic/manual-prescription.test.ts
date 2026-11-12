@@ -248,8 +248,9 @@ describe('parseManualPrescriptionBody · ad_plays', () => {
     expect(parsed.ok).toBe(true)
     if (!parsed.ok) return
     expect(parsed.content.action_list).toHaveLength(2)
+    expect(parsed.content.action_list?.[0]?.type).toBe('ads.pause_ad_set')
     expect(parsed.generationMeta.action_list_dropped_reason).toContain('已丢弃多余')
-    expect(parsed.content.pause_ad_set).toMatchObject({ adset_id: 'adset_FAKE_A' })
+    expect('pause_ad_set' in parsed.content).toBe(false)
   })
 
   it('rejects a malformed action_list', () => {

@@ -16,8 +16,9 @@ describe('normalizePrescriptionContentWithMeta action_list trim', () => {
       ],
     })
     expect(content.action_list).toHaveLength(2)
+    expect(content.action_list?.[0]?.type).toBe('ads.pause_ad_set')
     expect(action_list_dropped_reason).toContain('已丢弃多余')
-    expect(content.pause_ad_set).toBeDefined()
+    expect('pause_ad_set' in content).toBe(false)
   })
 
   it('does not mirror budget into a legacy top-level block', () => {

@@ -473,6 +473,6 @@ export interface PrescriptionContent {
    * 校验见 src/lib/ads/prescription-action-list.ts。
    */
   action_list?: PrescriptionActionListItem[]
-  /** 旧版暂停块；新数据可由 action_list 镜像。发卡仍读本字段（AD-3 前）。 */
+  /** 旧版暂停块。action_list 的暂停行不再写入这里；AD-3 用 issueOnePauseCard。 */
   pause_ad_set?: unknown
 }
