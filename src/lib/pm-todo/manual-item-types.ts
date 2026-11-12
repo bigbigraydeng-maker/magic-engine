@@ -371,6 +371,10 @@ export type ManualItemKind =
   | 'ads_auto_pause_pending'
   /** D3 暂停建议被内核或安全闸拦下，没进「等你点头」，广告照常花钱（2026-11-04） */
   | 'ads_auto_pause_blocked'
+  /** 加日预算确认卡已点过，还等花钱负责人在 kernel 批（AD-8） */
+  | 'budget_raise_awaiting_pm'
+  /** 加日预算已在 kernel 批过，还等执行同事回确认卡点第二次确认（AD-8） */
+  | 'budget_raise_awaiting_confirm'
   /** AI 全自动审核发现异常，已经自动暂停发送（PM 拍板 2026-09-15："要有异常刹车"） */
   | 'ai_auto_review_circuit_breaker'
   /** AI 客服回复草稿写好了，等人批准发送（issue #1589） */
