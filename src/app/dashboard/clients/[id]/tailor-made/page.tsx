@@ -4,6 +4,7 @@ import { clientHasIndustryFeature, INDUSTRY_FEATURE_NOTICE } from '@/lib/clients
 import { listItineraries } from '@/lib/tailor-made/store'
 import { TAILOR_MADE_STATUS_LABEL, type TailorMadeSummary } from '@/lib/tailor-made/types'
 import TailorMadeNewButton from './_components/TailorMadeNewButton'
+import TailorMadeDeleteButton from './_components/TailorMadeDeleteButton'
 
 export const dynamic = 'force-dynamic'
 
@@ -97,12 +98,19 @@ export default async function TailorMadeListPage({ params }: { params: { id: str
                     {formatWhen(item.updated_at)}
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <TailorMadeNewButton
-                      clientId={params.id}
-                      sourceId={item.id}
-                      label="复制新建"
-                      variant="ghost"
-                    />
+                    <div className="flex items-start justify-end gap-2">
+                      <TailorMadeNewButton
+                        clientId={params.id}
+                        sourceId={item.id}
+                        label="复制新建"
+                        variant="ghost"
+                      />
+                      <TailorMadeDeleteButton
+                        clientId={params.id}
+                        itineraryId={item.id}
+                        label={`${item.quote_ref} ${item.trip_title || '未命名行程'}`}
+                      />
+                    </div>
                   </td>
                 </tr>
               ))}
