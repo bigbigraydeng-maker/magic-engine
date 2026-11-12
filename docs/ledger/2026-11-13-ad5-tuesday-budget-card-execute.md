@@ -8,7 +8,7 @@ source: session:9c129e32
 verify_by: 2026-11-17
 verify_how: 打开周二督导出的预算确认卡，点确认之后走原来的改预算卡：减预算会执行，加预算仍要花钱批准人再点一次；超过已批准计划的每天上限，或当时的条件已经不成立，确认也不会改。
 done_on: 2026-11-13
-done_ref: doc:docs/ledger/2026-11-13-ad5-tuesday-budget-card-execute.md
+done_ref: pr:3818
 ---
 
 Ray 2026-11-13 01:28 NZDT 同意：周二督导出的加减预算卡，人确认之后要真正执行。
