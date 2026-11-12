@@ -13,7 +13,8 @@ import {
   readWeeklyQuota,
   unreadMeasurement,
 } from './read'
-import type { BuildInput, CountSignal, WeeklyQuotaInput } from './types'
+import { emptyReadbackSuggestion } from './readback-suggestion'
+import type { BuildInput, CountSignal, ReadbackSuggestionInput, WeeklyQuotaInput } from './types'
 
 const EMPTY_QUOTA: WeeklyQuotaInput = { storyPerWeek: null, postPerWeek: null, reelPerWeek: null }
 
@@ -34,6 +35,7 @@ export interface AssembleArgs {
   assetError: boolean
   assetCount: number | null
   authStatuses: string[] | 'unreadable'
+  readbackSuggestion?: ReadbackSuggestionInput
 }
 
 export function assembleInput(args: AssembleArgs): { input: BuildInput; gaps: string[] } {
@@ -62,6 +64,7 @@ export function assembleInput(args: AssembleArgs): { input: BuildInput; gaps: st
         ...unreadMeasurement(),
       },
       goal: readGoalCard(args.goalRow, args.goalError),
+      readbackSuggestion: args.readbackSuggestion ?? emptyReadbackSuggestion(),
       themes: readThemes(args.themeRows, args.themeError),
     },
   }

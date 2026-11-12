@@ -36,6 +36,7 @@ function readyPlan(): WeeklySocialPlan {
       complaintSpike: { state: 'unreadable', value: false },
     },
     goal: emptyGoalInput(),
+    readbackSuggestion: { read: 'none', asOf: null, draftBasis: [] },
     themes: { read: 'none', items: [] },
   })
 }

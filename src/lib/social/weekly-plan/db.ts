@@ -7,6 +7,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 import { assembleInput } from './assemble'
 import { mergeApproval, readApproval, slotDigest, type PlanApproval } from './digest'
+import { readReadbackSuggestionForClient } from './readback-suggestion'
 import { WEEKLY_SLOT_PLAN_KIND, type WeeklySocialPlan } from './types'
 
 export interface StoredWeeklyPlan {
@@ -22,8 +23,9 @@ export async function loadPlanInput(
   db: SupabaseClient,
   clientId: string,
   week: { weekStart: string; weekEnd: string },
+  now: Date = new Date(),
 ): Promise<ReturnType<typeof assembleInput>> {
-  const [client, pillars, goal, themes, facts, assets, authStatuses] = await Promise.all([
+  const [client, pillars, goal, themes, facts, assets, authStatuses, readbackSuggestion] = await Promise.all([
     readClient(db, clientId),
     readPillarRow(db, clientId),
     readGoalRow(db, clientId),
@@ -31,8 +33,19 @@ export async function loadPlanInput(
     factCount(db, clientId),
     assetCount(db, clientId),
     readAuth(db, clientId),
+    readReadbackSuggestionForClient(db, clientId, now),
   ])
-  return assembleInput({ ...week, ...client, ...pillars, ...goal, ...themes, ...facts, ...assets, authStatuses })
+  return assembleInput({
+    ...week,
+    ...client,
+    ...pillars,
+    ...goal,
+    ...themes,
+    ...facts,
+    ...assets,
+    authStatuses,
+    readbackSuggestion,
+  })
 }
 
 export async function readLatestWeeklyPlan(
