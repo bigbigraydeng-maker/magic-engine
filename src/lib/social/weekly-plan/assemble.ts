@@ -7,7 +7,7 @@ import {
   authFromStatuses,
   pillarNameMap,
   readClientRecipe,
-  readGoalTitle,
+  readGoalCard,
   readPillars,
   readThemes,
   readWeeklyQuota,
@@ -61,7 +61,7 @@ export function assembleInput(args: AssembleArgs): { input: BuildInput; gaps: st
         assets: countSignal(args.assetError, args.assetCount),
         ...unreadMeasurement(),
       },
-      goal: readGoalTitle(args.goalRow, args.goalError),
+      goal: readGoalCard(args.goalRow, args.goalError),
       themes: readThemes(args.themeRows, args.themeError),
     },
   }

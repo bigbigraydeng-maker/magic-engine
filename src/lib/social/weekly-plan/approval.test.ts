@@ -10,6 +10,7 @@ import { decideWeekPlanApproval, openWeekPlanApproval, planCardFacts } from './a
 import { assembleInput } from './assemble'
 import { buildWeeklySocialPlan } from './build'
 import { mergeApproval, slotDigest } from './digest'
+import { emptyGoalInput } from './read'
 import type { WeeklySocialPlan } from './types'
 
 const CLIENT = '11111111-1111-4111-8111-111111111111'
@@ -34,7 +35,7 @@ function readyPlan(): WeeklySocialPlan {
       circuitBreaker: { state: 'unreadable', value: false },
       complaintSpike: { state: 'unreadable', value: false },
     },
-    goal: { read: 'none', title: null },
+    goal: emptyGoalInput(),
     themes: { read: 'none', items: [] },
   })
 }
@@ -57,7 +58,7 @@ describe('week plan approval', () => {
   })
 
   it('blocks confirm when the goal card could not be read, and does not stamp', async () => {
-    const plan = { ...readyPlan(), goal: { read: 'unreadable' as const, title: null } }
+    const plan = { ...readyPlan(), goal: emptyGoalInput('unreadable') }
     const digest = slotDigest(plan)
     let stamped = false
     const decide = async () => 'card'
@@ -156,7 +157,7 @@ describe('weekly plan boundaries', () => {
   it('does not read money, tokens, or publish code', () => {
     const root = process.cwd()
     const db = readFileSync(join(root, 'src/lib/social/weekly-plan/db.ts'), 'utf8')
-    expect(db).toContain(".select('title')")
+    expect(db).toContain(".select('title, fde_reasoning, intent, sub_type, awareness_subtype')")
     expect(db).toContain(".select('id, title, campaign_angle')")
     expect(db).toContain(".select('status')")
     expect(db).not.toMatch(/access_token|target_value|budget|offer/)

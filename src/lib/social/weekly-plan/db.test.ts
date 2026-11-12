@@ -18,7 +18,7 @@ const plan: WeeklySocialPlan = {
   primarySignal: 'on_time_cadence',
   counts: { story: 1, post: 1, reel: 0 },
   countSources: { story: 'client_week', post: 'client_week', reel: 'client_week', mix: 'none' },
-  goal: { read: 'none', title: null },
+  goal: { read: 'none', title: null, reasoning: null, intent: null, subType: null, awarenessSubtype: null, draftBasis: [] },
   themes: { read: 'none', labels: [] },
   items: [],
   gaps: [],

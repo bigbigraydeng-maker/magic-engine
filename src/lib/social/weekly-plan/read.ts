@@ -48,11 +48,62 @@ function finiteOrNull(raw: unknown): number | null {
   return typeof raw === 'number' && Number.isFinite(raw) && raw >= 0 ? raw : null
 }
 
-export function readGoalTitle(row: unknown, error: boolean): GoalInput {
-  if (error) return { read: 'unreadable', title: null }
-  const title = plain(record(row)?.title)
-  if (!title) return { read: 'none', title: null }
-  return { read: 'ok', title }
+export function emptyGoalInput(read: GoalInput['read'] = 'none'): GoalInput {
+  return {
+    read,
+    title: null,
+    reasoning: null,
+    intent: null,
+    subType: null,
+    awarenessSubtype: null,
+    draftBasis: [],
+  }
+}
+
+const EMPTY_GOAL: GoalInput = {
+  read: 'none',
+  title: null,
+  reasoning: null,
+  intent: null,
+  subType: null,
+  awarenessSubtype: null,
+  draftBasis: [],
+}
+
+export function readGoalCard(row: unknown, error: boolean): GoalInput {
+  if (error) {
+    return { ...EMPTY_GOAL, read: 'unreadable' }
+  }
+  const rec = record(row)
+  if (!rec) return { ...EMPTY_GOAL }
+  const title = plain(rec.title)
+  const reasoning = goalParagraph(rec.fde_reasoning)
+  const intent = goalToken(rec.intent)
+  const subType = goalToken(rec.sub_type)
+  const awarenessSubtype = goalToken(rec.awareness_subtype)
+  const hasAny = Boolean(title || reasoning || intent || subType || awarenessSubtype)
+  if (!hasAny) return { ...EMPTY_GOAL }
+  const draftBasis = goalDraftBasis({ title, reasoning, intent, subType, awarenessSubtype })
+  return { read: 'ok', title, reasoning, intent, subType, awarenessSubtype, draftBasis }
+}
+
+/** @deprecated use readGoalCard */
+export const readGoalTitle = readGoalCard
+
+export function goalDraftBasis(fields: {
+  title: string | null
+  reasoning: string | null
+  intent: string | null
+  subType: string | null
+  awarenessSubtype: string | null
+}): string[] {
+  const lines: string[] = []
+  if (fields.title) lines.push(`目标标题：${fields.title}`)
+  if (fields.intent) lines.push(`目标意图：${fields.intent}`)
+  if (fields.subType) lines.push(`目标类型：${fields.subType}`)
+  if (fields.awarenessSubtype) lines.push(`曝光子类型：${fields.awarenessSubtype}`)
+  if (fields.reasoning) lines.push(`战略说明：${fields.reasoning}`)
+  return lines
 }
 
 export function readThemes(rows: unknown, error: boolean): ThemeInput {
@@ -110,6 +161,18 @@ function plain(raw: unknown): string | null {
   if (typeof raw !== 'string') return null
   const text = raw.replace(/[{}[\]`]/g, ' ').replace(/\s+/g, ' ').trim()
   return text ? text.slice(0, 80) : null
+}
+
+function goalParagraph(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const text = raw.replace(/[{}[\]`]/g, ' ').replace(/\s+/g, ' ').trim()
+  return text ? text.slice(0, 360) : null
+}
+
+function goalToken(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const text = raw.replace(/[^a-z0-9_\-]/gi, ' ').replace(/\s+/g, ' ').trim().toLowerCase()
+  return text ? text.slice(0, 40) : null
 }
 
 function record(raw: unknown): Record<string, unknown> | null {

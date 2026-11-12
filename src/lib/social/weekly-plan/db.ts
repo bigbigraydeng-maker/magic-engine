@@ -1,6 +1,6 @@
 /**
  * Read and store a weekly slot plan on the existing social_plans table.
- * Selects titles and counts only. Tokens, prices, and goal numbers stay out.
+ * Selects goal text and labels, plus titles and counts. Tokens, prices, and goal numbers stay out.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -129,7 +129,7 @@ async function readPillarRow(db: SupabaseClient, clientId: string) {
 async function readGoalRow(db: SupabaseClient, clientId: string) {
   const { data, error } = await db
     .from('goals')
-    .select('title')
+    .select('title, fde_reasoning, intent, sub_type, awareness_subtype')
     .eq('client_id', clientId)
     .eq('status', 'active')
     .order('created_at', { ascending: false })
