@@ -1,6 +1,8 @@
 /**
  * Tuesday supervision issues the same budget-step hold other cards use.
- * Issuing does not write a budget. Confirm goes through submitBudgetCard.
+ * The card lasts until 23:59 Pacific/Auckland on the issue day, like other
+ * daily auto-job cards. Issuing does not write a budget.
+ * Confirm goes through submitBudgetCard.
  */
 
 import { createHash } from 'node:crypto'
@@ -130,6 +132,7 @@ async function publish(
       clicker: AGENT,
       facts,
       now: now ?? deps.now(),
+      lifetime: 'nz_day',
     })
     await retireStale(deps.supabase, proposal.clientId, subjectKey, card.fingerprint)
     await insertHold(deps.supabase, proposal.clientId, holdOf(order, live, lock, key, card.runId, card.fingerprint, subjectKey))

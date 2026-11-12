@@ -292,7 +292,7 @@ describe('周二加减预算确认后走原来的改预算卡', () => {
     expect(f.tables.action_runs).toHaveLength(0)
   })
 
-  it('卡面上没有账户号，也不是每天自动任务那种过期', async () => {
+  it('卡面上没有账户号，过期到当天新西兰 23:59', async () => {
     const secret = '123456789012345'
     const box = { current: live({ name: secret }) }
     const wired = ports(box)
@@ -303,9 +303,41 @@ describe('周二加减预算确认后走原来的改预算卡', () => {
     expect(face).not.toContain(secret)
     expect(face).not.toContain('act_')
     expect(face.startsWith('把广告组 ')).toBe(true)
-    const stored = JSON.stringify(f.tables.action_runs)
-    expect(stored).toContain('urgent_30m')
-    expect(stored).not.toContain('nz_day')
+    expect(shown.expiresLabel).toContain('23:59')
+    expect(cardLifetime(f, row.runId ?? '')).toBe('nz_day')
+  })
+
+  it('过了 30 分钟、当天 23:59 之前确认仍会执行', async () => {
+    const box = { current: live() }
+    const wired = ports(box)
+    const f = fixture(50000, 'decrease')
+    const cut = proposal({ direction: 'decrease', afterCents: 2400 })
+    const [row] = await issueTuesdayBudgetTunes(f.kernel, [cut], wired)
+    const shown = await shownCard(f, row.runId ?? '')
+    const done = await submitBudgetCard({
+      ...submitOf(f, shown, box, wired),
+      now: new Date('2026-11-02T00:31:00.000Z'),
+    })
+    expect(done.status).toBe('executed')
+    expect(wired.calls).toHaveLength(1)
+  })
+
+  it('过了当天新西兰 23:59 再确认，不改预算', async () => {
+    const box = { current: live() }
+    const wired = ports(box)
+    const f = fixture(50000, 'decrease')
+    const cut = proposal({ direction: 'decrease', afterCents: 2400 })
+    const [row] = await issueTuesdayBudgetTunes(f.kernel, [cut], wired)
+    const shown = await shownCard(f, row.runId ?? '')
+    const done = await submitBudgetCard({
+      ...submitOf(f, shown, box, wired),
+      now: new Date('2026-11-02T11:00:00.000Z'),
+    })
+    expect(done.wroteMeta).toBe(false)
+    expect(done.status).toBe('blocked')
+    expect(wired.calls).toEqual([])
+    const later = await listConfirmationCards(f.kernel, CLIENT_A, OPC, new Date('2026-11-02T11:00:00.000Z'))
+    expect(later.find((card) => card.runId === shown.runId)?.status).toBe('expired')
   })
 
   it('这周没有现成金额时不出卡，也不去准备执行', async () => {
@@ -340,6 +372,12 @@ describe('周二加减预算确认后走原来的改预算卡', () => {
     const writer = readFileSync(join(root, 'src/lib/action-submission/ads-budget-card.ts'), 'utf8')
     expect(writer).toContain('requireHumanApproval: true')
     expect(writer).toContain('call.raising')
+    const issue = readFileSync(join(root, 'src/lib/confirmation-card/issue.ts'), 'utf8')
+    expect(issue).toContain("args.lifetime ?? 'urgent_30m'")
+    const budgetFlow = readFileSync(join(root, 'src/lib/ads-budget-card/flow.ts'), 'utf8')
+    expect(budgetFlow).not.toContain("lifetime: 'nz_day'")
+    const tuesday = readFileSync(join(root, 'src/lib/diagnostic/tuesday-budget-execute.ts'), 'utf8')
+    expect(tuesday).toContain("lifetime: 'nz_day'")
   })
 })
 
@@ -361,6 +399,12 @@ function submitOf(
     locks: wired.locks,
     path: wired.path,
   }
+}
+
+function cardLifetime(f: ReturnType<typeof fixture>, runId: string): string | null {
+  const run = (f.tables.action_runs as Array<{ id?: string; input?: { lifetime?: string } }>)
+    .find((row) => row.id === runId)
+  return run?.input?.lifetime ?? null
 }
 
 async function shownCard(f: ReturnType<typeof fixture>, runId: string) {
