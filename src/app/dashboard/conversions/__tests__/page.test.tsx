@@ -123,6 +123,58 @@ describe('🔴 不发送必须给原因', () => {
   })
 })
 
+describe('邮件链接里的客户编号', () => {
+  it('链接折行多了换行，仍然按客户读列表，不报必须是 uuid', async () => {
+    mountWith([outcome({ customer_first: 'maree' })])
+    window.history.pushState({}, '', `/dashboard/conversions?client=${CLIENT}%0A`)
+    cleanup()
+    render(<ConversionsPage />)
+    expect(await screen.findByText('Maree')).toBeTruthy()
+    expect(screen.queryByText(/读取出错/)).toBeNull()
+    const listed = fetchMock.mock.calls.map((c) => String(c[0])).filter((u) => u.includes('/outcomes'))
+    expect(listed.length).toBeGreaterThan(0)
+    expect(listed.every((u) => u.includes(`client_id=${CLIENT}`))).toBe(true)
+  })
+
+  it('client_id 这个参数名也能打开', async () => {
+    fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ outcomes: [outcome()], count: 1 }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    window.history.pushState({}, '', `/dashboard/conversions?client_id=${CLIENT}`)
+    render(<ConversionsPage />)
+    expect(await screen.findByText(/收到定金/)).toBeTruthy()
+    expect(screen.queryByText(/读取出错/)).toBeNull()
+  })
+
+  it('不是客户 ID 时在页面上说明，不去请求接口', async () => {
+    fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    window.history.pushState({}, '', '/dashboard/conversions?client=not-a-uuid')
+    render(<ConversionsPage />)
+    expect(await screen.findByText(/不是有效的客户 ID/)).toBeTruthy()
+    expect(screen.queryByText(/读取出错/)).toBeNull()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('不发送原因里有超过时限', () => {
+  it('菜单里有这一项', async () => {
+    mountWith([outcome()])
+    await screen.findByText(/收到定金/)
+    fireEvent.click(screen.getByText('✕ 不发送'))
+    expect(await screen.findByRole('option', { name: '超过时限' })).toBeTruthy()
+  })
+
+  it('已经过窗口的，一点不发送就选上超过时限', async () => {
+    mountWith([outcome({ occurred_at: new Date(Date.now() - 35 * 86_400_000).toISOString() })])
+    await screen.findByText(/已过去 35 天/)
+    fireEvent.click(screen.getByText('✕ 不发送'))
+    expect(await screen.findByRole('combobox')).toHaveValue('past_window')
+  })
+})
+
 describe('🔴 超过 7 天的不许发（平台不收，点了白点）', () => {
   it('发送按钮变灰且点不动', async () => {
     mountWith([outcome({ occurred_at: new Date(Date.now() - 35 * 86_400_000).toISOString() })])

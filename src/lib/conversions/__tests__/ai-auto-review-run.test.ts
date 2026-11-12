@@ -2,7 +2,8 @@
  * `runAiAutoReviewForClient()` 测试。
  *
  * 钉住设计里最重要的几条契约：
- *   · 客户开关关着 → 什么都不做（PM 随时能按的独立停止开关，魏征复审 BLOCKER）
+ *   · 客户开关关着 → 不判断、不发送（PM 随时能按的独立停止开关，魏征复审 BLOCKER）。
+ *     精确超过 7 天的仍标不发送（2026-09-26），这一步不发给广告平台。
  *   · 熔断命中 → 整批不处理，客户开关被自动关掉 + 写审计
  *   · 明显过期的记录不浪费一次 AI 调用，直接判过期
  *   · approve 之后同一轮内立即调用发送（不拆两步）
@@ -40,6 +41,7 @@ type Row = Record<string, unknown>
 
 let clients: Row[]
 let outcomes: Row[]
+let contacts: Row[]
 let audits: Row[]
 
 function fakeDb(table: string) {
@@ -48,7 +50,8 @@ function fakeDb(table: string) {
   let wantsAffectedSelect = false
   let limitN: number | null = null
 
-  const src = (): Row[] => (table === 'clients' ? clients : table === 'me_sale_outcomes' ? outcomes : [])
+  const src = (): Row[] =>
+    table === 'clients' ? clients : table === 'me_sale_outcomes' ? outcomes : table === 'contacts' ? contacts : []
 
   const rowsOf = (): Row[] =>
     src().filter((r) =>
@@ -60,6 +63,10 @@ function fakeDb(table: string) {
           if (typeof r[col] === 'number') return (r[col] as number) < (val as number)
           // 时间列按真实时刻比，不按字符串比（'…00Z' 和 '…00.000Z' 是同一刻）。
           if (typeof r[col] === 'string' && typeof val === 'string') return Date.parse(r[col] as string) < Date.parse(val)
+          return false
+        }
+        if (op === 'gte') {
+          if (typeof r[col] === 'string' && typeof val === 'string') return Date.parse(r[col] as string) >= Date.parse(val)
           return false
         }
         return true
@@ -78,6 +85,10 @@ function fakeDb(table: string) {
     },
     lt: (col: string, val: unknown) => {
       filters.push(['lt', col, val])
+      return builder
+    },
+    gte: (col: string, val: unknown) => {
+      filters.push(['gte', col, val])
       return builder
     },
     in: (col: string, vals: unknown[]) => {
@@ -151,6 +162,7 @@ const NOW = new Date('2026-09-15T00:00:00Z')
 beforeEach(() => {
   clients = [{ id: 'c1', ai_auto_review_enabled: true }]
   outcomes = []
+  contacts = []
   audits = []
   fromFn.mockImplementation(fakeDb)
   vi.mocked(checkCircuitBreaker).mockResolvedValue({ tripped: false })
@@ -170,6 +182,64 @@ describe('runAiAutoReviewForClient', () => {
     const summary = await run()
     expect(summary).toMatchObject({ ran: false, reason: 'disabled' })
     expect(judgeOutcome).not.toHaveBeenCalled()
+    expect((outcomes[0] as { review_status: string }).review_status).toBe('pending_review')
+  })
+
+  it('自动审核关着、已报价开关开着：窗口内的已报价咨询走发送，不交给模型', async () => {
+    clients = [{ id: 'c1', ai_auto_review_enabled: false, quoted_lead_auto_send_enabled: true }]
+    outcomes.push(
+      pendingRow({
+        id: 'quoted-lead',
+        outcome_kind: 'lead',
+        contact_id: 'person-1',
+        occurred_at: new Date(NOW.getTime() - 2 * DAY_MS).toISOString(),
+      }),
+      pendingRow({ id: 'not-quoted', outcome_kind: 'lead', contact_id: 'person-2' }),
+      pendingRow({ id: 'deal', outcome_kind: 'purchase', contact_id: 'person-1' }),
+    )
+    contacts.push(
+      { id: 'person-1', client_id: 'c1', stage: 'quoted' },
+      { id: 'person-2', client_id: 'c1', stage: 'contacted' },
+    )
+    const summary = await run()
+    expect(summary).toMatchObject({ ran: false, reason: 'disabled' })
+    expect(judgeOutcome).not.toHaveBeenCalled()
+    expect(sendApprovedOutcome).toHaveBeenCalledTimes(1)
+    expect(sendApprovedOutcome).toHaveBeenCalledWith('quoted-lead', expect.anything())
+    expect(outcomes.find((r) => r.id === 'quoted-lead')).toMatchObject({
+      review_status: 'approved',
+      reviewed_by: 'quoted-lead-auto-send@system',
+    })
+    expect(outcomes.find((r) => r.id === 'not-quoted')).toMatchObject({ review_status: 'pending_review' })
+    expect(outcomes.find((r) => r.id === 'deal')).toMatchObject({ review_status: 'pending_review' })
+    expect(audits).toContainEqual(
+      expect.objectContaining({
+        outcome_id: 'quoted-lead',
+        action: 'quoted_lead_auto_approved',
+        detail: expect.objectContaining({ rule: 'quoted_stage_within_window', stage: 'quoted' }),
+      }),
+    )
+  })
+
+  it('开关关着也清掉精确超过 7 天的，还在窗口里的不动、不问模型', async () => {
+    clients = [{ id: 'c1', ai_auto_review_enabled: false }]
+    outcomes.push(pendingRow({ id: 'old', occurred_at: new Date(NOW.getTime() - 8 * DAY_MS).toISOString() }))
+    outcomes.push(pendingRow({ id: 'fresh' }))
+    const summary = await run()
+    expect(summary).toMatchObject({ ran: false, reason: 'disabled' })
+    expect(judgeOutcome).not.toHaveBeenCalled()
+    expect(outcomes.find((r) => r.id === 'old')).toMatchObject({
+      review_status: 'rejected',
+      reject_reason: 'past_window',
+    })
+    expect(outcomes.find((r) => r.id === 'fresh')).toMatchObject({ review_status: 'pending_review' })
+    expect(audits).toContainEqual(
+      expect.objectContaining({
+        outcome_id: 'old',
+        action: 'ai_auto_rejected',
+        detail: expect.objectContaining({ reason: 'expired', rule: 'past_event_window' }),
+      }),
+    )
   })
 
   it('熔断命中 → 整批不处理，客户开关被自动关掉并写审计', async () => {
@@ -188,6 +258,7 @@ describe('runAiAutoReviewForClient', () => {
     expect(judgeOutcome).not.toHaveBeenCalled()
     expect(summary).toMatchObject({ ran: true, expired: 1 })
     expect((outcomes[0] as { review_status: string }).review_status).toBe('rejected')
+    expect((outcomes[0] as { reject_reason: string }).reject_reason).toBe('past_window')
   })
 
   describe('🔴 第 7 天边界：来不及发的一律不问 AI（2026-09-19 CTS 被 uncertain_backlog 熔断的回归测试）', () => {
@@ -276,11 +347,14 @@ describe('runAiAutoReviewForClient', () => {
       expect(judgeOutcome).toHaveBeenCalledTimes(1)
     })
 
-    it('客户开关关着 → 过期行也不动（开关是 PM 的停止按钮，清理同样受它管）', async () => {
+    it('客户开关关着 → 不再交给模型，但精确超过 7 天的仍标不发送（2026-09-26）', async () => {
+      // 开关停的是「自动判断并发送」。过了平台窗口的行发不出去，关着开关也不能留在待办里。
       clients = [{ id: 'c1', ai_auto_review_enabled: false }]
       outcomes.push(pendingRow({ occurred_at: ago(8) }))
-      await run()
-      expect(outcomes[0]).toMatchObject({ review_status: 'pending_review' })
+      const summary = await run()
+      expect(summary).toMatchObject({ ran: false, reason: 'disabled' })
+      expect(judgeOutcome).not.toHaveBeenCalled()
+      expect(outcomes[0]).toMatchObject({ review_status: 'rejected', reject_reason: 'past_window' })
     })
   })
 
