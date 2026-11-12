@@ -5,6 +5,7 @@ import {
   fakeBudgetAction,
   fakePauseAction,
   parsePrescriptionActionList,
+  pauseCardOrderFromAction,
 } from '../prescription-action-list'
 import type { PrescriptionContent } from '@/types/diagnostic'
 
@@ -52,18 +53,20 @@ describe('parsePrescriptionActionList', () => {
 })
 
 describe('attachPrescriptionActionList', () => {
-  it('mirrors pause into legacy pause_ad_set when absent', () => {
+  it('keeps a pause row on the new pause-card order and does not write pause_ad_set', () => {
     const pause = fakePauseAction()
     const attached = attachPrescriptionActionList({
       ...baseContent(),
       action_list: [pause],
     })
-    expect(attached.pause_ad_set).toMatchObject({
-      ad_account_id: 'act_FAKE_A',
-      adset_id: 'adset_FAKE_A',
-      direction: 'pause',
-      basis: pause.reason,
-    })
+    expect(attached.action_list?.[0]?.type).toBe(ADS_ACTION_TYPE.PAUSE_AD_SET)
+    expect('pause_ad_set' in attached).toBe(false)
+    const order = pauseCardOrderFromAction('rx-fake', 1, pause)
+    expect(order.ok).toBe(true)
+    if (!order.ok) return
+    expect(order.order.direction).toBe('pause')
+    expect(order.order.adsetId).toBe('adset_FAKE_A')
+    expect(order.order.basis).toBe(pause.reason)
   })
 
   it('removes invalid action_list instead of persisting it', () => {

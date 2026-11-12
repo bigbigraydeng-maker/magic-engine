@@ -7,7 +7,7 @@ import { issueOnePauseCard } from '@/lib/ads-pause-card/issue'
 import type { PauseAdSetOrder } from '@/lib/ads-pause-card/order'
 import { ADS_ACTION_TYPE, ADS_METRIC_KEY } from '@/lib/flywheel/vocabulary'
 import { parseLedgerFile } from '@/lib/ledger/parse'
-import { fakeBudgetAction, fakePauseAction } from '../prescription-action-list'
+import { fakeBudgetAction, fakePauseAction, pauseCardOrderFromAction } from '../prescription-action-list'
 import {
   actionCardKey,
   issuePlannedCards,
@@ -80,7 +80,11 @@ describe('prescription action cards', () => {
       `${PRESCRIPTION}:0:${ADS_ACTION_TYPE.PAUSE_AD_SET}`,
       `${PRESCRIPTION}:1:${ADS_ACTION_TYPE.ADJUST_ADSET_DAILY_BUDGET}`,
     ])
+    const pauseOrder = pauseCardOrderFromAction(PRESCRIPTION, VERSION, fakePauseAction())
+    expect(pauseOrder.ok).toBe(true)
+    if (!pauseOrder.ok) return
     expect(used.pause).toHaveBeenCalledTimes(1)
+    expect(used.pause).toHaveBeenCalledWith(pauseOrder.order)
     expect(used.budget).toHaveBeenCalledTimes(1)
     expect(report.items.every((item) => item.wroteMeta === false)).toBe(true)
   })
@@ -163,7 +167,9 @@ describe('prescription action cards', () => {
 
   it('does not execute, and asks the existing issuers for a day card', () => {
     const src = readFileSync('src/lib/ads/prescription-approve-cards.ts', 'utf8')
+    const planner = readFileSync('src/lib/ads/prescription-action-cards.ts', 'utf8')
     expect(src).toContain('issueOnePauseCard')
+    expect(planner).toContain('pauseCardOrderFromAction')
     expect(src).toContain('issueBudgetCard')
     expect(src).toContain('APPROVE_CARD_LIFETIME')
     expect(src).not.toMatch(/submitBudgetCard|confirmPauseCard|kernelBudgetPath|writePauseCardSwitch/)

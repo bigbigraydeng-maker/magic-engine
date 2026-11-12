@@ -473,6 +473,6 @@ export interface PrescriptionContent {
    * 同意处方时按此列表出确认卡，不直接改广告。校验见 src/lib/ads/prescription-action-list.ts。
    */
   action_list?: PrescriptionActionListItem[]
-  /** 旧版暂停块；新数据可由 action_list 镜像。手工暂停卡入口仍读本字段。 */
+  /** 旧版暂停块。action_list 的暂停行不再写入这里。手工暂停卡入口仍读本字段；同意处方出暂停卡走 pauseCardOrderFromAction。 */
   pause_ad_set?: unknown
 }

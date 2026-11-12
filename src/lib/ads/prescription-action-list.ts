@@ -8,6 +8,7 @@ import { z } from 'zod'
 import { ADS_ACTION_TYPE } from '@/lib/flywheel/vocabulary'
 import { ADS_METRIC_KEY } from '@/lib/flywheel/vocabulary'
 import { isAdsMetricPulled } from '@/lib/flywheel/metric-registry'
+import { readPauseOrder, type PauseAdSetOrder } from '@/lib/ads-pause-card/order'
 
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/
 const PLACEHOLDER = /^(待定|待补充|待填写|未知|暂无|无|默认|tbd|n\/a|na|todo|placeholder|—|-)$/i
@@ -116,11 +117,19 @@ export function finalizePrescriptionActionList<T extends { action_list?: unknown
     delete (next as { action_list?: unknown }).action_list
     return { content: next, action_list_dropped_reason: parsed.dropped_reason }
   }
-  const pause = parsed.action_list.find((a) => a.type === ADS_ACTION_TYPE.PAUSE_AD_SET)
-  if (pause && next.pause_ad_set === undefined) {
-    next.pause_ad_set = legacyPauseBlob(pause)
-  }
   return { content: next, action_list_dropped_reason: parsed.dropped_reason }
+}
+
+/**
+ * Pause rows stay on action_list. Approval passes this order to issueOnePauseCard.
+ * The blob is only an argument to the pause-card reader; it is not stored.
+ */
+export function pauseCardOrderFromAction(
+  prescriptionId: string,
+  version: number,
+  item: PrescriptionPauseAction,
+): { ok: true; order: PauseAdSetOrder } | { ok: false; reason: string | null } {
+  return readPauseOrder(prescriptionId, version, { pause_ad_set: pauseCardBlob(item) })
 }
 
 /** Normalize action_list on prescription content. Approval reads the saved list later. */
@@ -130,7 +139,7 @@ export function attachPrescriptionActionList<T extends { action_list?: unknown; 
   return finalizePrescriptionActionList(content).content
 }
 
-function legacyPauseBlob(pause: PrescriptionPauseAction): Record<string, unknown> {
+function pauseCardBlob(pause: PrescriptionPauseAction): Record<string, unknown> {
   return {
     ad_account_id: pause.target.ad_account_id,
     campaign_id: pause.target.campaign_id,
