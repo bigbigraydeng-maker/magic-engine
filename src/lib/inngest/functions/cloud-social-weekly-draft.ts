@@ -23,6 +23,11 @@ import { REMOTION_REVIEW_TIMEOUT_MS, runCheckWithTimeout, stampWorkOrderOutput }
 import { readSocialAgentSettings } from '@/lib/social/recipe/tier-defaults'
 import { MALIANG_BACKFILL_MAX_PER_RUN, maliangWeeklyCapUsd, overlayReviews, pickBackfillTargets, type BackfillPersisted, type BackfillTarget, type MaliangBackfillReceipt } from '@/lib/social/weekly-loop/maliang-backfill'
 import { runImagePostStep, type ImagePostStepReceipt } from '@/lib/social/image-post-step'
+import {
+  ensureWeekPlanApprovalAfterDraft,
+  shouldOpenWeekPlanApprovalAfterDraft,
+  type WeekPlanApprovalAfterDraftReceipt,
+} from '@/lib/social/weekly-plan/after-draft'
 
 export const SOCIAL_WEEKLY_DRAFT_FUNCTION_ID = `${CLOUD_FN_PREFIX}social-weekly-draft`
 export const SOCIAL_WEEKLY_DRAFT_CRON = 'TZ=Pacific/Auckland 30 6 * * *'
@@ -603,6 +608,7 @@ async function handleDue(
 
   let receipt: ClientRunReceipt
   let imagePostReceipt: ImagePostStepReceipt | null = null
+  let weekPlanApprovalReceipt: WeekPlanApprovalAfterDraftReceipt | null = null
   if (!ctx.clientId) {
     receipt = await step.run('invalid-event', async () => invalidEventReceipt(ctx))
   } else {
@@ -677,6 +683,27 @@ async function handleDue(
           return { attempted: 0, drafted: 0, planIds: [], skipped: null, error: `image_step_failed: ${message}`.slice(0, 300) }
         }
       })
+
+      if (
+        shouldOpenWeekPlanApprovalAfterDraft({
+          mode: receipt.mode,
+          status: receipt.status,
+          failureCount: receipt.failures.length,
+        })
+      ) {
+        weekPlanApprovalReceipt = await step.run(
+          'open-week-plan-approval',
+          async (): Promise<WeekPlanApprovalAfterDraftReceipt> => {
+            try {
+              return await ensureWeekPlanApprovalAfterDraft(supabaseAdmin, ctx.clientId, deps.now())
+            } catch (e) {
+              const message = errorMessage(e, 300)
+              console.error('[weekly-plan] after-draft: unexpected failure:', message)
+              return { status: 'error', reason: message }
+            }
+          },
+        )
+      }
     }
   }
 
@@ -690,7 +717,7 @@ async function handleDue(
       processed,
       completed,
       failed,
-      summary: { ...receipt, imagePost: imagePostReceipt },
+      summary: { ...receipt, imagePost: imagePostReceipt, weekPlanApproval: weekPlanApprovalReceipt },
       error: failed > 0 ? receipt.failures.join('; ').slice(0, 500) : undefined,
     })
     return null
