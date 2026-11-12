@@ -12,9 +12,13 @@ import type { ReadState, WeeklySocialPlan } from './types'
 
 const WHAT = '同意这一周的社媒方案，Story、图文和 Reel 一起批。这次不发布。'
 
+export function weekPlanSubject(clientId: string, weekStart: string): string {
+  return `social:week-plan:${clientId.toLowerCase()}:${weekStart}`
+}
+
 export function planCardFacts(plan: WeeklySocialPlan, clientId: string, digest: string): CardFacts {
   return {
-    subjectKey: `social:week-plan:${clientId.toLowerCase()}:${plan.weekStart}`,
+    subjectKey: weekPlanSubject(clientId, plan.weekStart),
     what: WHAT,
     account: 'Facebook',
     amount: '不涉及广告花费',
