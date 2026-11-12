@@ -1,0 +1,17 @@
+{
+  "files": [
+    {
+      "path": "./Annual-Brochure-2027.pdf",
+      "title": "Annual brochure 2027",
+      "category": "brochure",
+      "visibility": "client",
+      "versionLabel": "v1",
+      "description": "Full brochure for the year."
+    },
+    {
+      "path": "/absolute/path/to/Product-Sheet.pdf",
+      "category": "sheet",
+      "visibility": "internal"
+    }
+  ]
+}

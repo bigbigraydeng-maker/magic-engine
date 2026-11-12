@@ -102,5 +102,17 @@ BEGIN
   RAISE NOTICE '✅ 不变量4：无 anon/authenticated 可执行的 SECURITY DEFINER 函数';
 END $$;
 
+-- ── 不变量 5：资料库的存文件桶存在，并且必须是私有的 ──────────────────────
+-- me-client-documents 里放的是客户资料（合同、价格表等）。桶一旦公开，任何拿到网址的人都能读。
+-- 迁移里已经写了「冲突时强制改回私有」；这里在重放完之后独立再读回一次（桶在、且不公开），
+-- 防止以后某条迁移又把它改成公开，或者这条迁移的建桶语句被改丢。
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM storage.buckets WHERE id = 'me-client-documents' AND public IS FALSE) THEN
+    RAISE EXCEPTION E'[不变量5] 存文件桶 me-client-documents 不存在，或者被设成了公开';
+  END IF;
+  RAISE NOTICE '✅ 不变量5：资料库存文件桶存在且不公开';
+END $$;
+
 \echo ''
 \echo '✅ 全部数据库安全不变量通过'
