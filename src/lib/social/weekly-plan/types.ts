@@ -37,6 +37,13 @@ export interface WeeklyQuotaInput {
 export interface GoalInput {
   read: ReadState
   title: string | null
+  /** goals.fde_reasoning — 战略说明，不当条数也不当报价依据 */
+  reasoning: string | null
+  intent: string | null
+  subType: string | null
+  awarenessSubtype: string | null
+  /** 给下游出稿用的纯文本行，只来自上面已有字段，缺了就不写那一行 */
+  draftBasis: string[]
 }
 
 export interface ThemeInput {

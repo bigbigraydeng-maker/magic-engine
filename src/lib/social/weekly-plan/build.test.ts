@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { buildWeeklySocialPlan } from './build'
-import { authFromStatuses, readGoalTitle, readThemes, readWeeklyQuota } from './read'
+import { authFromStatuses, emptyGoalInput, readGoalCard, readThemes, readWeeklyQuota } from './read'
 import { resolveStage } from './stage-resolve'
 import type { BuildInput, FlagSignal, StageSignalsInput } from './types'
 
@@ -36,7 +36,7 @@ function input(partial: Partial<BuildInput> = {}): BuildInput {
     pillarNames: {},
     lockMix: false,
     stage: stage(),
-    goal: { read: 'none', title: null },
+    goal: emptyGoalInput(),
     themes: { read: 'none', items: [] },
     ...partial,
   }
@@ -60,7 +60,7 @@ describe('buildWeeklySocialPlan', () => {
       clientConfig: { content_pillars: CLIENT_MIX },
       weeklyQuota: { storyPerWeek: 18, postPerWeek: 4, reelPerWeek: 3 },
       themes: { read: 'ok', items: [{ id: 'theme-1', label: '中国团' }] },
-      goal: { read: 'ok', title: '这个月把中国团讲清楚' },
+      goal: readGoalCard({ title: '这个月把中国团讲清楚' }, false),
     }))
     expect(plan.status).toBe('ready')
     expect(plan.counts).toEqual({ story: 18, post: 4, reel: 3 })
@@ -139,13 +139,35 @@ describe('stage and readers', () => {
     expect(readWeeklyQuota({ social_week: { story_per_week: 18, post_per_week: 4, reel_per_week: 3 } }).quota)
       .toEqual({ storyPerWeek: 18, postPerWeek: 4, reelPerWeek: 3 })
     expect(readWeeklyQuota({ social_week: { story_per_week: 1.5 } }).gaps[0]).toContain('没有采用')
-    expect(readGoalTitle(null, false)).toEqual({ read: 'none', title: null })
-    expect(readGoalTitle(null, true).read).toBe('unreadable')
+    expect(readGoalCard(null, false)).toEqual(emptyGoalInput())
+    expect(readGoalCard(null, true).read).toBe('unreadable')
     expect(readThemes([{ id: 't1', title: '线路 A' }], false).items).toEqual([{ id: 't1', label: '线路 A' }])
     expect(authFromStatuses([])).toEqual({
       auth: { state: 'ok', value: false },
       authLost: { state: 'ok', value: false },
     })
     expect(authFromStatuses(['expired']).authLost.value).toBe(true)
+  })
+
+  it('reads a full goal card, title-only goal, and no goal without inventing text', () => {
+    const full = readGoalCard({
+      title: 'Q4 中国团',
+      intent: 'sales',
+      sub_type: 'launch',
+      awareness_subtype: null,
+      fde_reasoning: '这周对外强调成团节奏，不讲底价。',
+    }, false)
+    expect(full.read).toBe('ok')
+    expect(full.draftBasis).toEqual([
+      '目标标题：Q4 中国团',
+      '目标意图：sales',
+      '目标类型：launch',
+      '战略说明：这周对外强调成团节奏，不讲底价。',
+    ])
+    const titleOnly = readGoalCard({ title: '稳住咨询量' }, false)
+    expect(titleOnly.draftBasis).toEqual(['目标标题：稳住咨询量'])
+    expect(readGoalCard(null, false)).toEqual(emptyGoalInput())
+    const plan = buildWeeklySocialPlan(input({ goal: full }))
+    expect(plan.goal.draftBasis).toEqual(full.draftBasis)
   })
 })
