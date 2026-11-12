@@ -34,6 +34,12 @@ export type ReviewWindowKind =
 const WINDOW_MIN = 1
 const WINDOW_MAX = 28
 
+/**
+ * Campaign pause cards often omit observationDays. This is not a one-day
+ * window: `observationWindowForKind` replaces it with `campaign_pause_window_days`.
+ */
+export const CAMPAIGN_PAUSE_WINDOW_UNSET = 0
+
 export type ReviewDirection = 'up' | 'down' | 'pause'
 export type PairMark = 'clear' | 'overlap'
 
@@ -313,9 +319,14 @@ function directionFromLegacy(actionType: string | null, payload: Record<string, 
 function windowFromLegacy(actionType: string | null, payload: Record<string, unknown>): number | null {
   const order = record(payload.order)
   if (actionType === PAUSE_CARD_ACTION) return windowOf(order?.observationDays)
-  if (actionType === MONEY_CARD_ACTION || actionType === CAMPAIGN_PAUSE_ACTION) {
+  if (actionType === MONEY_CARD_ACTION) {
     const fromCard = windowOf(payload.observationWindowDays) ?? windowOf(payload.observationDays)
     return fromCard ?? 1
+  }
+  if (actionType === CAMPAIGN_PAUSE_ACTION) {
+    return windowOf(payload.observationWindowDays)
+      ?? windowOf(payload.observationDays)
+      ?? CAMPAIGN_PAUSE_WINDOW_UNSET
   }
   return agreeWindow(windowOf(payload.observationWindowDays), windowOf(order?.observationWindowDays))
 }

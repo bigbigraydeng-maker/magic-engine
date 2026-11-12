@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   BUDGET_CARD_ACTION,
   CAMPAIGN_PAUSE_ACTION,
+  CAMPAIGN_PAUSE_WINDOW_UNSET,
   MONEY_CARD_ACTION,
   PAUSE_CARD_ACTION,
   observationDue,
@@ -88,7 +89,40 @@ describe('executed card review', () => {
     expect(reviewWindowKindFor(MONEY_CARD_ACTION, money.payload as Record<string, unknown>)).toBe('money_budget')
     expect(reviewExperienceKindLabel(MONEY_CARD_ACTION, money.payload as Record<string, unknown>)).toBe('成绩单减预算')
     expect(readExecutedReview(money)).toMatchObject({ kind: 'ready', review: { direction: 'down', objectId: 'set-b' } })
-    expect(readExecutedReview(camp)).toMatchObject({ kind: 'ready', review: { direction: 'pause', objectId: 'camp-a' } })
+    expect(readExecutedReview(camp)).toMatchObject({
+      kind: 'ready',
+      review: { direction: 'pause', objectId: 'camp-a', observationWindowDays: CAMPAIGN_PAUSE_WINDOW_UNSET },
+    })
+  })
+
+  it('keeps a written campaign observation window and leaves a blank one unset', () => {
+    const blank = {
+      id: 'camp-blank',
+      client_id: 'client-1',
+      action_type: CAMPAIGN_PAUSE_ACTION,
+      expected_metric: 'ads.account.cost_per_lead',
+      executed_at: '2026-01-01T00:00:00.000Z',
+      payload: {
+        status: 'executed',
+        kind: 'pause',
+        wrote: true,
+        campaign_id: 'camp-a',
+        cardRunId: 'card-camp-blank',
+      },
+    } satisfies ReviewAction
+    const written = {
+      ...blank,
+      id: 'camp-written',
+      payload: { ...blank.payload, observationDays: 4 },
+    } satisfies ReviewAction
+    expect(readExecutedReview(blank)).toMatchObject({
+      kind: 'ready',
+      review: { observationWindowDays: CAMPAIGN_PAUSE_WINDOW_UNSET },
+    })
+    expect(readExecutedReview(written)).toMatchObject({
+      kind: 'ready',
+      review: { observationWindowDays: 4 },
+    })
   })
 
   it('reads budget and pause into one shape', () => {

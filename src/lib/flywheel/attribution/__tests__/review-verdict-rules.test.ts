@@ -7,7 +7,7 @@ import {
   scoreReviewVerdict,
   tierLabelZh,
 } from '../review-verdict-rules'
-import { PAUSE_CARD_ACTION } from '../executed-review'
+import { CAMPAIGN_PAUSE_WINDOW_UNSET, PAUSE_CARD_ACTION } from '../executed-review'
 import { BUDGET_CARD_ACTION } from '../executed-review'
 
 describe('review verdict rules', () => {
@@ -90,6 +90,15 @@ describe('review verdict rules', () => {
     expect(observationWindowForKind('money_pause', rules, 0)).toBe(7)
     expect(observationWindowForKind('campaign_pause', rules, 4)).toBe(4)
     expect(observationWindowForKind('campaign_pause', rules, 40)).toBe(7)
+  })
+
+  it('uses 7 days when a campaign pause card omits its window, the card when written, and the config when set', () => {
+    const rules = DEFAULT_REVIEW_VERDICT_RULES
+    expect(observationWindowForKind('campaign_pause', rules, CAMPAIGN_PAUSE_WINDOW_UNSET)).toBe(7)
+    expect(observationWindowForKind('campaign_pause', rules, 4)).toBe(4)
+    const overridden = { ...rules, campaignPauseWindowDays: 9 }
+    expect(observationWindowForKind('campaign_pause', overridden, CAMPAIGN_PAUSE_WINDOW_UNSET)).toBe(9)
+    expect(observationWindowForKind('campaign_pause', overridden, 4)).toBe(4)
   })
 
   it('maps tier labels for UI', () => {

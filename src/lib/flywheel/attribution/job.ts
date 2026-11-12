@@ -29,6 +29,7 @@ import {
   type ExecutedReview,
   type PairMark,
   type ReviewAction,
+  type WindowSpan,
 } from './executed-review'
 import { asObjectDay, judgeObjectWindow, objectWindowDates, type ObjectDay } from './object-window'
 import {
@@ -217,6 +218,25 @@ function metricForReviewCard(row: ActionRow): string {
     return 'ads.account.spend'
   }
   return 'ads.account.spend'
+}
+
+async function spansForPairing(actions: readonly ActionRow[]): Promise<WindowSpan[]> {
+  const spans: WindowSpan[] = []
+  for (const action of actions) {
+    const span = windowSpanOf(asReviewAction(action))
+    if (!span) continue
+    const kind = reviewWindowKindFor(action.action_type, action.payload)
+    if (!kind || span.observationWindowDays >= 1) {
+      spans.push(span)
+      continue
+    }
+    const ctx = await reviewContextFor(action.client_id)
+    spans.push({
+      ...span,
+      observationWindowDays: observationWindowForKind(kind, ctx.rules, span.observationWindowDays),
+    })
+  }
+  return spans
 }
 
 function asReviewAction(action: ActionRow): ReviewAction {
@@ -483,10 +503,7 @@ export async function runAttributionJob(
   const r = emptyResult()
   const pass2Clients = new Set<string>()
   let notEvaluable = 0
-  const pairs = pairSpans(actions.flatMap((action) => {
-    const span = windowSpanOf(asReviewAction(action))
-    return span ? [span] : []
-  }))
+  const pairs = pairSpans(await spansForPairing(actions))
 
   for (const action of actions) {
     const outcome = await attributeOne(action, windowDays, pairs, now)
