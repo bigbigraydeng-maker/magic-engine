@@ -116,6 +116,10 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   daily_plan_post_unmeasured: 'one_click', // 重新连接 Meta / 确认帖子公开
   daily_plan_first_comment_failed: 'one_click', // 在帖子下补发首评（文案已写好，复制即可）
   social_readback_refused: 'one_click', // 打开视频看是不是已经公开，公开了就转给开发
+  social_post_readback_missing: 'dev', // 过点没回执：读数链欠账
+  social_post_readback_unreadable: 'truth', // 有回执但读不到，多是权限或平台字段
+  social_post_readback_retries_exhausted: 'dev', // 读数重试耗尽
+  social_story_readback_unsupported: 'weekly', // Story 类型暂无 T+N 读数，周知即可
   mailchimp_export_broken: 'one_click', // 设置页填回 Mailchimp Audience ID
   lead_sheet_reauth_needed: 'one_click', // 写表被 Google 判 403，重新走一次「连接 Google」
   calendar_closure_overdue_summary: 'truth', // 日历到期没闭环的件数：「认一下」哪些真做了
@@ -148,6 +152,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   phone_call_needs_review: 'client_side', // 电话没能自动记进客人档案，客户销售要看一眼是谁
   messenger_draft_send_failed: 'client_side', // 回复没发出去，要人工发给客人
   tool_lead_needs_followup: 'client_side', // 工具实验室有人留资，值得联系一下
+  distributor_application_pending: 'decide', // 有人申请做经销商：批不批只能 PM 定
 
   // ── 4 · 发出去前要看一眼的 ───────────────────────────────────────────
   blog_draft_waiting: 'review',
@@ -205,11 +210,11 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   ads_config_unreadable: 'dev', // 广告回拉读不出广告设置，字段没对齐或临时故障，都是我们的活
   ads_agent_sync_stale: 'dev', // 广告 Agent 后台同步太久没成功：开发排查，不占客户操作
   ads_agent_daily_pull_gap: 'dev', // 每日回拉里日结果/体检局部失败：开发排查
-  ads_heartbeat_stall: 'dev', // 广告小时心跳停摆或配置错误：开发排查
   ads_daily_spend_over_cap_notice: 'decide', // 花费超日上限只读提醒，不自动暂停
   ads_circuit_breaker_pause: 'decide', // 异常只出暂停确认卡，等人点了才停
   ads_circuit_breaker_alert: 'decide', // 快照或花费太旧，只提醒，不出卡
   ads_plan_daily_cap_missing: 'decide', // 已批准计划还没填每天总上限，加预算会被拦住
+  ads_plan_delivery_stage_missing: 'decide', // 缺投放阶段：收回稳住与换阶段不工作，P-4 素材放量不受影响
   cron_not_running: 'dev',
   cron_silent_success: 'dev',
   ai_alerting_broken: 'dev',

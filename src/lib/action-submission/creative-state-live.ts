@@ -12,8 +12,10 @@ import { agreedPlanDailyTotalCap } from '@/lib/approval-source/plan-cap'
 import { createAdFromPost, readAdPlacement } from '@/lib/meta/ads-manager'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import { pauseConfirmedWinnerAd } from '@/lib/ads-pause-card/winner-pause'
+import { latestUsableCapture, singleApprovedPlanReason } from '@/lib/ads-strategy/daily-card-guard'
 import {
   decideCreatives,
+  nzProposalDay,
   rulesFromConfig,
   type CaptureFact,
   type CreativeDecision,
@@ -74,7 +76,7 @@ export function liveCreativePorts(kernel: KernelDeps): CreativePorts {
       expectedDecisionId: input.decisionId,
       fingerprint: input.fingerprint,
     }),
-    recheck: (clientId) => loadCreativeDecision(kernel.supabase, clientId, kernel.now(), Promise.resolve(0)),
+    recheck: (clientId) => recheckCreative(kernel, clientId),
     token: getMetaTokenForClient,
     createPaused: (input) => createAdFromPost(input),
     readPlacement: async (adId, token) => {
@@ -223,26 +225,24 @@ function committedMajor(rows: readonly { plan_data?: unknown }[]): number | null
 async function countPromotions(sb: Sb, clientId: string, now: Date): Promise<number> {
   const { data, error } = await sb.from('flywheel_actions').select('payload').eq('client_id', clientId).eq('action_type', 'ads.creative_state_proposal')
   if (error || !data) return Number.POSITIVE_INFINITY
-  const day = now.toISOString().slice(0, 10)
+  const day = nzProposalDay(now)
   return (data as Array<{ payload?: { kind?: string; proposedOn?: string } }>).filter((row) => (
     (row.payload?.kind === 'move_to_scale' || row.payload?.kind === 'new_plan') && row.payload.proposedOn === day
   )).length
 }
 
+async function recheckCreative(kernel: KernelDeps, clientId: string): Promise<CreativeDecision> {
+  const decision = await loadCreativeDecision(kernel.supabase, clientId, kernel.now(), Promise.resolve(0))
+  const plan = await singleApprovedPlanReason(kernel.supabase, clientId)
+  if (!plan) return decision
+  return { proposals: [], skipped: [...decision.skipped, 'plan_guard'] }
+}
+
 async function latestCapture(sb: Sb, clientId: string, accountId: string): Promise<CaptureFact | null | 'unread'> {
-  const { data, error } = await sb.from('ad_snapshot_captures')
-    .select('complete, captured_at, ad_account_id')
-    .eq('client_id', clientId)
-    .eq('ad_account_id', accountId)
-    .eq('level', 'ad')
-    .order('captured_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-  if (error) return 'unread'
-  if (!data) return null
-  const row = data as { complete?: boolean; captured_at?: string; ad_account_id?: string }
-  if (typeof row.captured_at !== 'string' || typeof row.ad_account_id !== 'string') return null
-  return { accountId: row.ad_account_id, complete: row.complete === true, capturedAt: row.captured_at }
+  const found = await latestUsableCapture(sb, clientId, accountId, 'ad')
+  if (found.state === 'unread') return 'unread'
+  if (found.state === 'none') return null
+  return { accountId, complete: true, capturedAt: found.capturedAt }
 }
 
 async function maybe(sb: Sb, table: string, columns: string, clientId: string, enabled: boolean): Promise<Record<string, unknown> | null | 'unread'> {

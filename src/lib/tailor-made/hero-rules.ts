@@ -20,6 +20,8 @@
  */
 const RULES: Array<{ hero: string; patterns: RegExp }> = [
   // —— 景点级（排在城市前面）——
+  // 亲子主题乐园：上海迪士尼 / 北京环球影城共用这一张（客户 2026-11-11 要求的亲子封面）
+  { hero: 'family-theme-parks', patterns: /disney|迪士尼|universal (studios|beijing|resort)|环球影城|theme park|主题乐园/i },
   { hero: 'temple-of-heaven',   patterns: /temple of heaven|天坛/i },
   { hero: 'tiananmen-square',   patterns: /tian'?anmen|天安门/i },
   { hero: 'olympic-green',      patterns: /water cube|bird'?s nest|olympic|aquatics cent|national stadium|水立方|鸟巢|奥林匹克/i },
@@ -114,6 +116,8 @@ export function pickHeroName(trip: { title?: string; route?: string[] }): string
 
 /** 供界面展示的可选清单 —— 顾问想手动换图时用 */
 export const HERO_CHOICES: Array<{ name: string; label: string }> = [
+  { name: 'family-theme-parks', label: '亲子 · 上海迪士尼 / 北京环球影城' },
+  { name: 'family-theme-parks-portrait', label: '亲子 · 迪士尼 / 环球影城（竖版）' },
   { name: 'beijing',        label: '北京 · 长城晨雾' },
   { name: 'great-wall',     label: '长城 · 云海' },
   { name: 'forbidden-city', label: '北京 · 故宫航拍' },

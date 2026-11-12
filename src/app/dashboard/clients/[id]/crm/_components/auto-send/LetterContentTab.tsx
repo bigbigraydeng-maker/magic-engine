@@ -40,11 +40,18 @@ function findPlaceholders(blocks: readonly BodyBlock[]): string[] {
   return Array.from(found)
 }
 
+/** 正文旁边那行灰色说明：名字已经换成示例名字，或者原样显示的占位符会换成每位客人自己的资料。 */
+function bodyHint(sampleFirstName: string | null | undefined, placeholders: readonly string[]): string | undefined {
+  if (sampleFirstName) return `正文里的名字（${sampleFirstName}）只是示例，每位客人收到的是自己的名字`
+  if (placeholders.length > 0) return `${placeholders.join('、')} 会换成每位客人自己的资料（例如名字）`
+  return undefined
+}
+
 function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }): JSX.Element {
   return (
     <div className="space-y-1">
       <p className="text-xs font-bold text-me-charcoal/70">{label}</p>
-      {hint && <p className="text-[11px] text-me-charcoal/55">{hint}</p>}
+      {hint && <p className="text-xs text-me-charcoal/55">{hint}</p>}
       {children}
     </div>
   )
@@ -61,7 +68,13 @@ function BodyView({ blocks }: { blocks: readonly BodyBlock[] }): JSX.Element {
             </p>
           )
         }
-        if (group.kind === 'paragraph') return <p key={index}>{group.text}</p>
+        if (group.kind === 'paragraph') {
+          return (
+            <p key={index} className="whitespace-pre-line">
+              {group.text}
+            </p>
+          )
+        }
         return (
           <ul key={index} className="list-disc space-y-1 pl-5">
             {group.items.map((item, itemIndex) => (
@@ -105,7 +118,7 @@ export function LetterContentTab({
       </Field>
       <Field
         label="正文"
-        hint={placeholders.length > 0 ? `${placeholders.join('、')} 会换成每位客人自己的资料（例如名字）` : undefined}
+        hint={bodyHint(content.sampleFirstName, placeholders)}
       >
         <div className="rounded-xl border border-black/10 bg-me-ivory p-5">
           {content.body.length === 0 ? (

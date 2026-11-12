@@ -13,6 +13,7 @@ import { saveTokensTo, tagLinks } from '@/lib/crm/email-templates/link-tracking/
 import { CONNECTION_STATUS } from '@/lib/platform-oauth/vocabulary'
 import { MICROSOFT_MAIL_PROVIDER } from '@/lib/microsoft/mail-oauth'
 import { checkManualSendDncForContact } from '@/lib/crm/manual-send-dnc-gate'
+import { readEmailUnsubscribed } from '@/lib/crm/email-unsubscribe'
 import type { TouchKind } from '@/lib/crm/email-compose/enquiry-record'
 import { GRAPH, callWithRetry, writeTouchpoint, type GraphCallResult } from '@/lib/microsoft/mail-send'
 import {
@@ -74,6 +75,7 @@ export function createMailNewStore(): MailNewStore {
       return (data as { leads_config: unknown } | null)?.leads_config ?? null
     },
     checkDnc: (clientId, contactId) => checkManualSendDncForContact(clientId, contactId),
+    checkEmailUnsubscribed: (clientId, contactId, addresses) => readEmailUnsubscribed(db, clientId, { contactId, addresses }),
     async loadContact(clientId, contactId) {
       const { data } = await db.from('contacts').select('id, primary_email').eq('id', contactId).eq('client_id', clientId).maybeSingle()
       const row = data as { id: string; primary_email: string | null } | null

@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest'
-import { publishPagePhotoPost, deletePagePost, readPageStoryId, PagePublishError } from '../page-posts'
+import { publishPagePhotoPost, deletePagePost, readPageStoryId, fetchPostText, PagePublishError } from '../page-posts'
 import { GRAPH_BASE } from '../graph-base'
 
 const PAGE = '1616575215312482'
@@ -315,5 +315,32 @@ describe('Graph version — page-posts follows the shared GRAPH_BASE', () => {
       vi.doUnmock('../graph-base')
       vi.resetModules()
     }
+  })
+})
+
+describe('fetchPostText — read-only post text for comment drafts', () => {
+  it('asks for the message and attachment title of that post', async () => {
+    const { fetcher, calls } = fakeFetch({ ok: true, body: { message: 'Harbour Loop. 10 days.', attachments: { data: [{ title: 'Harbour Loop' }] } } })
+    const got = await fetchPostText(`${PAGE}_99`, TOKEN, fetcher)
+    expect(got).toEqual({ text: 'Harbour Loop. 10 days.', title: 'Harbour Loop' })
+    expect(calls).toHaveLength(1)
+    const url = new URL(calls[0].url)
+    expect(`${url.origin}${url.pathname}`).toBe(`${GRAPH_BASE}/${PAGE}_99`)
+    expect(url.searchParams.get('fields')).toBe('message,attachments{title}')
+    expect(url.searchParams.get('access_token')).toBe(TOKEN)
+    expect(calls[0].init).toBeUndefined()
+  })
+
+  it('a post with only a headline still counts', async () => {
+    const { fetcher } = fakeFetch({ ok: true, body: { attachments: { data: [{ title: 'Harbour Loop' }] } } })
+    expect(await fetchPostText('1', TOKEN, fetcher)).toEqual({ text: '', title: 'Harbour Loop' })
+  })
+
+  it('is null when Meta refuses, errors, or the post has no text at all', async () => {
+    expect(await fetchPostText('1', TOKEN, fakeFetch({ ok: false, status: 400, body: {} }).fetcher)).toBeNull()
+    expect(await fetchPostText('1', TOKEN, fakeFetch({ ok: true, body: { error: { message: 'x' } } }).fetcher)).toBeNull()
+    expect(await fetchPostText('1', TOKEN, fakeFetch({ ok: true, body: {} }).fetcher)).toBeNull()
+    const boom = (async () => { throw new Error('network') }) as unknown as typeof fetch
+    expect(await fetchPostText('1', TOKEN, boom)).toBeNull()
   })
 })

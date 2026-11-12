@@ -1,11 +1,11 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { loadClientCapFacts } from '@/lib/ads-strategy/circuit-cap-facts'
 import type { ManualItem } from '../manual-item-types'
 import {
   pushAdsAgentStaleItems,
   pushAdsDailyPullbackGapItems,
   pushAdsDailySpendOverCapNoticeItems,
-  pushAdsHeartbeatStallItems,
+  pushAdsIntradaySpendSampleStallItems,
 } from '../ads-agent-stale-items'
 
 vi.mock('@/lib/meta/client-ad-accounts', () => ({
@@ -92,30 +92,26 @@ describe('pushAdsDailySpendOverCapNoticeItems', () => {
   })
 })
 
-describe('pushAdsHeartbeatStallItems', () => {
-  const env = process.env
-
-  afterEach(() => {
-    process.env = { ...env }
-  })
-
-  it('does not alert when dry and no clients', async () => {
-    process.env.AD_HEARTBEAT_MODE = 'dry'
-    process.env.AD_HEARTBEAT_CLIENT_IDS = ''
+describe('pushAdsIntradaySpendSampleStallItems', () => {
+  it('alerts on infra when no successful cron run', async () => {
     const items: ManualItem[] = []
     const supabase = { from: () => chain('cron_run_logs', []) }
-    await pushAdsHeartbeatStallItems(supabase as never, items, NOW)
-    expect(items).toHaveLength(0)
-  })
-
-  it('alerts when configured client never succeeds', async () => {
-    process.env.AD_HEARTBEAT_MODE = 'dry'
-    process.env.AD_HEARTBEAT_CLIENT_IDS = 'c1'
-    const items: ManualItem[] = []
-    const supabase = { from: () => chain('cron_run_logs', []) }
-    await pushAdsHeartbeatStallItems(supabase as never, items, NOW)
+    await pushAdsIntradaySpendSampleStallItems(supabase as never, items, NOW)
     expect(items).toHaveLength(1)
-    expect(items[0]?.kind).toBe('ads_heartbeat_stall')
+    expect(items[0]?.kind).toBe('ads_agent_sync_stale')
+    expect(items[0]?.client_id).toBe('infra')
+    expect(items[0]?.what).toContain('日内花费采样')
+  })
+
+  it('silent when recent success', async () => {
+    const recent = new Date(NOW.getTime() - 15 * 60_000).toISOString()
+    const items: ManualItem[] = []
+    const supabase = {
+      from: () =>
+        chain('cron_run_logs', [{ status: 'completed', finished_at: recent, started_at: recent }]),
+    }
+    await pushAdsIntradaySpendSampleStallItems(supabase as never, items, NOW)
+    expect(items).toHaveLength(0)
   })
 })
 

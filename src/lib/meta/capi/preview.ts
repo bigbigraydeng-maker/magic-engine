@@ -12,7 +12,7 @@
  */
 
 import type { ClientSendConfig, OutcomeForSend } from '@/lib/conversions/destination-writer'
-import { normalizeEmail, normalizePhone } from '@/lib/pii/normalize'
+import { normalizeEmail, normalizeStoredPhone } from '@/lib/pii/normalize'
 import { formatMoney } from '@/lib/conversions/money'
 
 function maskEmail(email: string | null): string | null {
@@ -41,7 +41,7 @@ export function maskForPreview(
   meta: { eventName: string; maxEventAgeDays: number },
 ): Record<string, unknown> {
   const email = normalizeEmail(outcome.customerEmail)
-  const phone = normalizePhone(outcome.customerPhone, config.defaultPhoneCountry)
+  const phone = normalizeStoredPhone(outcome.customerPhone, config.defaultPhoneCountry)
 
   const present: string[] = []
   const missing: string[] = []

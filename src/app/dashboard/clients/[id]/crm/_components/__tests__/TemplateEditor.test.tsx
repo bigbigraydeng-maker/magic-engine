@@ -86,6 +86,7 @@ describe('a new template', () => {
       pickFilter: {},
       status: 'disabled',
       changeNote: null,
+      whenToUse: null,
     })
     expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ version: 1 }), ['提醒：x'])
   })

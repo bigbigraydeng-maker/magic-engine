@@ -5,12 +5,18 @@
 // P0.1a 只实现 FacebookReelAdapter(Oztop);加新平台 = 多注册个 adapter,主体不改。
 
 import { randomUUID } from 'node:crypto'
+import { ZodError } from 'zod'
 import { supabaseAdmin } from '@/lib/supabase'
 import type { PublishAdapter, PublishTarget, PublishedRef } from '../types'
 import { scanRedlineHits } from '../worker-guard'
 import { sanitizeFailReason } from './publish-display'
 import { facebookReelAdapter } from './facebook-reel-adapter'
 import { buildReelPublishedEvent } from './reel-published-event'
+import {
+  missingReelSignalFields,
+  reasonFromZod,
+  recordReelContractFailure,
+} from './reel-event-contract-failure'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
 import { REEL_AUTO_CHECK_KEYS, checklistPasses, humanKeysForReviewRef, validateContentChecklist } from '@/lib/social/content-review'
 import { buildReelFirstComment, buildReelPostCaption } from '@/lib/social/reel-publishing'
@@ -477,8 +483,15 @@ async function emitReelPublishedEvent(
   clientId: string,
 ): Promise<void> {
   if (ref.platform !== 'facebook' || ref.video_state !== 'PUBLISHED') return
-  if (!ref.video_id || !ref.page_id) return
   if (ref.event_ids && ref.event_ids.length > 0) return // 已喊过,幂等短路
+  if (!ref.video_id || !ref.page_id) {
+    await recordReelContractFailure(supabaseAdmin, {
+      clientId,
+      workOrderId,
+      reason: missingReelSignalFields(ref),
+    })
+    return
+  }
 
   try {
     const nowIso = new Date().toISOString()
@@ -500,9 +513,12 @@ async function emitReelPublishedEvent(
       .update({ published_ref: nextRef, updated_at: nowIso })
       .eq('id', workOrderId)
   } catch (e) {
-    console.error(
-      `[publish-worker] 发布信号 emit 失败(片已发出,待补发对账重发) ${workOrderId}: ${e instanceof Error ? e.message : e}`,
-    )
+    const contract = e instanceof ZodError ? reasonFromZod(e) : null
+    if (contract) {
+      await recordReelContractFailure(supabaseAdmin, { clientId, workOrderId, reason: contract })
+    }
+    const detail = contract ?? (e instanceof Error ? e.message : e)
+    console.error(`[publish-worker] 发布信号 emit 失败(片已发出,待补发对账重发) ${workOrderId}: ${detail}`)
   }
 }
 

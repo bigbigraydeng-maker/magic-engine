@@ -7,7 +7,7 @@
  *  ③ 补发对账只补 PUBLISHED、跳过草稿、跳过已喊过的(不双发)。
  * 这三条正是「有实现、没接对」会出的事,拆纯函数单测证明不了。
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
 vi.mock('./facebook-reel-adapter', () => ({
@@ -16,11 +16,18 @@ vi.mock('./facebook-reel-adapter', () => ({
 vi.mock('@/lib/workflows/inngest-event', () => ({
   sendInngestEvent: vi.fn(async () => ({ event_ids: ['evt_reel_1'] })),
 }))
+vi.mock('@/lib/social/readback-outcome-record', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/social/readback-outcome-record')>(
+    '@/lib/social/readback-outcome-record',
+  )
+  return { ...actual, writeReadbackOutcome: vi.fn(async () => undefined) }
+})
 
 import { runPublishWorker, reconcileMissingReelEvents } from './publish-worker'
 import { supabaseAdmin } from '@/lib/supabase'
 import { facebookReelAdapter } from './facebook-reel-adapter'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
+import { SOCIAL_READBACK_OUTCOME_ENV, writeReadbackOutcome } from '@/lib/social/readback-outcome-record'
 import { reelPublishedEventId } from './reel-published-event'
 import { REEL_AUTO_CHECK_KEYS, REEL_HUMAN_CHECK_KEYS } from '@/lib/social/content-review'
 
@@ -28,6 +35,7 @@ const mockFrom = vi.mocked(supabaseAdmin.from)
 const mockPublish = vi.mocked(facebookReelAdapter.publish)
 const mockFindExisting = vi.mocked(facebookReelAdapter.findExisting)
 const mockSend = vi.mocked(sendInngestEvent)
+const mockOutcome = vi.mocked(writeReadbackOutcome)
 
 const CLIENT_ID = 'c0000000-0000-0000-0000-000000000000'
 const WO_ID = 'a1a1a1a1-b2b2-c3c3-d4d4-e5e5e5e5e5e5'
@@ -151,6 +159,7 @@ describe('发布信号 emit(只在真·PUBLISHED 喊)', () => {
 
     const r = await runPublishWorker({ draft: false, workerId: 'test' })
     expect(r.result).toBe('published') // emit 炸了,发布照样算成功
+    expect(mockOutcome).not.toHaveBeenCalled()
   })
 })
 
@@ -205,5 +214,67 @@ describe('补发对账(reconcileMissingReelEvents)', () => {
     ])
     await reconcileMissingReelEvents()
     expect(mockSend).not.toHaveBeenCalled()
+  })
+})
+
+describe('发布信号结构不合格要留记录', () => {
+  beforeEach(() => {
+    process.env[SOCIAL_READBACK_OUTCOME_ENV] = 'true'
+  })
+  afterEach(() => {
+    delete process.env[SOCIAL_READBACK_OUTCOME_ENV]
+  })
+
+  it('字段不合格时写下字段名，不写下原始值，片仍然算已发出', async () => {
+    installWorkerMocks()
+    mockPublish.mockResolvedValue({
+      platform: 'facebook', page_id: 'not-a-page', post_id: '12345', video_id: '12345',
+      published_at: '2026-09-06T20:00:00.000Z', video_state: 'PUBLISHED',
+    } as never)
+
+    const r = await runPublishWorker({ draft: false, workerId: 'test' })
+    expect(r.result).toBe('published')
+    expect(mockSend).not.toHaveBeenCalled()
+    expect(mockOutcome).toHaveBeenCalledTimes(1)
+    const input = mockOutcome.mock.calls[0][1]
+    expect(input).toMatchObject({
+      clientId: CLIENT_ID,
+      subjectKind: 'reel',
+      subjectRef: WO_ID,
+      outcome: 'reel_event_contract_invalid',
+      reason: 'page_id',
+    })
+    expect(JSON.stringify(input)).not.toContain('not-a-page')
+  })
+
+  it('缺 page_id 的已公开 Reel 留下记录，补发不会把它记成发送失败', async () => {
+    installReconcileMocks([
+      { id: WO_ID, client_id: CLIENT_ID, published_ref: { platform: 'facebook', video_id: '12345', post_id: '12345', published_at: '2026-09-06T20:00:00.000Z', video_state: 'PUBLISHED' } },
+    ])
+    await reconcileMissingReelEvents()
+    expect(mockSend).not.toHaveBeenCalled()
+    expect(mockOutcome).toHaveBeenCalledTimes(1)
+    expect(mockOutcome.mock.calls[0][1]).toMatchObject({ reason: 'page_id', outcome: 'reel_event_contract_invalid' })
+  })
+
+  it('开关开着时，发送失败仍不写记录', async () => {
+    installWorkerMocks()
+    mockSend.mockRejectedValue(new Error('INNGEST_EVENT_KEY_MISSING'))
+    mockPublish.mockResolvedValue({
+      platform: 'facebook', page_id: PAGE_ID, post_id: VIDEO_ID, video_id: VIDEO_ID,
+      published_at: '2026-09-06T20:00:00.000Z', video_state: 'PUBLISHED',
+    } as never)
+    const r = await runPublishWorker({ draft: false, workerId: 'test' })
+    expect(r.result).toBe('published')
+    expect(mockOutcome).not.toHaveBeenCalled()
+  })
+
+  it('开关不是正好打开时，结构不合格也不写', async () => {
+    delete process.env[SOCIAL_READBACK_OUTCOME_ENV]
+    installReconcileMocks([
+      { id: WO_ID, client_id: CLIENT_ID, published_ref: { platform: 'facebook', video_id: '12345', published_at: '2026-09-06T20:00:00.000Z', video_state: 'PUBLISHED' } },
+    ])
+    await reconcileMissingReelEvents()
+    expect(mockOutcome).not.toHaveBeenCalled()
   })
 })

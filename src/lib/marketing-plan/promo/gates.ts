@@ -16,7 +16,7 @@ import type { CreativePoolStatus } from '@/lib/ads-strategy/config'
 import type { PromoPlaybook, PromoEvidence } from './playbooks'
 import { checkAdsBudget, type AccountCapFacts } from './budget-caps'
 import { dailyTotalCapCents } from './daily-total-cap'
-import { promoContentHash } from './content-hash'
+import { promoContentMatches } from './content-hash'
 import { allAdsSteps, type ManualCheck, type PromoPhase, type PromoSpec } from './spec'
 import { GATE_LABELS } from '@/lib/ads-tracking-preflight/judge'
 import { BUDGET_RECEIPT_STALE_HOURS, TRACKING_RECEIPT_STALE_HOURS, receiptAgeHours } from '@/lib/ads-tracking-preflight/receipt'
@@ -206,11 +206,10 @@ function manualChecks(spec: PromoSpec, phase: PromoPhase, f: GateFacts): GateRes
       how: '把稀缺性 / 截止日等说法发给客户确认，确认后在计划里点「已核实」。' },
   ]
   // 核实记录绑内容版本：内容一改，旧核实自动失效（content_hash 对不上就不算数）。
-  const currentHash = promoContentHash(spec)
   return defs.map(d => {
     const all = f.manual_checks // 只信服务端写入的核实记录（spec.checks 是客户端可写的，不参与判定）
       .filter(c => c.phase_id === phase.id && c.check_key === d.key)
-    const valid = all.filter(c => c.content_hash === currentHash)
+    const valid = all.filter(c => typeof c.content_hash === 'string' && promoContentMatches(c.content_hash, spec))
     const rec = valid.sort((a, b) => b.verified_at.localeCompare(a.verified_at))[0]
     if (!rec) {
       if (all.length > 0) {

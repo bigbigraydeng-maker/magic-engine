@@ -17,6 +17,9 @@ import {
 import type { CardResolution } from '@/lib/confirmation-card/decide'
 import { ConfirmationCardError } from '@/lib/confirmation-card/errors'
 import type { ConfirmationCardView } from '@/lib/confirmation-card/view'
+import type { CardLifetime } from '@/lib/confirmation-card/view'
+import { isExpired } from '@/lib/confirmation-card/view'
+import { NZ_DAY_EXPIRED, recheckBreakerPause } from '@/lib/ads-strategy/daily-card-guard'
 import type { ClientAccessResult } from '@/lib/auth/client-access'
 import { CAMPAIGN_PAUSE_WHAT, CAMPAIGN_RESUME_WHAT } from '@/lib/ads-strategy/paused-draft-copy'
 import {
@@ -53,6 +56,8 @@ export interface CampaignHold {
   executionItemId: string | null
   resultLine?: string
   authorization?: SpendActivationReceipt
+  cardLifetime?: CardLifetime
+  issuedAt?: string
 }
 
 interface HoldRow { readonly id: string; readonly payload: CampaignHold }
@@ -64,12 +69,14 @@ export interface LiveCampaign {
 }
 
 export interface CampaignDeps {
-  issue(clientId: string, clicker: CardClicker, facts: CardFacts): Promise<ConfirmationCardView>
+  issue(clientId: string, clicker: CardClicker, facts: CardFacts, lifetime?: CardLifetime): Promise<ConfirmationCardView>
+  recheckPause?(clientId: string, campaignId: string, accountId: string, now: Date): Promise<string | null>
   decide(args: DecideArgs): Promise<ConfirmationCardView>
   live(clientId: string, campaignId: string): Promise<LiveCampaign | null>
   write(clientId: string, campaignId: string, status: 'PAUSED' | 'ACTIVE'): Promise<boolean>
   messenger(campaignId: string): Promise<'ok' | 'blocked' | 'unread'>
   resumeAuthority(): ReturnType<typeof requireSpendActivationAuthority>
+  now?(): Date
 }
 
 interface DecideArgs {
@@ -92,6 +99,7 @@ export interface CampaignRequest {
   readonly dailyBudget: string | null
   readonly objective: string | null
   readonly executionItemId: string | null
+  readonly cardLifetime?: CardLifetime
 }
 
 export interface ConfirmResult {
@@ -116,7 +124,10 @@ export async function requestCampaignStatusCard(
   }
   const open = await openHold(sb, args.clientId, args.kind, args.campaignId)
   if (open) return { status: 202, body: waitingBody(open.payload) }
-  const card = await deps.issue(args.clientId, asker(args.access, args.clientId), facts(args))
+  const clicker = asker(args.access, args.clientId)
+  const card = args.cardLifetime
+    ? await deps.issue(args.clientId, clicker, facts(args), args.cardLifetime)
+    : await deps.issue(args.clientId, clicker, facts(args))
   const payload = holdFrom(args, card)
   await insertHold(sb, args.clientId, payload)
   return { status: 202, body: waitingBody(payload) }
@@ -133,6 +144,13 @@ export async function confirmCampaignStatusCard(
   if (row.payload.status === 'writing') return stopped(409, '上次写到一半，没有再自动写一次。')
   if (row.payload.status !== 'holding') return stopped(409, row.payload.resultLine ?? '这张卡已经有结果了，没有再改。')
   if (args.resolution === 'decline') return decline(sb, args, row, deps)
+  const fresh = await automaticPauseBlock(sb, args.clientId, row.payload, deps, deps.now?.() ?? new Date())
+  if (fresh) return stopped(409, fresh)
+  if (row.payload.requestedBy === 'intraday-cap@internal') {
+    const { intradayConfirmRefusal } = await import('@/lib/ads-strategy/intraday-spend/cap-proposal-run')
+    const block = await intradayConfirmRefusal(sb, args.clientId, deps.now?.() ?? new Date())
+    if (block) return stopped(409, block)
+  }
   const bound = await resumePlan(sb, args.clientId, row.payload)
   if (!bound.ok) return stopped(409, bound.reason)
   const block = await guard(args.clientId, row.payload, deps)
@@ -269,7 +287,24 @@ function holdFrom(args: CampaignRequest, card: ConfirmationCardView): CampaignHo
     wrote: false,
     requestedBy: args.access.user.email ?? args.access.user.id,
     executionItemId: args.executionItemId,
+    cardLifetime: args.cardLifetime ?? 'urgent_30m',
+    issuedAt: new Date().toISOString(),
   }
+}
+
+async function automaticPauseBlock(
+  sb: Sb,
+  clientId: string,
+  hold: CampaignHold,
+  deps: CampaignDeps,
+  now: Date,
+): Promise<string | null> {
+  if (hold.issuedAt && isExpired(hold.issuedAt, now, hold.cardLifetime ?? 'urgent_30m')) {
+    return hold.cardLifetime === 'nz_day' ? NZ_DAY_EXPIRED : '过了 30 分钟没人点，这张卡作废了。'
+  }
+  if (hold.kind !== 'pause' || hold.cardLifetime !== 'nz_day') return null
+  const recheck = deps.recheckPause ?? ((id, campaignId, accountId, at) => recheckBreakerPause(sb, id, campaignId, accountId, at))
+  return recheck(clientId, hold.campaign_id, hold.ad_account_id, now)
 }
 
 function waitingBody(payload: CampaignHold): Record<string, unknown> {
@@ -304,7 +339,10 @@ function stopped(statusCode: number, reason: string): ConfirmResult {
 function defaultDeps(sb: Sb): CampaignDeps {
   const kernel = createKernel(sb)
   return {
-    issue: (clientId, clicker, cardFacts) => issueConfirmationCard(kernel, { clientId, clicker, facts: cardFacts }),
+    issue: (clientId, clicker, cardFacts, lifetime) => issueConfirmationCard(kernel, {
+      clientId, clicker, facts: cardFacts, lifetime,
+    }),
+    recheckPause: (clientId, campaignId, accountId, now) => recheckBreakerPause(sb, clientId, campaignId, accountId, now),
     decide: (args) => decideConfirmationCard(kernel, args),
     live: (clientId, campaignId) => readLive(clientId, campaignId),
     write: (clientId, campaignId, status) => writeStatus(clientId, campaignId, status),

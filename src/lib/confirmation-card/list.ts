@@ -9,8 +9,8 @@ async function expirePending(deps: KernelDeps, clientId: string, now: Date): Pro
   const pending = await listPendingCards(deps.supabase, clientId)
   for (const run of pending) {
     const stored = readStoredCard(run.input)
-    if (!stored || !isExpired(stored.issuedAt, now)) continue
-    await settleExpired(deps, run)
+    if (!stored || !isExpired(stored.issuedAt, now, stored.lifetime)) continue
+    await settleExpired(deps, run, stored.lifetime)
   }
 }
 

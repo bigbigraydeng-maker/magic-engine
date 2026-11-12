@@ -34,7 +34,7 @@ import type {
   RawSendResult,
   SendVerdict,
 } from '@/lib/conversions/destination-writer'
-import { hashEmail, hashName, hashPhone } from '@/lib/pii/hasher'
+import { hashEmail, hashName, hashStoredPhone } from '@/lib/pii/hasher'
 import { maskForPreview } from './preview'
 import { resolveCapiConfig, type CapiCredentials } from './config'
 import { toMajorUnits } from '@/lib/conversions/money'
@@ -43,7 +43,7 @@ const GRAPH_VERSION = process.env.META_CAPI_VERSION ?? 'v19.0'
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`
 
 /** Meta 标准事件名。业务事实 → 事件名的映射只发生在这里。 */
-const EVENT_NAME: Record<OutcomeForSend['outcomeKind'], string> = {
+const EVENT_NAME: Record<Exclude<OutcomeForSend['outcomeKind'], 'lead_stage'>, string> = {
   // 收到定金 = 一笔成交（PM 2026-09-05 定义：与出发日无关）
   purchase: 'Purchase',
   // 🔴 尾款**不是** Purchase。PM 明令："定金算成交，坚决不能记成 2 笔。"
@@ -52,6 +52,25 @@ const EVENT_NAME: Record<OutcomeForSend['outcomeKind'], string> = {
   balance: 'BalancePaid',
   // 有效咨询 = 对话过或邮件过
   lead: 'Lead',
+}
+
+/**
+ * 线索阶段事件的事件名就是客户配置里的阶段名（Meta 文档："Free form field to capture
+ * the stages you use within your CRM"）——不是标准事件，也不进标准成交口径。
+ */
+function eventNameFor(outcome: OutcomeForSend): string {
+  if (outcome.outcomeKind === 'lead_stage') {
+    if (!outcome.leadStage) throw new Error('线索阶段事件缺阶段名')
+    return outcome.leadStage
+  }
+  return EVENT_NAME[outcome.outcomeKind]
+}
+
+const LEAD_ID_RE = /^\d{15,17}$/
+
+/** 线索阶段事件走 Meta 的线索阶段集成：action_source 固定为 system_generated。 */
+function isLeadStagePayload(payload: MetaCapiPayload): boolean {
+  return payload.data.some((e) => e.action_source === 'system_generated')
 }
 
 export type MetaCapiPayload = {
@@ -121,10 +140,11 @@ export class MetaCapiWriter implements DestinationWriter<MetaCapiPayload> {
   readonly maxEventAgeDays = 7
 
   build(outcome: OutcomeForSend, config: ClientSendConfig): MetaCapiPayload {
+    if (outcome.outcomeKind === 'lead_stage') return this.buildLeadStage(outcome, config)
     const userData: Record<string, string[] | string> = {}
 
     const em = hashEmail(outcome.customerEmail)
-    const ph = hashPhone(outcome.customerPhone, config.defaultPhoneCountry)
+    const ph = hashStoredPhone(outcome.customerPhone, config.defaultPhoneCountry)
     const fn = hashName(outcome.customerFirst)
     const ln = hashName(outcome.customerLast)
 
@@ -148,12 +168,12 @@ export class MetaCapiWriter implements DestinationWriter<MetaCapiPayload> {
     //    28 天内成交等条件）。后者是另一套集成，当前没做，别因为这里出现 lead_id 就当成做过了。
     // 🔴 第四种匹配键——Facebook 即时表单线索编号。官方参数表标注「Do not hash」，
     //    跟 em/ph/fn/ln 不同，不能套 hash* 函数。只放真有的、格式对的（15–17 位纯数字）。
-    if (outcome.metaLeadId && /^\d{15,17}$/.test(outcome.metaLeadId)) {
+    if (outcome.metaLeadId && LEAD_ID_RE.test(outcome.metaLeadId)) {
       userData.lead_id = outcome.metaLeadId
     }
 
     const event: MetaCapiPayload['data'][number] = {
-      event_name: EVENT_NAME[outcome.outcomeKind],
+      event_name: eventNameFor(outcome),
       event_time: Math.floor(new Date(outcome.occurredAt).getTime() / 1000),
       // 幂等键 = 事实行的 uuid（不可变）。
       // 注意：Meta 只在 pixel↔server 之间用它去重，服务端之间不去重 ——
@@ -185,11 +205,58 @@ export class MetaCapiWriter implements DestinationWriter<MetaCapiPayload> {
     return { data: [event] }
   }
 
+  /**
+   * Meta「Conversion Leads」线索阶段事件（2026-11-10 按官方 payload 规范核对）：
+   *   - action_source = "system_generated"
+   *   - custom_data.event_source = "crm"，custom_data.lead_event_source = 线索来自哪个系统
+   *   - user_data.lead_id = 即时表单线索编号（15–17 位，不哈希；以字符串发，
+   *     16–17 位超出 JS 安全整数，转成数字会丢精度、对不上线索）
+   *   - event_name = 客户配置里的阶段名
+   *   - 不带金额：阶段不是成交，金额只走 Purchase。
+   * 没有线索编号 / 没配线索阶段数据集 → 直接抛错（状态机记成组装失败，不发）。
+   */
+  private buildLeadStage(outcome: OutcomeForSend, config: ClientSendConfig): MetaCapiPayload {
+    if (!config.crmStage) {
+      throw new Error('这个客户没配置线索阶段数据集，线索阶段事件不能发（不会回落到网站数据集）')
+    }
+    if (!outcome.metaLeadId || !LEAD_ID_RE.test(outcome.metaLeadId)) {
+      throw new Error('线索阶段事件必须带 Facebook 即时表单线索编号（15–17 位数字）')
+    }
+    const userData: Record<string, string[] | string> = { lead_id: outcome.metaLeadId }
+    const em = hashEmail(outcome.customerEmail)
+    const ph = hashStoredPhone(outcome.customerPhone, config.defaultPhoneCountry)
+    const fn = hashName(outcome.customerFirst)
+    const ln = hashName(outcome.customerLast)
+    if (em) userData.em = [em]
+    if (ph) userData.ph = [ph]
+    if (fn) userData.fn = [fn]
+    if (ln) userData.ln = [ln]
+
+    return {
+      data: [
+        {
+          event_name: eventNameFor(outcome),
+          event_time: Math.floor(new Date(outcome.occurredAt).getTime() / 1000),
+          event_id: outcome.id,
+          action_source: 'system_generated',
+          user_data: userData,
+          custom_data: { event_source: 'crm', lead_event_source: config.crmStage.leadEventSource },
+        },
+      ],
+    }
+  }
+
   preview(outcome: OutcomeForSend, config: ClientSendConfig): Record<string, unknown> {
-    return maskForPreview(outcome, config, {
-      eventName: EVENT_NAME[outcome.outcomeKind],
+    const base = maskForPreview(outcome, config, {
+      eventName: eventNameFor(outcome),
       maxEventAgeDays: this.maxEventAgeDays,
     })
+    if (outcome.outcomeKind !== 'lead_stage') return base
+    return {
+      ...base,
+      回报方式: '线索阶段（对回即时表单线索）',
+      目标数据集: config.crmStage?.datasetId ?? '未配置',
+    }
   }
 
   async preflight(
@@ -246,6 +313,28 @@ export class MetaCapiWriter implements DestinationWriter<MetaCapiPayload> {
       return { ok: false, detail }
     }
 
+    // 配了线索阶段数据集，就再确认这把令牌也看得见它——切正式之前要先发现「令牌没被授权到新数据集」。
+    if (config.crmStage) {
+      const crmId = config.crmStage.datasetId
+      detail.crm_dataset_id = crmId
+      try {
+        const res = await opts.fetcher(
+          `${GRAPH_BASE}/${crmId}?fields=id,name&access_token=${encodeURIComponent(creds.accessToken)}`,
+        )
+        const body = (await res.json()) as { id?: string; name?: string; error?: { message?: string } }
+        const visible = body?.id === crmId
+        detail.crm_dataset_visible = visible
+        detail.crm_dataset_name = body?.name ?? null
+        if (!visible) {
+          detail.crm_dataset_error = body?.error?.message ?? '这把令牌看不到线索阶段数据集'
+          return { ok: false, detail }
+        }
+      } catch (e) {
+        detail.crm_dataset_error = e instanceof Error ? e.message : String(e)
+        return { ok: false, detail }
+      }
+    }
+
     return { ok: true, detail }
   }
 
@@ -268,11 +357,29 @@ export class MetaCapiWriter implements DestinationWriter<MetaCapiPayload> {
       }
     }
 
+    // 线索阶段事件只发到线索阶段数据集；没配就当配置错误（请求根本没发出去，可安全判永久失败）。
+    let datasetId = creds.pixelId
+    if (isLeadStagePayload(payload)) {
+      if (!config.crmStage?.datasetId) {
+        return {
+          ok: false,
+          errorName: 'ConfigError',
+          errorMessage: '这个客户没配置线索阶段数据集，线索阶段事件不能发',
+          latencyMs: Date.now() - startedAt,
+        }
+      }
+      // 线索阶段数据集**可以**跟网站像素是同一个：Meta 事件管理工具现在的 CRM 接入流程
+      // （连接数据 → CRM → 手动连接）就是把 CRM 事件挂到已有的统一数据集上，不再新建
+      // （2026-11-10 在 CTS 的事件管理工具里实测）。Meta 靠 action_source=system_generated
+      // + custom_data.event_source=crm 区分它们，不靠数据集。发到哪个数据集只认客户配置。
+      datasetId = config.crmStage.datasetId
+    }
+
     // 🔴 一切异常都变成返回值，绝不抛出。
     //    抛出的话调用方分不清"请求根本没发出去"和"发出去了但没接住回应"，
     //    而这两者的正确处置完全相反（前者可以重发，后者绝不能）。
     try {
-      const res = await opts.fetcher(`${GRAPH_BASE}/${creds.pixelId}/events`, {
+      const res = await opts.fetcher(`${GRAPH_BASE}/${datasetId}/events`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ ...payload, access_token: creds.accessToken }),

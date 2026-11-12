@@ -22,6 +22,7 @@ import { clientWorkflowSteps, prescriptionEntryHref } from './prescription-entry
 import { industryFeatureFlags } from '@/lib/clients/industry-features';
 import { homeEntryVisible, type HomeEntry } from '@/lib/auth/home-entries';
 import { useWorkspaceViewer } from '@/app/dashboard/workspace-viewer';
+import { ClientHomeFdeView } from './_components/fde-home/ClientHomeFdeView';
 
 
 interface Client {
@@ -493,6 +494,70 @@ export default function ClientDetailPage() {
     );
   }
 
+  const isFdeHome = viewer.role === 'admin'
+
+  const clientDrawers = (
+    <>
+      <GenerationDrawer
+        clientId={clientId}
+        open={generationOpen}
+        onClose={() => setGenerationOpen(false)}
+        executionItemId={execItemId}
+      />
+      <ZhugeDrawer
+        clientId={clientId}
+        isOpen={zhugeDrawerOpen}
+        onClose={() => setZhugeDrawerOpen(false)}
+        onComplete={(output) => {
+          setZhugeFreshOutput(output)
+          setZhugeRefreshKey(k => k + 1)
+        }}
+      />
+      <SettingsDrawer
+        open={settingsOpen}
+        onClose={() => {
+          setSettingsOpen(false)
+          const params = new URLSearchParams(searchParams?.toString() ?? '')
+          let dirty = false
+          if (params.has('brief')) { params.delete('brief'); dirty = true }
+          if (params.has('settings')) { params.delete('settings'); dirty = true }
+          if (dirty && pathname) {
+            const query = params.toString()
+            router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false })
+          }
+        }}
+        clientId={clientId}
+        client={client}
+        activeTab={settingsTab}
+        onTabChange={setSettingsTab}
+      />
+    </>
+  )
+
+  if (isFdeHome) {
+    return (
+      <div className="min-h-screen bg-me-ivory">
+        <LocaleConfirmBanner clientId={clientId} />
+        <GoalBanner clientId={clientId} />
+        <ClientHomeFdeView
+          client={client}
+          clientId={clientId}
+          discoveryStatus={discoveryStatus}
+          prescriptionStatus={prescriptionStatus}
+          prescriptionId={prescriptionId}
+          discoveryConfirmed={discoveryConfirmed}
+          showEntry={showEntry}
+          hasActiveBrief={hasActiveBrief}
+          onOpenSettings={() => openSettings('brief')}
+          zhugeRefreshKey={zhugeRefreshKey}
+          zhugeFreshOutput={zhugeFreshOutput}
+          onAskZhuge={() => setZhugeDrawerOpen(true)}
+        />
+        {clientDrawers}
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen space-y-5 bg-[#f6f7f2] px-4 py-5 md:px-6">
       {/* Locale confirmation banner — shown until client confirms */}
@@ -789,47 +854,7 @@ export default function ClientDetailPage() {
         </div>
       )}
 
-      {/* Generation drawer */}
-      <GenerationDrawer
-        clientId={clientId}
-        open={generationOpen}
-        onClose={() => setGenerationOpen(false)}
-        executionItemId={execItemId}
-      />
-
-      {/* Zhuge AI drawer — real-time conduct + Luban trigger */}
-      <ZhugeDrawer
-        clientId={clientId}
-        isOpen={zhugeDrawerOpen}
-        onClose={() => setZhugeDrawerOpen(false)}
-        onComplete={(output) => {
-          setZhugeFreshOutput(output)
-          setZhugeRefreshKey(k => k + 1)
-        }}
-      />
-
-      {/* Settings drawer.
-          On close we also strip the auto-open URL params (?brief, ?settings)
-          so a page refresh doesn't re-open the drawer the FDE just closed.
-          Other params (e.g. ?exec) are preserved. */}
-      <SettingsDrawer
-        open={settingsOpen}
-        onClose={() => {
-          setSettingsOpen(false)
-          const params = new URLSearchParams(searchParams?.toString() ?? '')
-          let dirty = false
-          if (params.has('brief'))    { params.delete('brief');    dirty = true }
-          if (params.has('settings')) { params.delete('settings'); dirty = true }
-          if (dirty && pathname) {
-            const query = params.toString()
-            router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false })
-          }
-        }}
-        clientId={clientId}
-        client={client}
-        activeTab={settingsTab}
-        onTabChange={setSettingsTab}
-      />
+      {clientDrawers}
     </div>
   );
 }

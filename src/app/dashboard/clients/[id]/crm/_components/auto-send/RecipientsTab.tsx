@@ -65,7 +65,7 @@ function RecipientLine({
       </td>
       <td className="py-2 pr-2 text-me-charcoal/70">
         <div>{reason.main}</div>
-        {reason.detail && <div className="text-[10px] text-me-charcoal/45">{reason.detail}</div>}
+        {reason.detail && <div className="text-xs text-me-charcoal/45">{reason.detail}</div>}
       </td>
       <td className="py-2 text-right text-me-charcoal/70">{engagementText(info, row)}</td>
     </tr>
@@ -124,13 +124,18 @@ export function RecipientsTab({
           演练：系统彩排了一遍，下面标「演练」的没有真的发出去，不算「已发」。
         </p>
       )}
+      {summary.unknownCount > 0 && (
+        <p role="note" className="text-xs font-semibold text-me-charcoal">
+          下面标「结果不明」的：发出了，但没拿到最终结果，信可能已经送到客人手里，先别重发。
+        </p>
+      )}
       {line && <p className="text-xs text-me-charcoal/70">{line}</p>}
       {recipients.length === 0 ? (
         <p className="text-xs text-me-charcoal/55">这封信还没有收件人名单。</p>
       ) : (
         <RecipientTable clientId={clientId} recipients={recipients} info={openInfo} linkNames={linkNames} />
       )}
-      <p className="text-[11px] text-me-charcoal/55">{recipientsFootnote(openInfo)}</p>
+      <p className="text-xs text-me-charcoal/55">{recipientsFootnote(openInfo)}</p>
     </div>
   )
 }

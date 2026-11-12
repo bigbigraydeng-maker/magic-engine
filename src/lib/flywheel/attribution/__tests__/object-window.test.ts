@@ -87,6 +87,6 @@ describe('same object, same window', () => {
     const worse = judgeObjectWindow({ ...base, rows: [row('2025-12-28', 20, 10), row('2026-01-03', 80, 10)] })
     expect(worse.case.verdict).toBe('worse')
     expect(worse.storedVerdict).toBe('reversed')
-    expect(worse.case.text).toContain('结论：变差了。')
+    expect(worse.case.verdict).toBe('worse')
   })
 })

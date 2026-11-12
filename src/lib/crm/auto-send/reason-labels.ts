@@ -47,16 +47,26 @@ function normaliseDetail(detail: string | null): string | null {
  * ADDS labels and never changes an existing one. The raw reason code is never returned.
  */
 export function resolveReasonText(
-  row: { status: RecipientStatus; reasonCode: string | null; reasonDetail: string | null },
+  row: { status: RecipientStatus; reasonCode: string | null; reasonDetail: string | null; reasonText?: string | null },
   base: Readonly<Record<string, string>>,
 ): { main: string; detail: string | null } {
-  if (row.status === 'sent' || row.status === 'pending') {
+  if (row.status === 'sent') {
     return { main: '—', detail: null }
+  }
+
+  // A pending row normally has nothing to explain; the read interface may still attach a plain note
+  // (for example 「这一批发出时他不在名单里（不补发）」 on an already-sent batch).
+  if (row.status === 'pending') {
+    return { main: normaliseDetail(row.reasonText ?? null) ?? '—', detail: null }
   }
 
   if (row.status === 'rehearsal') {
     return { main: '彩排，没有真的发出去', detail: null }
   }
+
+  // The read interface already translated the reason into plain Chinese: show that as it is.
+  const told = normaliseDetail(row.reasonText ?? null)
+  if (told !== null) return { main: told, detail: normaliseDetail(row.reasonDetail) }
 
   const code = row.reasonCode
   const main =

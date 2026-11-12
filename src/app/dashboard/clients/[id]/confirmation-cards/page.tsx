@@ -1,4 +1,5 @@
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { AdsExecutionReviewPanel } from '../_components/AdsExecutionReviewPanel'
 import { CardList } from './card-list'
 
 export const dynamic = 'force-dynamic'
@@ -12,20 +13,25 @@ export default async function ConfirmationCardsPage({
   if (!access.ok) {
     const line = access.status === 401 ? '请先登录。' : '你不能看这位客户的确认卡。'
     return (
-      <main className="mx-auto max-w-xl px-4 py-10">
-        <h1 className="text-2xl font-semibold text-neutral-900">请确认</h1>
-        <p className="mt-3 text-base text-neutral-800">{line}</p>
-      </main>
+      <div className="px-6 py-10 md:px-10">
+        <h1 className="font-display text-2xl font-bold text-me-charcoal">确认卡</h1>
+        <p className="mt-3 text-base text-me-charcoal/80">{line}</p>
+      </div>
     )
   }
 
   return (
-    <main className="mx-auto max-w-xl px-4 py-10">
-      <h1 className="text-2xl font-semibold text-neutral-900">请确认</h1>
-      <p className="mt-2 text-base text-neutral-700">
-        点「确认」或「不做」才算数。标题是「批准建 Meta 暂停草稿并送审」的那张，点了确认才会去建暂停草稿。建成后仍是暂停，不会开启，也不会花钱。「建议把跑赢的自然帖建成暂停广告」点了才建成暂停广告；「建议暂停一条点击率过低的广告」点了才走暂停；「把这条已暂停的新广告打开」点了才打开这一条。「把跑赢的广告放进放量组，先建成暂停」点了才在放量组建成暂停广告，不改预算。「为跑赢的广告另提一份新计划」点了只记下新计划，不改正在跑的预算。「建议暂停一条获客成本过高的广告」点了才暂停那一条。其他卡点了只是记下。
-      </p>
-      <CardList clientId={params.id} />
-    </main>
+    <div className="px-6 py-8 md:px-10 md:py-10">
+      <header className="max-w-3xl">
+        <h1 className="font-display text-2xl font-bold tracking-tight text-me-charcoal md:text-3xl">确认卡</h1>
+        <p className="mt-2 text-base leading-relaxed text-me-charcoal/70">
+          会改广告、预算或 Meta 的事，都在这里点头。你不点，什么都不会改。
+        </p>
+      </header>
+      <div className="max-w-3xl space-y-8">
+        <CardList clientId={params.id} />
+        <AdsExecutionReviewPanel clientId={params.id} />
+      </div>
+    </div>
   )
 }

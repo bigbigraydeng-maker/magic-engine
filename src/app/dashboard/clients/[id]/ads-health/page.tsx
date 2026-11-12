@@ -15,23 +15,14 @@ import { useParams, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 // Pure data module (no server imports) — safe in a client component.
 import { resolveAdsPlaybook, type AdsPlaybook } from '@/lib/ads-strategy/playbooks'
-import type { AdsScorecard } from '@/lib/ads-strategy/portfolio/scorecard'
-import { summarizeResultsByType, type ResultSummary } from '@/lib/ads-strategy/portfolio/result-summary'
-import { CORE_METRIC_NOUN } from '@/lib/ads-strategy/rules/core-metric'
 import AutonomySettings from './autonomy-settings'
-import GrowthPanel, { type GrowthStateView, goalLiveNote } from './growth-panel'
-import ScorecardSection from './scorecard-section'
-import QualifiedPanel from './qualified-panel'
-import { TodayGoalProgress } from './today-goal-progress'
-import WarMapPanel from './war-map-panel'
-import LiveTodayPanel from './live-today-panel'
-import LivePacingPanel from './live-pacing-panel'
-import HourlyLeadsPanel from './hourly-leads-panel'
+import GrowthPanel, { type GrowthStateView } from './growth-panel'
 import BreakdownPanel from './breakdown-panel'
+import LiveTodayPanel from './live-today-panel'
 import EntityTreePanel from './entity-tree-panel'
 import AutoPausePanel from './auto-pause-panel'
-import AdsNextStepCard from './ads-next-step-card'
 import { PAGE_TABS, tabFromQuery, type PageTab } from './tabs'
+import { AdsHealthTodayTab } from './ads-health-today-tab'
 import { CurrentWinnerPanel } from './current-winner-panel'
 import type { ClientGrowthView } from '@/lib/ads-strategy/agents/growth-client-view'
 
@@ -96,11 +87,18 @@ interface AdHealthResponse {
 // ─── Verdict styling (colour = conclusion, per 板桥) ───────────────────────────
 
 const VERDICT_META: Record<Verdict, { label: string; dot: string; tint: string; text: string }> = {
-  alert:                { label: '该动手了', dot: 'bg-red-500',    tint: 'bg-red-50 border-red-200',       text: 'text-red-700' },
-  watch:                { label: '留意',     dot: 'bg-amber-500',  tint: 'bg-amber-50 border-amber-200',   text: 'text-amber-700' },
-  healthy:              { label: '健康',     dot: 'bg-emerald-500', tint: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-700' },
-  insufficient_history: { label: '数据积累中', dot: 'bg-gray-400',  tint: 'bg-gray-50 border-gray-200',     text: 'text-gray-500' },
-  paused:               { label: '已停投',   dot: 'bg-gray-300',  tint: 'bg-gray-50 border-gray-200 opacity-70', text: 'text-gray-400' },
+  alert:                { label: '该动手了', dot: 'bg-status-rej',   tint: 'border-status-rej/25 bg-status-rej/10', text: 'text-status-rej' },
+  watch:                { label: '留意',     dot: 'bg-status-exec',  tint: 'border-me-ochre/30 bg-me-ochre/10',     text: 'text-me-ochre' },
+  healthy:              { label: '健康',     dot: 'bg-status-track', tint: 'border-status-track/25 bg-status-track/10', text: 'text-status-track' },
+  insufficient_history: { label: '数据积累中', dot: 'bg-status-attn',  tint: 'border-me-stone bg-me-ivory',            text: 'text-status-attn' },
+  paused:               { label: '已停投',   dot: 'bg-me-taupe',     tint: 'border-me-stone bg-me-stone/40 opacity-80', text: 'text-me-taupe' },
+}
+
+function fmtDataUpdatedLine(insightDate: string): string {
+  const parts = insightDate.split('-').map((x) => parseInt(x, 10))
+  if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) return `数据更新于 ${insightDate}（新西兰时间）`
+  const [, month, day] = parts
+  return `数据更新于 ${month}月${day}日 早上 6:00（新西兰时间）`
 }
 
 function fmtPct(fraction: number | null): string {
@@ -237,7 +235,7 @@ function PrescriptionBlock({ clientId, c }: { clientId: string; c: CampaignNarra
             type="button"
             disabled={running || done}
             onClick={run}
-            className="shrink-0 rounded-lg bg-gray-800 px-3 py-1.5 text-sm text-white hover:bg-gray-700 disabled:opacity-50"
+            className="min-h-11 shrink-0 rounded-xl bg-me-charcoal px-4 py-2 text-sm font-semibold text-me-ivory hover:bg-me-black disabled:opacity-50"
           >
             {running ? '执行中…' : done ? '已执行 ✓' : '执行'}
           </button>
@@ -253,88 +251,6 @@ function PrescriptionBlock({ clientId, c }: { clientId: string; c: CampaignNarra
 }
 
 // ─── Campaign card ─────────────────────────────────────────────────────────────
-
-/**
- * The money question, answered before any diagnosis.
- *
- * The page used to open with "which ad is sick" and never once said what the
- * week cost. That is the first thing the PM actually wants to know (板桥), and
- * every number here is a plain sum of figures already on the cards — nothing
- * modelled, nothing estimated. Deliberately absent: an account-wide
- * week-over-week comparison, because the engine only computes that per campaign
- * and inventing an aggregate would be a fabricated number.
- */
-function MoneySummary({ campaigns, playbook, scorecard }: {
-  campaigns: CampaignNarrative[]
-  playbook: AdsPlaybook
-  /** 内部员工才有；有了就按结果种类分开汇总（RL-12：开聊和留资不相加），没有就退回旧的整体相加 */
-  scorecard?: AdsScorecard | { error: string }
-}) {
-  const spend = campaigns.reduce((s, c) => s + c.latest_spend_7d, 0)
-  if (spend <= 0) return null
-
-  if (scorecard && !('error' in scorecard)) {
-    return <TypedMoneySummary spend={spend} summary={summarizeResultsByType(scorecard.units)} />
-  }
-
-  const results = campaigns.reduce((s, c) => s + c.latest_results_7d, 0)
-  const perResult = results > 0 ? spend / results : null
-
-  // Name only the single worst payer, and only when it is meaningfully worse
-  // than the average — one name to act on beats a table nobody reads.
-  const worst = campaigns
-    .filter(c => c.latest_results_7d > 0 && c.latest_spend_7d > 0)
-    .map(c => ({ c, per: c.latest_spend_7d / c.latest_results_7d }))
-    .sort((a, b) => b.per - a.per)[0]
-  const showWorst = worst && perResult != null && campaigns.length > 1 && worst.per > perResult * 1.2
-
-  return (
-    <div className="rounded-xl border border-gray-200 bg-white p-4 mb-4">
-      <p className="text-sm text-gray-700">
-        过去 7 天花了 <span className="font-semibold tabular-nums">${spend.toFixed(0)}</span>
-        {results > 0 ? (
-          <>
-            ,来了 <span className="font-semibold tabular-nums">{results}</span> 个{playbook.resultNoun},
-            实付平均 <span className="font-semibold tabular-nums">${perResult!.toFixed(1)}</span> 一个。
-          </>
-        ) : (
-          <>,<span className="font-semibold text-amber-700">一个{playbook.resultNoun}都没来</span>。</>
-        )}
-      </p>
-      {showWorst && (
-        <p className="mt-1.5 text-xs text-gray-500">
-          最贵的是「<span className="text-gray-700">{worst.c.campaign_name}</span>」——
-          一个{playbook.resultNoun} <span className="tabular-nums text-gray-700">${worst.per.toFixed(1)}</span>。
-        </p>
-      )}
-    </div>
-  )
-}
-
-/** 按结果种类分开写：留资一行、开聊一行，永远不加成一个数。 */
-function TypedMoneySummary({ spend, summary }: { spend: number; summary: ResultSummary }) {
-  const skipped = summary.noResultUnits + summary.unknownUnits
-  return (
-    <div className="rounded-xl border border-gray-200 bg-white p-4 mb-4">
-      <p className="text-sm text-gray-700">
-        过去 7 天花了 <span className="font-semibold tabular-nums">${spend.toFixed(0)}</span>
-        {summary.rows.length === 0 && <>,按结果种类汇总的数今天读不到（见下面成绩单）。</>}
-        {summary.rows.length > 0 && <>,其中：</>}
-      </p>
-      {summary.rows.map(row => (
-        <p key={row.type} className="mt-1 text-sm text-gray-700">
-          <span className="font-semibold tabular-nums">{row.results}</span> 个{CORE_METRIC_NOUN[row.type]}
-          {row.costPerResult !== null && <>,实付平均 <span className="font-semibold tabular-nums">${row.costPerResult.toFixed(1)}</span> 一个</>}
-        </p>
-      ))}
-      {skipped > 0 && (
-        <p className="mt-1.5 text-xs text-gray-500">
-          另有 {skipped} 个组没算进上面的数（不出结果，比如视频播放，或判不出结果种类）。
-        </p>
-      )}
-    </div>
-  )
-}
 
 interface StopLossPreview {
   campaign_name: string
@@ -475,7 +391,7 @@ function StopLossBlock({ clientId, c, playbook }: { clientId: string; c: Campaig
           type="button"
           disabled={busy !== null || settled}
           onClick={() => run('cut')}
-          className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          className="min-h-11 rounded-xl border border-black/10 bg-white px-4 py-2 text-sm font-medium text-me-charcoal hover:bg-me-stone/50 disabled:opacity-50"
         >
           {busy === 'cut' ? '正在改…' : '预算降 20%'}
         </button>
@@ -483,7 +399,7 @@ function StopLossBlock({ clientId, c, playbook }: { clientId: string; c: Campaig
           type="button"
           disabled={busy !== null || settled}
           onClick={() => run('pause')}
-          className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          className="min-h-11 rounded-xl border border-black/10 bg-white px-4 py-2 text-sm font-medium text-me-charcoal hover:bg-me-stone/50 disabled:opacity-50"
         >
           {busy === 'pause' ? '正在停…' : '先全停'}
         </button>
@@ -558,17 +474,51 @@ function CampaignCard({ clientId, c, playbook }: { clientId: string; c: Campaign
 
 // ─── Page ──────────────────────────────────────────────────────────────────────
 
+function AdsHealthPageHeader({
+  clientId,
+  insightDate,
+}: {
+  clientId: string
+  insightDate?: string
+}) {
+  return (
+    <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div>
+        <Link
+          href={`/dashboard/clients/${clientId}`}
+          className="text-sm text-me-charcoal/45 hover:text-me-charcoal/70"
+        >
+          ← 返回客户
+        </Link>
+        <h1 className="mt-2 font-display text-2xl font-bold tracking-tight text-me-charcoal md:text-3xl">
+          广告健康
+        </h1>
+        <p className="mt-1 max-w-xl text-sm text-me-charcoal/55">
+          先看现在花得怎么样、有没有要你点头的事，其余往下翻。
+        </p>
+      </div>
+      {insightDate ? (
+        <p className="shrink-0 text-xs text-me-charcoal/45 sm:text-right">
+          {fmtDataUpdatedLine(insightDate)}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
 function TabBar({ tab, onChange }: { tab: PageTab; onChange: (t: PageTab) => void }) {
   return (
-    <div className="mb-5 flex gap-1 border-b border-gray-200">
+    <div className="mb-5 flex flex-wrap gap-1 border-b border-me-stone">
       {PAGE_TABS.map(item => (
         <button
           key={item.key}
           type="button"
           onClick={() => onChange(item.key)}
           title={item.hint}
-          className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
-            tab === item.key ? 'border-gray-800 text-gray-900' : 'border-transparent text-gray-400 hover:text-gray-600'
+          className={`-mb-px min-h-11 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+            tab === item.key
+              ? 'border-me-ochre text-me-charcoal'
+              : 'border-transparent text-me-charcoal/45 hover:text-me-charcoal/70'
           }`}
         >
           {item.label}
@@ -626,80 +576,30 @@ export default function AdsHealthPage() {
   const stopped = campaigns.filter(c => c.verdict === 'paused')
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-8">
-      <div className="mb-5">
-        <Link href={`/dashboard/clients/${clientId}`} className="text-sm text-gray-400 hover:text-gray-600">
-          ← 返回客户
-        </Link>
-        <h1 className="mt-2 text-2xl font-semibold text-gray-800">广告健康</h1>
-        <p className="text-sm text-gray-400">每天自动体检 · 先看「今天看这里」，其余按需要点开</p>
-      </div>
-
-      <AdsNextStepCard clientId={clientId} refreshKey={nextStepRefreshKey} />
+    <div className="mx-auto max-w-5xl bg-me-ivory px-4 py-6 md:py-8">
+      <AdsHealthPageHeader clientId={clientId} insightDate={latest?.insight_date} />
 
       <TabBar tab={tab} onChange={setTab} />
 
       {tab === 'today' && (
-        <>
-          {!loading && !error && (
-            <TodayGoalProgress
-              state={data?.growth}
-              clientId={clientId}
-              todayCrmLeads={data?.today_crm_leads}
-              liveNote={
-                data?.growth && 'goal_live' in data.growth
-                  ? goalLiveNote(data.growth.goal_live)
-                  : undefined
-              }
-            />
-          )}
-          <HourlyLeadsPanel clientId={clientId} />
-          {/* 作战地图（只给内部员工；非内部人员接口回 403，面板自己不渲染）。三句话先看。 */}
-          <LiveTodayPanel clientId={clientId} part="today" />
-          <LivePacingPanel clientId={clientId} />
-          <WarMapPanel clientId={clientId} />
-          {/* 每日广告成绩单：只给内部员工（客户版没有 payload，见 growth-client-view 白名单）；今天还没巡察就不显示 */}
-          {!loading && !error && data?.growth && !('viewer' in data.growth) && (
-            <ScorecardSection scorecard={data.growth.payload?.scorecard} clientId={clientId} />
-          )}
-          {!loading && !error && data?.growth && !('viewer' in data.growth) && data.growth.payload?.scorecard && !('error' in data.growth.payload.scorecard) && (
-            <QualifiedPanel block={data.growth.payload.scorecard.qualified} />
-          )}
-          {loading && <div className="text-gray-400 text-sm py-8 text-center">加载中…</div>}
-          {error && (
-            <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">加载出错:{error}</div>
-          )}
-          {!loading && !error && !latest && (
-            <div className="rounded-xl border border-gray-200 bg-gray-50 p-8 text-center text-gray-500">
-              <p className="text-sm">广告数据还在积累中,暂时没有健康报告。</p>
-              <p className="text-xs mt-2 text-gray-400">系统每天凌晨自动体检,数据够了这里就会出现。</p>
-            </div>
-          )}
-          {!loading && !error && latest && (
-            <>
-              <p className="mb-1.5 text-xs font-medium text-gray-500">
-                跟自己以前比 · 每个系列和它自己最好的一周比，不看目标成本（跟上面「体检红灯」是两把尺子）
-              </p>
-              <div className={`rounded-xl border p-4 mb-4 ${overallMeta.tint}`}>
-                <div className="flex items-center gap-2.5">
-                  <span className={`inline-block w-3 h-3 rounded-full ${overallMeta.dot}`} />
-                  <span className={`text-base font-semibold ${overallMeta.text}`}>{latest.headline}</span>
-                </div>
-                <p className="mt-1.5 text-xs text-gray-400">
-                  体检日期 {latest.insight_date} · 共 {latest.payload.evaluated} 条广告
-                </p>
-              </div>
-              <MoneySummary
-                campaigns={latest.payload.campaigns}
-                playbook={playbook}
-                scorecard={data?.growth && !('viewer' in data.growth) ? data.growth.payload?.scorecard : undefined}
-              />
-              {live.length > 0 && (
-                <p className="text-xs text-gray-400">在投的 {live.length} 条广告要看明细，点上面「每条广告」。</p>
-              )}
-            </>
-          )}
-        </>
+        <AdsHealthTodayTab
+          clientId={clientId}
+          loading={loading}
+          error={error}
+          playbook={playbook}
+          growth={data?.growth}
+          todayCrmLeads={data?.today_crm_leads}
+          campaigns={latest?.payload.campaigns ?? []}
+          liveCampaigns={live}
+          overallHeadline={latest?.headline ?? null}
+          insightDate={latest?.insight_date ?? null}
+          evaluated={latest?.payload.evaluated ?? 0}
+          scorecard={data?.growth && !('viewer' in data.growth) ? data.growth.payload?.scorecard : undefined}
+          refreshKey={nextStepRefreshKey}
+          overallTint={overallMeta.tint}
+          overallDot={overallMeta.dot}
+          overallText={overallMeta.text}
+        />
       )}
 
       {tab === 'ads' && (
@@ -775,8 +675,8 @@ export default function AdsHealthPage() {
         </div>
       )}
 
-      <p className="mt-8 text-xs text-gray-300 text-center">
-        所有判断由系统每天自动生成 · 数字直接来自广告平台,可自行核对
+      <p className="mt-8 text-center text-xs text-me-charcoal/35">
+        所有判断由系统每天自动生成 · 数字直接来自广告平台，可自行核对
       </p>
     </div>
   )

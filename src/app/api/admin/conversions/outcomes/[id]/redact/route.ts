@@ -33,14 +33,14 @@ export async function POST(request: Request, { params }: { params: { id: string 
 
   const { data, error } = await supabaseAdmin
     .from('me_sale_outcomes')
-    .select('id, client_id, redacted_at')
+    .select('id, client_id, redacted_at, outcome_kind')
     .eq('id', params.id)
     .maybeSingle()
 
   if (error) return NextResponse.json({ error: `读取失败: ${error.message}` }, { status: 500 })
   if (!data) return NextResponse.json({ error: '记录不存在' }, { status: 404 })
 
-  const outcome = data as { id: string; client_id: string; redacted_at: string | null }
+  const outcome = data as { id: string; client_id: string; redacted_at: string | null; outcome_kind: string }
 
   const denied = assertClientScope(actor, outcome.client_id)
   if (denied) return denied
@@ -81,6 +81,9 @@ export async function POST(request: Request, { params }: { params: { id: string 
       page_scoped_user_id: null,
       // Facebook 线索编号能反查到具体那条表单提交（含姓名电话），同样必须清空。
       meta_lead_id: null,
+      // 线索阶段记录的幂等键是「线索编号:阶段名」，同样能反查到那条表单提交，一起清掉。
+      // 清掉不会导致每日任务重新写入：那边按 (客户, 联系人, 阶段名) 查重，数据库有同样的唯一索引。
+      ...(outcome.outcome_kind === 'lead_stage' ? { source_ref: null } : {}),
       redacted_at: now,
       redaction_reason: reason || '客人要求删除',
       updated_at: now,

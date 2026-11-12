@@ -1,6 +1,9 @@
 /**
- * Conservative anomaly rules. Pure. Never pauses and never calls Meta.
- * A missing cap or target is "cannot judge", not zero.
+ * Anomaly rules. Pure. Never pauses and never calls Meta.
+ * Confirmed by Ray 2026-11-10: a confirm card when cost per primary result
+ * is over twice the client's own target. Data stale for 12 hours or more
+ * is a reminder only, never a pause card.
+ * A missing cap, target, or primary-result count is "cannot judge", not zero.
  */
 
 import { DEFAULT_STALE_HOURS } from './settings'
@@ -9,13 +12,16 @@ import type { BreakerSettings } from './settings'
 export const POLICY_ERROR_STATUSES = ['DISAPPROVED', 'WITH_ISSUES'] as const
 const MIN_FORECAST_HOURS = 1
 
+export type PrimaryResultKind = 'lead' | 'messaging_started'
+
 export interface SpendRow {
   readonly accountId: string
   readonly campaignId: string
   readonly campaignName: string
   readonly day: string
   readonly spendCents: number
-  readonly leads: number | null
+  /** Count of the client's primary result. null = cannot judge, never zero. */
+  readonly primaryCount: number | null
   readonly currency: string | null
   readonly campaignLive: boolean
 }
@@ -57,9 +63,11 @@ export interface BreakerFacts {
   readonly insights: readonly InsightStamp[]
   readonly accounts: readonly string[]
   readonly freshReadable: boolean
+  /** null = the configured primary result is not a count this pass can read. */
+  readonly primaryResult: PrimaryResultKind | null
 }
 
-export type PauseRule = 'spend_over_cap' | 'cpl_zero_leads' | 'policy_error'
+export type PauseRule = 'spend_over_cap' | 'cpl_zero_leads' | 'cpl_over_target' | 'policy_error'
 
 export interface PauseProposal {
   readonly kind: 'pause'
@@ -79,6 +87,7 @@ export type AlertCode =
   | 'policy_unreadable'
   | 'fresh_unreadable'
   | 'stale'
+  | 'primary_unreadable'
 
 export interface AlertFinding {
   readonly kind: 'alert'
@@ -115,9 +124,10 @@ export function previousDay(day: string): string {
 
 export function judgeBreaker(facts: BreakerFacts): BreakerJudgement {
   if (!facts.settings.enabled) return { pauses: [], alerts: [] }
+  const alerts = [spendAlert(facts), cplAlert(facts), policyAlert(facts), freshAlert(facts)].flatMap((item) => item ?? [])
+  if (alerts.some((item) => item.code === 'stale' || item.code === 'fresh_unreadable')) return { pauses: [], alerts }
   const spend = spendPause(facts)
   const pauses = mergePauses([...(spend ? [spend] : []), ...cplPauses(facts), ...policyPauses(facts)])
-  const alerts = [spendAlert(facts), policyAlert(facts), freshAlert(facts)].flatMap((item) => item ?? [])
   return { pauses, alerts }
 }
 
@@ -147,13 +157,44 @@ function spendAlert(facts: BreakerFacts): AlertFinding | null {
   return null
 }
 
-function cplPauses(facts: BreakerFacts): PauseProposal[] {
+const LEAD_CPL_SUMMARY = '最近这一天有花费，但没有线索，花费已经高于约定的目标线索成本倍数。系统没有暂停。请在确认卡上点确认，才会暂停。'
+const CHAT_CPL_SUMMARY = '最近这一天有花费，但没有开聊，花费已经高于约定的目标开聊成本倍数。系统没有暂停。请在确认卡上点确认，才会暂停。'
+const LEAD_OVER_SUMMARY = '最近这一天的单次线索成本已经高于约定的目标倍数。系统没有暂停。请在确认卡上点确认，才会暂停。'
+const CHAT_OVER_SUMMARY = '最近这一天的单次开聊成本已经高于约定的目标倍数。系统没有暂停。请在确认卡上点确认，才会暂停。'
+
+function cplWindow(facts: BreakerFacts): { rows: SpendRow[]; line: number } | null {
   const target = facts.settings.targetCplCents
   const window = cplRows(facts)
-  if (!facts.spendReadable || target === null || window === null || currenciesClash(window)) return []
-  return groupCampaigns(window)
-    .filter((row) => row.leads === 0 && row.spendCents > target * facts.settings.cplMultiple && row.campaignLive)
-    .map((hit) => pauseOf('cpl_zero_leads', hit, '最近这一天有花费，但没有线索，花费已经高于约定的目标线索成本倍数。系统没有暂停。请在确认卡上点确认，才会暂停。'))
+  if (!facts.spendReadable || target === null || window === null || currenciesClash(window)) return null
+  return { rows: groupCampaigns(window), line: target * facts.settings.cplMultiple }
+}
+
+function cplPauses(facts: BreakerFacts): PauseProposal[] {
+  const window = cplWindow(facts)
+  if (!window) return []
+  return window.rows
+    .filter((row) => row.campaignLive && overPrimaryCost(row, window.line))
+    .map((hit) => pauseOf(hit.primaryCount === 0 ? 'cpl_zero_leads' : 'cpl_over_target', hit, costSummary(facts, hit)))
+}
+
+function overPrimaryCost(row: SpendRow, line: number): boolean {
+  if (row.primaryCount === null) return false
+  if (row.primaryCount <= 0) return row.spendCents > line
+  return row.spendCents > line * row.primaryCount
+}
+
+function costSummary(facts: BreakerFacts, row: SpendRow): string {
+  const chat = facts.primaryResult === 'messaging_started'
+  if ((row.primaryCount ?? 0) <= 0) return chat ? CHAT_CPL_SUMMARY : LEAD_CPL_SUMMARY
+  return chat ? CHAT_OVER_SUMMARY : LEAD_OVER_SUMMARY
+}
+
+function cplAlert(facts: BreakerFacts): AlertFinding | null {
+  const window = cplWindow(facts)
+  if (!window) return null
+  const blind = window.rows.some((row) => row.primaryCount === null && row.spendCents > window.line && row.campaignLive)
+  if (!blind) return null
+  return alert('primary_unreadable', '', '主结果数读不出来，没有出暂停卡。')
 }
 
 function policyPauses(facts: BreakerFacts): PauseProposal[] {
@@ -187,7 +228,7 @@ function freshAlert(facts: BreakerFacts): AlertFinding | null {
   const limit = facts.settings.staleHours || DEFAULT_STALE_HOURS
   const stale = facts.accounts.filter((accountId) => accountIsStale(facts, accountId, limit))
   if (stale.length === 0) return null
-  return alert('stale', stale[0] ?? '', '广告设置快照或花费数据已经超过约定时间没更新。这条只是提醒，不会出暂停卡。')
+  return alert('stale', stale[0] ?? '', '广告设置快照或花费数据已经达到或超过约定时间没更新。这条只是提醒，不会出暂停卡。')
 }
 
 function accountIsStale(facts: BreakerFacts, accountId: string, limit: number): boolean {
@@ -195,7 +236,7 @@ function accountIsStale(facts: BreakerFacts, accountId: string, limit: number): 
   const insight = facts.insights.find((row) => row.accountId === accountId)
   const snapAge = capture?.complete ? ageHours(capture.capturedAt, facts.now) : null
   const insightAge = ageHours(insight?.updatedAt ?? null, facts.now)
-  return snapAge === null || snapAge > limit || insightAge === null || insightAge > limit
+  return snapAge === null || snapAge >= limit || insightAge === null || insightAge >= limit
 }
 
 function cplRows(facts: BreakerFacts): readonly SpendRow[] | null {
@@ -232,8 +273,8 @@ function groupCampaigns(rows: readonly SpendRow[]): SpendRow[] {
       map.set(row.campaignId, row)
       continue
     }
-    const leads = prior.leads === null || row.leads === null ? null : prior.leads + row.leads
-    map.set(row.campaignId, { ...prior, spendCents: prior.spendCents + row.spendCents, leads, campaignLive: prior.campaignLive || row.campaignLive })
+    const primaryCount = prior.primaryCount === null || row.primaryCount === null ? null : prior.primaryCount + row.primaryCount
+    map.set(row.campaignId, { ...prior, spendCents: prior.spendCents + row.spendCents, primaryCount, campaignLive: prior.campaignLive || row.campaignLive })
   }
   return [...map.values()]
 }

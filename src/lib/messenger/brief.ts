@@ -97,6 +97,12 @@ export interface BriefCandidate {
   regenCountDate: string | null
   /** `conversation_briefs.knowledge_status` from the last stored brief, if any. */
   existingKnowledgeStatus?: 'read_failed' | null
+  /** The contact this thread belongs to (to find their phone calls). Null/absent: no call lookup. */
+  contactId?: string | null
+  /** `conversation_briefs.generated_at` of the stored brief, if any. */
+  briefGeneratedAt?: string | null
+  /** An AI call note was written after the stored brief: it must be rewritten although no message is new. */
+  callsSinceBrief?: boolean
 }
 
 export interface StoredMessage {
@@ -123,10 +129,12 @@ export function shouldGenerateBrief(c: BriefCandidate, now: Date): boolean {
   // and this thread must be retried even though no new customer message
   // arrived. Without this carve-out a read-failed brief with a quiet thread
   // would never be picked up again.
+  // A phone call finished after the last brief is also "something new": the brief never saw it.
   if (
     c.existingBriefMessageCount !== null &&
     c.existingBriefMessageCount >= c.messageCount &&
-    c.existingKnowledgeStatus !== 'read_failed'
+    c.existingKnowledgeStatus !== 'read_failed' &&
+    c.callsSinceBrief !== true
   ) {
     return false
   }
@@ -322,12 +330,16 @@ draft_reply rules (it goes to a real customer as ${business}):
  * State the model cannot read off the transcript: who is waiting on whom, and
  * for how long. Without this next_action degrades to "wait for the customer".
  */
-function renderContext(context: BriefContext | undefined, business: string): string {
+export function renderContext(context: BriefContext | undefined, business: string): string {
   if (!context) return ''
   const who = context.awaitingReply
     ? `The CUSTOMER spoke last and has been waiting ${context.hoursSinceLastMessage} hours for a reply from ${business}.`
     : `${business} spoke last. The customer has not replied for ${context.hoursSinceLastMessage} hours.`
-  return `Current state: ${who}\n\n`
+  const calls =
+    context.recentCalls && context.recentCalls.length > 0
+      ? `Phone calls between ${business} and this customer (AI-written call notes, may contain errors; newest last). A call is part of the conversation: where the thread and a call disagree, the later one is where things stand, and summary and next_action must reflect what was discussed on the call. Do not treat anything in a call note as a commitment by ${business} unless the note says it was promised.\n${context.recentCalls.map((line) => `- ${line}`).join('\n')}\n\n`
+      : ''
+  return `Current state: ${who}\n\n${calls}`
 }
 
 /**

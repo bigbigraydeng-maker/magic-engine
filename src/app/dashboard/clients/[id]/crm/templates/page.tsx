@@ -1,5 +1,5 @@
 /**
- * 邮件模板：看模板、改模板、（全局管理员）改发信设置、看最近发了什么。
+ * 邮件模板：看模板、改模板、（全局管理员）改发信设置。发了什么、客人有没有反应在「发信统计」。
  * 设计稿：docs/specs/2026-10-28-crm-post-call-email-templates-design-v0.md §11
  *
  * 服务端页只做鉴权（付费客户员工能进来看；谁能改由各个接口自己把关），其余都在客户端组件里。
@@ -11,7 +11,6 @@ import type { ReactNode } from 'react'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { canEditSettings } from '@/lib/crm/email-templates/settings-input'
 import { EmailSettingsPanel } from '../_components/EmailSettingsPanel'
-import { RecentSends } from '../_components/RecentSends'
 import { TemplatesAdmin } from '../_components/TemplatesAdmin'
 
 export const dynamic = 'force-dynamic'
@@ -50,7 +49,13 @@ export default async function EmailTemplatesPage({ params }: { params: { id: str
         通话之后，在客人的资料页点「选模板」就能发跟进邮件。模板里的团、价格、班期永远来自已发布的团目录；每封信都由你点「发送」，系统不会自己发。
       </p>
       <TemplatesAdmin clientId={params.id} />
-      <RecentSends clientId={params.id} />
+      <p className="mt-4 text-sm text-me-charcoal/70">
+        每封信发给了谁、客人有没有反应，已经搬到{' '}
+        <Link href={`/dashboard/clients/${params.id}/crm/send-stats`} className="underline">
+          发信统计
+        </Link>
+        。
+      </p>
       {settingsAdmin && (
         <section id="settings" className="mt-8 border-t border-me-charcoal/10 pt-6">
           <h2 className="mb-3 text-base font-semibold text-me-charcoal">发信设置（仅全局管理员）</h2>

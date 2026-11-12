@@ -2,6 +2,7 @@ import type { OutboundItem } from '@/lib/crm/email-templates/gates/types'
 import type { TriggeredSendRule } from './rule'
 import { localDay } from './candidates'
 import type {
+  AddressHistoryRead,
   ConsentRead,
   DeferReason,
   DncRead,
@@ -12,6 +13,7 @@ import type {
   ShadowDecision,
   ShadowGatePorts,
   SkipReason,
+  UnsubscribeRead,
 } from './types'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -96,112 +98,110 @@ function isSalesEmailItem(item: OutboundItem, createdAtMs: number): boolean {
   return atMs >= createdAtMs
 }
 
+/**
+ * 'rehearsal' = the shadow run (the old batch is only noted); 'send' = real sending (what the old batch already did is a
+ * final skip, design P2 §5.2 D④). Everything else is decided the same way, so the rehearsal predicts real sending.
+ */
+export type GateMode = 'rehearsal' | 'send'
+
+const NO_EVIDENCE: EvidenceRead = { ok: true, items: [], legacy: { welcomed: false, batchSeen: true, campaignIds: [] } }
+
+/** Every read the gates need, all of them succeeded. */
+interface GateReads {
+  consent: Extract<ConsentRead, { ok: true }>
+  dnc: Extract<DncRead, { ok: true }>
+  member: Extract<MemberRead, { ok: true }>
+  evidence: Extract<EvidenceRead, { ok: true }>
+  unsubscribed: Extract<UnsubscribeRead, { ok: true }>
+  history: Extract<AddressHistoryRead, { ok: true }>
+}
+
+/** All reads at once; the first failed read (in this priority order) defers the contact. */
+async function readGates(contact: ShadowContact, ports: ShadowGatePorts): Promise<{ ok: true; reads: GateReads } | { ok: false; decision: ShadowDecision }> {
+  const email = contact.primaryEmail
+  const hasAddress = contact.addresses.length > 0
+  const [dnc, consent, member, evidence, unsubscribed, history] = await Promise.all([
+    safe(() => ports.dnc(contact.contactId)),
+    safe(() => ports.consent(contact.contactId)),
+    email !== null && isPlausibleEmail(email) ? safe(() => ports.member(email)) : Promise.resolve<Safe<MemberRead>>({ ok: true, state: 'not_applicable', tags: [] }),
+    // No address at all: the old batch could not have mailed this contact and there is nothing to count.
+    hasAddress ? safe(() => ports.evidence(contact)) : Promise.resolve<Safe<EvidenceRead>>(NO_EVIDENCE),
+    safe(() => ports.unsubscribed(contact)),
+    hasAddress ? safe(() => ports.addressHistory(contact)) : Promise.resolve<Safe<AddressHistoryRead>>({ ok: true, complained: false, hardBounced: false }),
+  ])
+  if (isFailed(dnc)) return { ok: false, decision: defer('dnc_unverifiable', dnc.error) }
+  if (isFailed(consent)) return { ok: false, decision: defer('consent_unreadable', consent.error) }
+  if (isFailed(member)) return { ok: false, decision: defer('legacy_unverifiable', member.error) }
+  if (isFailed(evidence)) return { ok: false, decision: defer('evidence_unverifiable', evidence.error) }
+  if (isFailed(unsubscribed)) return { ok: false, decision: defer('unsubscribe_unverifiable', unsubscribed.error) }
+  if (isFailed(history)) return { ok: false, decision: defer('address_history_unreadable', history.error) }
+  return { ok: true, reads: { dnc, consent, member, evidence, unsubscribed, history } }
+}
+
+/**
+ * The two judgements on the e-mail evidence (§5.2 J): a person already wrote to the guest since the lead came in, or the
+ * rule's cap is full. Real sending runs this again INSIDE the locks, on evidence read there, with the same code.
+ * The old batch's campaigns are not among the items (taken out before counting), so every item counts.
+ */
+export function evidenceReason(contact: ShadowContact, rule: TriggeredSendRule, items: readonly OutboundItem[]): 'sales_email_exists' | 'frequency_full' | null {
+  const createdAtMs = Date.parse(contact.createdAt)
+  if (items.some((item) => isSalesEmailItem(item, createdAtMs))) return 'sales_email_exists'
+  if (items.length >= rule.frequency_cap.max) return 'frequency_full'
+  return null
+}
+
+/** The first matching reason wins (the decision is the same whichever reason is named). */
+function firstSkipReason(contact: ShadowContact, rule: TriggeredSendRule, r: GateReads, mode: GateMode): SkipReason | null {
+  const email = contact.primaryEmail
+  const allowlisted = rule.recipient_allowlist !== null && email !== null && rule.recipient_allowlist.includes(email)
+  // The tags the old batch skips (sales is on it, not interested, "next year"): ME skips the same people.
+  const excludedTags = new Set(rule.legacy.excluded_tags.map((tag) => tag.toLowerCase()))
+  if (email === null || !isPlausibleEmail(email)) return 'bad_email'
+  if (isSystemAddress(email)) return 'system_address'
+  if (rule.recipient_allowlist !== null && !allowlisted) return 'not_in_allowlist'
+  if (r.dnc.blocked) return 'dnc'
+  if (r.unsubscribed.unsubscribed) return 'email_unsubscribed'
+  if (r.history.complained) return 'complained'
+  if (r.history.hardBounced) return 'hard_bounced_address'
+  if (r.member.state === 'suppressed') return 'mailchimp_suppressed'
+  if (r.member.tags.some((tag) => excludedTags.has(tag.toLowerCase()))) return 'excluded_tag'
+  if (mode === 'send' && r.evidence.legacy.welcomed) return 'legacy_welcomed'
+  if (!allowlisted && matchedBasisOf(rule, r) === null) return 'no_consent_basis'
+  return evidenceReason(contact, rule, r.evidence.items)
+}
+
+function matchedBasisOf(rule: TriggeredSendRule, r: GateReads): string | null {
+  return r.consent.bases.find((basis) => rule.consent.accepted_bases.includes(basis)) ?? null
+}
+
 export async function decideShadow(args: {
   contact: ShadowContact
   rule: TriggeredSendRule
   ports: ShadowGatePorts
+  mode?: GateMode
 }): Promise<ShadowDecision> {
   const { contact, rule, ports } = args
-
-  const primaryEmail = contact.primaryEmail
-  const shouldReadMember = primaryEmail !== null && isPlausibleEmail(primaryEmail)
-  const shouldReadEvidence = contact.addresses.length > 0
-
-  const consentPromise: Promise<Safe<ConsentRead>> = safe(() => ports.consent(contact.contactId))
-  const dncPromise: Promise<Safe<DncRead>> = safe(() => ports.dnc(contact.contactId))
-  const memberPromise: Promise<Safe<MemberRead>> = shouldReadMember
-    ? safe(() => ports.member(primaryEmail as string))
-    : Promise.resolve<Safe<MemberRead>>({ ok: true, state: 'not_applicable', tags: [] })
-  const evidencePromise: Promise<Safe<EvidenceRead>> = shouldReadEvidence
-    ? safe(() => ports.evidence(contact))
-    : // No address at all: the old batch could not have mailed this contact and there is nothing to count.
-      Promise.resolve<Safe<EvidenceRead>>({
-        ok: true,
-        items: [],
-        legacy: { welcomed: false, batchSeen: true, campaignIds: [] },
-      })
-
-  const [consent, dnc, member, evidence] = await Promise.all([
-    consentPromise,
-    dncPromise,
-    memberPromise,
-    evidencePromise,
-  ])
-
-  // STEP 2: any failed read defers, in priority order.
-  if (isFailed(dnc)) {
-    return defer('dnc_unverifiable', dnc.error)
-  }
-  if (isFailed(consent)) {
-    return defer('consent_unreadable', consent.error)
-  }
-  if (isFailed(member)) {
-    return defer('legacy_unverifiable', member.error)
-  }
-  if (isFailed(evidence)) {
-    return defer('evidence_unverifiable', evidence.error)
-  }
-
-  // STEP 3: derived facts.
-  // The old batch's campaigns are not among the items (taken out before counting), so every item counts.
-  const counted = evidence.items
-  const createdAtMs = Date.parse(contact.createdAt)
-  const salesEmail = counted.some((item) => isSalesEmailItem(item, createdAtMs))
-  const frequencyCount = counted.length
-
-  const allowlisted =
-    rule.recipient_allowlist !== null &&
-    primaryEmail !== null &&
-    rule.recipient_allowlist.includes(primaryEmail)
-
-  // The tags the old batch skips (sales is on it, not interested, "next year"): ME skips the same people.
-  const excludedTags = new Set(rule.legacy.excluded_tags.map((tag) => tag.toLowerCase()))
-  const hasExcludedTag = member.tags.some((tag) => excludedTags.has(tag.toLowerCase()))
-
-  const matchedBasis =
-    consent.bases.find((basis) => rule.consent.accepted_bases.includes(basis)) ?? null
-
-  // STEP 4: first matching reason wins.
-  let reason: SkipReason | null = null
-  if (primaryEmail === null || !isPlausibleEmail(primaryEmail)) {
-    reason = 'bad_email'
-  } else if (isSystemAddress(primaryEmail)) {
-    reason = 'system_address'
-  } else if (rule.recipient_allowlist !== null && !allowlisted) {
-    reason = 'not_in_allowlist'
-  } else if (dnc.blocked) {
-    reason = 'dnc'
-  } else if (member.state === 'suppressed') {
-    reason = 'mailchimp_suppressed'
-  } else if (hasExcludedTag) {
-    reason = 'excluded_tag'
-  } else if (!allowlisted && matchedBasis === null) {
-    reason = 'no_consent_basis'
-  } else if (salesEmail) {
-    reason = 'sales_email_exists'
-  } else if (frequencyCount >= rule.frequency_cap.max) {
-    reason = 'frequency_full'
-  }
-
-  // STEP 5: build the write decision.
+  const read = await readGates(contact, ports)
+  if (!read.ok) return read.decision
+  const r = read.reads
+  const reason = firstSkipReason(contact, rule, r, args.mode ?? 'rehearsal')
   const annotations: ShadowAnnotations = {
     gate_contract_version: rule.gate_contract_version,
     would_send: reason === null,
-    legacy_welcomed: evidence.legacy.welcomed,
-    legacy_batch_seen: evidence.legacy.batchSeen,
-    legacy_campaign_ids: [...evidence.legacy.campaignIds],
-    sales_email: salesEmail,
-    frequency_count: frequencyCount,
+    legacy_welcomed: r.evidence.legacy.welcomed,
+    legacy_batch_seen: r.evidence.legacy.batchSeen,
+    legacy_campaign_ids: [...r.evidence.legacy.campaignIds],
+    sales_email: r.evidence.items.some((item) => isSalesEmailItem(item, Date.parse(contact.createdAt))),
+    frequency_count: r.evidence.items.length,
     lead_local_day: leadLocalDay(contact, rule),
   }
-
   return {
     kind: 'write',
     status: reason === null ? 'shadow' : 'skipped',
     reasonCode: reason,
     annotations,
-    consentBasis: matchedBasis,
-    sourceRef: consent.sourceRef,
+    consentBasis: matchedBasisOf(rule, r),
+    sourceRef: r.consent.sourceRef,
   }
 }
 

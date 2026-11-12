@@ -8,6 +8,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ActionRun } from '@/lib/kernel/types'
 import { listPendingAdsAutoPauseForClient } from '@/lib/ads-strategy/auto-pause-pending'
+import { dedicatedApprovalEntryFor } from '@/lib/kernel/dedicated-approval-entries'
+import { ADS_AUTO_PAUSE_ACTION_KEY } from '@/lib/action-submission/ads-auto-pause-key'
 import { listPendingRunsForActionForClient } from '@/lib/kernel-approval/action-pending'
 import { ADS_O1_BUDGET_SCALE_ACTION_KEY } from '@/lib/action-submission/ads-o1-budget-scale'
 import type { Diagnosis, DiagnosisRun } from '@/lib/ads-strategy/portfolio/diagnostics/types'
@@ -23,7 +25,8 @@ const DIAGNOSIS_HIT_PRIORITY: readonly string[] = [
 ]
 
 function approvalsHref(clientId: string): string {
-  return `/dashboard/clients/${clientId}/ads-health?tab=approvals`
+  const entry = dedicatedApprovalEntryFor(ADS_AUTO_PAUSE_ACTION_KEY)
+  return entry?.path(clientId) ?? `/dashboard/clients/${clientId}/ads-health`
 }
 
 function settingsHref(clientId: string): string {

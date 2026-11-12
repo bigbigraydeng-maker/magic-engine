@@ -25,6 +25,8 @@ export interface CommentEngagementRow {
   reviewed_by: string | null
   created_at: string
   needs_human: boolean
+  /** 'catalog_draft' = a reply draft is already waiting on the audit page. */
+  reply_source?: string | null
 }
 
 const INTENT_LABEL: Record<CommentIntent, string> = {
@@ -37,6 +39,7 @@ const INTENT_LABEL: Record<CommentIntent, string> = {
   faq_itinerary: '问行程',
   faq_visa: '问签证',
   faq_signup: '问怎么订',
+  praise: '夸奖',
 }
 
 function auditHref(clientId: string): string {
@@ -102,7 +105,7 @@ export function buildCommentHumanTodos(
   rows: readonly CommentEngagementRow[],
   activeClientIds: ReadonlySet<string>,
 ): ManualItem[] {
-  const byClient = new Map<string, { total: number; intents: Partial<Record<CommentIntent, number>> }>()
+  const byClient = new Map<string, { total: number; drafts: number; intents: Partial<Record<CommentIntent, number>> }>()
 
   for (const row of rows) {
     if (!row || typeof row.client_id !== 'string') continue
@@ -118,8 +121,9 @@ export function buildCommentHumanTodos(
       needs_human: row.needs_human,
     })
 
-    const cur = byClient.get(row.client_id) ?? { total: 0, intents: {} }
+    const cur = byClient.get(row.client_id) ?? { total: 0, drafts: 0, intents: {} }
     cur.total += 1
+    if (row.reply_source === 'catalog_draft') cur.drafts += 1
     cur.intents[intent] = (cur.intents[intent] ?? 0) + 1
     byClient.set(row.client_id, cur)
   }
@@ -132,7 +136,10 @@ export function buildCommentHumanTodos(
       `最近 ${WINDOW_DAYS} 天里，这个客户 Facebook 主页有 ${agg.total} 条评论要人回` +
       (breakdown ? `（${breakdown}）` : '') +
       ' —— 客人会觉得没人理，问价/投诉还可能升级。'
-    const how = hasPrice ? `${HOW_BASE}${HOW_PRICE}` : HOW_BASE
+    const draftNote = agg.drafts > 0
+      ? `其中 ${agg.drafts} 条已按团目录起好回复草稿：在审计页看一眼、需要就改，点「发到 Facebook」就发出去，不用去 Facebook 上手打。`
+      : ''
+    const how = `${hasPrice ? `${HOW_BASE}${HOW_PRICE}` : HOW_BASE}${draftNote}`
 
     items.push({
       kind: 'comment_needs_human_reply',
@@ -163,7 +170,7 @@ export async function pushCommentHumanItems(
       supabase
         .from('social_comment_engagements')
         .select(
-          'client_id, category, comment_text, author_name, reviewed_by, created_at, needs_human',
+          'client_id, category, comment_text, author_name, reviewed_by, created_at, needs_human, reply_source',
         )
         .eq('needs_human', true)
         .is('reviewed_by', null)

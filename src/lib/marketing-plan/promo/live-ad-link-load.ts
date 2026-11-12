@@ -9,8 +9,15 @@ import {
   budgetChangesFromSnapshots, describeLiveAdLink, parseBudgetApproval, parseLaunchReceipts, pickCurrentApprovedPlan, readMinor,
   type BudgetApproval, type LinkAdset, type PlanRow,
 } from './live-ad-link'
+import {
+  captureTrustKey,
+  fieldChangesFromSnapshots,
+  type AdsetSnapshotRow,
+  type MeLedgerEntry,
+} from './live-ad-snapshot-diff'
 
 const BUDGET_KEYS = ['ads.scale_unit_budget', 'ads.cut_unit_budget', 'ads.cut_campaign_budget']
+const LEDGER_KEYS = [...BUDGET_KEYS, 'ads.pause_unit', 'ads.pause_campaign']
 const ACTION_CAP = 500
 const SNAPSHOT_CAP = 2000
 const UNREADABLE = ['在投广告和已批准计划的对上关系这次没读出来。']
@@ -29,13 +36,22 @@ async function buildLink(clientId: string, now: Date): Promise<string[]> {
   const adsets = await liveAdsets(clientId, labels, now)
   const actions = await launchRows(clientId)
   if (actions === 'capped') return CAPPED
-  const history = await budgetHistory(clientId, adsets.map(adset => adset.id))
+  const ids = adsets.map(adset => adset.id)
+  const [history, trusted, meLedger, approvals] = await Promise.all([
+    budgetHistory(clientId, ids),
+    trustedCaptureKeys(clientId),
+    meLedgerEntries(clientId),
+    budgetApprovals(clientId),
+  ])
+  const fieldChanges = fieldChangesFromSnapshots(history.rows, trusted)
   return describeLiveAdLink({
     plan: pickCurrentApprovedPlan(await approvedPlans(clientId)),
     adsets,
     receipts: parseLaunchReceipts(actions),
     changes: budgetChangesFromSnapshots(history.rows),
-    approvals: await budgetApprovals(clientId),
+    fieldChanges,
+    approvals,
+    meLedger,
     changesTruncated: history.truncated,
   })
 }
@@ -104,9 +120,9 @@ async function approvedPlans(clientId: string): Promise<PlanRow[]> {
 }
 
 async function budgetHistory(clientId: string, ids: readonly string[]) {
-  if (ids.length === 0) return { rows: [], truncated: false }
+  if (ids.length === 0) return { rows: [] as AdsetSnapshotRow[], truncated: false }
   const { data, error } = await supabaseAdmin.from('ad_entity_snapshots')
-    .select('entity_id, captured_at, daily_budget_minor')
+    .select('entity_id, ad_account_id, captured_at, daily_budget_minor, effective_status')
     .eq('client_id', clientId).eq('level', 'adset').in('entity_id', [...ids])
     .order('captured_at', { ascending: false }).limit(SNAPSHOT_CAP)
   if (error) throw new Error(error.message)
@@ -114,10 +130,69 @@ async function budgetHistory(clientId: string, ids: readonly string[]) {
     const row = rec(raw)
     const entityId = str(row?.entity_id)
     const capturedAt = str(row?.captured_at)
-    if (!row || entityId === '' || capturedAt === '') return []
-    return [{ entityId, capturedAt, dailyBudgetMinor: readMinor(row.daily_budget_minor) }]
+    const adAccountId = str(row?.ad_account_id)
+    if (!row || entityId === '' || capturedAt === '' || adAccountId === '') return []
+    return [{
+      entityId,
+      adAccountId,
+      capturedAt,
+      dailyBudgetMinor: readMinor(row.daily_budget_minor),
+      effectiveStatus: text(row.effective_status),
+    }]
   })
   return { rows, truncated: rows.length >= SNAPSHOT_CAP }
+}
+
+async function trustedCaptureKeys(clientId: string): Promise<Set<string>> {
+  const { data, error } = await supabaseAdmin.from('ad_snapshot_captures')
+    .select('ad_account_id, captured_at, complete, error')
+    .eq('client_id', clientId).eq('level', 'adset').eq('complete', true).is('error', null)
+    .order('captured_at', { ascending: false }).limit(SNAPSHOT_CAP)
+  if (error) throw new Error(error.message)
+  const keys = new Set<string>()
+  for (const raw of Array.isArray(data) ? data : []) {
+    const row = rec(raw)
+    const account = str(row?.ad_account_id)
+    const at = str(row?.captured_at)
+    if (account !== '' && at !== '') keys.add(captureTrustKey(account, at))
+  }
+  return keys
+}
+
+async function meLedgerEntries(clientId: string): Promise<MeLedgerEntry[]> {
+  const { data, error } = await supabaseAdmin.from('action_runs')
+    .select('id, action_key, input, finished_at')
+    .eq('client_id', clientId).eq('status', 'succeeded').in('action_key', LEDGER_KEYS).limit(200)
+  if (error) throw new Error(error.message)
+  const rawRuns = Array.isArray(data) ? data : []
+  if (rawRuns.length >= 200) throw new Error('ledger runs capped')
+  const runs = rawRuns.flatMap(raw => {
+    const row = rec(raw)
+    const id = str(row?.id)
+    const actionKey = str(row?.action_key)
+    const finishedAt = text(row?.finished_at)
+    if (!row || id === '' || actionKey === '' || finishedAt === null) return []
+    const input = rec(row.input)
+    return [{
+      runId: id,
+      actionKey,
+      finishedAt,
+      input,
+    }]
+  })
+  const passed = await passedRuns(runs.map(run => run.runId))
+  return runs.flatMap(run => {
+    if (!passed.has(run.runId)) return []
+    const input = run.input
+    return [{
+      runId: run.runId,
+      actionKey: run.actionKey,
+      adSetId: text(input?.adset_id),
+      campaignId: text(input?.campaign_id),
+      finishedAt: run.finishedAt,
+      afterMinor: readMinor(input?.after_cents),
+    }]
+  })
 }
 
 async function budgetApprovals(clientId: string): Promise<BudgetApproval[]> {

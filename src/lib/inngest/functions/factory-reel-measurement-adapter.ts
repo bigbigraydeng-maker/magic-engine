@@ -37,6 +37,7 @@ import {
   socialReadbackOutcomeEnabled,
   writeReadbackOutcome,
 } from '@/lib/social/readback-outcome-record'
+import { reelBareVideoId } from '@/lib/meta/post-engagement'
 
 const UNIQUE_VIOLATION = '23505'
 
@@ -179,6 +180,7 @@ export async function registerReelPublishAction(
       idempotency_key: input.idempotencyKey,
       post_id: input.postId,
       page_id: input.pageId,
+      video_id: reelBareVideoId(input.postId, input.pageId),
       permalink: input.permalink,
       campaign_id: null,
       plan_id: null,

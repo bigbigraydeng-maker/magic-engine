@@ -85,6 +85,8 @@ const A_PATHS: Array<[string, string]> = [
   ['src/lib/crm/address-sha256.ts', 'address fingerprint (email-unsubscribe alternative)'],
   ['src/lib/crm/email-templates/automated-template-key.ts', 'automated-letter template rule'],
   ['src/lib/microsoft/mail-send-new.ts', 'staff-send pipeline'],
+  ['src/lib/microsoft/mail-send.ts', 'reply-to-guest pipeline (unsubscribe rule)'],
+  ['src/lib/crm/reply-unsubscribe-gate.ts', 'reply unsubscribe rule (email-unsubscribe alternative)'],
   ['src/lib/microsoft/mail-send-new-prod.ts', 'staff-send pipeline wiring (mail-send-new alternative)'],
   ['src/lib/platform/live-switch.ts', 'live-send arming switch'],
   // Planned for P2-1b (does not exist yet): the rule must already rate it A when it lands.

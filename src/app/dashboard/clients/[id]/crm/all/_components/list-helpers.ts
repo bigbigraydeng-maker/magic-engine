@@ -52,6 +52,9 @@ export function toDrawerRow(r: ContactRow): DrawerRow {
     assignedTo: r.assignedTo ?? null,
     // 回头客：同一份判据，抽屉顶部的横幅靠它立刻画出来。
     returning: r.returning ?? null,
+    // AI 跟进中 / 客人回来了：抽屉名字旁的小标先用列表的值画出来，抽屉自己再读一次最新状态。
+    aiTakeover: r.aiTakeover === true,
+    customerCameBack: r.customerCameBack === true,
   }
 }
 

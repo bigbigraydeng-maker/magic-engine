@@ -47,6 +47,7 @@ import { pushLeadSheetItems } from './lead-sheet-items'
 import { foldRootCauseDuplicates } from './dedupe-root-cause'
 import { pushCalendarClosureItems } from './calendar-closure-items'
 import { pushToolLeadItems } from './tool-lead-items'
+import { pushDistributorApplicationItems } from './distributor-application-items'
 import { pushToolsWideBudgetItems } from './tools-wide-budget-items'
 import { pushAdsAutonomySyncItems } from './ads-autonomy-items'
 import { pushAdsRuleFindingItems } from './ads-rule-finding-items'
@@ -59,6 +60,7 @@ import { pushWeeklyLoopItems } from './social-weekly-loop-items'
 import { pushReelScheduledItems } from './reel-scheduled-items'
 import { pushAccountAuditItems } from './account-audit-items'
 import { pushReadbackItems } from './readback-suggestion-items'
+import { pushSocialPostReadbackGapItems } from './social-post-readback-gap-items'
 import { pushDailyListItems } from './daily-list-items'
 import { pushPlanDraftFailureItems } from './plan-draft-failure-items'
 import { pushAdsTrackingPreflightItems } from './ads-tracking-preflight-items'
@@ -331,6 +333,10 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     (b) => pushToolLeadItems(supabase, b, clients, now).catch((e) =>
       console.warn('[manual-items] 工具实验室留资待办生成失败（不阻塞其他待办）:', e),
     ),
+    // 有人在申请页申请做经销商 —— 批准 / 拒绝只有人能做
+    (b) => pushDistributorApplicationItems(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] 经销商申请待办生成失败（不阻塞其他待办）:', e),
+    ),
     // 工具实验室全站每月合计上限（网站诊断+广告体检赞助分析共用）快用完
     (b) => pushToolsWideBudgetItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] 工具实验室全站上限待办生成失败（不阻塞其他待办）:', e),
@@ -474,6 +480,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 社媒每周回看建议：公开满 72 小时的 Reel 成绩（只读；建议不会自己改设置）
     (b) => pushReadbackItems(supabase, b, nameOf, now).catch((e) =>
       console.warn('[manual-items] 社媒回看建议待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 发后 T+4 / T+72 过点没回执、读不到、重试用尽；Story 暂不支持 T+N（复用 R-1 读回视图）
+    (b) => pushSocialPostReadbackGapItems(supabase, b, now, nameOf, ids).catch((e) =>
+      console.warn('[manual-items] 发后读数缺口待办生成失败（不阻塞其他待办）:', e),
     ),
     // Reel 按日公开：周卡批过、到日没发出去的（读流量记录里的授权状态）
     (b) => pushReelScheduledItems(supabase, b, nameOf).catch((e) =>

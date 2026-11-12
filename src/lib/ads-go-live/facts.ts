@@ -11,6 +11,7 @@ import {
   type CardFacts,
   type HardCheck,
 } from '@/lib/confirmation-card'
+import { GO_LIVE_WHAT } from '@/lib/ads-strategy/paused-draft-copy'
 import { chooseAccountLabel } from './account'
 import { hardChecksForGoLive, type GoLiveGate } from './checks'
 import { goLiveSubjectKey, type PausedDraftView } from './draft'
@@ -88,7 +89,7 @@ export function buildGoLiveFacts(input: {
   const date = dateLine(input.view)
   return normalizeFacts({
     subjectKey,
-    what: '开投：把暂停的广告改成在投',
+    what: GO_LIVE_WHAT,
     account: 'label' in account ? account.label : account.problem,
     amount: money.text,
     date: date.text,

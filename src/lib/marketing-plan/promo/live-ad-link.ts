@@ -3,6 +3,13 @@
  * Built only from receipts already stored. Does not call Meta, write, or invent an approval.
  */
 import { publicAdAccountName } from '@/lib/ads/spend-figures'
+import {
+  formatBudgetMinor,
+  meLedgerExplainsChange,
+  statusLabel,
+  type FieldChange,
+  type MeLedgerEntry,
+} from './live-ad-snapshot-diff'
 
 const SYDNEY = 'Australia/Sydney'
 const CHANGE_CAP = 8
@@ -20,7 +27,13 @@ export interface LaunchReceipt {
 
 export interface LinkPlan { id: string; title: string; approvedAt: string }
 export interface LinkAdset { id: string; name: string | null; accountLabel: string | null; campaignId: string | null }
-export interface BudgetChange { adSetId: string; at: string; afterMinor: number }
+export interface BudgetChange {
+  adSetId: string
+  at: string
+  fromAt: string
+  beforeMinor: number
+  afterMinor: number
+}
 export interface BudgetApproval {
   runId: string
   adSetId: string | null
@@ -86,13 +99,15 @@ export function describeLiveAdLink(input: {
   adsets: readonly LinkAdset[]
   receipts: readonly LaunchReceipt[]
   changes: readonly BudgetChange[]
+  fieldChanges: readonly FieldChange[]
   approvals: readonly BudgetApproval[]
+  meLedger: readonly MeLedgerEntry[]
   changesTruncated: boolean
 }): string[] {
   if (input.adsets.length === 0) return ['现在没有开着的广告组，所以没有要挂到已批准计划上的在投广告。']
   const ordered = [...input.adsets].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   const lines = [planLine(input.plan), ...ordered.map((adset, index) => launchLine(adset, index, input.plan, input.receipts))]
-  lines.push(...budgetLines(ordered, input.changes, input.approvals))
+  lines.push(...fieldChangeLines(ordered, input.fieldChanges, input.approvals, input.meLedger))
   if (input.changesTruncated) lines.push('广告组的历史快照这次没有读全，更早的预算变动没有逐条列出。')
   return lines
 }
@@ -143,10 +158,20 @@ function changesFor(adSetId: string, rows: { capturedAt: string; dailyBudgetMino
   const sorted = [...rows].sort((a, b) => (a.capturedAt < b.capturedAt ? -1 : 1))
   const out: BudgetChange[] = []
   let previous: number | null = null
+  let fromAt = ''
   for (const row of sorted) {
     if (row.dailyBudgetMinor === null) continue
-    if (previous !== null && row.dailyBudgetMinor !== previous) out.push({ adSetId, at: row.capturedAt, afterMinor: row.dailyBudgetMinor })
+    if (previous !== null && row.dailyBudgetMinor !== previous) {
+      out.push({
+        adSetId,
+        at: row.capturedAt,
+        fromAt: fromAt || row.capturedAt,
+        beforeMinor: previous,
+        afterMinor: row.dailyBudgetMinor,
+      })
+    }
     previous = row.dailyBudgetMinor
+    fromAt = row.capturedAt
   }
   return out
 }
@@ -165,25 +190,70 @@ function launchLine(adset: LinkAdset, index: number, plan: LinkPlan | null, rece
   return `${name}：${hung}开投已经批准并读回，批准时间是 ${whenOf(receipt.authorizedAt)}，${who}。`
 }
 
-function budgetLines(adsets: readonly LinkAdset[], changes: readonly BudgetChange[], approvals: readonly BudgetApproval[]): string[] {
+function fieldChangeLines(
+  adsets: readonly LinkAdset[],
+  fieldChanges: readonly FieldChange[],
+  approvals: readonly BudgetApproval[],
+  meLedger: readonly MeLedgerEntry[],
+): string[] {
+  const indexById = new Map(adsets.map((adset, index) => [adset.id, index]))
   const lines: string[] = []
   let hidden = 0
-  for (const [index, adset] of adsets.entries()) {
-    for (const change of changes.filter(item => item.adSetId === adset.id)) {
-      if (lines.length >= CHANGE_CAP) hidden += 1
-      else lines.push(budgetLine(adset, index, change, approvals))
-    }
+  const ordered = [...fieldChanges].sort((a, b) => (a.at < b.at ? -1 : 1))
+  for (const change of ordered) {
+    const index = indexById.get(change.adSetId)
+    if (index === undefined) continue
+    const adset = adsets[index]!
+    const line = change.kind === 'budget'
+      ? budgetChangeLine(adset, index, change, approvals, meLedger)
+      : statusChangeLine(adset, index, change, meLedger)
+    if (line === null) continue
+    if (lines.length >= CHANGE_CAP) hidden += 1
+    else lines.push(line)
   }
-  return hidden > 0 ? [...lines, `还有 ${hidden} 笔预算变动没有逐条写在这里。`] : lines
+  return hidden > 0 ? [...lines, `还有 ${hidden} 笔预算或状态变动没有逐条写在这里。`] : lines
 }
 
-function budgetLine(adset: LinkAdset, index: number, change: BudgetChange, approvals: readonly BudgetApproval[]): string {
-  const approval = coverFor(change, adset, approvals)
-  const seen = `快照里看到预算变过（${whenOf(change.at)}）`
+function budgetChangeLine(
+  adset: LinkAdset,
+  index: number,
+  change: Extract<FieldChange, { kind: 'budget' }>,
+  approvals: readonly BudgetApproval[],
+  meLedger: readonly MeLedgerEntry[],
+): string | null {
+  const asBudget: BudgetChange = {
+    adSetId: change.adSetId,
+    at: change.at,
+    fromAt: change.fromAt,
+    beforeMinor: change.beforeMinor,
+    afterMinor: change.afterMinor,
+  }
+  const approval = coverFor(asBudget, adset, approvals)
   const name = displayName(adset, index)
-  return approval
-    ? `${name}：${seen}，对上了改预算回执，批准时间是 ${whenOf(approval.approvedAt)}。`
-    : `${name}：${seen}，无批准记录。`
+  if (approval) {
+    return `${name}：快照里看到预算变过（${whenOf(change.at)}），对上了改预算回执，批准时间是 ${whenOf(approval.approvedAt)}。`
+  }
+  if (meLedgerExplainsChange(change, meLedger, adset.campaignId)) {
+    return `${name}：快照里看到预算变过（${whenOf(change.at)}），无批准记录。`
+  }
+  return externalBudgetLine(name, change)
+}
+
+function statusChangeLine(
+  adset: LinkAdset,
+  index: number,
+  change: Extract<FieldChange, { kind: 'status' }>,
+  meLedger: readonly MeLedgerEntry[],
+): string | null {
+  if (meLedgerExplainsChange(change, meLedger, adset.campaignId)) return null
+  const name = displayName(adset, index)
+  return `${name}：状态从「${statusLabel(change.beforeStatus)}」变到「${statusLabel(change.afterStatus)}」，时间介于 ${whenOf(change.fromAt)} 与 ${whenOf(change.at)} 之间看出来，不是在 ME 里改的。`
+}
+
+function externalBudgetLine(name: string, change: Extract<FieldChange, { kind: 'budget' }>): string {
+  const from = formatBudgetMinor(change.beforeMinor)
+  const to = formatBudgetMinor(change.afterMinor)
+  return `${name}：日预算从 ${from} 改到 ${to}，时间介于 ${whenOf(change.fromAt)} 与 ${whenOf(change.at)} 之间看出来，不是在 ME 里改的。`
 }
 
 function coverFor(change: BudgetChange, adset: LinkAdset, approvals: readonly BudgetApproval[]): BudgetApproval | null {

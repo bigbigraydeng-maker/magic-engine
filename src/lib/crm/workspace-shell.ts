@@ -19,6 +19,7 @@ export type CrmNavKey =
   | 'sales'
   | 'calendar'
   | 'templates'
+  | 'sendstats'
   | 'autosend'
   | 'settings'
 
@@ -79,6 +80,7 @@ export function buildCrmNavItems(clientId: string): CrmNavItem[] {
     { key: 'sales', label: '销售进度', href: `${base}/sales-progress`, title: '每个团卖了多少、还差多少人成行', gate: 'bookings', align: 'left' },
     { key: 'calendar', label: '到期日历', href: `${base}/crm/calendar`, title: '定金尾款到期日历', gate: 'bookings', align: 'left' },
     { key: 'templates', label: '邮件模板', href: `${base}/crm/templates`, title: '通话后发跟进邮件用的模板：看模板、改模板、看最近发了什么', gate: 'templates', align: 'right' },
+    { key: 'sendstats', label: '发信统计', href: `${base}/crm/send-stats`, title: '每封信发给了谁，客人点了链接没有、发信后有没有联系我们（只读）', gate: 'templates', align: 'right' },
     { key: 'autosend', label: '自动发信', href: `${base}/crm/auto-letters`, title: '系统自动发给客人的信：看每封信的内容、收件人和发送情况（只读，不发信）', gate: 'templates', align: 'right' },
     { key: 'settings', label: '设置', href: `${base}/settings?tab=crm`, title: 'CRM 设置', gate: 'none', align: 'right' },
   ]
@@ -109,6 +111,7 @@ export function activeCrmNavKey(
   if (pathname === `${base}/crm/calendar`) return 'calendar'
   if (pathname === `${base}/crm/payments`) return 'payments'
   if (pathname === `${base}/crm/templates`) return 'templates'
+  if (pathname === `${base}/crm/send-stats`) return 'sendstats'
   if (pathname === `${base}/crm/auto-letters`) return 'autosend'
 
   if (pathname === `${base}/sales-progress` || pathname.startsWith(`${base}/sales-progress/`)) {

@@ -37,6 +37,9 @@ export interface SendTouchpointInput {
 
 export type SendState = 'claimed' | 'cancelled'
 
+/** The welcome letter's timeline line once it is known it did not go (refused by the provider, or a person said so). */
+export const WELCOME_NOT_SENT_TIMELINE_LINE = 'ME 自动发信没有发出：欢迎信'
+
 // A type literal (not an interface) so it is a plain JSON record wherever metadata is read as Record<string, unknown>.
 export type SendTouchpointMetadata = {
   automated: true

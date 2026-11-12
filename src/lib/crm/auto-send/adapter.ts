@@ -1,14 +1,15 @@
 /**
  * 「读数据适配器」：页面只通过它拿数据。
  *
- * 现在有两个实现：
- *  - 还没接通（本文件）：真实数据接口还没来，永远报「还没接通」，页面据此显示空状态 + 「看示例」。
- *  - 示例（./demo-data.ts）：合成假数据，只在员工点「看示例」时用，页面整页标明「示例数据」。
- * 真实数据接口来了，再加第三个实现（调它的读接口），页面不用改。
+ * 现在有三个实现：
+ *  - 真实数据（./http-adapter.ts，由 createLiveAdapter 返回）：调读接口 /api/clients/[id]/crm/auto-letters。
+ *  - 示例（./demo-data.ts）：合成假数据，页面整页标明「示例数据」，给测试和预览用。
+ *  - 「还没接通」（AutoSendNotConnectedError）：数据来源暂时没有时适配器抛它，页面显示空状态 + 「看示例」。
  *
  * 只读：这里没有任何写、发、放行的方法，也不应该有。
  */
 
+import { createHttpAdapter } from './http-adapter'
 import type { AutoSendOverview, LetterDetail } from './types'
 
 export interface AutoSendAdapter {
@@ -37,10 +38,7 @@ export function loadErrorText(err: unknown): string {
   return '网络出错'
 }
 
-/** 真实数据的适配器。接口来之前它只会报「还没接通」。 */
-export function createLiveAdapter(_clientId: string): AutoSendAdapter {
-  return {
-    loadOverview: () => Promise.reject(new AutoSendNotConnectedError()),
-    loadLetterDetail: () => Promise.reject(new AutoSendNotConnectedError()),
-  }
+/** 真实数据的适配器：调读接口。 */
+export function createLiveAdapter(clientId: string): AutoSendAdapter {
+  return createHttpAdapter(clientId)
 }

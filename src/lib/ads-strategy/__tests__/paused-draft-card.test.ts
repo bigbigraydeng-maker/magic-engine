@@ -9,7 +9,7 @@ import type { CardClicker } from '@/lib/confirmation-card'
 import { ConfirmationCardError } from '@/lib/confirmation-card/errors'
 import type { AdDraft } from '../ad-draft'
 import { joinSpendPages, loadPausedDraftContext, readPaged } from '../paused-draft-context'
-import { pausedDraftClickUrl, PAUSED_DRAFT_WHAT } from '../paused-draft-copy'
+import { GO_LIVE_CONFIRM_HREF, GO_LIVE_WHAT, pausedDraftClickUrl, PAUSED_DRAFT_WHAT } from '../paused-draft-copy'
 import { pausedDraftFacts, pausedDraftRetry } from '../paused-draft-facts'
 import { issuePausedDraftCard, submitPausedDraftCard } from '../paused-draft-submit'
 import type { CreateDraftDeps, CreateDraftOutcome } from '../draft-and-gate'
@@ -715,6 +715,7 @@ describe('paused draft helpers', () => {
   it('sends only the paused-draft card to its own click address', () => {
     expect(pausedDraftClickUrl('c1', 'r1', PAUSED_DRAFT_WHAT)).toBe('/api/clients/c1/meta-ads/paused-draft-card/r1')
     expect(pausedDraftClickUrl('c1', 'r1', '记下要不要调每周预算')).toContain('/confirmation-cards/r1/decision')
+    expect(pausedDraftClickUrl('c1', 'r1', GO_LIVE_WHAT)).toBe(GO_LIVE_CONFIRM_HREF)
   })
 
   it('reads the cap from stored rows and does not invent one', async () => {
