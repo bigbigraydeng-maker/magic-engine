@@ -7,6 +7,7 @@ import {
   type AdsExecutionReviewPanel,
   type RawExecutionRow,
 } from './ads-execution-review-panel'
+import { rulesFromLeadsConfig } from '@/lib/flywheel/attribution/review-verdict-rules'
 
 const ACTION_TYPES = [
   ADS_ACTION_TYPE.ADJUST_ADSET_DAILY_BUDGET,
@@ -30,6 +31,17 @@ export async function loadAdsExecutionReviewPanel(
   const now = input.now ?? new Date()
   const limit = input.limit ?? EXECUTION_REVIEW_DEFAULT_LIMIT
   const capped = Math.min(Math.max(limit, 1), 50)
+
+  const { data: clientRow } = await supabase
+    .from('clients')
+    .select('leads_config')
+    .eq('id', input.clientId)
+    .maybeSingle()
+  const rules = rulesFromLeadsConfig(
+    clientRow && typeof clientRow === 'object'
+      ? (clientRow as { leads_config?: unknown }).leads_config
+      : null,
+  )
 
   const { data: actions, error } = await supabase
     .from('flywheel_actions')
@@ -65,5 +77,5 @@ export async function loadAdsExecutionReviewPanel(
     }]
   })
 
-  return buildAdsExecutionReviewPanel({ clientId: input.clientId, rows, limit: capped, now })
+  return buildAdsExecutionReviewPanel({ clientId: input.clientId, rows, limit: capped, now, rules })
 }

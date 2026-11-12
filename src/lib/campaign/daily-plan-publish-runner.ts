@@ -47,6 +47,7 @@ import {
   type PlanRow,
   type PublishCandidate,
 } from '@/lib/campaign/daily-plan-publish-effects'
+import { lookupWeekPackApproval, weekPackSkipReason } from '@/lib/social/weekly-plan/publish-gate'
 
 const UUID_LIKE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -59,6 +60,19 @@ export interface PublishRefusal {
 
 export function isRefusal(value: unknown): value is PublishRefusal {
   return typeof value === 'object' && value !== null && (value as { refusal?: unknown }).refusal === true
+}
+
+async function liveWeekPackReason(clientId: string, dates: readonly string[]): Promise<string | null> {
+  if (dates.length === 0) return 'WEEK_PACK_MISSING'
+  for (const date of dates) {
+    try {
+      const reason = weekPackSkipReason(await lookupWeekPackApproval(supabaseAdmin, clientId, date))
+      if (reason) return reason
+    } catch {
+      return 'WEEK_PACK_UNREADABLE'
+    }
+  }
+  return null
 }
 
 function conflict(error: string, extra: Record<string, unknown> = {}): PublishRefusal {
@@ -425,6 +439,11 @@ export async function runDailyPlanPublish(input: RunDailyPlanPublishInput): Prom
         already_published: skipped.map(post => ({ date: post.date, idempotency_key: post.idempotency_key })),
       },
     }
+  }
+
+  if (pending.length > 0) {
+    const packReason = await liveWeekPackReason(clientId, pending.map(post => post.date))
+    if (packReason) return refuse(conflict(packReason))
   }
 
   const page = await resolvePageToken(clientId, command.page_id)
