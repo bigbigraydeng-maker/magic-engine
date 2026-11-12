@@ -14,7 +14,16 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { cronRunHandle, startCronRunId } from '@/lib/cron/run-logger'
 import { cadenceFromConfig, isoDate, nzCalendar } from '@/lib/social/week-pack/cadence'
 import { buildRunIncompleteTask, incompleteReasons, runWeeklyLoop, WEEKLY_LOOP_JOB, type FactCheckWriteOutcome, type WeeklyLoopDeps, type WeeklyLoopMode, type WeeklyLoopReceipt } from '@/lib/social/weekly-loop/run'
-import { createWeeklyLoopDbDeps, listWeeklyLoopClients, loadWeeklyLoopClientConfig, loadWeeklyMaliangSpend, reserveWeeklyMaliangSpend, weeklyLoopEnabled } from '@/lib/social/weekly-loop/run-deps'
+import {
+  createWeeklyLoopDbDeps,
+  listWeeklyLoopClients,
+  loadWeeklyLoopClientConfig,
+  loadRunMaliangReservedCharges,
+  loadWeeklyMaliangSpend,
+  mergeMaliangBackfillOnFinish,
+  reserveWeeklyMaliangSpend,
+  weeklyLoopEnabled,
+} from '@/lib/social/weekly-loop/run-deps'
 import type { MaliangCheck } from '@/lib/maliang/render-check'
 import { allowedVideoHosts } from '@/lib/maliang/render-check'
 import { REVIEW_V2_ESTIMATE_USD, runReviewCheckV2, withinWeeklyBudget } from '@/lib/maliang/render-check-v2'
@@ -133,8 +142,8 @@ export interface SocialWeeklyDraftDeps {
   supabaseUrl: () => string | undefined
   /** false when the model key is missing: the backfill does not start (no review, no charge). */
   reviewReady: () => boolean
-  /** Books cumulative 马良 spend of this run on its own log row; throws when it cannot. Called before every model call. */
-  reserveMaliangSpend: (input: { runId: string; clientId: string; spentUsd: number }) => Promise<void>
+  /** Books one review's 马良 spend on this run row; throws when it cannot. Called before every model call. */
+  reserveMaliangSpend: (input: { runId: string; clientId: string; chargeUsd: number }) => Promise<void>
 }
 
 type StepLike = GetStepTools<typeof inngest>
@@ -206,8 +215,6 @@ interface ReviewContext {
   mode: WeeklyLoopMode
   runId: string
   capUsd: number
-  /** Reviews already charged earlier in this run. */
-  chargedSoFar: number
 }
 
 function emptyPlan(off_reason: string, cap_usd: number, spent_before_usd: number): BackfillPlan {
@@ -335,7 +342,7 @@ async function reviewOne(
     await deps.reserveMaliangSpend({
       runId: ctx.runId,
       clientId: ctx.clientId,
-      spentUsd: (ctx.chargedSoFar + 1) * REVIEW_V2_ESTIMATE_USD,
+      chargeUsd: REVIEW_V2_ESTIMATE_USD,
     })
   } catch {
     return skip('reserve_failed')
@@ -363,12 +370,15 @@ function buildBackfillReceipt(
     if (review.check === null || review.persisted === null) continue
     reviewed.push({ id: review.id, status: review.check.status, persisted: review.persisted })
   }
+  const chargedReviews = reviews.filter((r) => r.charged)
+  const charges_usd = chargedReviews.map(() => REVIEW_V2_ESTIMATE_USD)
   return {
     enabled: plan.off_reason === null,
     off_reason: plan.off_reason,
     cap_usd: plan.cap_usd,
     spent_before_usd: plan.spent_before_usd,
-    spent_usd: reviews.filter((r) => r.charged).length * REVIEW_V2_ESTIMATE_USD,
+    charges_usd,
+    spent_usd: charges_usd.length * REVIEW_V2_ESTIMATE_USD,
     estimated_usd: plan.target_count * REVIEW_V2_ESTIMATE_USD,
     targets: plan.target_count,
     skipped,
@@ -389,14 +399,8 @@ async function runMaliangBackfill(
 
   const reviews: BackfillReview[] = []
   for (const target of plan.targets) {
-    const chargedSoFar = reviews.filter((r) => r.charged).length
     const review = await step.run(`maliang-review-${target.id}`, () =>
-      reviewOne(
-        deps,
-        { clientId, mode, runId, capUsd: plan.cap_usd, chargedSoFar },
-        target,
-        plan.outputs[target.id],
-      ),
+      reviewOne(deps, { clientId, mode, runId, capUsd: plan.cap_usd }, target, plan.outputs[target.id]),
     )
     reviews.push(review)
   }
@@ -720,8 +724,13 @@ export const socialWeeklyDraft = createSocialWeeklyDraftFunction({
   loadClientConfig: (clientId) => loadWeeklyLoopClientConfig(supabaseAdmin, clientId),
   loopDeps: () => createWeeklyLoopDbDeps(supabaseAdmin),
   startRun: () => startCronRunId(WEEKLY_LOOP_JOB),
-  finishRun: async ({ runId, startedAt, ...rest }) => {
-    await cronRunHandle(WEEKLY_LOOP_JOB, runId, startedAt).finish(rest)
+  finishRun: async ({ runId, startedAt, summary, ...rest }) => {
+    const reserved = await loadRunMaliangReservedCharges(supabaseAdmin, runId)
+    const merged =
+      summary && typeof summary === 'object'
+        ? mergeMaliangBackfillOnFinish(summary as Record<string, unknown>, reserved)
+        : summary
+    await cronRunHandle(WEEKLY_LOOP_JOB, runId, startedAt).finish({ ...rest, summary: merged })
   },
   send: async (events) => {
     await inngest.send(events)
