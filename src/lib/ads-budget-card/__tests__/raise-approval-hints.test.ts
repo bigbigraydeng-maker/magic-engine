@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { applyBudgetRaiseOverlay } from '../raise-approval-present'
+import type { ConfirmationCardView } from '@/lib/confirmation-card/view'
 import type { BudgetHold } from '../ledger'
 import {
   KERNEL_APPROVALS_PATH,
@@ -51,8 +53,8 @@ describe('budgetRaisePhase', () => {
     expect(budgetRaisePhase(baseHold, 'pending_approval')).toBe('awaiting_pm')
   })
 
-  it('flags raises ready for a second confirm after kernel approval', () => {
-    expect(budgetRaisePhase(baseHold, 'authorized')).toBe('awaiting_confirm')
+  it('flags a signed raise that is still not executed', () => {
+    expect(budgetRaisePhase(baseHold, 'authorized')).toBe('authorized_idle')
   })
 
   it('ignores cuts and holds without a linked kernel run', () => {
@@ -72,11 +74,40 @@ describe('raise approval copy', () => {
     expect(overlay.confirmEnabled).toBe(false)
   })
 
-  it('asks for a second confirm on the card after approval', () => {
-    const line = statusLineForPhase('awaiting_confirm', baseHold)
-    expect(line).toContain('再点一次')
-    expect(followUpHintForPhase('awaiting_confirm')).toContain('确认')
-    const overlay = overlayForPhase('awaiting_confirm', baseHold)
-    expect(overlay.confirmEnabled).toBe(true)
+  it('keeps confirm off after approval and does not promise a second click', () => {
+    const line = statusLineForPhase('authorized_idle', baseHold)
+    expect(line).toContain('已授权')
+    expect(line).toContain('不会写 Meta')
+    expect(line).not.toContain('再点一次')
+    expect(followUpHintForPhase('authorized_idle')).toContain('没有')
+    expect(followUpHintForPhase('authorized_idle')).not.toContain('点「确认」执行')
+    const overlay = overlayForPhase('authorized_idle', baseHold)
+    expect(overlay.confirmEnabled).toBe(false)
+    expect(overlay.declineEnabled).toBe(false)
+  })
+
+  it('does not turn a signed card’s confirm button back on', () => {
+    const overlay = overlayForPhase('authorized_idle', baseHold)
+    const card: ConfirmationCardView = {
+      runId: 'card-1',
+      expectedDecisionId: 'd1',
+      fingerprint: 'fp',
+      what: '把广告组 测试组 的日预算从 1.00 调到 1.20（+20%）',
+      account: '已登记的广告账户',
+      amount: '从 1.00 调到 1.20（+20%）',
+      date: '确认之后才改',
+      scope: '只改这一个广告组的日预算',
+      expiresLabel: '请在 11月12日 23:59（新西兰时间）前点。过了要重新出一张。',
+      status: 'confirmed',
+      statusLine: '有人 点了确认。这件事还没有开始做。',
+      confirmEnabled: true,
+      declineEnabled: true,
+      blockedReason: null,
+    }
+    const shown = applyBudgetRaiseOverlay(card, overlay)
+    expect(shown.confirmEnabled).toBe(false)
+    expect(shown.declineEnabled).toBe(false)
+    expect(shown.statusLine).toContain('停在已授权')
+    expect(shown.statusLine).not.toContain('再点一次')
   })
 })

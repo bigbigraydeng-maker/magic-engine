@@ -60,7 +60,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   ai_auto_review_circuit_breaker: 'decide', // 重新打开「AI 自动发给广告平台」
   ads_auto_pause_pending: 'decide', // 暂停在花钱的广告组
   budget_raise_awaiting_pm: 'decide', // 加预算：花钱负责人批 kernel
-  budget_raise_awaiting_confirm: 'decide', // 加预算：回卡二次确认才执行
+  budget_raise_awaiting_confirm: 'decide', // 加预算：已授权但没有执行入口
   ads_auto_pause_blocked: 'decide', // 暂停建议被拦下、广告还在花钱：停不停 / 规则改不改由人定
   tour_publish_requested: 'decide', // 客户员工请我们把团目录的修改上架（对外）
   // 广告自治被熔断器冻住了，要不要恢复自动动手是个决定；同 ads_auto_pause_pending 一档

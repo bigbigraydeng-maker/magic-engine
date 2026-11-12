@@ -63,7 +63,7 @@ describe('pushBudgetRaiseApprovalItems', () => {
     expect(items[0].how).toContain(KERNEL_APPROVALS_PATH)
   })
 
-  it('emits a confirmation-card todo after kernel authorized the raise', async () => {
+  it('says a signed raise is not executed and does not ask for another confirm', async () => {
     const items: ManualItem[] = []
     await pushBudgetRaiseApprovalItems(
       fakeSupabase(
@@ -77,6 +77,9 @@ describe('pushBudgetRaiseApprovalItems', () => {
     expect(items).toHaveLength(1)
     expect(items[0].kind).toBe('budget_raise_awaiting_confirm')
     expect(items[0].href).toContain('/confirmation-cards')
+    expect(items[0].what).toContain('已授权')
+    expect(items[0].how).toContain('不可点')
+    expect(items[0].how).not.toContain('点「确认」执行')
   })
 
   it('surfaces a read failure instead of staying silent', async () => {

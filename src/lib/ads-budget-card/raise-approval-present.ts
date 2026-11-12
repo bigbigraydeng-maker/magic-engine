@@ -1,5 +1,6 @@
 /**
- * Read open budget-raise holds and overlay card copy for the two-step approval path.
+ * Read open budget-raise holds and overlay honest card copy.
+ * Never turns the confirm button back on.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -118,17 +119,17 @@ export function todoCopyForRaise(
 ): { what: string; how: string; href: string } {
   const who = raiseAdsetLabel(draft.hold)
   const amt = raiseAmountPhrase(draft.hold)
-  const confirmHref = `${appBase}/dashboard/clients/${encodeURIComponent(draft.clientId)}/confirmation-cards`
+  const cardHref = `${appBase}/dashboard/clients/${encodeURIComponent(draft.clientId)}/confirmation-cards`
   if (draft.phase === 'awaiting_pm') {
     return {
-      what: `「${who}」加日预算（${amt}）已有人确认过卡，还等你（花钱负责人）在内核批一次；不批不会动 Meta。`,
-      how: `打开 ${KERNEL_APPROVALS_PATH}，找到这条 ads.scale_unit_budget，点「同意」。`,
+      what: `「${who}」加日预算（${amt}）已有人确认过卡，还等你（花钱负责人）点同意；点同意只签授权，不会改 Meta。`,
+      how: `打开 ${KERNEL_APPROVALS_PATH}，找到这条加广告组日预算，点「同意」。`,
       href: `${appBase}${KERNEL_APPROVALS_PATH}`,
     }
   }
   return {
-    what: `「${who}」加日预算（${amt}）你已批准，执行同事还没在这张卡上点第二次确认，日预算还没改。`,
-    how: '打开这位客户的确认卡页，找到对应那张卡，点「确认」执行。',
-    href: confirmHref,
+    what: `「${who}」加日预算（${amt}）花钱负责人已点同意。动作停在已授权，日预算没有改。`,
+    how: '确认卡上的「确认」不可点。再提交不会执行，只会停在已授权。现在没有执行入口。',
+    href: cardHref,
   }
 }
