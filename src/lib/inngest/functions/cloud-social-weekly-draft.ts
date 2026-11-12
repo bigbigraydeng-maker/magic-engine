@@ -11,7 +11,8 @@
 import type { GetStepTools } from 'inngest'
 import { inngest, CLOUD_FN_PREFIX } from '../client'
 import { supabaseAdmin } from '@/lib/supabase'
-import { cronRunHandle, startCronRunId } from '@/lib/cron/run-logger'
+import { cronRunHandle, cronRunIdFromInngestRun, startCronRunWithId } from '@/lib/cron/run-logger'
+import { socialWeeklyDraftOnFailure } from './social-weekly-draft-failure'
 import { cadenceFromConfig, isoDate, nzCalendar } from '@/lib/social/week-pack/cadence'
 import { buildRunIncompleteTask, incompleteReasons, runWeeklyLoop, WEEKLY_LOOP_JOB, type FactCheckWriteOutcome, type WeeklyLoopDeps, type WeeklyLoopMode, type WeeklyLoopReceipt } from '@/lib/social/weekly-loop/run'
 import { createWeeklyLoopDbDeps, listWeeklyLoopClients, loadWeeklyLoopClientConfig, loadWeeklyMaliangSpend, reserveWeeklyMaliangSpend, weeklyLoopEnabled } from '@/lib/social/weekly-loop/run-deps'
@@ -115,7 +116,8 @@ export interface SocialWeeklyDraftDeps {
   listClients: () => Promise<LoopClient[]>
   loadClientConfig: (clientId: string) => Promise<unknown>
   loopDeps: () => WeeklyLoopDeps
-  startRun: () => Promise<string>
+  /** Opens this Inngest run's own log row. The id is derived from `inngestRunId`. */
+  startRun: (inngestRunId: string) => Promise<string>
   finishRun: (input: {
     runId: string
     startedAt: number
@@ -505,9 +507,9 @@ export function forceDaily(ctx: Pick<DueContext, 'forceDaily'>, mode: WeeklyLoop
   return ctx.forceDaily && mode === 'dry_run'
 }
 
-async function handleCron(deps: SocialWeeklyDraftDeps, step: StepLike): Promise<FanOutReceipt> {
+async function handleCron(deps: SocialWeeklyDraftDeps, step: StepLike, inngestRunId: string): Promise<FanOutReceipt> {
   const started = await step.run('start-run', async () => ({
-    runId: await deps.startRun(),
+    runId: await deps.startRun(inngestRunId),
     startedAt: Date.now(),
   }))
 
@@ -590,9 +592,10 @@ async function handleDue(
   deps: SocialWeeklyDraftDeps,
   event: { id?: unknown; ts?: unknown; data?: unknown },
   step: StepLike,
+  inngestRunId: string,
 ): Promise<ClientRunReceipt> {
   const started = await step.run('start-run', async () => ({
-    runId: await deps.startRun(),
+    runId: await deps.startRun(inngestRunId),
     startedAt: Date.now(),
   }))
 
@@ -703,13 +706,23 @@ export function createSocialWeeklyDraftFunction(deps: SocialWeeklyDraftDeps) {
       name: 'Social weekly draft: fact-check, 马良 gate and schedule draft reels (dry run unless switched on)',
       concurrency: { limit: 1, key: 'event.data.clientId' },
       retries: 0,
+      onFailure: socialWeeklyDraftOnFailure,
     },
     [{ cron: SOCIAL_WEEKLY_DRAFT_CRON }, { event: SOCIAL_WEEKLY_DRAFT_DUE_EVENT }],
-    async ({ event, step }) =>
-      event.name === SOCIAL_WEEKLY_DRAFT_DUE_EVENT
-        ? handleDue(deps, event, step)
-        : handleCron(deps, step),
+    async ({ event, step, runId }) => {
+      const inngestRunId = typeof runId === 'string' ? runId : ''
+      return event.name === SOCIAL_WEEKLY_DRAFT_DUE_EVENT
+        ? handleDue(deps, event, step, inngestRunId)
+        : handleCron(deps, step, inngestRunId)
+    },
   )
+}
+
+/** Opens the log row for this Inngest run. Same id `onFailure` closes. */
+export async function openWeeklyDraftRun(inngestRunId: string): Promise<string> {
+  const id = cronRunIdFromInngestRun(inngestRunId)
+  await startCronRunWithId(WEEKLY_LOOP_JOB, id)
+  return id
 }
 
 /** 生产实例。 */
@@ -719,7 +732,7 @@ export const socialWeeklyDraft = createSocialWeeklyDraftFunction({
   listClients: () => listWeeklyLoopClients(supabaseAdmin),
   loadClientConfig: (clientId) => loadWeeklyLoopClientConfig(supabaseAdmin, clientId),
   loopDeps: () => createWeeklyLoopDbDeps(supabaseAdmin),
-  startRun: () => startCronRunId(WEEKLY_LOOP_JOB),
+  startRun: (inngestRunId) => openWeeklyDraftRun(inngestRunId),
   finishRun: async ({ runId, startedAt, ...rest }) => {
     await cronRunHandle(WEEKLY_LOOP_JOB, runId, startedAt).finish(rest)
   },
