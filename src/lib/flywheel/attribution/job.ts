@@ -19,11 +19,12 @@ import { dualWindowEnabled } from './dual-window-gate'
 import { isNotEvaluable } from './execution-evidence'
 import { getMetricPolarity } from '../polarity'
 import {
-  BUDGET_CARD_ACTION,
+  EXECUTED_REVIEW_ACTION_TYPES,
   observationDue,
-  PAUSE_CARD_ACTION,
   pairSpans,
   readExecutedReview,
+  reviewExperienceKindLabel,
+  reviewWindowKindFor,
   windowSpanOf,
   type ExecutedReview,
   type PairMark,
@@ -33,7 +34,7 @@ import { asObjectDay, judgeObjectWindow, objectWindowDates, type ObjectDay } fro
 import {
   countPrimaryOutcomesAfter,
   loadClientReviewContext,
-  observationWindowForAction,
+  observationWindowForKind,
   primaryCostMetric,
   type ClientReviewContext,
 } from './review-verdict-rules'
@@ -158,22 +159,64 @@ const UNATTRIBUTABLE_SAMPLE_LIMIT = 10
 async function loadAttributableActions(
   options: AttributionJobOptions,
 ): Promise<ActionRow[]> {
-  return fetchAll<ActionRow>((from, to) => {
-    let query = supabaseAdmin
-      .from('flywheel_actions')
-      .select('id, client_id, flywheel, action_type, payload, expected_metric, expected_delta, executed_at, execution_item_id, action_run_id, vendor')
-      .not('expected_metric', 'is', null)
-      // A stable, unique sort — `range` without one repeats or drops rows at
-      // page boundaries.
-      .order('id', { ascending: true })
-
-    if (options.clientId) query = query.eq('client_id', options.clientId)
-
-    return query.range(from, to)
-  }).catch((err: unknown) => {
+  const [withMetric, reviewCards] = await Promise.all([
+    fetchAll<ActionRow>((from, to) => {
+      let query = supabaseAdmin
+        .from('flywheel_actions')
+        .select('id, client_id, flywheel, action_type, payload, expected_metric, expected_delta, executed_at, execution_item_id, action_run_id, vendor')
+        .not('expected_metric', 'is', null)
+        .order('id', { ascending: true })
+      if (options.clientId) query = query.eq('client_id', options.clientId)
+      return query.range(from, to)
+    }),
+    loadExecutedReviewCardActions(options),
+  ]).catch((err: unknown) => {
     const message = err instanceof Error ? err.message : String(err)
     throw new Error(`runAttributionJob: failed to fetch actions — ${message}`)
   })
+  const byId = new Map<string, ActionRow>()
+  for (const row of [...withMetric, ...reviewCards]) {
+    byId.set(row.id, row)
+  }
+  return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id))
+}
+
+function reviewCardRowEligible(row: ActionRow): boolean {
+  const payload = row.payload
+  if (!payload || payload.status !== 'executed' || !row.executed_at) return false
+  return reviewWindowKindFor(row.action_type, payload) !== null
+}
+
+async function loadExecutedReviewCardActions(
+  options: AttributionJobOptions,
+): Promise<ActionRow[]> {
+  const rows = await fetchAll<ActionRow>((from, to) => {
+    let query = supabaseAdmin
+      .from('flywheel_actions')
+      .select('id, client_id, flywheel, action_type, payload, expected_metric, expected_delta, executed_at, execution_item_id, action_run_id, vendor')
+      .eq('flywheel', 'ads')
+      .in('action_type', [...EXECUTED_REVIEW_ACTION_TYPES])
+      .eq('payload->>status', 'executed')
+      .not('executed_at', 'is', null)
+      .order('id', { ascending: true })
+    if (options.clientId) query = query.eq('client_id', options.clientId)
+    return query.range(from, to)
+  })
+  return rows.filter(reviewCardRowEligible).map((row) => ({
+    ...row,
+    expected_metric: row.expected_metric ?? metricForReviewCard(row),
+    expected_delta: row.expected_delta ?? null,
+  }))
+}
+
+function metricForReviewCard(row: ActionRow): string {
+  if (typeof row.expected_metric === 'string' && row.expected_metric) return row.expected_metric
+  const payload = row.payload ?? {}
+  const kind = reviewWindowKindFor(row.action_type, payload)
+  if (kind === 'money_budget' || kind === 'money_pause' || kind === 'campaign_pause') {
+    return 'ads.account.spend'
+  }
+  return 'ads.account.spend'
 }
 
 function asReviewAction(action: ActionRow): ReviewAction {
@@ -210,11 +253,10 @@ async function saveDueReview(
   now: Date,
 ): Promise<ActionOutcome> {
   const ctx = await reviewContextFor(action.client_id)
-  const windowDays = observationWindowForAction(
-    action.action_type ?? '',
-    ctx.rules,
-    review.observationWindowDays,
-  )
+  const windowKind = reviewWindowKindFor(action.action_type, action.payload)
+  const windowDays = windowKind
+    ? observationWindowForKind(windowKind, ctx.rules, review.observationWindowDays)
+    : review.observationWindowDays
   const metric = primaryCostMetric(ctx.primary) ?? review.metric
   const reconcileErrors = await reconcileLegacyWindows(action.id, metric)
   if (!observationDue(review.executedAt, windowDays, now)) {
@@ -255,7 +297,10 @@ async function saveDueReview(
       computed_at: now.toISOString(),
     })
     await saveCase(action, judged.case)
-    const kindLabel = action.action_type === PAUSE_CARD_ACTION ? '暂停广告组' : '调日预算'
+    const kindLabel = reviewExperienceKindLabel(
+      action.action_type ?? '',
+      action.payload ?? {},
+    )
     await persistReviewExperience(supabaseAdmin, {
       clientId: action.client_id,
       actionId: action.id,

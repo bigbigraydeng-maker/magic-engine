@@ -32,7 +32,7 @@ vi.mock('@/lib/supabase', () => {
   function chainFor(table: string): Record<string, unknown> {
     const chain: Record<string, unknown> = {}
     const passthrough = () => chain
-    for (const name of ['select', 'not', 'lt', 'gte', 'lte', 'order', 'limit', 'is', 'neq', 'delete', 'update']) {
+    for (const name of ['select', 'not', 'lt', 'gte', 'lte', 'order', 'limit', 'is', 'neq', 'delete', 'update', 'in', 'eq']) {
       chain[name] = passthrough
     }
     chain.eq = (column: string, value: unknown) => {
@@ -142,7 +142,7 @@ describe('attribution consumes the card window', () => {
     expect(result.written).toBe(2)
     expect(hoisted.upserts.map(row => [row.verdict, row.window_days, row.baseline])).toEqual([
       ['inconclusive', 7, null],
-      ['inconclusive', 3, null],
+      ['inconclusive', 7, null],
     ])
   })
 
@@ -185,7 +185,7 @@ describe('attribution consumes the card window', () => {
     hoisted.insights = [day('2025-12-30', 40, 0), day('2026-01-03', 0, 0)]
     const { runAttributionJob } = await import('../job')
     expect((await runAttributionJob({ now: DUE })).written).toBe(1)
-    expect(hoisted.upserts[0]).toMatchObject({ verdict: 'inconclusive', window_days: 3 })
+    expect(hoisted.upserts[0]).toMatchObject({ verdict: 'inconclusive', window_days: 7 })
     const text = caseText()
     expect(text).toContain('结论：')
     expect(text).not.toContain('变好了')

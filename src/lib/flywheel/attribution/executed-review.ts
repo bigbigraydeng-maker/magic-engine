@@ -14,6 +14,22 @@ import { ADS_ACTION_TYPE } from '@/lib/flywheel/vocabulary'
 
 export const BUDGET_CARD_ACTION = ADS_ACTION_TYPE.ADJUST_ADSET_DAILY_BUDGET
 export const PAUSE_CARD_ACTION = ADS_ACTION_TYPE.PAUSE_AD_SET
+export const MONEY_CARD_ACTION = 'ads.money_card'
+export const CAMPAIGN_PAUSE_ACTION = ADS_ACTION_TYPE.PAUSE_CAMPAIGN
+
+export const EXECUTED_REVIEW_ACTION_TYPES = [
+  BUDGET_CARD_ACTION,
+  PAUSE_CARD_ACTION,
+  MONEY_CARD_ACTION,
+  CAMPAIGN_PAUSE_ACTION,
+] as const
+
+export type ReviewWindowKind =
+  | 'budget_adset'
+  | 'pause_adset'
+  | 'money_budget'
+  | 'money_pause'
+  | 'campaign_pause'
 
 const WINDOW_MIN = 1
 const WINDOW_MAX = 28
@@ -102,7 +118,7 @@ export function windowSpanOf(action: ReviewAction): WindowSpan | null {
   if (!isCard(action.action_type)) return null
   const payload = record(action.payload)
   if (!payload || payload.status !== 'executed') return null
-  const objectId = agree(objectFromStamp(payload), objectFromLegacy(payload))
+  const objectId = agree(objectFromStamp(payload), objectFromLegacy(action.action_type, payload))
   const observationWindowDays = agreeWindow(windowFromStamp(payload), windowFromLegacy(action.action_type, payload))
   const executedAt = text(action.executed_at)
   if (!objectId || observationWindowDays === null || !executedAt || Number.isNaN(Date.parse(executedAt))) return null
@@ -142,11 +158,63 @@ export function reviewVerdict(pair: PairMark): { verdict: 'inconclusive'; confid
   return { verdict: 'inconclusive', confidence: 0, pair }
 }
 
+export function isExecutedReviewAction(actionType: string | null): boolean {
+  if (!actionType) return false
+  return (EXECUTED_REVIEW_ACTION_TYPES as readonly string[]).includes(actionType)
+}
+
+/** Which default observation window applies. Used with `observationWindowForKind`. */
+export function reviewWindowKindFor(
+  actionType: string | null,
+  payload: Record<string, unknown> | null,
+): ReviewWindowKind | null {
+  if (!actionType || !payload || payload.status !== 'executed') return null
+  if (actionType === BUDGET_CARD_ACTION) return 'budget_adset'
+  if (actionType === PAUSE_CARD_ACTION) return 'pause_adset'
+  if (actionType === MONEY_CARD_ACTION) {
+    if (payload.wroteMeta !== true) return null
+    if (payload.lane === 'pause_adset') return 'money_pause'
+    if (payload.lane === 'budget') return 'money_budget'
+    return null
+  }
+  if (actionType === CAMPAIGN_PAUSE_ACTION) {
+    if (payload.kind !== 'pause' || payload.wrote !== true) return null
+    return 'campaign_pause'
+  }
+  return null
+}
+
+/** Human label stored on client_learned_preferences experience rows. */
+export function reviewExperienceKindLabel(
+  actionType: string,
+  payload: Record<string, unknown>,
+): string {
+  if (actionType === BUDGET_CARD_ACTION) {
+    const subject = text(payload.subjectKey) ?? text(record(payload.order)?.prescriptionId)
+    if (subject?.startsWith('intraday-cap:')) return '日内上限减预算'
+    return '调日预算'
+  }
+  if (actionType === PAUSE_CARD_ACTION) return '暂停广告组'
+  if (actionType === MONEY_CARD_ACTION) {
+    if (payload.lane === 'pause_adset') return '自动暂停广告组'
+    if (payload.source === 'stop_loss') return '止损减预算'
+    if (payload.source === 'scorecard_down') return '成绩单减预算'
+    if (payload.source === 'opportunity') return '机会减预算'
+    return '金额确认卡减预算'
+  }
+  if (actionType === CAMPAIGN_PAUSE_ACTION) {
+    if (payload.requestedBy === 'intraday-cap@internal') return '日内上限暂停系列'
+    return '暂停广告系列'
+  }
+  return '广告执行'
+}
+
 function openExecuted(action: ReviewAction, payload: Record<string, unknown>): ExecutedReview | null {
   const span = windowSpanOf(action)
   const direction = agreeDirection(directionFromStamp(payload), directionFromLegacy(action.action_type, payload))
-  const metric = agree(metricFromStamp(payload), metricFromLegacy(action.action_type, payload))
+  let metric = agree(metricFromStamp(payload), metricFromLegacy(action.action_type, payload))
   const column = text(action.expected_metric)
+  if (!metric && column) metric = column
   if (column && metric && column !== metric) return null
   const source = sourceFromLock(action.action_type, payload)
   const stampSource = sourceOf(record(payload.review)?.source)
@@ -154,6 +222,11 @@ function openExecuted(action: ReviewAction, payload: Record<string, unknown>): E
   if (!span || !direction || !metric || !source) return null
   if (action.action_type === PAUSE_CARD_ACTION && direction !== 'pause') return null
   if (action.action_type === BUDGET_CARD_ACTION && direction === 'pause') return null
+  if (action.action_type === MONEY_CARD_ACTION) {
+    if (payload.lane === 'pause_adset' && direction !== 'pause') return null
+    if (payload.lane === 'budget' && direction === 'pause') return null
+  }
+  if (action.action_type === CAMPAIGN_PAUSE_ACTION && direction !== 'pause') return null
   return {
     actionId: action.id,
     clientId: action.client_id,
@@ -168,17 +241,55 @@ function openExecuted(action: ReviewAction, payload: Record<string, unknown>): E
 }
 
 function isCard(actionType: string | null): boolean {
-  return actionType === BUDGET_CARD_ACTION || actionType === PAUSE_CARD_ACTION
+  return isExecutedReviewAction(actionType)
 }
 
 function sourceFromLock(actionType: string | null, payload: Record<string, unknown>): ReviewSource | null {
-  return sourceOf(actionType === BUDGET_CARD_ACTION ? payload.lock : payload.source)
+  if (actionType === BUDGET_CARD_ACTION) return sourceOf(payload.lock)
+  if (actionType === PAUSE_CARD_ACTION) return sourceOf(payload.source)
+  if (actionType === MONEY_CARD_ACTION || actionType === CAMPAIGN_PAUSE_ACTION) {
+    return cardOnlySource(payload)
+  }
+  return null
+}
+
+function cardOnlySource(payload: Record<string, unknown>): ReviewSource | null {
+  const cardRunId = text(payload.cardRunId)
+  if (!cardRunId) return null
+  const channel = text(payload.source)
+    ?? (payload.kind === 'pause' ? 'campaign_pause' : text(payload.lane))
+    ?? 'money_card'
+  const goalId = text(payload.goalId) ?? 'card-only'
+  const subject = text(payload.subjectKey) ?? cardRunId
+  const issued = text(payload.issuedAt)
+  const approvedOn = issued?.slice(0, 10) ?? '1970-01-01'
+  return {
+    prescriptionId: cardRunId,
+    version: 1,
+    goalId,
+    planId: channel,
+    planHash: subject.length > 0 ? subject.slice(0, 40) : cardRunId.slice(0, 40),
+    approvedOn,
+  }
 }
 
 function metricFromLegacy(actionType: string | null, payload: Record<string, unknown>): string | null {
   const order = record(payload.order)
-  if (!order) return null
-  return text(actionType === BUDGET_CARD_ACTION ? order.expectedMetric : order.metric)
+  if (actionType === BUDGET_CARD_ACTION) {
+    if (!order) return null
+    return text(order.expectedMetric)
+  }
+  if (actionType === PAUSE_CARD_ACTION) {
+    if (!order) return null
+    return text(order.metric)
+  }
+  if (actionType === MONEY_CARD_ACTION) {
+    if (payload.lane === 'pause_adset') return 'ads.account.spend'
+    if (payload.lane === 'budget') return 'ads.account.spend'
+    return null
+  }
+  if (actionType === CAMPAIGN_PAUSE_ACTION) return null
+  return null
 }
 
 function directionFromLegacy(actionType: string | null, payload: Record<string, unknown>): ReviewDirection | null {
@@ -186,17 +297,37 @@ function directionFromLegacy(actionType: string | null, payload: Record<string, 
   const fromOrder = directionOf(order?.direction)
   const fromPayload = directionOf(payload.direction)
   if (actionType === PAUSE_CARD_ACTION) return fromOrder
+  if (actionType === MONEY_CARD_ACTION) {
+    if (payload.lane === 'pause_adset') return 'pause'
+    const before = centsOf(payload.beforeCents)
+    const after = centsOf(payload.afterCents)
+    if (before === null || after === null) return fromPayload
+    if (after > before) return 'up'
+    if (after < before) return 'down'
+    return fromPayload
+  }
+  if (actionType === CAMPAIGN_PAUSE_ACTION) return payload.kind === 'pause' ? 'pause' : null
   return agreeDirection(fromPayload, fromOrder)
 }
 
 function windowFromLegacy(actionType: string | null, payload: Record<string, unknown>): number | null {
   const order = record(payload.order)
   if (actionType === PAUSE_CARD_ACTION) return windowOf(order?.observationDays)
+  if (actionType === MONEY_CARD_ACTION || actionType === CAMPAIGN_PAUSE_ACTION) {
+    const fromCard = windowOf(payload.observationWindowDays) ?? windowOf(payload.observationDays)
+    return fromCard ?? 1
+  }
   return agreeWindow(windowOf(payload.observationWindowDays), windowOf(order?.observationWindowDays))
 }
 
-function objectFromLegacy(payload: Record<string, unknown>): string | null {
+function objectFromLegacy(actionType: string | null, payload: Record<string, unknown>): string | null {
+  if (actionType === CAMPAIGN_PAUSE_ACTION) return text(payload.campaign_id)
+  if (actionType === MONEY_CARD_ACTION) return text(payload.entityId)
   return text(record(payload.order)?.adsetId)
+}
+
+function centsOf(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) ? value : null
 }
 
 function metricFromStamp(payload: Record<string, unknown>): string | null {

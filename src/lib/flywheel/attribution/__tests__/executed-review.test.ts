@@ -1,7 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import {
-  BUDGET_CARD_ACTION, PAUSE_CARD_ACTION, observationDue, pairSpans, readExecutedReview, reviewVerdict,
-  type ReviewAction, type ReviewSource, type WindowSpan,
+  BUDGET_CARD_ACTION,
+  CAMPAIGN_PAUSE_ACTION,
+  MONEY_CARD_ACTION,
+  PAUSE_CARD_ACTION,
+  observationDue,
+  pairSpans,
+  readExecutedReview,
+  reviewExperienceKindLabel,
+  reviewVerdict,
+  reviewWindowKindFor,
+  type ReviewAction,
+  type ReviewSource,
+  type WindowSpan,
 } from '../executed-review'
 
 const SOURCE: ReviewSource = {
@@ -37,6 +48,49 @@ function pause(extra: Record<string, unknown> = {}): ReviewAction {
 }
 
 describe('executed card review', () => {
+  it('reads money and campaign pause cards into one shape', () => {
+    const money = {
+      id: 'money-1',
+      client_id: 'client-1',
+      action_type: MONEY_CARD_ACTION,
+      expected_metric: 'ads.account.spend',
+      executed_at: '2026-01-01T00:00:00.000Z',
+      payload: {
+        kind: 'money_card',
+        lane: 'budget',
+        status: 'executed',
+        wroteMeta: true,
+        source: 'scorecard_down',
+        entityId: 'set-b',
+        cardRunId: 'card-money-1',
+        subjectKey: 'budget-x',
+        beforeCents: 2000,
+        afterCents: 1600,
+      },
+    } satisfies ReviewAction
+    const camp = {
+      id: 'camp-1',
+      client_id: 'client-1',
+      action_type: CAMPAIGN_PAUSE_ACTION,
+      expected_metric: 'ads.account.cost_per_lead',
+      executed_at: '2026-01-01T00:00:00.000Z',
+      payload: {
+        status: 'executed',
+        kind: 'pause',
+        wrote: true,
+        campaign_id: 'camp-a',
+        cardRunId: 'card-camp-1',
+        issuedAt: '2026-01-01T00:00:00.000Z',
+        before: { status: 'ACTIVE' },
+        after: { status: 'PAUSED' },
+      },
+    } satisfies ReviewAction
+    expect(reviewWindowKindFor(MONEY_CARD_ACTION, money.payload as Record<string, unknown>)).toBe('money_budget')
+    expect(reviewExperienceKindLabel(MONEY_CARD_ACTION, money.payload as Record<string, unknown>)).toBe('成绩单减预算')
+    expect(readExecutedReview(money)).toMatchObject({ kind: 'ready', review: { direction: 'down', objectId: 'set-b' } })
+    expect(readExecutedReview(camp)).toMatchObject({ kind: 'ready', review: { direction: 'pause', objectId: 'camp-a' } })
+  })
+
   it('reads budget and pause into one shape', () => {
     const down = readExecutedReview(budget())
     const stopped = readExecutedReview(pause())
