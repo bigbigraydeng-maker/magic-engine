@@ -8,7 +8,7 @@ source: session:9c129e32
 verify_by: 2026-11-20
 verify_how: 同意一份带动作列表的处方后，暂停和调预算各最多一张确认卡，都走原来的发卡；再跑一次不会多出卡。发卡失败处方仍算同意，原因留在处方上。卡留到出卡当天新西兰 23:59。确认时仍重读，加预算仍走原来的批准。
 done_on: 2026-11-13
-done_ref: doc:docs/ledger/2026-11-13-ad3-prescription-approve-issue-cards.md
+done_ref: pr:3819
 ---
 
 Ray 2026-11-13 01:28 NZDT 批准 AD-3。只出卡，不执行。客户开关保持原样，不打开。
