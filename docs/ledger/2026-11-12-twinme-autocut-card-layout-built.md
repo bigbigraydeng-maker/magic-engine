@@ -1,6 +1,6 @@
 ---
 id: 2026-11-12-twinme-autocut-card-layout-built
-title: TwinMe 自动排卡第一版做好（草稿改动单 #125，未合并）：卡片由程序按口播稿和时间轴自动排，没说过的字上不了屏
+title: TwinMe 自动排卡第一版做好（草稿改动单#125，未合并）：卡片由程序按口播稿和时间轴自动排，没说过的字上不了屏
 status: decided
 owner: agent
 decided_on: 2026-11-12
