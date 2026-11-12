@@ -7,10 +7,11 @@ import { parseBudgetRequest } from '@/lib/ads-budget-card/request'
 import type { BudgetIssueResult } from '@/lib/ads-budget-card/flow'
 import type { BudgetOrder } from '@/lib/ads-budget-card/types'
 import type { PauseIssueItem } from '@/lib/ads-pause-card/issue'
-import { readPauseOrder, type PauseAdSetOrder } from '@/lib/ads-pause-card/order'
+import type { PauseAdSetOrder } from '@/lib/ads-pause-card/order'
 import { ADS_ACTION_TYPE } from '@/lib/flywheel/vocabulary'
 import {
   parsePrescriptionActionList,
+  pauseCardOrderFromAction,
   type PrescriptionActionListItem,
   type PrescriptionBudgetAction,
   type PrescriptionPauseAction,
@@ -117,7 +118,7 @@ function workOf(prescriptionId: string, version: number, index: number, item: Pr
 }
 
 function pauseWork(prescriptionId: string, version: number, index: number, item: PrescriptionPauseAction): Work {
-  const parsed = readPauseOrder(prescriptionId, version, { pause_ad_set: pauseBlob(item) })
+  const parsed = pauseCardOrderFromAction(prescriptionId, version, item)
   if (!parsed.ok) return { kind: 'bad', index, type: item.type, reason: parsed.reason ?? '这份暂停动作没有出卡。' }
   return { kind: 'pause', index, type: item.type, order: parsed.order }
 }
@@ -127,18 +128,6 @@ function budgetWork(prescriptionId: string, index: number, item: PrescriptionBud
     return { kind: 'budget', index, type: item.type, reason: null, order: parseBudgetRequest(budgetBody(prescriptionId, item)) }
   } catch (error) {
     return { kind: 'budget', index, type: item.type, reason: messageOf(error), order: null }
-  }
-}
-
-function pauseBlob(item: PrescriptionPauseAction): Record<string, unknown> {
-  return {
-    ad_account_id: item.target.ad_account_id,
-    campaign_id: item.target.campaign_id,
-    adset_id: item.target.adset_id,
-    metric: item.metric,
-    direction: 'pause',
-    observation_days: item.observation_days,
-    basis: item.reason,
   }
 }
 
