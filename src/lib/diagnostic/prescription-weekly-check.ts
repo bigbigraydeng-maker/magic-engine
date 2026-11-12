@@ -40,10 +40,34 @@ export interface WeeklyCheckOutcome {
   detail?: string
 }
 
+export interface WeeklyBudgetSuggestion {
+  readonly clientId: string
+  readonly subjectKey: string
+  readonly direction: 'increase' | 'decrease'
+  readonly accountLabel: string
+  readonly beforeCents: number
+  readonly afterCents: number
+  readonly currencyLabel: string
+  readonly why: string
+  readonly dateLabel: string
+  readonly scopeLabel: string
+  readonly adsetId: string
+  readonly adAccountId: string
+  readonly prescriptionId: string
+  readonly name: string | null
+}
+
+export interface WeeklyBudgetBlock {
+  readonly clientId: string
+  readonly reason: string
+}
+
 export interface WeeklyCheckSummary {
   considered: number
   checked: number
   outcomes: WeeklyCheckOutcome[]
+  budgetSuggestions?: WeeklyBudgetSuggestion[]
+  budgetBlocks?: WeeklyBudgetBlock[]
 }
 
 interface ApprovedRow {
