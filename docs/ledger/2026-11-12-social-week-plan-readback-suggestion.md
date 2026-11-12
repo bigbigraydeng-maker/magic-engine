@@ -1,9 +1,11 @@
 ---
 id: 2026-11-12-social-week-plan-readback-suggestion
 title: 周计划带上每周一看回建议作出稿参考
-status: decided
+status: done
 owner: agent
 decided_on: 2026-11-12
+done_on: 2026-11-12
+done_ref: pr:3813
 source: doc:docs/specs/2026-10-29-social-goal-driven-impact-loop-v1.md
 verify_by: 2026-11-19
 verify_how: 跑 weekly-plan 读回测试：有建议写入 draftBasis；无建议、过期、读失败不编造。
