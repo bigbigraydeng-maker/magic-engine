@@ -37,6 +37,7 @@ import { pushTourCatalogPublishRequestItems } from './tour-catalog-publish-reque
 import { pushAutoPublishItems } from './auto-publish-items'
 import { pushStoryLiteItems } from './story-lite-items'
 import { pushWeekPackItems } from './week-pack-items'
+import { pushWeekPlanApprovalItems } from './week-plan-items'
 import { pushEmailReplyItems } from './email-reply-items'
 import { pushLeadFollowupItems } from './lead-followup-items'
 import { pushBindingRequestItems } from './binding-request-items'
@@ -382,6 +383,9 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
       WEEKLY_PACK_REEL_GO_PUBLIC: process.env.WEEKLY_PACK_REEL_GO_PUBLIC,
     }, ids).catch((e) =>
       console.warn('[manual-items] 每周整包待办检查失败（不阻塞其他待办）:', e),
+    ),
+    (b) => pushWeekPlanApprovalItems(supabase, b, ids, nameOf, now).catch((e) =>
+      console.warn('[manual-items] 本周方案待批待办检查失败（不阻塞其他待办）:', e),
     ),
     // 本周已批准方案的进度复查 —— 只通知建议，不要求按这条去改方案
     (b) => pushPrescriptionItems(supabase, b, now, nameOf).catch((e) =>
