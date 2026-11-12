@@ -1,43 +1,36 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const submitActionRun = vi.hoisted(() => vi.fn())
-vi.mock('@/lib/kernel/runner', () => ({ submitActionRun }))
+const runAction = vi.hoisted(() => vi.fn())
+vi.mock('@/lib/kernel/runner', () => ({ submitActionRun, runAction }))
 
-import { queueAdsCampaignBudgetDecrease } from '../ads-campaign-budget'
+import { queueAdsCampaignBudgetDecrease, runQueuedAdsCampaignBudgetDecrease } from '../ads-campaign-budget'
 
-describe('queueAdsCampaignBudgetDecrease', () => {
+describe('direct campaign budget submission', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('persists the authenticated human request as a Kernel run before dispatch', async () => {
-    submitActionRun.mockResolvedValue({ run: { id: 'run-1' }, existing: false })
+  it('does not queue a budget decrease', async () => {
     const deps = {} as Parameters<typeof queueAdsCampaignBudgetDecrease>[0]
     const access = { ok: true, user: { id: 'auth-user-1' } } as Parameters<typeof queueAdsCampaignBudgetDecrease>[1]['access']
 
-    await queueAdsCampaignBudgetDecrease(deps, {
+    await expect(queueAdsCampaignBudgetDecrease(deps, {
       clientId: 'client-1',
       access,
       cycleDate: '2026-09-30',
-      adAccountId: 'act_1234567890',
-      campaignId: '987654321',
-      afterCents: 4_000,
+      adAccountId: 'act_1',
+      campaignId: 'camp-1',
+      afterCents: 100,
       executionItemId: 'item-1',
-    })
+    })).rejects.toThrow(/closed/)
 
-    expect(submitActionRun).toHaveBeenCalledWith(deps, {
-      clientId: 'client-1',
-      actionKey: 'ads.cut_campaign_budget',
-      purpose: 'maintenance',
-      executionItemId: 'item-1',
-      triggeredBy: 'human',
-      triggeredByRef: 'auth-user-1',
-      rationale: '从广告执行看板提交广告系列日预算下调',
-      evidence: { source: 'meta-ads/execute' },
-      input: {
-        cycle_date: '2026-09-30',
-        ad_account_id: 'act_1234567890',
-        campaign_id: '987654321',
-        after_cents: 4_000,
-      },
-    })
+    expect(submitActionRun).not.toHaveBeenCalled()
+    expect(runAction).not.toHaveBeenCalled()
+  })
+
+  it('does not resume a queued budget decrease', async () => {
+    const deps = {} as Parameters<typeof runQueuedAdsCampaignBudgetDecrease>[0]
+    await expect(runQueuedAdsCampaignBudgetDecrease(deps, 'client-1', 'run-1')).rejects.toThrow(/closed/)
+    expect(submitActionRun).not.toHaveBeenCalled()
+    expect(runAction).not.toHaveBeenCalled()
   })
 })
