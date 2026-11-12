@@ -444,6 +444,9 @@ export async function saveDecisionHistory(
       chosen_action: input.chosen_action,
       alternatives_rejected: input.alternatives_rejected,
       reasoning: input.reasoning,
+      ...(input.source_kind ? { source_kind: input.source_kind } : {}),
+      ...(input.source_ref ? { source_ref: input.source_ref } : {}),
+      ...(input.goal_id ? { goal_id: input.goal_id } : {}),
     })
     .select()
     .single()
