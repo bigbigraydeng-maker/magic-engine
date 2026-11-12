@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { buildWeeklySocialPlan } from './build'
+import { emptyReadbackSuggestion, parseReadbackSuggestion } from './readback-suggestion'
 import { authFromStatuses, readGoalTitle, readThemes, readWeeklyQuota } from './read'
 import { resolveStage } from './stage-resolve'
 import type { BuildInput, FlagSignal, StageSignalsInput } from './types'
@@ -37,6 +38,7 @@ function input(partial: Partial<BuildInput> = {}): BuildInput {
     lockMix: false,
     stage: stage(),
     goal: { read: 'none', title: null },
+    readbackSuggestion: emptyReadbackSuggestion(),
     themes: { read: 'none', items: [] },
     ...partial,
   }
@@ -125,6 +127,16 @@ describe('buildWeeklySocialPlan', () => {
     const plan = buildWeeklySocialPlan(input({ industryKey: 'logistics' }))
     expect(plan.items.some((item) => item.contentGroup === 'how_to_ship')).toBe(true)
     expect(plan.items.some((item) => item.contentGroup === 'travel_mood')).toBe(false)
+  })
+
+  it('keeps readback suggestion lines on the plan as reference-only draft basis', () => {
+    const readback = parseReadbackSuggestion({
+      client_id: 'x', as_of: '2026-11-17', error: null,
+      suggestion: { status: 'ok', lines: ['内容类型「mood」建议多做。'] },
+    })
+    const plan = buildWeeklySocialPlan(input({ readbackSuggestion: readback }))
+    expect(plan.readbackSuggestion.draftBasis.some((line) => line.includes('建议多做'))).toBe(true)
+    expect(plan.items[0].reason).not.toContain('建议多做')
   })
 })
 

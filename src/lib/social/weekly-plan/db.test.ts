@@ -19,6 +19,7 @@ const plan: WeeklySocialPlan = {
   counts: { story: 1, post: 1, reel: 0 },
   countSources: { story: 'client_week', post: 'client_week', reel: 'client_week', mix: 'none' },
   goal: { read: 'none', title: null },
+  readbackSuggestion: { read: 'none', asOf: null, draftBasis: [] },
   themes: { read: 'none', labels: [] },
   items: [],
   gaps: [],

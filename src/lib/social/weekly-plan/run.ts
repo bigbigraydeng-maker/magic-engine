@@ -11,7 +11,7 @@ import { loadPlanInput, saveWeeklyPlan } from './db'
 
 export async function buildAndSaveWeeklyPlan(db: SupabaseClient, clientId: string, now: Date) {
   const week = targetWeek(now)
-  const loaded = await loadPlanInput(db, clientId, week)
+  const loaded = await loadPlanInput(db, clientId, week, now)
   const plan = buildWeeklySocialPlan(loaded.input)
   return saveWeeklyPlan(db, clientId, { ...plan, gaps: [...loaded.gaps, ...plan.gaps] })
 }

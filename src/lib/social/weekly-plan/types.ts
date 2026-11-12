@@ -39,6 +39,13 @@ export interface GoalInput {
   title: string | null
 }
 
+export interface ReadbackSuggestionInput {
+  read: ReadState
+  asOf: string | null
+  /** From social-readback-weekly receipts; reference only for drafting. */
+  draftBasis: string[]
+}
+
 export interface ThemeInput {
   read: ReadState
   items: ReadonlyArray<{ id: string; label: string }>
@@ -66,6 +73,7 @@ export interface WeeklySocialPlan {
   counts: { story: number | null; post: number | null; reel: number | null }
   countSources: { story: CountSource; post: CountSource; reel: CountSource; mix: CountSource }
   goal: GoalInput
+  readbackSuggestion: ReadbackSuggestionInput
   themes: { read: ReadState; labels: string[] }
   items: WeeklyPlanSlot[]
   gaps: string[]
@@ -82,6 +90,7 @@ export interface BuildInput {
   lockMix: boolean
   stage: StageSignalsInput
   goal: GoalInput
+  readbackSuggestion: ReadbackSuggestionInput
   themes: ThemeInput
 }
 
