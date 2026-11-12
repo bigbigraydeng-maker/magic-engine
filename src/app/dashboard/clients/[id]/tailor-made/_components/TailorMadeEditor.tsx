@@ -5,9 +5,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   blankDay,
   buildFileName,
+  PRODUCT_TYPE_CHOICES,
   TAILOR_MADE_STATUS_LABEL,
   type TailorMadeDay,
   type TailorMadeItinerary,
+  type TailorMadeProductType,
   type TailorMadeRecord,
   type TailorMadeStatus,
   type TailorMadeFlight,
@@ -45,6 +47,10 @@ export default function TailorMadeEditor({
   const [instruction, setInstruction] = useState('');
   const [assisting, setAssisting] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  // 预览是按哪一版内容生成的、iframe 有没有加载完。导出 PDF 打印的是这个 iframe，
+  // 改完马上点导出时预览还是旧版（防抖 + 生成要一两秒），会把新加的内容漏掉。
+  const [previewFor, setPreviewFor] = useState<TailorMadeItinerary | null>(null);
+  const [frameReady, setFrameReady] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
 
@@ -333,7 +339,9 @@ export default function TailorMadeEditor({
         const url = URL.createObjectURL(blob);
         if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
         objectUrlRef.current = url;
+        setFrameReady(false);
         setPreviewUrl(url);
+        setPreviewFor(payload);
         setPreviewError(null);
       } catch (err) {
         setPreviewError(err instanceof Error ? err.message : '预览生成失败');
@@ -426,7 +434,10 @@ export default function TailorMadeEditor({
     return () => window.removeEventListener('beforeunload', onLeave);
   }, [dirty]);
 
+  const previewCurrent = previewFor === payload && frameReady && !previewError;
+
   const print = () => {
+    if (!previewCurrent) return;
     const frame = iframeRef.current;
     if (!frame?.contentWindow) return;
     frame.contentWindow.focus();
@@ -485,9 +496,11 @@ export default function TailorMadeEditor({
           <button
             type="button"
             onClick={print}
-            className="rounded-md bg-me-ochre px-4 py-2 text-sm font-medium text-white hover:bg-me-ochre/90"
+            disabled={!previewCurrent}
+            title={previewCurrent ? undefined : '预览还在更新，好了再导出，避免漏掉刚改的内容'}
+            className="rounded-md bg-me-ochre px-4 py-2 text-sm font-medium text-white hover:bg-me-ochre/90 disabled:cursor-wait disabled:opacity-50"
           >
-            导出 PDF
+            {previewCurrent ? '导出 PDF' : '预览更新中…'}
           </button>
           <button
             type="button"
@@ -664,6 +677,17 @@ export default function TailorMadeEditor({
           </Section>
 
           <Section id="tm-trip" title="行程概览">
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium text-gray-700">产品类型</span>
+              <select
+                className={inputCls}
+                value={payload.trip.productType ?? 'tailor-made'}
+                onChange={(e) => edit((d) => { d.trip.productType = e.target.value as TailorMadeProductType; })}
+              >
+                {PRODUCT_TYPE_CHOICES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </select>
+              <span className="mt-1 block text-xs text-gray-500">决定封面图上的小字：Tailor-made journey 或 Seat-in-coach (SIC) journey</span>
+            </label>
             <Text label="行程名称" value={payload.trip.title}
               onChange={(v) => edit((d) => { d.trip.title = v; })} />
             <Text label="城市线" hint="用逗号分隔，如 Beijing, Xi'an, Shanghai" value={payload.trip.route.join(', ')}
@@ -849,6 +873,7 @@ export default function TailorMadeEditor({
               ref={iframeRef}
               src={previewUrl ?? undefined}
               title="行程单预览"
+              onLoad={() => setFrameReady(true)}
               className="h-[70vh] w-full rounded-md border border-black/10 bg-gray-100 lg:h-full"
             />
           )}

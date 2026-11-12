@@ -63,6 +63,8 @@ export interface SocialReadbackItem {
   published_at_display: string
   story_sent: boolean | null
   story_registered: boolean | null
+  /** Invite-story direct-message line. Null until a verdict exists. */
+  story_dm?: string | null
   windows: ReadbackWindowBlock[] | null
   summary: string | null
 }
@@ -256,6 +258,7 @@ function buildEngagementItem(
     published_at_display: formatReadbackTimeNz(publishedAt),
     story_sent: null,
     story_registered: null,
+    story_dm: null,
     windows: buildEngagementWindows(action.payload, publishedAt, receipts, now),
     summary: null,
   }
@@ -264,6 +267,7 @@ function buildEngagementItem(
 function buildStoryItem(
   row: StoryRow,
   registeredItemIds: ReadonlySet<string>,
+  storyDmByItemId: Readonly<Record<string, string>>,
 ): SocialReadbackItem {
   const registered = registeredItemIds.has(row.item_id)
   return {
@@ -275,6 +279,7 @@ function buildStoryItem(
     published_at_display: formatReadbackTimeNz(row.sent_at),
     story_sent: true,
     story_registered: registered,
+    story_dm: storyDmByItemId[row.item_id] ?? null,
     windows: null,
     summary: registered
       ? '已发出并已登记；Story 没有公开的赞评转，观看数需要洞察权限，目前读不到。'
@@ -304,6 +309,7 @@ export function buildSocialReadbackPanel(input: {
   receipts: ReceiptRow[]
   stories: StoryRow[]
   storyRegistrationRows: Array<{ payload: unknown }>
+  storyDmByItemId?: Readonly<Record<string, string>>
 }): SocialReadbackPanel {
   const receiptsByAction = new Map<string, ReceiptRow[]>()
   for (const r of input.receipts) {
@@ -323,7 +329,7 @@ export function buildSocialReadbackPanel(input: {
 
   for (const story of input.stories) {
     if (story.status !== 'SENT') continue
-    items.push(buildStoryItem(story, registeredStories))
+    items.push(buildStoryItem(story, registeredStories, input.storyDmByItemId ?? {}))
   }
 
   items.sort((a, b) => compareDesc(parseTime(a.published_at), parseTime(b.published_at)))

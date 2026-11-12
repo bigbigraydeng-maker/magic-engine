@@ -13,6 +13,7 @@ import { readAutoPublishSwitches } from './daily-plan-auto-publish-decide'
 import { readPublishLive } from '@/lib/social/publish-gate/read-live'
 import { writePublishDispatchReceipt } from '@/lib/social/publish-gate/receipt'
 import type { AutoPublishWorkerDeps, PlanState, ScopeState } from './daily-plan-auto-publish-worker'
+import { lookupWeekPackApproval } from '@/lib/social/weekly-plan/publish-gate'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -121,6 +122,7 @@ export function buildProductionDeps(now: Date, env: NodeJS.ProcessEnv = process.
     claimAttempt,
     finishAttempt,
     runPublish: input => runDailyPlanPublish(input),
+    readWeekPackApproval: (clientId, scheduledDate) => lookupWeekPackApproval(supabaseAdmin, clientId, scheduledDate),
     emit: async event => {
       await sendInngestEvent(event)
     },

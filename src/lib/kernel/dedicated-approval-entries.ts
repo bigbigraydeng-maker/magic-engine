@@ -44,14 +44,12 @@ export const DEDICATED_APPROVAL_ENTRIES: readonly DedicatedApprovalEntry[] = [
   },
   {
     actionKey: 'ads.auto_pause_on_d3',
-    label: '广告门 ·「等你点头」',
+    label: '自动暂停',
     /**
-     * 2026-10-18：内容从 `ad-health/auto-pause` 整段搬进广告门的标签
-     * （设计稿 `2026-10-18-ads-door-merge-design-v0.1.md` §5 步 2）。
-     * 改这一行，待办里的链接和页面里的链接会一起跟着走 —— 这就是把路径收在一张表里的用处。
-     * 旧网址保留为跳转，已经发出去的待办邮件不会失效。
+     * 2026-11-10：Figma 41-397 独立自动暂停页；广告门「等你点头」标签仍嵌入同款列表。
+     * 待办与侧栏链接走 `ad-health/auto-pause`（旧书签仍有效）。
      */
-    path: (clientId) => `/dashboard/clients/${encodeURIComponent(clientId)}/ads-health?tab=approvals`,
+    path: (clientId) => `/dashboard/clients/${encodeURIComponent(clientId)}/ad-health/auto-pause`,
     // 2026-11-04：被拒的暂停建议由 `pm-todo/ads-auto-pause-items.ts` 的「被拦下」一栏列（读 action_runs denied）
     ownsDeniedTodo: true,
   },

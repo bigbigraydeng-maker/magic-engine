@@ -9,8 +9,10 @@ import { CORE_METRIC_NOUN } from '@/lib/ads-strategy/rules/core-metric'
 import { summarizeResultsByType, type ResultSummary } from '@/lib/ads-strategy/portfolio/result-summary'
 import type { LiveTodayView } from '@/lib/ads-strategy/heartbeat/live-view'
 import { HeldCards } from '@/components/confirmation-card/HeldCards'
+import { AdsExecutionReviewPanel } from '../_components/AdsExecutionReviewPanel'
 import { MeButton, MePill, MeStatCard, MeTable } from '@/components/ui/me-primitives'
 import AdsNextStepCard from './ads-next-step-card'
+import OutsideChangePanel from './outside-change-panel'
 import { TodayGoalProgress } from './today-goal-progress'
 import HourlyLeadsPanel from './hourly-leads-panel'
 import LiveTodayPanel from './live-today-panel'
@@ -191,6 +193,7 @@ export function AdsHealthTodayTab(props: TodayTabProps) {
 
   return (
     <>
+      <OutsideChangePanel clientId={clientId} />
       {!loading && !error && (
         <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-[24px] border border-black/10 bg-white p-5 shadow-card">
@@ -234,6 +237,10 @@ export function AdsHealthTodayTab(props: TodayTabProps) {
         </div>
         <p className="mt-1 text-xs text-me-charcoal/55">在你点确认之前，预算和投放都不会改。</p>
         <HeldCards clientId={clientId} refreshKey={refreshKey} hideWhenEmpty />
+      </section>
+
+      <section className="mb-6">
+        <AdsExecutionReviewPanel clientId={clientId} />
       </section>
 
       <AdsNextStepCard clientId={clientId} refreshKey={refreshKey} />

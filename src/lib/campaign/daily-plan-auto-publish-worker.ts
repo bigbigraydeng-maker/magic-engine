@@ -18,11 +18,14 @@
  *   mode            practice (dry run) unless the env switch, the allow-list,
  *                   AND the per-client flag all say so. Practice never calls
  *                   the publish API. A wired receipt writer records the rehearsal.
+ *   week pack       a live date needs the pack card for the week that contains
+ *                   that date; missing, refused, or unreadable skips that date
  *
  * All I/O is injected so the sweep can be exercised end to end without a
  * network: see `__tests__/daily-plan-auto-publish-worker.test.ts`.
  */
 import { randomUUID } from 'node:crypto'
+import { weekPackSkipReason, type WeekPackApprovalRead } from '@/lib/social/weekly-plan/publish-gate'
 import {
   DAILY_PLAN_AUTO_PUBLISH_ATTEMPTED_EVENT,
   judgeAuthorization,
@@ -109,6 +112,8 @@ export interface AutoPublishWorkerDeps {
   }) => Promise<boolean>
   finishAttempt: (input: { planId: string; date: string; requestId: string; patch: AttemptPatch; now: Date }) => Promise<boolean>
   runPublish: (input: RunPublishInput) => Promise<{ status: number; body: Record<string, unknown> }>
+  /** Pack card for the week containing this scheduled date. */
+  readWeekPackApproval: (clientId: string, scheduledDate: string) => Promise<WeekPackApprovalRead>
   /** Best-effort machine-readable receipt; the attempts table is the source of truth. */
   emit: (event: { id: string; name: string; data: Record<string, unknown> }) => Promise<void>
   /**
@@ -142,6 +147,14 @@ interface DatePlan {
   date: string
   existing: AttemptRecord | null
   decision: ReturnType<typeof decideClaim>
+}
+
+async function weekPackBlock(deps: AutoPublishWorkerDeps, clientId: string, scheduledDate: string): Promise<string | null> {
+  try {
+    return weekPackSkipReason(await deps.readWeekPackApproval(clientId, scheduledDate))
+  } catch {
+    return 'WEEK_PACK_UNREADABLE'
+  }
 }
 
 function patchFromOutcome(outcome: AttemptOutcome): AttemptPatch {
@@ -402,8 +415,19 @@ export async function runAutoPublishSweep(deps: AutoPublishWorkerDeps): Promise<
         continue
       }
 
-      // 5. Live: serial, one date at a time, re-checking the grant before each send.
+      const allowed: DatePlan[] = []
       for (const item of sendable) {
+        const packReason = await weekPackBlock(deps, auth.client_id, item.date)
+        if (packReason) {
+          note(item.date, 'skipped', packReason)
+          continue
+        }
+        allowed.push(item)
+      }
+      if (allowed.length === 0) continue
+
+      // 5. Live: serial, one date at a time, re-checking the grant before each send.
+      for (const item of allowed) {
         const stillGranted = await deps.getActiveAuthorization(auth.plan_id, auth.client_id)
         if (
           stillGranted === null ||

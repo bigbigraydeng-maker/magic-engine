@@ -12,6 +12,8 @@ interface Call {
 function fakeClient(input: {
   stories: Array<Record<string, unknown>>
   registrations: Array<Record<string, unknown>>
+  verdicts?: Array<Record<string, unknown>>
+  verdictError?: { code?: string; message: string } | null
 }): { client: { from: (table: string) => unknown }; calls: Call[] } {
   const calls: Call[] = []
   const client = {
@@ -31,8 +33,12 @@ function fakeClient(input: {
           filters.push(['in', key, value])
           return chain
         },
-        then: (resolve: (value: { data: unknown; error: null }) => void) => {
+        then: (resolve: (value: { data: unknown; error: { code?: string; message: string } | null }) => void) => {
           calls.push({ table, filters })
+          if (table === 'social_verification_verdicts') {
+            resolve({ data: input.verdictError ? null : (input.verdicts ?? []), error: input.verdictError ?? null })
+            return
+          }
           const actionType = filters.find((f) => f[0] === 'eq' && f[1] === 'action_type')?.[2]
           if (table === 'story_items') {
             resolve({ data: input.stories, error: null })
@@ -96,5 +102,51 @@ describe('loadSocialReadbackPanel story registration', () => {
         ['in', 'payload->>idempotency_key', ['story-lite:newest-story']],
       ]),
     )
+  })
+
+  it('attaches the earliest direct-message label and still shows the story if the verdict table is missing', async () => {
+    const story = {
+      item_id: 'newest-story',
+      channel: 'facebook_story',
+      status: 'SENT',
+      sent_at: '2026-11-03T08:00:00.000Z',
+      slot_at: '2026-11-03T08:00:00.000Z',
+    }
+    const registrations = [{ id: 'action-1', payload: { idempotency_key: 'story-lite:newest-story', item_id: 'newest-story' } }]
+    const shown = fakeClient({
+      stories: [story],
+      registrations,
+      verdicts: [
+        {
+          content_action_id: 'action-1',
+          verdict: 'counted',
+          observed_value: '2',
+          reason: null,
+          window_hours: 12,
+          created_at: '2026-11-03T20:00:00.000Z',
+        },
+      ],
+    })
+    const panel = await loadSocialReadbackPanel(shown.client as never, {
+      clientId: CLIENT,
+      since: new Date('2026-10-01T00:00:00.000Z'),
+      until: new Date('2026-11-04T00:00:00.000Z'),
+      now: new Date('2026-11-03T12:00:00.000Z'),
+    })
+    expect(panel.items[0]?.story_dm).toContain('新开私信 2 条')
+
+    const missing = fakeClient({
+      stories: [story],
+      registrations,
+      verdictError: { code: '42P01', message: 'relation social_verification_verdicts does not exist' },
+    })
+    const fallback = await loadSocialReadbackPanel(missing.client as never, {
+      clientId: CLIENT,
+      since: new Date('2026-10-01T00:00:00.000Z'),
+      until: new Date('2026-11-04T00:00:00.000Z'),
+      now: new Date('2026-11-03T12:00:00.000Z'),
+    })
+    expect(fallback.items[0]?.story_registered).toBe(true)
+    expect(fallback.items[0]?.story_dm ?? null).toBeNull()
   })
 })

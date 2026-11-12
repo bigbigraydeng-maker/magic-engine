@@ -128,6 +128,7 @@ function makeDeps(now: Date, runPublish: Script, extra: { receiptRecalled?: stri
     claimAttempt,
     finishAttempt,
     runPublish: sent,
+    readWeekPackApproval: async () => 'approved',
     emit: async () => undefined,
   }
   return { deps, sent, liveCalls: () => sent.mock.calls.filter(c => c[0].command.no_publish === false).length }
