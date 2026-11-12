@@ -6,9 +6,10 @@ owner: agent
 decided_on: 2026-11-13
 source: session:9c129e32
 verify_by: 2026-11-20
-verify_how: 保存带 action_list 的处方草稿后读 prescriptions.content，字段通过 zod 校验且超过 1+1 时有 generation_meta.action_list_dropped_reason；发卡逻辑未改。
+verify_how: 华佗生成或精修后读 prescriptions.content.action_list 与 generation_meta.action_list_dropped_reason（超 1+1 时与 manual 同键）；HUATUO_GENERATION_SYSTEM_PROMPT 含 action_list schema；预算不进顶层 legacy 块；发卡未改。
 done_on: 2026-11-13
 done_ref: pr:3815
 ---
 
 Ray 2026-11-13 01:28 NZDT 批准 AD-2（B 级，数据/格式）。动作类型 ads.pause_ad_set / ads.adjust_adset_daily_budget；存 prescriptions.content，无新表。AD-3 再消费发卡。
+Ray 2026-11-13 01:59 NZDT（PR #3815）：v1 华佗 prompt 须输出 action_list（仍不发卡）；华佗 generate/refine 裁剪留痕写 generation_meta.action_list_dropped_reason；预算仅 action_list、不镜像顶层预算块；预算行 direction/expected_metric 保持可选。

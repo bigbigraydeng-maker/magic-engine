@@ -98,29 +98,35 @@ function capPauseAndBudget(items: PrescriptionActionListItem[]): {
   }
 }
 
-/** Normalize action_list on prescription content without touching approval or card issuance. */
-export function attachPrescriptionActionList<T extends { action_list?: unknown; pause_ad_set?: unknown }>(
+export function finalizePrescriptionActionList<T extends { action_list?: unknown; pause_ad_set?: unknown }>(
   content: T,
-): T & { action_list?: PrescriptionActionListItem[] } {
+): { content: T & { action_list?: PrescriptionActionListItem[] }; action_list_dropped_reason: string | null } {
   if (!('action_list' in content) || content.action_list === undefined) {
-    return content
+    return { content, action_list_dropped_reason: null }
   }
   const parsed = parsePrescriptionActionList(content.action_list)
   if (!parsed.ok) {
     const next = { ...content }
     delete next.action_list
-    return next
+    return { content: next, action_list_dropped_reason: null }
   }
-  const next = { ...content, action_list: parsed.action_list }
+  const next = { ...content, action_list: parsed.action_list } as T & { action_list?: PrescriptionActionListItem[] }
   if (parsed.action_list.length === 0) {
     delete (next as { action_list?: unknown }).action_list
-    return next
+    return { content: next, action_list_dropped_reason: parsed.dropped_reason }
   }
   const pause = parsed.action_list.find((a) => a.type === ADS_ACTION_TYPE.PAUSE_AD_SET)
   if (pause && next.pause_ad_set === undefined) {
     next.pause_ad_set = legacyPauseBlob(pause)
   }
-  return next
+  return { content: next, action_list_dropped_reason: parsed.dropped_reason }
+}
+
+/** Normalize action_list on prescription content without touching approval or card issuance. */
+export function attachPrescriptionActionList<T extends { action_list?: unknown; pause_ad_set?: unknown }>(
+  content: T,
+): T & { action_list?: PrescriptionActionListItem[] } {
+  return finalizePrescriptionActionList(content).content
 }
 
 function legacyPauseBlob(pause: PrescriptionPauseAction): Record<string, unknown> {
