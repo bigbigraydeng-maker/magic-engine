@@ -7,6 +7,7 @@ import {
   parseManualPrescriptionBody,
   type ManualParseResult,
 } from './manual-prescription'
+import { fakeBudgetAction, fakePauseAction } from '@/lib/ads/prescription-action-list'
 
 const CLIENT = 'client-1'
 
@@ -234,5 +235,26 @@ describe('parseManualPrescriptionBody · ad_plays', () => {
     expect(seed?.title).toBe('建系列')
     expect(seed?.posture).toBe('fast')
     expect(seed?.budget_percent).toBe(100)
+  })
+
+  it('parses a valid action_list and records trim reason when extras are dropped', () => {
+    const b = body()
+    ;(b.content as Record<string, unknown>).action_list = [
+      fakePauseAction(),
+      fakePauseAction({ target: { ad_account_id: 'act_FAKE_Z', campaign_id: 'camp_FAKE_Z', adset_id: 'adset_FAKE_Z' } }),
+      fakeBudgetAction(),
+    ]
+    const parsed = parseManualPrescriptionBody(b, CLIENT)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    expect(parsed.content.action_list).toHaveLength(2)
+    expect(parsed.generationMeta.action_list_dropped_reason).toContain('已丢弃多余')
+    expect(parsed.content.pause_ad_set).toMatchObject({ adset_id: 'adset_FAKE_A' })
+  })
+
+  it('rejects a malformed action_list', () => {
+    const b = body()
+    ;(b.content as Record<string, unknown>).action_list = [{ type: 'ads.pause_campaign' }]
+    fail(parseManualPrescriptionBody(b, CLIENT), 422, 'action_list')
   })
 })

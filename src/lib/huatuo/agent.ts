@@ -35,6 +35,7 @@ import { getSeasonalCalendar } from './seasonal-calendar'
 import { getIndustryInterestTrend } from '@/lib/gtrends/client'
 import { coerceWeaknesses } from './weakness-utils'
 import { applyLlmAdPlays, dedupeAdPlayStepKeys } from '@/lib/ads-strategy/plan-seed/ad-plays'
+import { attachPrescriptionActionList } from '@/lib/ads/prescription-action-list'
 import { retrieveSimilarCases } from '@/lib/case-library/retriever'
 import { audOnlyAmount } from '@/lib/ads/budget-currency'
 import { fetchOutcomeConfidenceMap } from '@/lib/case-library/outcome-confidence'
@@ -593,7 +594,10 @@ export function normalizePrescriptionContent(p: Partial<PrescriptionContent>): P
     budget_allocation: Array.isArray(p.budget_allocation) ? p.budget_allocation : [],
   }
   dedupeAdPlayStepKeys(normalized.phases)
-  return normalized
+  if (Array.isArray((p as { action_list?: unknown }).action_list)) {
+    normalized.action_list = (p as PrescriptionContent).action_list
+  }
+  return attachPrescriptionActionList(normalized)
 }
 
 /** 喂给 LLM 的上一版处方副本：去掉顶层 plan_seed（含真实账户号与日预算，不能让 LLM 看到）。不改入参。 */
