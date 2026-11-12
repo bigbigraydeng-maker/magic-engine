@@ -1,7 +1,7 @@
 ---
 id: 2026-11-12-tailor-made-list-delete
 title: CTS 行程单列表加「删除」按钮（实际归档、可找回）；「未命名行程」是点了新建就先建一条空单、没填就留下的空壳
-status: done
+status: decided
 owner: agent
 decided_on: 2026-11-12
 source: session:bdc59205
