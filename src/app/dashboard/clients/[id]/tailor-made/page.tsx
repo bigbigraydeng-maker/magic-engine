@@ -5,6 +5,7 @@ import { listItineraries } from '@/lib/tailor-made/store'
 import { TAILOR_MADE_STATUS_LABEL, type TailorMadeSummary } from '@/lib/tailor-made/types'
 import TailorMadeNewButton from './_components/TailorMadeNewButton'
 import TailorMadeDeleteButton from './_components/TailorMadeDeleteButton'
+import RefreshOnShow from './_components/RefreshOnShow'
 
 export const dynamic = 'force-dynamic'
 
@@ -30,6 +31,7 @@ export default async function TailorMadeListPage({ params }: { params: { id: str
 
   return (
     <div className="mx-auto w-full max-w-6xl px-5 py-6 sm:px-8">
+      <RefreshOnShow />
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div>
           <Link
