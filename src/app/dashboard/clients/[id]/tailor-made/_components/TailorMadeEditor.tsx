@@ -47,6 +47,10 @@ export default function TailorMadeEditor({
   const [instruction, setInstruction] = useState('');
   const [assisting, setAssisting] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  // 预览是按哪一版内容生成的、iframe 有没有加载完。导出 PDF 打印的是这个 iframe，
+  // 改完马上点导出时预览还是旧版（防抖 + 生成要一两秒），会把新加的内容漏掉。
+  const [previewFor, setPreviewFor] = useState<TailorMadeItinerary | null>(null);
+  const [frameReady, setFrameReady] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
 
@@ -335,7 +339,9 @@ export default function TailorMadeEditor({
         const url = URL.createObjectURL(blob);
         if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
         objectUrlRef.current = url;
+        setFrameReady(false);
         setPreviewUrl(url);
+        setPreviewFor(payload);
         setPreviewError(null);
       } catch (err) {
         setPreviewError(err instanceof Error ? err.message : '预览生成失败');
@@ -428,7 +434,10 @@ export default function TailorMadeEditor({
     return () => window.removeEventListener('beforeunload', onLeave);
   }, [dirty]);
 
+  const previewCurrent = previewFor === payload && frameReady && !previewError;
+
   const print = () => {
+    if (!previewCurrent) return;
     const frame = iframeRef.current;
     if (!frame?.contentWindow) return;
     frame.contentWindow.focus();
@@ -487,9 +496,11 @@ export default function TailorMadeEditor({
           <button
             type="button"
             onClick={print}
-            className="rounded-md bg-me-ochre px-4 py-2 text-sm font-medium text-white hover:bg-me-ochre/90"
+            disabled={!previewCurrent}
+            title={previewCurrent ? undefined : '预览还在更新，好了再导出，避免漏掉刚改的内容'}
+            className="rounded-md bg-me-ochre px-4 py-2 text-sm font-medium text-white hover:bg-me-ochre/90 disabled:cursor-wait disabled:opacity-50"
           >
-            导出 PDF
+            {previewCurrent ? '导出 PDF' : '预览更新中…'}
           </button>
           <button
             type="button"
@@ -862,6 +873,7 @@ export default function TailorMadeEditor({
               ref={iframeRef}
               src={previewUrl ?? undefined}
               title="行程单预览"
+              onLoad={() => setFrameReady(true)}
               className="h-[70vh] w-full rounded-md border border-black/10 bg-gray-100 lg:h-full"
             />
           )}

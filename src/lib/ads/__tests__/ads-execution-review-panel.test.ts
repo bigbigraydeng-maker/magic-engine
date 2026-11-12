@@ -54,18 +54,18 @@ describe('buildExecutionReviewItem', () => {
         order: { expectedMetric: 'ads.account.cpa', direction: 'down', observationWindowDays: 7, adsetId: 'set-a' },
         lock: SOURCE,
         reviewCase: {
-          verdict: 'improved',
+          verdict: 'useful',
           reason: null,
-          text: '结论：变好了。',
+          text: '结论：有用。',
         },
       },
       outcome_baseline: 10,
       outcome_after: 4,
     }, NOW_DUE)
     expect(item?.phase).toBe('concluded')
-    expect(item?.verdict).toBe('improved')
-    expect(item?.verdict_label).toBe('变好')
-    expect(item?.summary).toContain('变好了')
+    expect(item?.verdict).toBe('useful')
+    expect(item?.verdict_label).toBe('有用')
+    expect(item?.summary).toContain('有用')
   })
 
   it('handles pause cards with unsure verdict', () => {
@@ -80,16 +80,16 @@ describe('buildExecutionReviewItem', () => {
         source: SOURCE,
         order: { metric: 'ads.account.spend', direction: 'pause', observationDays: 7, adsetId: 'set-a' },
         reviewCase: {
-          verdict: 'unsure',
+          verdict: 'unclear',
           reason: '花费本身不分变好或变差',
-          text: '结论：判不了。',
+          text: '结论：看不出。',
         },
       },
       outcome_baseline: null,
       outcome_after: null,
     }, NOW_DUE)
     expect(item?.kind_label).toBe('暂停广告组')
-    expect(item?.verdict_label).toBe('判不了')
+    expect(item?.verdict_label).toBe('看不出')
     expect(item?.reason).toContain('花费')
   })
 

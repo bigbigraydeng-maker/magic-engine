@@ -8,12 +8,17 @@ import {
   readExecutedReview,
   type ReviewAction,
 } from '@/lib/flywheel/attribution/executed-review'
+import {
+  DEFAULT_REVIEW_VERDICT_RULES,
+  observationWindowForAction,
+  type ReviewVerdictRules,
+} from '@/lib/flywheel/attribution/review-verdict-rules'
 
 export const EXECUTION_REVIEW_DEFAULT_LIMIT = 15
 
 export type ExecutionReviewPhase = 'pending' | 'concluded' | 'incomplete'
 
-export type ExecutionVerdictUi = 'improved' | 'worse' | 'unsure'
+export type ExecutionVerdictUi = 'useful' | 'not_useful' | 'unclear' | 'improved' | 'worse' | 'unsure'
 
 export interface ExecutionReviewItem {
   readonly action_id: string
@@ -41,6 +46,9 @@ export interface AdsExecutionReviewPanel {
 }
 
 const VERDICT_ZH: Record<ExecutionVerdictUi, string> = {
+  useful: '有用',
+  not_useful: '没用',
+  unclear: '看不出',
   improved: '变好',
   worse: '变差',
   unsure: '判不了',
@@ -89,7 +97,10 @@ function reviewCaseOf(payload: Record<string, unknown> | null): {
   const row = record(payload?.reviewCase)
   if (!row) return null
   const verdictRaw = row.verdict
-  const verdict = verdictRaw === 'improved' || verdictRaw === 'worse' || verdictRaw === 'unsure' ? verdictRaw : null
+  const verdict = verdictRaw === 'useful' || verdictRaw === 'not_useful' || verdictRaw === 'unclear'
+    || verdictRaw === 'improved' || verdictRaw === 'worse' || verdictRaw === 'unsure'
+    ? verdictRaw
+    : null
   const body = text(row.text)
   if (!verdict || !body) return null
   return { verdict, reason: text(row.reason), text: body }
@@ -158,7 +169,11 @@ function asReviewAction(row: RawExecutionRow): ReviewAction {
   }
 }
 
-export function buildExecutionReviewItem(row: RawExecutionRow, now: Date): ExecutionReviewItem | null {
+export function buildExecutionReviewItem(
+  row: RawExecutionRow,
+  now: Date,
+  rules: ReviewVerdictRules = DEFAULT_REVIEW_VERDICT_RULES,
+): ExecutionReviewItem | null {
   const actionType = row.action_type
   if (actionType !== BUDGET_CARD_ACTION && actionType !== PAUSE_CARD_ACTION) return null
   const payload = record(row.payload)
@@ -167,7 +182,9 @@ export function buildExecutionReviewItem(row: RawExecutionRow, now: Date): Execu
   const kind = actionType === BUDGET_CARD_ACTION ? 'budget' as const : 'pause' as const
   const kind_label = kind === 'budget' ? '调日预算' : '暂停广告组'
   const read = readExecutedReview(asReviewAction(row))
-  const windowDays = read.kind === 'ready' ? read.review.observationWindowDays : null
+  const windowDays = read.kind === 'ready'
+    ? observationWindowForAction(actionType, rules, read.review.observationWindowDays)
+    : null
   const executedAt = text(row.executed_at)
 
   const reviewCase = reviewCaseOf(payload)
@@ -222,9 +239,11 @@ export function buildAdsExecutionReviewPanel(input: {
   rows: readonly RawExecutionRow[]
   limit: number
   now: Date
+  rules?: ReviewVerdictRules
 }): AdsExecutionReviewPanel {
+  const rules = input.rules ?? DEFAULT_REVIEW_VERDICT_RULES
   const items = input.rows
-    .map((row) => buildExecutionReviewItem(row, input.now))
+    .map((row) => buildExecutionReviewItem(row, input.now, rules))
     .filter((item): item is ExecutionReviewItem => item !== null)
   return {
     client_id: input.clientId,

@@ -24,9 +24,9 @@ function VerdictBadge({ item }: { item: ExecutionReviewItem }) {
     return <span className="text-xs font-medium text-me-charcoal/55">{item.phase_label}</span>
   }
   const tone =
-    item.verdict === 'improved'
+    item.verdict === 'useful' || item.verdict === 'improved'
       ? 'bg-emerald-50 text-emerald-900'
-      : item.verdict === 'worse'
+      : item.verdict === 'not_useful' || item.verdict === 'worse'
         ? 'bg-red-50 text-red-900'
         : 'bg-me-stone/80 text-me-charcoal'
   return (
@@ -75,7 +75,7 @@ function ReviewRow({ item }: { item: ExecutionReviewItem }) {
       {item.phase === 'concluded' && item.summary ? (
         <p className="mt-2 text-sm text-me-charcoal/80 leading-relaxed">{item.summary}</p>
       ) : null}
-      {item.phase === 'concluded' && item.verdict === 'unsure' && item.reason ? (
+      {item.phase === 'concluded' && (item.verdict === 'unclear' || item.verdict === 'unsure' || item.verdict === 'not_useful') && item.reason ? (
         <p className="mt-1 text-xs text-me-charcoal/60">原因：{item.reason}</p>
       ) : null}
       {item.phase === 'pending' && item.observation_window_days !== null ? (
@@ -150,7 +150,7 @@ export function AdsExecutionReviewPanel({ clientId }: { clientId: string }) {
             改完后的成绩
           </h2>
           <p className="mt-1 text-xs text-me-charcoal/65 leading-relaxed">
-            调过日预算或暂停过的组，观察几天后会写清变好、变差还是判不了。只读，不会再去改广告。
+            调过日预算或暂停过的组，观察几天后会写清有用、没用还是看不出。只读，不会再去改广告。
           </p>
         </div>
         <p className="text-[11px] text-me-charcoal/50">最近 {panel.limit} 条 · 新西兰时间</p>

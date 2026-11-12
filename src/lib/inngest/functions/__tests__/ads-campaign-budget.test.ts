@@ -42,6 +42,21 @@ describe('ads campaign budget Inngest workflow', () => {
     expect(execute).toHaveBeenCalledWith('aaaaaaaa-0000-4000-8000-000000000000', 'bbbbbbbb-0000-4000-8000-000000000000')
   })
 
+  it('refuses a direct budget event without a custom executor', async () => {
+    const handler = handlerOf(createAdsCampaignBudgetDecreaseFunction())
+    const step = { run: vi.fn(async (_name: string, work: () => Promise<unknown>) => work()) }
+
+    const result = await handler({
+      event: { data: { client_id: 'aaaaaaaa-0000-4000-8000-000000000000', action_run_id: 'bbbbbbbb-0000-4000-8000-000000000000' } },
+      step,
+    })
+
+    expect(result).toMatchObject({
+      status: 'refused',
+      human_reason: expect.stringMatching(/closed/),
+    })
+  })
+
   it('does not run on a malformed event', async () => {
     const execute = vi.fn()
     const handler = handlerOf(createAdsCampaignBudgetDecreaseFunction(execute))
