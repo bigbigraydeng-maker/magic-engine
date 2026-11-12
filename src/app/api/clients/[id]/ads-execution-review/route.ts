@@ -7,7 +7,7 @@ import { NextResponse } from 'next/server'
 
 import { loadAdsExecutionReviewPanel } from '@/lib/ads/ads-execution-review-load'
 import { EXECUTION_REVIEW_DEFAULT_LIMIT } from '@/lib/ads/ads-execution-review-panel'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { requireOperatorAccess } from '@/lib/auth/client-access'
 import { isUuid } from '@/lib/validation-utils'
 import { supabaseAdmin } from '@/lib/supabase'
 
@@ -18,7 +18,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }):
     return NextResponse.json({ success: false, error: '这个地址不对。' }, { status: 400 })
   }
 
-  const access = await requirePaidClientAccess(params.id)
+  const access = await requireOperatorAccess(params.id)
   if (!access.ok) {
     const message = access.status === 401 ? '请先登录。' : '你不能看这位客户。'
     return NextResponse.json({ success: false, error: message }, { status: access.status })
