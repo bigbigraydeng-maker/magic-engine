@@ -20,6 +20,7 @@ import { requirePaidClientAccess, requirePlanApproverAccess } from '@/lib/auth/c
 import { landPrescription } from '@/lib/diagnostic/prescription-landing'
 import { emitPromotionSignal, readableError } from '@/lib/factory/promotion-signal'
 import { buildPrescriptionDecisionPatch } from '@/lib/diagnostic/prescription-patch'
+import { actionCardsAfterApproval } from './action-cards'
 import { approveDraftContentGate } from './approve-gate'
 import { isStaleGenerating, STALE_GENERATING_MESSAGE } from '@/lib/huatuo/prescription-status'
 import { planDraftCardLine, planDraftCardView } from '@/lib/marketing-plan/promo/plan-draft-card'
@@ -280,11 +281,13 @@ export async function PATCH(
       }
       const promotionSignal = await promotionSignalAfterApproval(clientId, pId, current.goal_id, current.content)
       const planApproval = await planAgreeAfterApproval(req, clientId, pId, access, landedRow)
+      const actionCards = await actionCardsAfterApproval(req, clientId, pId, access, landedRow)
       return NextResponse.json({
         success: true,
         prescription: landedRow,
         promotion_signal: promotionSignal,
         plan_approval: planApproval,
+        action_cards: actionCards,
       })
     }
 

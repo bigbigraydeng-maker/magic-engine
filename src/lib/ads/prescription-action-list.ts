@@ -1,6 +1,7 @@
 /**
  * Machine-readable ads actions embedded in prescriptions.content (AD-2).
- * At most one pause and one budget adjustment per prescription. AD-3 will consume this for cards.
+ * At most one pause and one budget adjustment per prescription.
+ * Approval issues confirm cards from this list and does not execute them.
  */
 
 import { z } from 'zod'
@@ -120,7 +121,7 @@ export function finalizePrescriptionActionList<T extends { action_list?: unknown
 }
 
 /**
- * Pause rows stay on action_list. AD-3 passes this order to issueOnePauseCard.
+ * Pause rows stay on action_list. Approval passes this order to issueOnePauseCard.
  * The blob is only an argument to the pause-card reader; it is not stored.
  */
 export function pauseCardOrderFromAction(
@@ -131,7 +132,7 @@ export function pauseCardOrderFromAction(
   return readPauseOrder(prescriptionId, version, { pause_ad_set: pauseCardBlob(item) })
 }
 
-/** Normalize action_list on prescription content without touching approval or card issuance. */
+/** Normalize action_list on prescription content. Approval reads the saved list later. */
 export function attachPrescriptionActionList<T extends { action_list?: unknown; pause_ad_set?: unknown }>(
   content: T,
 ): T & { action_list?: PrescriptionActionListItem[] } {
