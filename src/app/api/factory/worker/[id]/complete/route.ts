@@ -71,7 +71,7 @@ function parseMediaEvidence(raw: unknown): ReelMediaEvidence | null | undefined 
       out[key] = value[key]
     }
   }
-  for (const key of ['audio_loudness_lufs', 'width', 'height', 'duration_seconds', 'cover_mean_luma', 'cover_luma_range'] as const) {
+  for (const key of ['audio_loudness_lufs', 'width', 'height', 'duration_seconds', 'cover_mean_luma', 'cover_luma_range', 'file_size_bytes', 'video_bitrate_bps'] as const) {
     if (value[key] !== undefined) {
       if (typeof value[key] !== 'number' || !Number.isFinite(value[key])) return null
       out[key] = value[key]
@@ -232,6 +232,7 @@ export async function POST(
     newClips,
     recipeReceipt: body.recipe_receipt,
     mediaEvidence,
+    engine: body.engine,
     ...(aspectDelivery.outputs ? { aspectOutputs: aspectDelivery.outputs } : {}),
   })
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status })

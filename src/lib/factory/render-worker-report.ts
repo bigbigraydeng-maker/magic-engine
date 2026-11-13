@@ -20,7 +20,12 @@ export function parseRenderWorkerField(body: Record<string, unknown>): RenderWor
 }
 
 export interface AlivePing {
-  summary: { client_ids?: string[] | null; render_worker?: unknown } | null
+  summary: {
+    client_ids?: string[] | null
+    render_worker?: unknown
+    engine_stale?: boolean
+    engine_notice?: string
+  } | null
 }
 
 /** Reason text when this client's latest pings say the render engine is down. */

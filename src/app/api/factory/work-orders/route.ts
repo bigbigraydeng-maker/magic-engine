@@ -5,6 +5,7 @@ import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireAdminScope } from '@/lib/auth/require-admin'
 import { toPublishedView } from '@/lib/factory/publish/publish-display'
+import { engineStaleNotice } from '@/lib/factory/engine-catalog.mjs'
 
 export const dynamic = 'force-dynamic'
 
@@ -69,6 +70,17 @@ export async function GET(req?: Request) {
     .in('id', clientIds.length > 0 ? clientIds : ['00000000-0000-0000-0000-000000000000'])
   const nameById = new Map((clients ?? []).map((c) => [c.id, c.name as string]))
 
+  let engineNotice: string | null = null
+  const { data: aliveRows } = await supabaseAdmin
+    .from('cron_run_logs')
+    .select('summary')
+    .eq('job_name', 'factory-worker-alive')
+    .limit(20)
+  engineNotice = engineStaleNotice(
+    (aliveRows ?? []).map((row) => ({ summary: row.summary as { client_ids?: string[] | null; engine_stale?: boolean; engine_notice?: string } | null })),
+    admin.scope.kind === 'global' ? undefined : admin.scope.clientId,
+  )
+
   const orders = (data ?? []).map(({ published_ref, ...w }) => ({
     ...w,
     client_name: nameById.get(w.client_id) ?? w.client_id,
@@ -76,6 +88,6 @@ export async function GET(req?: Request) {
   }))
   return NextResponse.json({
     orders,
-    worker: { last_heartbeat_at: lastHeartbeat, active_count: active.length },
+    worker: { last_heartbeat_at: lastHeartbeat, active_count: active.length, engine_notice: engineNotice },
   })
 }

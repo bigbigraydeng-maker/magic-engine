@@ -13,7 +13,8 @@ import {
   sha256File,
   usedWindowFromProps,
 } from './music-vocal-gate.mjs'
-import { MAX_UPLOAD_BYTES, oversizeUploadMessage } from './engines/remotion/encode-cap.mjs'
+import { encodeCapVerdict, MAX_UPLOAD_BYTES, oversizeUploadMessage } from './engines/remotion/encode-cap.mjs'
+import { currentEngineReport } from './engine-report.mjs'
 
 /** Directory that holds the Remotion package (schema.ts, timing.ts, render.mjs). */
 export const REMOTION_ENGINE_DIR = join(import.meta.dirname, 'engines', 'remotion')
@@ -851,6 +852,11 @@ function assertUploadSize(size, label) {
   if (size > MAX_UPLOAD_BYTES) throw new RemotionOrderError(oversizeUploadMessage(size, label))
 }
 
+function assertEncodeBudget(size, durationSec, label) {
+  const verdict = encodeCapVerdict({ sizeBytes: size, durationSec, label })
+  if (!verdict.ok) throw new RemotionOrderError(verdict.message)
+}
+
 // Extra ratios need a claim-time signed URL whose file name matches the aspect.
 function aspectUploadSlots(wo, extras, aspects) {
   const rows = Array.isArray(wo.aspect_uploads) ? wo.aspect_uploads : []
@@ -913,7 +919,9 @@ async function renderExtraAspects({ slots, renderFn, baseArgs, outDir, hb, deps,
     const stat = statSync(outFile)
     if (!stat.isFile() || stat.size <= 0) throw new RemotionOrderError(`成片体检没过：${slot.aspect} 渲染产物不存在或为空`)
     assertUploadSize(stat.size, `${slot.aspect} 成片`)
-    assertAspectFile(deps.probeMediaEvidenceFn(outFile, srtText), slot, expectedSeconds, musicFile)
+    const extraEvidence = deps.probeMediaEvidenceFn(outFile, srtText)
+    assertAspectFile(extraEvidence, slot, expectedSeconds, musicFile)
+    assertEncodeBudget(stat.size, extraEvidence.duration_seconds, `${slot.aspect} 成片`)
     delivered.push({ slot, outFile })
   }
   return delivered
@@ -1155,6 +1163,7 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
     const expectedSeconds = totalFrames / eng.FPS
     const evidence = deps.probeMediaEvidenceFn(finalPath, srtText)
     assertAspectFile(evidence, { aspect: '9:16', width: 1080, height: 1920 }, expectedSeconds, props.musicFile)
+    assertEncodeBudget(stat.size, evidence.duration_seconds, '成片')
     hb.assertAlive()
     const extraRendered = extraSlots.length === 0 ? [] : await renderExtraAspects({
       slots: extraSlots,
@@ -1212,8 +1221,10 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
       caption,
       actual_cost_usd: 0,
       new_clips: [],
+      engine: currentEngineReport(),
       media_evidence: {
         ...evidence,
+        file_size_bytes: stat.size,
         content_substance: {
           verdict: contentSubstance.verdict,
           kinds: contentSubstance.kinds,
