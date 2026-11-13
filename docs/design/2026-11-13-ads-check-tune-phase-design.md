@@ -317,7 +317,19 @@ severity: watch | act_soon
 
 > **Ray 原话**：「我不论今天的结论是什么，我需要广告 agent 有一个流程去记录决策，并且回头看。」
 
+**根因（本次设计要修的）**：现有「回头看」几乎只认 **在 ME 里点过确认卡** 的预算/暂停执行（#3803 归因链）；真实投放里大量改动在 **Ads Manager / ME 外** 完成，决策流里没有行 → 复盘 **跑空**。同时交付习惯把 **PR 合并** 当成「做完了」，Ray 在 ME 页面和今日待办里 **看不到结论**，等于没交付。
+
 目标：广告 agent（诸葛亮/华佗链路上的 **ads 决策面**）对 **每一次** 投放判断留痕——含 **决定不动**、ME 外改动、创意调换——并在约定日复盘时由 **§3.5 AI Check** 对照预期，结论回流 **今日待办** 与 **经验库**，下次开处方可读回。
+
+### 5.0 试点纪律 · **Ray 已定 2026-11-14 02:33**
+
+> **Ray 原话（对客户 C 试点，2026-11-14 02:33）**：「以后改广告一律走 ME 确认卡。」
+
+设计稿对外只称 **客户 C（试点户）**：
+
+- **常态**：该户 **所有广告改动**（预算、暂停、受众、创意上下线等）必须经 ME **确认卡** 管道执行；**禁止**把 Ads Manager 当主操作面在 ME 外直接改（ME 外改 = 流程例外，见下）。  
+- **例外**：若仍在 ME 外改了设置，须在 **24 小时内** 由 FDE/PM 在决策日志 **手工补记**（`decision_type: external_noted`），并设 `review_due_on`；否则快照 diff 只能报警，没有决策上下文。  
+- **与 Tune 关系**：创意上新仍可走社媒工单 + 确认卡，不得用「人工已在外网上线」跳过 ME 记录。
 
 ### 5.1 记什么（决策记录契约 · `ads_decision_v1`）
 
@@ -344,7 +356,7 @@ severity: watch | act_soon
 | 入口 | 行为 |
 |------|------|
 | **确认卡执行成功** | `action_runs` / `flywheel_actions` 已有执行行 → **自动**在 `payload.ads_decision_v1` 补全决策字段（从卡上 scope + 执行前证据拉取）；`decided_by: card_execution` |
-| **人工 / ME 外** | 广告门「记一条决策」表单（FDE/PM）：如客户 C 组 A「旧视频继续跑 + 加 2 张静图」；不写 Meta |
+| **人工 / ME 外（例外）** | 广告门「记一条决策」表单（**仅 FDE/PM** · §8.4）：如客户 C 组 A「旧视频继续跑 + 加 2 张静图」；补记 ME 外已发生的改动，不替代确认卡做主路径 |
 | **Agent 起草** | §3.5 或处方 agent 产出 `ads_decision_v1` 草稿 → `status: pending_confirm` → 今日待办给 Ray **确认或改**；确认后才 `active` 并可选挂处方/工单 |
 | **决定不动** | 显式选「本日不动作」+ 简短原因 + 可选 `review_due_on`（避免沉默被当成没决策） |
 
@@ -372,8 +384,8 @@ AI **不**因复盘结果自动改广告；`not_met` 只出待办 + 可选处方
 
 **推荐落地（v1）**
 
-- **扩展** `flywheel_actions.payload.ads_decision_v1` + 新 `action_type` 如 `ads.decision_log`（含 `no_action` / 人工 / agent 确认后）→ **同一套查询与 UI**。  
-- **不新建**平行「决策表」除非列表/待办查询证明 JSONB 不够；若需独立表 `ads_decision_records` + 外键 `flywheel_actions.id` 可选项 → 该 PR **A 级 migration**。  
+- **v1 默认（§8.4）**：`flywheel_actions.payload` 内 **`ads_decision_log`**（承载 `ads_decision_v1`）+ `action_type: ads.decision_log`（含 `no_action` / 人工 / agent 确认后）→ **PR-7 按 B 级**。  
+- **不新建**平行表，除非 Ray 推翻 §8.4 且查询证明 JSONB 不够；届时另开 **A 级 migration** PR。  
 - **复用** #3803 job：观察窗结束写 `reviewCase` 的同时 merge 进 `review_result`；#3809 读 preference 时优先匹配 `extracted_from` 决策行。
 
 ### 5.5 示例记录（虚构 · 客户 C 组 A · 加创意）
@@ -409,15 +421,17 @@ AI **不**因复盘结果自动改广告；`not_met` 只出待办 + 可选处方
 
 ## 6. 实现拆分（含决策记录）
 
+**交付标准（全 PR 共用）**：一项工作 **不算完成** 于 PR 合并或 CI 绿；**算完成** 仅当 **Ray 在 ME 页面（广告门 / 确认卡回看 / 决策记录）或今日待办** 能看到本 PR 承诺的 **真实结论**（含文案、状态或待办条）。每条 PR 验收须包含此句。
+
 | 序号 | 标题 | 级别 | 依赖 | 验收标准（可观察） |
 |------|------|------|------|-------------------|
-| **PR-1** | 旧 ME 日内采样扩列：点击等 + 表 migration（§8.2 已定） | **A** | #3827 可选 | `ad-intraday-spend-sample?dry_run=1` 夹具含新字段；migration 过 CI；**不**改 breaker 判定逻辑 |
-| **PR-2** | 日趋势规则引擎 + `leads_config.ads_trend_check`（触发/兜底） | **B** | 日表 CTR/CPL；采样路径已定 | 脱敏夹具 **第 6–11 天** 内规则可触发 `creative_fatigue`；`cron_run_logs` 有回执 |
-| **PR-3** | D+1/D+3/D+7 执行后 Check + 广告门展示（规则结果；AI 来后叠加） | **B** | #3803/#3814 | 假动作登记后可见节点；与 `reviewCase` 不打架 |
-| **PR-4** | Tune：`action_list` 新 remedy + 调方确认卡 + 社媒工单 | **B**（v1 narrow 仅建议卡 · §8.3） | AD-2/AD-3 | 诊断/处方草稿 → 确认卡；`narrow_audience` 无 Meta 写；幂等 + 守卫测试绿 |
-| **PR-5** | 快照 diff 进 Check / 归因脚注 | **B** | 日快照 | hash 变无 `action_runs` → `external_change_detected` |
-| **PR-6** | **AI 分析层**：读采样+日表 → 结构化结论 → 回看 + 待办 + 可选处方草稿 | **B** | PR-2；PR-1 有点击 | 客户 C 组 A 重放 **第 6–11 天**：`素材疲劳、点击率走弱` + `swap_creative`；直写 Meta **0** |
-| **PR-7** | **决策记录 + 回头看**：`ads_decision_v1`、人工/不动作入口、到期 AI 复盘写回 + 经验库 | **B**（仅 JSONB 扩展）；**A**（若独立 `ads_decision_records` 表） | #3803/#3809；PR-6 写 `review_result` | 确认卡执行自动生成记录；组 A 示例 JSON 可手录入并到日到期待办；`client_learned_preferences` 有新 extracted 行；华佗 scope 可读摘要 |
+| **PR-1** | 旧 ME 日内采样扩列：点击等 + 表 migration（§8.2 已定） | **A** | #3827 可选 | `ad-intraday-spend-sample?dry_run=1` 夹具含新字段；migration 过 CI；**不**改 breaker 判定逻辑。**交付**：广告门 pacing/采样相关处可见新字段驱动的只读展示或 cron 回执说明（内测户即可） |
+| **PR-2** | 日趋势规则引擎 + `leads_config.ads_trend_check`（触发/兜底） | **B** | 日表 CTR/CPL；采样路径已定 | 脱敏夹具 **第 6–11 天** 内规则可触发 `creative_fatigue`；`cron_run_logs` 有回执。**交付**：今日待办或广告门出现规则触发的诊断条（staging/夹具回放可证） |
+| **PR-3** | D+1/D+3/D+7 执行后 Check + 广告门展示（规则结果；AI 来后叠加） | **B** | #3803/#3814 | 假动作登记后可见节点；与 `reviewCase` 不打架。**交付**：Ray 在广告门回看区看到 D+1/D+3 时间线条目 |
+| **PR-4** | Tune：`action_list` 新 remedy + 调方确认卡 + 社媒工单 | **B**（v1 narrow 仅建议卡 · §8.3） | AD-2/AD-3 | 诊断/处方草稿 → 确认卡；`narrow_audience` 无 Meta 写；幂等 + 守卫测试绿。**交付**：待办或确认卡列表出现一条调方/创意工单（测试数据即可） |
+| **PR-5** | 快照 diff 进 Check / 归因脚注 | **B** | 日快照 | hash 变无 `action_runs` → `external_change_detected`。**交付**：广告门或决策上下文可见 ME 外改动脚注 |
+| **PR-6** | **AI 分析层**：读采样+日表 → 结构化结论 → 回看 + 待办 + 可选处方草稿 | **B** | PR-2；PR-1 有点击 | 客户 C 组 A 重放 **第 6–11 天**：`素材疲劳、点击率走弱` + `swap_creative`；直写 Meta **0**。**交付**：今日待办或回看区可见 AI 结论 headline（非仅日志） |
+| **PR-7** | **决策记录 + 回头看**：`ads_decision_v1`、人工/不动作入口、到期 AI 复盘写回 + 经验库 | **B**（`payload.ads_decision_log` · §8.4） | #3803/#3809；PR-6 写 `review_result` | 确认卡执行自动生成记录；组 A 示例可手录入；到期日在待办出现复盘条；`client_learned_preferences` 有 extracted 行。**交付**：Ray 在 ME 看到完整决策行 + 到期复盘结论（合并卡回看一块 · §8.4） |
 
 **建议合并顺序**：PR-1 → PR-2 → **PR-7** 与 **PR-6** 可并行（PR-7 复盘调用 PR-6）→ PR-3/4/5。
 
@@ -484,13 +498,17 @@ AI **不**因复盘结果自动改广告；`not_met` 只出待办 + 可选处方
 | 3 | **今日待办** 排序：熔断类 **暂停确认卡** 优先于 AI **`verdict: worse`** 条目（§3.5.5）。 |
 | 4 | **`auto_draft_prescription`** 全户默认 **关**；**仅 pilot 客户 C** 可先开，用于回放验收与真网试跑（§3.5.5）。 |
 
-### 8.4 待 Ray 拍板（决策记录 + 回头看）
+### 8.4 决策记录实现默认 · **默认，待 Ray 确认**
 
-1. **PR-7 存哪**：仅 `flywheel_actions.payload` JSONB（B）还是新建 `ads_decision_records` 表（A）？  
-2. **人工录入权限**：仅 FDE/PM，还是客户 owner 也能记「ME 外改动」？  
-3. **Agent 起草确认**：`pending_confirm` 决策是否必须 Ray 本人点认，还是任意 `paid_client` 操作员可认？  
-4. **回头看与 #3803**：同一动作上 `reviewCase`（CPL 三档）与 `review_result`（自定义 expectation）**合并一条 UI** 还是上下两段？  
-5. **CRM「已报价」占比**：v1 是否硬依赖 CRM 阶段统计进 AI 复盘，还是先写进 `expectation` 文本、数据后补？
+下列为 **PR-7 及回头看 UI** 的默认选型（Ray 未反对前按此实现；若要改口一条即生效）：
+
+| # | 默认 |
+|---|------|
+| 1 | 存 **`flywheel_actions.payload.ads_decision_log`**（JSONB，PR-7 **B 级**）；不新建独立决策表。 |
+| 2 | **手工补记**（含 ME 外例外）**仅 FDE/PM**；客户 owner 不提供入口。 |
+| 3 | Agent **`pending_confirm` 须 Ray 本人确认** 后才 `active`。 |
+| 4 | `reviewCase`（#3803）与自定义 **`review_result` 在卡回看区合并为一块**（一条时间线，§3.2 / §5.3）。 |
+| 5 | CRM **「已报价」占比**：v1 只写在 `expectation` / `stop_or_rollback_zh` 文本里，**数据接线后补**进 AI 复盘。 |
 
 ---
 
