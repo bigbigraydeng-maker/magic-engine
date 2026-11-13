@@ -1,6 +1,7 @@
 /** GET. Read-only Meta spend sample. ?dry_run=1 replays a fixture and writes nothing. */
 import { NextRequest, NextResponse } from 'next/server'
 import { startCronRun } from '@/lib/cron/run-logger'
+import { dryIntradayCpl } from '@/lib/ads-strategy/circuit-breaker/intraday'
 import { proposeDry } from '@/lib/ads-strategy/intraday-spend/cap-proposal'
 import { samplesTableReady } from '@/lib/ads-strategy/intraday-spend/db'
 import { DRY_CLIENT, DRY_NOW, dryDeps } from '@/lib/ads-strategy/intraday-spend/dry'
@@ -27,9 +28,19 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const receipt = await runIntradaySample(deps, { now: DRY_NOW, sleep: async () => {}, dryRun: true })
     const rows = await deps.loadSamples(DRY_CLIENT, '2000-01-01')
     const proposal = await proposeDry(rows, await deps.capMinor(DRY_CLIENT), DRY_NOW)
-    return NextResponse.json({ ok: true, ...receipt, proposal })
+    const cpl = dryIntradayCpl(rows, DRY_NOW)
+    return NextResponse.json({ ok: true, ...receipt, proposal, cpl })
   }
   return live()
+}
+
+async function liveCpl(now: Date): Promise<{ cards: number; clients: number; failed: number; action: string }> {
+  try {
+    const { runIntradayCplCards } = await import('@/lib/ads-strategy/circuit-breaker/intraday-run')
+    return await runIntradayCplCards(supabaseAdmin, now)
+  } catch {
+    return { cards: 0, clients: 0, failed: 1, action: 'cpl_failed' }
+  }
 }
 
 async function liveProposal(now: Date): Promise<{ cards: number; todos: number; action: string }> {
@@ -51,13 +62,14 @@ async function live(): Promise<NextResponse> {
     const now = new Date()
     const receipt = await runIntradaySample(productionDeps(), { now, sleep: delay })
     const proposal = await liveProposal(now)
+    const cpl = await liveCpl(now)
     await cronRun.finish({
       processed: receipt.accountsSampled + receipt.failed,
       completed: receipt.accountsSampled + receipt.noLive,
       failed: receipt.failed,
-      summary: { ...receipt, proposal } as unknown as Record<string, unknown>,
+      summary: { ...receipt, proposal, cpl } as unknown as Record<string, unknown>,
     })
-    return NextResponse.json({ ok: receipt.failed === 0, ...receipt, proposal })
+    return NextResponse.json({ ok: receipt.failed === 0, ...receipt, proposal, cpl })
   } catch {
     await cronRun.finish({ error: 'intraday sample failed' })
     return NextResponse.json({ ok: false, error: '采样没有跑完' }, { status: 500 })
