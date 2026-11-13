@@ -23,6 +23,8 @@ import {
 } from '@/lib/kernel-approval/http'
 import { listPendingApprovals } from '@/lib/kernel-approval/service'
 
+export const dynamic = 'force-dynamic'
+
 /**
  * 查询串里的数字参数。
  *
