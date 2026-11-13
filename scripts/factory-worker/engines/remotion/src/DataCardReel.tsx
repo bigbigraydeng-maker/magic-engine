@@ -7,6 +7,11 @@ import { FPS } from './timing'
 import { fontFamily } from './theme'
 import { templateProps } from './aspect'
 import { useStage } from './stage'
+import { useStyleFamily } from './styles/fonts'
+import { peelStyle } from './styles/select'
+import { StyledDataCard } from './styles/StyledDataCard'
+import { styledDataCardTiming } from './styles/template-craft'
+import type { ResolvedLook } from './styles/types'
 
 const ROW_GAP = 12
 const CARD_PAD = 24
@@ -141,7 +146,7 @@ const Row: React.FC<{ props: DataCardProps; index: number; rowFrames: number }> 
   )
 }
 
-export const DataCardReel: React.FC<Record<string, unknown>> = (rawProps) => {
+const DataCardReelMain: React.FC<Record<string, unknown>> = (rawProps) => {
   const props = parseDataCardProps(templateProps(rawProps))
   const timing = computeDataCardTiming(props)
   const plan = resolveFramePlan('datacard', props)
@@ -170,4 +175,35 @@ export const DataCardReel: React.FC<Record<string, unknown>> = (rawProps) => {
       {props.musicFile !== null ? <Audio src={staticFile(props.musicFile)} volume={vol * 0.9 * (props.musicGain ?? 1)} startFrom={Math.round((props.musicStartSec ?? 0) * FPS)} /> : null}
     </AbsoluteFill>
   )
+}
+
+function carriedLook(rawProps: Record<string, unknown>): ResolvedLook | null {
+  const look = peelStyle(rawProps).look
+  return look == null ? null : (look as ResolvedLook)
+}
+
+function plainProps(rawProps: Record<string, unknown>): Record<string, unknown> {
+  const body = peelStyle(rawProps).body
+  return body === rawProps ? rawProps : (body as Record<string, unknown>)
+}
+
+const DataCardStyled: React.FC<{ rawProps: Record<string, unknown>; look: ResolvedLook }> = ({ rawProps, look }) => {
+  const family = useStyleFamily(look)
+  const props = parseDataCardProps(templateProps(peelStyle(rawProps).body))
+  const timing = styledDataCardTiming(props.rows, look, FPS)
+  const frame = useCurrentFrame()
+  const vol = interpolate(frame, [0, 8, timing.totalFrames - 36, timing.totalFrames - 4], [0, 1, 1, 0], { extrapolateRight: 'clamp' })
+  if (family === null) return null
+  return (
+    <AbsoluteFill style={{ background: props.bgColor }}>
+      <StyledDataCard props={props} look={look} family={family} timing={timing} />
+      {props.musicFile !== null ? <Audio src={staticFile(props.musicFile)} volume={vol * 0.9 * (props.musicGain ?? 1)} startFrom={Math.round((props.musicStartSec ?? 0) * FPS)} /> : null}
+    </AbsoluteFill>
+  )
+}
+
+export const DataCardReel: React.FC<Record<string, unknown>> = (rawProps) => {
+  const look = carriedLook(rawProps)
+  if (look) return <DataCardStyled rawProps={rawProps} look={look} />
+  return <DataCardReelMain rawProps={plainProps(rawProps)} />
 }
