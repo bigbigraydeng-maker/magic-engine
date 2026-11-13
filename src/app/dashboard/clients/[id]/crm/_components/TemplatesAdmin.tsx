@@ -5,13 +5,15 @@
  * 读失败绝不显示成「没有模板」。
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { EmailTemplateVersion } from '@/lib/crm/email-templates/types'
 import type { ReceiptSummaryRow } from '@/lib/crm/email-templates/receipt-store'
 import type { FeatureState } from '@/lib/crm/email-templates/feature-state'
+import { isAutomatedTemplateKey } from '@/lib/crm/email-templates/automated-template-key'
 import { EMAIL_SETTINGS_SAVED_EVENT } from '@/lib/crm/email-templates/settings-events'
+import { MeChip } from '@/components/ui/me-primitives'
 import { TemplateEditor, type TemplateVariables } from './TemplateEditor'
-import { WhenToUsePreview } from './WhenToUsePreview'
+import { TemplatePreviewPane } from './TemplatePreviewPane'
 
 interface ListPayload {
   featureState: FeatureState
@@ -98,28 +100,14 @@ function statsFor(stats: ReceiptSummaryRow[], key: string): ReceiptSummaryRow {
   return found ?? { templateKey: key, sent: 0, blocked: 0, failed: 0, unknown: 0 }
 }
 
-function StatusBadge({ status }: { status: EmailTemplateVersion['status'] }) {
-  if (status === 'active') {
-    return (
-      <span className="inline-block rounded-full bg-green-100 px-2 py-0.5 text-[11px] font-bold text-green-800">
-        启用
-      </span>
-    )
-  }
-  return (
-    <span className="inline-block rounded-full bg-me-stone/40 px-2 py-0.5 text-[11px] font-bold text-me-charcoal/60">
-      停用
-    </span>
-  )
-}
-
 export function TemplatesAdmin(props: { clientId: string }): JSX.Element {
   const { clientId } = props
   const [data, setData] = useState<ListPayload | null>(null)
   const [loading, setLoading] = useState(true)
   const [readError, setReadError] = useState<string | null>(null)
   const [editor, setEditor] = useState<EditorState>({ kind: 'closed' })
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+  const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  const [showDisabled, setShowDisabled] = useState(false)
   const [history, setHistory] = useState<Record<string, HistoryPayload | 'loading' | 'error'>>({})
   const [busyKey, setBusyKey] = useState<string | null>(null)
   const [rowError, setRowError] = useState<Record<string, string>>({})
@@ -311,6 +299,7 @@ export function TemplatesAdmin(props: { clientId: string }): JSX.Element {
   const onSaved = useCallback(
     (template: EmailTemplateVersion, incoming: string[]) => {
       setEditor({ kind: 'closed' })
+      setSelectedKey(template.templateKey)
       void load()
       showNotices(incoming, template.version)
     },
@@ -325,6 +314,29 @@ export function TemplatesAdmin(props: { clientId: string }): JSX.Element {
   const banner = data ? bannerText(data.featureState) : null
   const canEdit = data?.canEditTemplates === true
   const sorted = data ? sortByName(data.templates) : []
+
+  const grouped = useMemo(() => {
+    const manual: EmailTemplateVersion[] = []
+    const auto: EmailTemplateVersion[] = []
+    const disabled: EmailTemplateVersion[] = []
+    for (const row of sorted) {
+      if (row.status === 'disabled') disabled.push(row)
+      else if (isAutomatedTemplateKey(row.templateKey)) auto.push(row)
+      else manual.push(row)
+    }
+    return { manual, auto, disabled }
+  }, [sorted])
+
+  const selected = useMemo(
+    () => (data && selectedKey ? data.templates.find((t) => t.templateKey === selectedKey) ?? null : null),
+    [data, selectedKey],
+  )
+
+  useEffect(() => {
+    if (!data || selectedKey) return
+    const first = grouped.manual[0] ?? grouped.auto[0] ?? grouped.disabled[0]
+    if (first) setSelectedKey(first.templateKey)
+  }, [data, grouped, selectedKey])
 
   return (
     <div data-testid="templates-admin" className="mt-4">
@@ -396,131 +408,136 @@ export function TemplatesAdmin(props: { clientId: string }): JSX.Element {
         <p className="text-xs text-me-charcoal/60">还没有模板。</p>
       )}
 
-      {!loading && readError === null && data && sorted.length > 0 && (
-        <ul className="space-y-2">
-          {sorted.map((row) => {
-            const s = statsFor(data.stats, row.templateKey)
-            const isOpen = expanded[row.templateKey] === true
-            const hist = history[row.templateKey]
-            const err = rowError[row.templateKey]
-            return (
-              <li
-                key={row.templateKey}
-                className="rounded-xl border border-me-charcoal/10 bg-me-ivory/40 p-3"
-              >
-                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                  <span className="text-sm font-bold text-me-charcoal">{row.name}</span>
-                  <span className="text-[11px] text-me-charcoal/50">{row.templateKey}</span>
-                  <StatusBadge status={row.status} />
-                  <span className="text-[11px] text-me-charcoal/60">第 {row.version} 版</span>
-                  <span className="text-[11px] text-me-charcoal/60">{formatNz(row.createdAt)}</span>
-                </div>
-                <WhenToUsePreview text={row.whenToUse} />
-                <p className="mt-1 text-[11px] text-me-charcoal/60">
-                  近 30 天：发出 {s.sent} · 被拦 {s.blocked} · 出错 {s.failed} · 不明 {s.unknown}
-                </p>
+      {!loading && readError === null && data && sorted.length > 0 && selected && (
+        <div className="mt-3 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,300px)_1fr]">
+          <TemplateListColumn
+            grouped={grouped}
+            showDisabled={showDisabled}
+            setShowDisabled={setShowDisabled}
+            selectedKey={selectedKey}
+            setSelectedKey={setSelectedKey}
+            stats={data.stats}
+          />
+          {editor.kind === 'closed' && (
+            <TemplatePreviewPane
+              row={selected}
+              stats={data.stats}
+              canEdit={canEdit}
+              busy={busyKey === selected.templateKey}
+              rowError={rowError[selected.templateKey]}
+              onEdit={() => setEditor({ kind: 'edit', initial: selected })}
+              onToggleStatus={() => void toggleStatus(selected)}
+            />
+          )}
+        </div>
+      )}
 
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setExpanded((prev) => ({ ...prev, [row.templateKey]: !isOpen }))
-                    }
-                    className="rounded-lg border border-me-stone bg-white px-2 py-1 text-[11px] font-bold text-me-charcoal"
-                  >
-                    {isOpen ? '收起内容' : '看内容'}
-                  </button>
-                  {canEdit && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => setEditor({ kind: 'edit', initial: row })}
-                        className="rounded-lg border border-me-stone bg-white px-2 py-1 text-[11px] font-bold text-me-charcoal"
-                      >
-                        编辑
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void toggleStatus(row)}
-                        disabled={busyKey !== null}
-                        className="rounded-lg border border-me-stone bg-white px-2 py-1 text-[11px] font-bold text-me-charcoal disabled:opacity-40"
-                      >
-                        {busyKey === row.templateKey
-                          ? '保存中…'
-                          : row.status === 'active'
-                            ? '停用'
-                            : '启用'}
-                      </button>
-                    </>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => toggleHistory(row.templateKey)}
-                    className="rounded-lg border border-me-stone bg-white px-2 py-1 text-[11px] font-bold text-me-charcoal"
-                  >
-                    {hist && hist !== 'loading' && hist !== 'error' ? '收起历史' : '历史'}
-                  </button>
-                </div>
+      {!loading && readError === null && data && selected && editor.kind === 'closed' && (
+        <TemplateHistoryFooter
+          canEdit={canEdit}
+          selected={selected}
+          history={history[selected.templateKey]}
+          onToggle={() => toggleHistory(selected.templateKey)}
+          onRetry={() => void loadHistory(selected.templateKey)}
+          onPrefill={(v) => setEditor({ kind: 'prefill', initial: selected, prefill: v })}
+        />
+      )}
+    </div>
+  )
+}
 
-                {err && (
-                  <p className="mt-2 text-xs font-semibold text-red-700" role="alert">
-                    {err}
-                  </p>
-                )}
+function TemplateListColumn(props: {
+  grouped: { manual: EmailTemplateVersion[]; auto: EmailTemplateVersion[]; disabled: EmailTemplateVersion[] }
+  showDisabled: boolean
+  setShowDisabled: (v: boolean | ((p: boolean) => boolean)) => void
+  selectedKey: string | null
+  setSelectedKey: (k: string) => void
+  stats: ReceiptSummaryRow[]
+}): JSX.Element {
+  const { grouped, showDisabled, setShowDisabled, selectedKey, setSelectedKey, stats } = props
+  const render = (row: EmailTemplateVersion) => {
+    const sent = statsFor(stats, row.templateKey).sent
+    const active = row.templateKey === selectedKey
+    return (
+      <li key={row.templateKey}>
+        <button
+          type="button"
+          onClick={() => setSelectedKey(row.templateKey)}
+          className={`w-full rounded-lg border px-2 py-2 text-left ${active ? 'border-me-ochre bg-me-ochre/10' : 'border-me-charcoal/10 bg-white'}`}
+        >
+          <span className="text-sm font-bold">{row.name}</span>
+          {isAutomatedTemplateKey(row.templateKey) && (
+            <span className="ml-1 inline-block">
+              <MeChip gold>自动</MeChip>
+            </span>
+          )}
+          <p className="text-[11px] text-me-charcoal/55">近 30 天发出 {sent}</p>
+        </button>
+      </li>
+    )
+  }
+  return (
+    <div className="space-y-3">
+      {grouped.manual.length > 0 && (
+        <section>
+          <h3 className="mb-1 text-xs font-bold text-me-charcoal/70">同事手动发</h3>
+          <ul className="space-y-1">{grouped.manual.map(render)}</ul>
+        </section>
+      )}
+      {grouped.auto.length > 0 && (
+        <section>
+          <h3 className="mb-1 text-xs font-bold text-me-charcoal/70">系统自动发</h3>
+          <ul className="space-y-1">{grouped.auto.map(render)}</ul>
+        </section>
+      )}
+      {grouped.disabled.length > 0 && (
+        <section>
+          <button type="button" className="text-xs underline" onClick={() => setShowDisabled((v) => !v)}>
+            {showDisabled ? '收起' : '展开'}停用（{grouped.disabled.length}）
+          </button>
+          {showDisabled && <ul className="mt-1 space-y-1">{grouped.disabled.map(render)}</ul>}
+        </section>
+      )}
+    </div>
+  )
+}
 
-                {isOpen && (
-                  <div className="mt-2 rounded-lg border border-me-stone/60 bg-white p-2">
-                    <p className="text-[11px] font-bold text-me-charcoal/70">主题</p>
-                    <pre className="whitespace-pre-wrap text-xs text-me-charcoal">{row.subject}</pre>
-                    <p className="mt-2 text-[11px] font-bold text-me-charcoal/70">正文</p>
-                    <pre className="whitespace-pre-wrap text-xs text-me-charcoal">{row.body}</pre>
-                  </div>
-                )}
-
-                {hist === 'loading' && (
-                  <p className="mt-2 text-xs text-me-charcoal/60">加载历史中…</p>
-                )}
-                {hist === 'error' && (
-                  <div className="mt-2 text-xs text-red-800">
-                    <p>暂时读不到历史。</p>
-                    <button
-                      type="button"
-                      onClick={() => void loadHistory(row.templateKey)}
-                      className="mt-1 rounded-lg border border-red-300 bg-white px-2 py-1 text-[11px] font-bold text-red-800"
-                    >
-                      重试
-                    </button>
-                  </div>
-                )}
-                {hist && hist !== 'loading' && hist !== 'error' && (
-                  <ul className="mt-2 space-y-1 border-t border-me-stone/60 pt-2">
-                    {hist.history.map((v) => (
-                      <li key={v.id} className="text-[11px] text-me-charcoal/70">
-                        <div className="flex flex-wrap items-baseline gap-x-2">
-                          <span className="font-bold">第 {v.version} 版</span>
-                          <span>{formatNzFull(v.createdAt)}</span>
-                          <span>{v.createdBy}</span>
-                          <span>{v.changeNote ?? '—'}</span>
-                          <span>{v.status === 'active' ? '启用' : '停用'}</span>
-                        </div>
-                        {canEdit && (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setEditor({ kind: 'prefill', initial: row, prefill: v })
-                            }
-                            className="mt-1 rounded-lg border border-me-stone bg-white px-2 py-0.5 text-[11px] font-bold text-me-charcoal"
-                          >
-                            以这一版内容写新版本
-                          </button>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </li>
-            )
-          })}
+function TemplateHistoryFooter(props: {
+  canEdit: boolean
+  selected: EmailTemplateVersion
+  history: HistoryPayload | 'loading' | 'error' | undefined
+  onToggle: () => void
+  onRetry: () => void
+  onPrefill: (v: EmailTemplateVersion) => void
+}): JSX.Element {
+  const { canEdit, history, onToggle, onRetry, onPrefill } = props
+  const open = history && history !== 'loading' && history !== 'error'
+  return (
+    <div className="mt-4 border-t border-me-stone/60 pt-3">
+      <button type="button" onClick={onToggle} className="text-xs font-bold underline">
+        {open ? '收起历史' : '历史'}
+      </button>
+      {history === 'loading' && <p className="text-xs">加载历史中…</p>}
+      {history === 'error' && (
+        <p className="text-xs text-red-800">
+          暂时读不到历史。
+          <button type="button" onClick={onRetry} className="ml-2 underline">
+            重试
+          </button>
+        </p>
+      )}
+      {open && (
+        <ul className="mt-2 space-y-1 text-[11px]">
+          {history.history.map((v) => (
+            <li key={v.id}>
+              第 {v.version} 版 · {v.changeNote ?? '—'}
+              {canEdit && (
+                <button type="button" onClick={() => onPrefill(v)} className="ml-2 underline">
+                  以这一版写新版本
+                </button>
+              )}
+            </li>
+          ))}
         </ul>
       )}
     </div>

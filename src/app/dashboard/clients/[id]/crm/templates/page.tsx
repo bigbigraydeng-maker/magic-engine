@@ -19,7 +19,7 @@ const NO_ACCESS_TEXT = '你的账号没有查看这一页的权限。'
 const UNAVAILABLE_TEXT = '这一页暂时打不开，请稍后再试；如果一直这样，请告诉 Magic Engine。'
 
 function Shell({ children }: { children: ReactNode }): JSX.Element {
-  return <div className="mx-auto w-full max-w-4xl px-5 py-6 sm:px-8">{children}</div>
+  return <div className="mx-auto w-full max-w-[1200px] px-5 py-6 sm:px-8">{children}</div>
 }
 
 function Notice({ text }: { text: string }): JSX.Element {
