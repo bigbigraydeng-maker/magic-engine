@@ -24,6 +24,19 @@ describe('tour landscape summary', () => {
     expect(prompt).toContain('不得因为一篇文章就声称整个市场发生变化')
   })
 
+  it('treats an approved ad observation as visible copy, not as spend or sales proof', () => {
+    const prompt = tourLandscapePrompt({
+      client_name: 'Example', client_products: [], competitor_products: [],
+      field_observations: [{
+        source_type: 'meta_ad_library', source_name: 'Meta Ad Library', source_url: 'https://example.com/ad',
+        title: 'See China', excerpt: 'China tours from Auckland', observed_at: '2026-10-24T00:00:00.000Z',
+        competitor_domain: 'live.example', payload: { ad_library_id: '99', competitor_name: 'Example Tours' },
+      }],
+    })
+    expect(prompt).toContain('China tours from Auckland')
+    expect(prompt).toContain('不代表广告花费')
+  })
+
   it('labels traffic estimates as an auxiliary low-confidence signal', () => {
     const prompt = tourLandscapePrompt({ client_name: 'CTS', client_products: [], competitor_products: [], traffic_signals: [{ domain: 'competitor.example', observed_at: '2026-09-12', estimated_visits: 1200, previous_estimated_visits: 1000, visits_change_pct: 20, excerpt: 'Public estimate' }] })
     expect(prompt).toContain('公开估算，低置信度')

@@ -1,7 +1,8 @@
 import { callClaudeChat, MODEL_HAIKU, parseJsonResponse } from '@/lib/anthropic/client'
+import type { LandscapeFieldObservation } from './field-observations'
 
 export const TOUR_LANDSCAPE_MODEL = MODEL_HAIKU
-export const TOUR_LANDSCAPE_PROMPT_VERSION = 'tour-landscape-v2'
+export const TOUR_LANDSCAPE_PROMPT_VERSION = 'tour-landscape-v3'
 
 export type TourLandscape = {
   headline: string
@@ -54,7 +55,7 @@ export function formatTourLandscapeChatReply(value: string): string {
 
 const SYSTEM = '你是旅游产品竞争情报分析师。只根据输入事实做整体市场判断，不把不同旅行社的 Tour 强行视为一一对应产品。不得编造价格、日期、城市或余位。输出严格 JSON。结论必须具体到已提供的产品、城市、天数或价格事实；如果事实不足，就明确说缺什么，不要用空泛的行业术语填充。'
 
-export function tourLandscapePrompt(input: { client_name: string; market_scope?: string[]; client_products: unknown[]; competitor_products: unknown[]; external_signals?: TourLandscapeExternalSignal[]; traffic_signals?: TourLandscapeTrafficSignal[]; memory_context?: string }): string {
+export function tourLandscapePrompt(input: { client_name: string; market_scope?: string[]; client_products: unknown[]; competitor_products: unknown[]; external_signals?: TourLandscapeExternalSignal[]; traffic_signals?: TourLandscapeTrafficSignal[]; field_observations?: LandscapeFieldObservation[]; memory_context?: string }): string {
   return `请为 ${input.client_name} 做竞品产品组合总览，而不是逐团横向配对。
 
 本次分析范围：${input.market_scope?.length ? input.market_scope.join('、') : '客户当前配置的市场范围'}。
@@ -73,11 +74,15 @@ ${input.external_signals?.length ? JSON.stringify(input.external_signals).slice(
 竞品网站流量方向（公开估算，低置信度，不代表真实访问量、订单或销售影响）：
 ${input.traffic_signals?.length ? JSON.stringify(input.traffic_signals).slice(0, 5000) : '暂无可用的竞品网站流量方向估算。'}
 
+已复核的现场观察（公开广告库、地图评分、点评站或 AI 回答；未批准的不在这里）：
+${input.field_observations?.length ? JSON.stringify(input.field_observations).slice(0, 6000) : '暂无已复核的现场观察。'}
+
 客户已确认的历史偏好与决策（只能作为背景，不能替代当前证据）：
 ${input.memory_context ? input.memory_context.slice(0, 5000) : '暂无已确认的客户 Memory。'}
 
 行业与媒体只能作为补充证据：必须区分文章明确说了什么和你的推断，不得因为一篇文章就声称整个市场发生变化；如果引用行业证据，在结论或建议中写出来源名称、标题或观察日期。不要把没有来源链接或观察时间的内容当作可核实事实。
 流量方向只能作为低置信度的辅助信号；没有估算值或变化百分比时不要推断流量变化，也不得据此声称竞品销售增长、客户流失或 CTS 受到影响。
+现场观察只说明当时公开页面上看得到的文案、评分或回答，不代表广告花费、转化或评分变化的原因。未出现在输入里的广告视为还没核实。
 输出字段：headline（不超过40字，直接说现在最重要的经营判断）、market_summary（2-4句，必须引用至少2个输入中的具体事实，例如产品数量、产品名、城市、天数或价格带，并给出明确判断；如使用行业证据，注明来源）、client_opportunities（最多4条，每条都要是“建议现在做”的具体动作，尽量点名 CTS 产品或产品层级）、client_risks（最多4条，每条都要是“暂时不要做”的具体动作或风险，并说明依据）、recommended_focus（最多4条，每条都要是下一步先确认的事项）、unknowns（最多4条，列出缺失的关键证据）、confidence（0到1）。
 不要输出“加强竞争力”“优化产品”“关注市场”等无法执行的空话。不要为了凑满字段而编造事实；但只要输入中有证据，就必须把证据写进结论和建议。每个数组最多3条，优先保留最影响经营决策的内容。
 必须返回以上全部字段；没有证据时对应字段返回 []，不要省略字段。只返回 JSON，不要 Markdown 代码块。`
@@ -169,6 +174,7 @@ export async function chatAboutTourLandscape(input: {
   competitor_products: unknown[]
   external_signals?: TourLandscapeExternalSignal[]
   traffic_signals?: TourLandscapeTrafficSignal[]
+  field_observations?: LandscapeFieldObservation[]
   market_scope?: string[]
   memory_context?: string
   landscape: TourLandscape | null
@@ -178,7 +184,7 @@ export async function chatAboutTourLandscape(input: {
   const systemPrompt = `${SYSTEM} 你现在是一个经营决策对话助手。回答要直接、具体、少讲术语。
 回答固定使用以下顺序：结论：一句话直接回答；依据：列出1-3条输入资料支持的事实；建议：给出一个下一步动作。只能使用提供的客户产品、竞品资料和当前总览；资料没有写的内容必须明确说“目前无法判断”。竞品资料是重点监控样本，不是竞品完整产品线；不要把样本结论扩大成整个市场结论。
 不要把不同旅行社的 Tour 强行一一对应，不要建议自动调价、发布或执行外部动作。`
-  const context = `当前总览：${JSON.stringify(input.landscape)}\n\n${tourLandscapePrompt({ client_name: input.client_name, market_scope: input.market_scope, client_products: input.client_products, competitor_products: input.competitor_products, external_signals: input.external_signals, traffic_signals: input.traffic_signals, memory_context: input.memory_context })}`
+  const context = `当前总览：${JSON.stringify(input.landscape)}\n\n${tourLandscapePrompt({ client_name: input.client_name, market_scope: input.market_scope, client_products: input.client_products, competitor_products: input.competitor_products, external_signals: input.external_signals, traffic_signals: input.traffic_signals, field_observations: input.field_observations, memory_context: input.memory_context })}`
   try {
     const result = await callClaudeChat({
       model: TOUR_LANDSCAPE_MODEL,
