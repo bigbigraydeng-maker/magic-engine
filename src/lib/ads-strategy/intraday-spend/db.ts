@@ -4,6 +4,7 @@ import type { SpendDraft } from './sample'
 import { pacingFromSamples, sinceDay, type PacingPayload } from './view'
 
 const COLUMNS = 'client_id, ad_account_id, account_day, local_minute, entity_level, entity_id, spend_minor, impressions, currency, timezone, sampled_at'
+const OUTCOME_COLUMNS = 'link_clicks, results'
 const ROW_CAP = 20000
 
 export async function samplesTableReady(sb: SupabaseClient): Promise<boolean> {
@@ -23,14 +24,23 @@ export async function readClientPacing(
   return pacingFromSamples(rows, cap.state === 'set' ? cap.cents : null, now)
 }
 
+/** True only when the nullable click/result columns exist. A missing column must not break spend reads. */
+export async function outcomeColumnsReady(sb: SupabaseClient): Promise<boolean> {
+  const { error } = await sb.from('ad_intraday_spend_samples').select('link_clicks').limit(1)
+  if (!error) return true
+  if (/does not exist|schema cache|Could not find/i.test(error.message)) return false
+  throw new Error(error.message)
+}
+
 export async function loadRecentSamples(
   sb: SupabaseClient,
   clientId: string,
   since: string,
 ): Promise<SpendDraft[] | null> {
+  const outcomes = await outcomeColumnsReady(sb)
   const { data, error } = await sb
     .from('ad_intraday_spend_samples')
-    .select(COLUMNS)
+    .select(outcomes ? `${COLUMNS}, ${OUTCOME_COLUMNS}` : COLUMNS)
     .eq('client_id', clientId)
     .gte('account_day', since)
     .limit(ROW_CAP)
@@ -40,8 +50,9 @@ export async function loadRecentSamples(
   return raw.map(mapRow).filter((row): row is SpendDraft => row !== null)
 }
 export async function upsertSamples(sb: SupabaseClient, drafts: readonly SpendDraft[]): Promise<void> {
+  const outcomes = await outcomeColumnsReady(sb)
   for (let i = 0; i < drafts.length; i += 400) {
-    const chunk = drafts.slice(i, i + 400).map(toRow)
+    const chunk = drafts.slice(i, i + 400).map((draft) => toRow(draft, outcomes))
     const { error } = await sb.from('ad_intraday_spend_samples').upsert(chunk, {
       onConflict: 'client_id,ad_account_id,account_day,local_minute,entity_level,entity_id',
     })
@@ -56,7 +67,7 @@ export async function purgeSamplesBefore(sb: SupabaseClient, beforeIso: string):
   if (error) throw new Error(error.message)
   return count ?? 0
 }
-function toRow(draft: SpendDraft): Record<string, unknown> {
+function toRow(draft: SpendDraft, outcomes: boolean): Record<string, unknown> {
   return {
     client_id: draft.clientId,
     ad_account_id: draft.adAccountId,
@@ -69,6 +80,7 @@ function toRow(draft: SpendDraft): Record<string, unknown> {
     impressions: draft.impressions,
     currency: draft.currency,
     timezone: draft.timezone,
+    ...(outcomes ? { link_clicks: draft.linkClicks, results: draft.results } : {}),
   }
 }
 function mapRow(raw: Record<string, unknown>): SpendDraft | null {
@@ -88,10 +100,18 @@ function mapRow(raw: Record<string, unknown>): SpendDraft | null {
     entityId: raw.entity_id,
     spendMinor: spend,
     impressions: asInt(raw.impressions) ?? 0,
+    linkClicks: asNullableCount(raw.link_clicks),
+    results: asNullableCount(raw.results),
     currency: typeof raw.currency === 'string' ? raw.currency : null,
     timezone: raw.timezone,
     sampledAt: raw.sampled_at,
   }
+}
+function asNullableCount(value: unknown): number | null {
+  if (value === null || value === undefined) return null
+  const n = asInt(value)
+  if (n === null || n < 0) return null
+  return n
 }
 function asInt(value: unknown): number | null {
   if (typeof value === 'number' && Number.isSafeInteger(value)) return value
