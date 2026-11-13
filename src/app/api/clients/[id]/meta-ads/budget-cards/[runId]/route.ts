@@ -16,6 +16,7 @@ import { confirmMoneyBudget } from '@/lib/action-submission/money-card'
 import { loadMoneyBudgetLive } from '@/lib/ads-budget-card/money-live'
 import { writeHeldBudget } from '@/lib/action-submission/money-card-write'
 import { budgetCardGate, budgetKernel } from '../access'
+import { applyBudgetRaiseOverlay, fetchBudgetRaiseOverlays } from '@/lib/ads-budget-card/raise-approval-present'
 
 export async function POST(
   req: Request,
@@ -49,7 +50,12 @@ export async function POST(
     })
     if (money.handled) {
       if (!money.card) return NextResponse.json({ error: money.reason, wroteMeta: false }, { status: 409 })
-      return NextResponse.json({ ...money.card, statusLine: money.reason, wroteMeta: money.wroteMeta })
+      const overlays = await fetchBudgetRaiseOverlays(supabaseAdmin, id)
+      const body = applyBudgetRaiseOverlay(
+        { ...money.card, statusLine: money.reason },
+        overlays.get(runId),
+      )
+      return NextResponse.json({ ...body, wroteMeta: money.wroteMeta })
     }
     const runtime = await metaBudgetRuntime(id, supabaseAdmin)
     if (!runtime) return NextResponse.json({ error: '拿不到广告授权，没有改日预算。' }, { status: 424 })
@@ -67,7 +73,12 @@ export async function POST(
       const status = result.status === 'blocked' || result.status === 'failed' ? 409 : 200
       return NextResponse.json({ error: result.reason, status: result.status }, { status })
     }
-    return NextResponse.json({ ...result.card, statusLine: result.reason })
+    const overlays = await fetchBudgetRaiseOverlays(supabaseAdmin, id)
+    const body = applyBudgetRaiseOverlay(
+      { ...result.card, statusLine: result.reason },
+      overlays.get(runId),
+    )
+    return NextResponse.json(body)
   } catch (error) {
     const mapped = publicError(error)
     if (mapped.status === 500) console.error('[budget-cards] confirm failed')

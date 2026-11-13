@@ -25,6 +25,8 @@ export interface CardPayload {
   readonly confirmEnabled: boolean
   readonly declineEnabled: boolean
   readonly blockedReason: string | null
+  readonly followUpHint?: string | null
+  readonly followUpHref?: string | null
 }
 
 function text(value: unknown): string | null {
@@ -55,6 +57,16 @@ export function toCardPayload(value: unknown): CardPayload | null {
   if (!runId || !expectedDecisionId || !fingerprint) return null
   if (typeof row.confirmEnabled !== 'boolean' || typeof row.declineEnabled !== 'boolean') return null
   if (row.blockedReason !== null && typeof row.blockedReason !== 'string') return null
+  const followUpHint = row.followUpHint === null || row.followUpHint === undefined
+    ? null
+    : typeof row.followUpHint === 'string' && row.followUpHint.trim()
+      ? row.followUpHint
+      : null
+  const followUpHref = row.followUpHref === null || row.followUpHref === undefined
+    ? null
+    : typeof row.followUpHref === 'string' && row.followUpHref.trim()
+      ? row.followUpHref
+      : null
   return {
     runId,
     expectedDecisionId,
@@ -70,6 +82,8 @@ export function toCardPayload(value: unknown): CardPayload | null {
     confirmEnabled: row.confirmEnabled,
     declineEnabled: row.declineEnabled,
     blockedReason: row.blockedReason,
+    followUpHint,
+    followUpHref,
   }
 }
 
@@ -138,6 +152,8 @@ function CardRow({ clientId, card }: { clientId: string; card: CardPayload }) {
         confirmEnabled={goLive ? false : view.confirmEnabled}
         declineEnabled={goLive ? false : view.declineEnabled}
         blockedReason={view.blockedReason}
+        followUpHint={view.followUpHint}
+        followUpHref={view.followUpHref}
         busy={busy}
         muted={isMutedStatus(view.status)}
         goLiveHref={goLive ? GO_LIVE_CONFIRM_HREF : undefined}

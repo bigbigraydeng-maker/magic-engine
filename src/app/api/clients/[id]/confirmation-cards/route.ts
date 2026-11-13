@@ -11,6 +11,7 @@ import {
 } from '@/lib/confirmation-card'
 import { parseIssueBody, publicError } from '@/lib/confirmation-card/http'
 import { pausedDraftResultLines } from '@/lib/ads-strategy/paused-draft-submit'
+import { applyBudgetRaiseOverlay, fetchBudgetRaiseOverlays } from '@/lib/ads-budget-card/raise-approval-present'
 
 function clickerOf(req: Request, email: string, role: 'admin' | 'client-viewer', allowedClientId: string | null, clientId: string) {
   return clickerFromSession({
@@ -35,11 +36,15 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   const clicker = clickerOf(req, access.user.email ?? '', access.role, access.allowedClientId, params.id)
   try {
     const kernel = createKernel(supabaseAdmin)
-    const cards = await listConfirmationCards(kernel, params.id, clicker)
-    const lines = await pausedDraftResultLines(kernel.supabase, params.id)
+    const [cards, lines, raiseOverlays] = await Promise.all([
+      listConfirmationCards(kernel, params.id, clicker),
+      pausedDraftResultLines(kernel.supabase, params.id),
+      fetchBudgetRaiseOverlays(kernel.supabase, params.id),
+    ])
     const shown = cards.map((card) => {
       const line = lines.get(card.runId)
-      return line ? { ...card, statusLine: line } : card
+      const withLine = line ? { ...card, statusLine: line } : card
+      return applyBudgetRaiseOverlay(withLine, raiseOverlays.get(card.runId))
     })
     return NextResponse.json({ cards: shown })
   } catch (error) {

@@ -20,6 +20,8 @@ export interface ConfirmationCardProps {
   readonly confirmEnabled: boolean
   readonly declineEnabled: boolean
   readonly blockedReason: string | null
+  readonly followUpHint?: string | null
+  readonly followUpHref?: string | null
   readonly busy?: boolean
   readonly muted?: boolean
   readonly goLiveHref?: string
@@ -87,6 +89,21 @@ export function ConfirmationCard(props: ConfirmationCardProps) {
 
       {props.blockedReason ? (
         <p className="mt-2 text-sm text-red-700">{props.blockedReason}</p>
+      ) : null}
+
+      {props.followUpHint ? (
+        <p className="mt-3 text-sm font-medium text-me-ochre">
+          {props.followUpHref ? (
+            <>
+              {props.followUpHint.replace(props.followUpHref, '')}
+              <a className="underline" href={props.followUpHref}>
+                {props.followUpHref}
+              </a>
+            </>
+          ) : (
+            props.followUpHint
+          )}
+        </p>
       ) : null}
 
       {props.goLiveHref ? (
