@@ -371,6 +371,8 @@ export type ManualItemKind =
   /** 已批准的成交/咨询因为连接广告平台的授权失效发不出去，7 天内不修就永久丢（2026-09-22） */
   | 'conversion_capi_token_dead'
   /** D3 诊断建议暂停广告组，Kernel 待批准——PM 不点头不暂停 */
+  | 'ads_decision_review_due'
+  | 'ads_decision_pending_confirm'
   | 'ads_auto_pause_pending'
   /** D3 暂停建议被内核或安全闸拦下，没进「等你点头」，广告照常花钱（2026-11-04） */
   | 'ads_auto_pause_blocked'

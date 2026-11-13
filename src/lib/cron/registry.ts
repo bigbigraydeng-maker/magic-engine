@@ -569,6 +569,9 @@ export const UNSCHEDULED_CRON_ROUTES: Readonly<Record<string, string>> = {
   // 天天报「从没跑过」。对账扫描只认 startCronRunId，所以同文件有一个只给扫描器看的声明。
   'social-readback-outcome': '按需事件触发（读回链拒绝时写一行失败回执），非周期任务，不适用 CRON_REGISTRY 的排班对账',
 
+  'ads-decision-lookback':
+    '广告决策回头看：默认不排班；仅 leads_config.ads_decision_review.enabled=true 的客户在手调路由时处理',
+
   // Render 上这条从 2026-10-24 审计起已是暂停、30 天没有运行。不进 dispatcher。
   // 路由留着给人手补跑。恢复时要重新加登记、加进 DISPATCH_CATALOG，并在 Render 打开它。
   'oztop-seo-optimizer': '2026-10-24 审计时 Render 上已暂停且 30 天无运行，不进 dispatcher',
