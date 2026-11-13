@@ -123,6 +123,8 @@
 
 **复用**：`review-verdict-rules`、日表、`ads-execution-review` UI；扩展动作类型见 #3814 思路。
 
+**展示（默认，Ray 未反对前按此 · §7.3）**：对 **暂停卡**，D+1 / D+3 节点与 #3803 默认 **3 天暂停观察窗** 在广告门回看区 **同一区块合并展示**（一条时间线：第几天、规则/AI 结论、`reviewCase` 档位），不分两个 Tab。
+
 **配置**：`leads_config.ads_execution_review` 增加 `post_exec_check_days: [1,3,7]` 开关与跳过条件（样本不足 → `unclear`）。
 
 ### 3.3 每日趋势判定（per-client 阈值 · 触发器 + 兜底）
@@ -152,18 +154,12 @@ severity: watch | act_soon
 
 **与 breaker 关系**：趋势 Check 可出 **「观察 / 调方」** 级诊断和 Tune 提议；**暂停**仍只走现有确认卡与 2× CPL 熔断（避免双管道自动停投）。AI 层若建议 `pause`，同样只生成 **处方草稿 + 确认卡提议**，不直写 Meta。
 
-### 3.4 扩展 10 分钟采样（路径见 §7）
+### 3.4 扩展 10 分钟采样（**Ray 已定** · §7.2）
 
-**本仓库（旧 ME / magic-engine）现状**：`SpendDraft` 仅 `spendMinor`、`impressions`（`src/lib/ads-strategy/intraday-spend/sample.ts`）。**未存**点击、版位、表单打开等（完整对比见 **§7**）。
+**本仓库（旧 ME / magic-engine）现状**：`SpendDraft` 仅 `spendMinor`、`impressions`（`src/lib/ads-strategy/intraday-spend/sample.ts`）。**未存**点击、版位、表单打开等（完整对比见 **§7.1**）。
 
-**若 Ray 选择「先在旧版补」**（§7.2 选项 B）：
-
-- 在 `public.ad_intraday_spend_samples` **加列**（至少 `clicks`；理想态含广告层级与版位摘要）→ **PR-1 含 migration，定 A 级**。  
-- 保留 10 分钟步长与封顶提议；为 AI 分析层提供日内点击序列。
-
-**若 Ray 选择「复用新版采样」**（§7.2 选项 A）：
-
-- 本仓库通过 **跨系统只读接口** 读新版 `ad_intraday_samples` / `ad_hourly_history`（无私有仓库凭证不进本 PR）；PR-1 可能降为接线型 **B**，前提是字段已含 `inline_link_clicks` + `impressions`。
+**v1 做法**：**先在旧版补** — 在 `public.ad_intraday_spend_samples` **加列**（至少 `clicks`；理想态含广告层级与版位摘要）→ **PR-1 含 migration，A 级**；保留 10 分钟步长与封顶提议，为 AI 分析层提供日内点击序列。  
+**以后**：再迁到新版 magic-engine-platform 采样（§7.2），本仓改为读统一数据服务或下线重复 cron，不在本阶段实现。
 
 **回放案例**：在第 **6–11 天**窗口内，无论日规则是否触线，AI + 足够点击/impress 序列应能给出 **watch / act_soon**（客户 C 组 A 夹具）。
 
@@ -189,7 +185,7 @@ severity: watch | act_soon
 
 组装 **单客户端、单主体**（卡或 adset/campaign）一份上下文包，不含任何可识别客户的 PII：
 
-1. **10 分钟采样序列**（§7 所选来源）：近 48h（或当日）`spend`、`impressions`、`clicks`（或衍生 CTR）、`local_minute` 桶；有则带 `actions` 主成效计数。  
+1. **10 分钟采样序列**（v1：**旧 ME** 表，§7.2）：近 48h（或当日）`spend`、`impressions`、`clicks`（或衍生 CTR）、`local_minute` 桶；有则带 `actions` 主成效计数。  
 2. **日表**：近 14 日同对象 `ctr`、`cpc`、`cpm`、`spend`、`primary_results`、相对目标 CPL 比。  
 3. **结构特征**：在投广告条数、创意年龄（天）、单创意标记、ME 外快照 diff 摘要（有则）。  
 4. **卡上下文**（若是回看）：动作类型、执行日、观察窗、`reviewCase` 既有档位（不重复判有钱卡 attribution）。  
@@ -266,9 +262,9 @@ severity: watch | act_soon
 
 #### 3.5.5 展示与待办
 
-- **卡回看区**（`AdsExecutionReviewPanel` / 确认卡详情）：在既有 `reviewCase` 下方增 **「AI 复盘」** 块，显示 `headline_zh`、`reason_zh`、`evidence` 摘要、`confidence`（内部账号可见数值；客户账号可只显示 headline + reason）。  
-- **今日待办**：`verdict === worse` 且 `confidence ≥ 0.55` → 进 `pm-todo` 人工栏，`what` = headline，`how` = reason + 链到广告门对象；**不**自动发卡。  
-- **自动起草处方**：仅当 `suggested_prescription` 非空且客户开关 `ads_ai_check.auto_draft_prescription`（默认 **关**）；开时创建 **draft** 处方，不等价于同意，更不执行。
+- **卡回看区**（`AdsExecutionReviewPanel` / 确认卡详情）：在既有 `reviewCase` 下方增 **「AI 复盘」** 块，显示 `headline_zh`、`reason_zh`、`evidence` 摘要、`confidence`（内部账号可见数值；客户账号可只显示 headline + reason）。暂停卡 D+1/D+3 与 §3.2 合并展示规则一致。  
+- **今日待办（默认 · §7.3）**：`verdict === worse` 且 `confidence ≥ 0.55` → 进 `pm-todo` 人工栏，`what` = headline，`how` = reason + 链到广告门对象；**不**自动发卡。排序：**熔断 / 止损类暂停确认卡** 始终排在 AI「变差」待办 **之上**（同栏内 priority 更高）。  
+- **自动起草处方（默认 · §7.3）**：`ads_ai_check.auto_draft_prescription` 全平台默认 **关**；**首开仅 pilot 客户 C**（回放验收户，无额外实名）。该户为开时：若 `suggested_prescription` 非空则写 **draft** 处方，不等价于同意，更不执行。
 
 ### 3.6 Check 不做的
 
@@ -292,12 +288,12 @@ severity: watch | act_soon
 |--------|------|-----------|
 | `swap_creative` | 换下走弱创意 | 出 **创意任务卡**（非 Meta 写入）：描述对象、原因、截止；交 **社媒 agent** 或人工 |
 | `add_creative` | 加一条新创意对照 | 同上；可挂工厂/内容工作流入口链接 |
-| `narrow_audience` | 收窄人群（年龄/地域/兴趣） | 出 **确认卡** 类型扩展或「设置变更建议卡」：仍须人确认；若接 Meta 写入须走现有 Kernel + 守卫 |
+| `narrow_audience` | 收窄人群（年龄/地域/兴趣） | v1 **仅「设置变更建议卡」**（只读说明 + 人工去 Meta 改）；**不写 Meta**（默认 · §7.3）；日后接 Kernel 另开 A 级 PR |
 | `lower_budget` | 只降预算不断投 | 复用 `adjust_adset_daily_budget`（降方向），与熔断降预算守卫一致 |
 
 **发卡**：优先复用 AD-3「处方同意 → 出卡」；Tune 自动诊断出的 remedy 走 **`ads.tune_proposal` 确认卡**（新卡种，文案为调方非止损），lifetime 建议 `nz_day` 或 72h。
 
-**守卫**：沿用 72h 改一次、单次加预算 ≤20%、花钱须 PM 等既有闸；**narrow_audience** 若涉及写入 Meta，标 **A 级 / Ray 合**。
+**守卫**：沿用 72h 改一次、单次加预算 ≤20%、花钱须 PM 等既有闸。v1 `narrow_audience` 无 Meta 写入，**PR-4 可按 B 级合**（§7.3）。
 
 ### 4.3 创意类交给社媒
 
@@ -321,14 +317,14 @@ severity: watch | act_soon
 
 | 序号 | 标题 | 级别 | 依赖 | 验收标准（可观察） |
 |------|------|------|------|-------------------|
-| **PR-1** | 日内采样扩列（**仅当** §7 选「先在旧版补」）：点击等 + 表 migration | **A** | Ray 选定采样路径；#3827 可选 | `ad-intraday-spend-sample?dry_run=1` 夹具含新字段；migration 过 CI；**不**改 breaker 判定逻辑 |
+| **PR-1** | 旧 ME 日内采样扩列：点击等 + 表 migration（§7.2 已定） | **A** | #3827 可选 | `ad-intraday-spend-sample?dry_run=1` 夹具含新字段；migration 过 CI；**不**改 breaker 判定逻辑 |
 | **PR-2** | 日趋势规则引擎 + `leads_config.ads_trend_check`（触发/兜底） | **B** | 日表 CTR/CPL；采样路径已定 | 脱敏夹具 **第 6–11 天** 内规则可触发 `creative_fatigue`；`cron_run_logs` 有回执 |
 | **PR-3** | D+1/D+3/D+7 执行后 Check + 广告门展示（规则结果；AI 来后叠加） | **B** | #3803/#3814 | 假动作登记后可见节点；与 `reviewCase` 不打架 |
-| **PR-4** | Tune：`action_list` 新 remedy + 调方确认卡 + 社媒工单 | **A**（narrow 写 Meta）/ **B**（仅创意工单 + 降预算） | AD-2/AD-3 | 诊断/处方草稿 → 确认卡；幂等 + 守卫测试绿 |
+| **PR-4** | Tune：`action_list` 新 remedy + 调方确认卡 + 社媒工单 | **B**（v1 narrow 仅建议卡 · §7.3） | AD-2/AD-3 | 诊断/处方草稿 → 确认卡；`narrow_audience` 无 Meta 写；幂等 + 守卫测试绿 |
 | **PR-5** | 快照 diff 进 Check / 归因脚注 | **B** | 日快照 | hash 变无 `action_runs` → `external_change_detected` |
 | **PR-6** | **AI 分析层**：读采样+日表 → 结构化结论 → 回看 + 待办 + 可选处方草稿 | **B** | PR-2 规则触发；§7 采样可读点击/impress | 客户 C 组 A 重放 **第 6–11 天**：`素材疲劳、点击率走弱` + `swap_creative`；失败走 fallback；直写 Meta **0** |
 
-**建议合并顺序**：Ray 定 §7 采样路线 → PR-1 或跳过 → PR-2 → **PR-6**（可与 PR-3 并行）→ PR-3/4/5。AI 层依赖有点击/impress 的采样源，但不要求版位/表单 v1 全齐。
+**建议合并顺序**：**PR-1**（旧版采样）→ PR-2 → **PR-6**（可与 PR-3 并行）→ PR-3/4/5。AI 层 v1 依赖 PR-1 的 clicks/impress；版位/表单为后续增量。
 
 **与既有草稿**：#3827、#3828 应先合入再叠 PR-2，避免管道仍吞卡；本设计 **不替代** 熔断，只补 **早于 2× CPL** 的诊断层。
 
@@ -364,24 +360,34 @@ severity: watch | act_soon
 | **分析用途** | 收盘花费预测、超日封顶确认卡（`cap-proposal-run`）、广告门 live pacing、采样停摆告警 | 同时段 vs **7 日均**与昨日、收盘预测、派生 CTR/CPC、pace 告警（`pace_spend_high/low`、`pace_cost_high`、`pace_no_results`）off/dry/live；控制台与客户页；可选 no-results 自动处理 |
 | **诊断** | 无 CTR 趋势、无创意疲劳、无 AI 结论 | 仍 **阈值规则**，无 AI 综合结论 |
 
-**与本设计关系**：要像客户 C 组 A 那样在 **10 分钟粒度**看见 CTR 滑坡，新版 **已有 clicks + impressions**（可派生 CTR）；旧版 **必须加字段**（至少 clicks，理想含 ad 级）→ **migration，A 级（PR-1）**。两版都 **没有** reach/frequency/placements/表单打开/ad 级 10 分钟样本——§3.5 AI 层 v1 用 clicks/impress + 日表补叙事，版位/表单列为后续增量。
+**与本设计关系（Ray 已定 · §7.2）**：v1 在 **旧版加字段**（至少 clicks）→ **PR-1 A 级**；迁移新版后再读统一采样。两版都 **没有** reach/frequency/placements/表单打开/ad 级 10 分钟样本——§3.5 AI 层 v1 用 clicks/impress + 日表补叙事，版位/表单列为后续增量。
 
-### 7.2 取舍（待 Ray 拍板 · 设计稿不替 Ray 决定）
+### 7.2 采样路线 · **Ray 已定 2026-11-14**
 
-| 选项 | 做什么 | 利 | 弊 |
-|------|--------|----|----|
-| **A · 复用新版采样** | magic-engine **只读**拉新版库/API 的 `ad_intraday_samples` + `ad_hourly_history`（或今后统一数据服务） | 已有 clicks、hourly、pace 告警；避免本仓重复 migration | 新版在 **私有仓**，需跨系统读数、鉴权、SLA；广告组级问题要靠日表或降粒度到系列 |
-| **B · 先在旧版补** | 本仓库扩 `ad_intraday_spend_samples` + cron 拉字段（PR-1 **A 级**） | 与现有熔断/封顶/PR #3827 同库同链路，改动面清晰 | 与新版 **双轨采样** 维护成本；仍缺 hourly/round 语义除非继续抄新版 |
+**决定**：**「采样先在旧版补，以后迁新版」**
 
-无论 A/B，**PR-6 AI 分析层** 都要求：能拿到 **点击 + 展示** 时间序列 + **日表**；版位/表单为增强项，非阻塞 v1。
+1. **现在（v1）**：在 magic-engine（旧 ME）扩 `ad_intraday_spend_samples` + `ad-intraday-spend-sample` cron，至少增加 **clicks**（理想含 ad 级/版位）→ **PR-1（A 级 migration）**。  
+2. **以后**：数据与读数迁到 magic-engine-platform 新版采样（或统一数据服务）；本仓重复 cron **退役或只读转发**，单独排期，不在 Check/Tune 首波 PR 内。
 
-### 7.3 开放问题（待 Ray / PM 一句）
+**曾考虑的备选（留档，本次不选）**：
 
-1. §7.2 选 **A 还是 B**（或分阶段：先 B 后迁 A）？  
-2. D+1/D+3 是否与现有暂停 3 日窗 **合并展示** 还是分栏？  
-3. `narrow_audience` v1 是否只做「建议卡」不接 Meta 写入（全线 B 级）？  
-4. AI `worse` 结论与熔断暂停卡 **谁先占** 今日待办头条？  
-5. `ads_ai_check.auto_draft_prescription` 默认关 — 首开客户名单是否只要内部户？
+| 选项 | 说明 |
+|------|------|
+| A · 复用新版采样 | 本仓只读拉新版 `ad_intraday_samples` / hourly；跳过 PR-1 migration，但要跨私有仓接线 |
+| B · 先在旧版补 ✓ | 与熔断/封顶/#3827 同库；短期双轨维护，长期再迁 A |
+
+**PR-6 AI 分析层** v1 读 **旧 ME 补完后的** 点击 + 展示序列 + 日表；版位/表单非阻塞。
+
+### 7.3 产品默认 · **默认，Ray 未反对前按此**
+
+下列为设计与实现的 **默认行为**（非 §7.2 级拍板；Ray 未明确反对则按表执行）：
+
+| # | 默认 |
+|---|------|
+| 1 | **D+1 / D+3 回看** 与暂停卡 **3 天观察窗**（#3803）在 UI **合并一块**展示，一条时间线（§3.2）。 |
+| 2 | **`narrow_audience` v1** 只出 **建议卡**，说明收窄方向；**从不写 Meta**（§4.2）；PR-4 按 **B 级**。 |
+| 3 | **今日待办** 排序：熔断类 **暂停确认卡** 优先于 AI **`verdict: worse`** 条目（§3.5.5）。 |
+| 4 | **`auto_draft_prescription`** 全户默认 **关**；**仅 pilot 客户 C** 可先开，用于回放验收与真网试跑（§3.5.5）。 |
 
 ---
 
