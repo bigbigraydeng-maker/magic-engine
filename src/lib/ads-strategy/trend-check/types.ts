@@ -1,6 +1,6 @@
 /**
  * Daily trend Check (PR-2): pure inputs/outputs for rule engine + future AI layer trigger.
- * Daily table only; intraday is an optional hook (PR-1 / cross-system), not required.
+ * Daily table only; intraday hook wires PR-1 columns in this repo (Ray §7.2：先旧版补列，后迁新版).
  */
 
 export type TrendSubjectLevel = 'ad' | 'adset' | 'campaign'

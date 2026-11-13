@@ -17,7 +17,7 @@ interface GroupAFixture {
   client_slug: string
   target_cost_per_primary: number
   adset: { id: string; name: string }
-  narrative_window: { acceptance_first: string; acceptance_last: string }
+  narrative_window: { acceptance_first: string; acceptance_last: string; day_1: string }
   structure: { delivering_ad_count: number; single_creative_days: number }
   daily: FixtureDay[]
 }
@@ -60,30 +60,37 @@ function datesBetween(first: string, last: string): string[] {
   return out
 }
 
+function fatigueOn(date: string): boolean {
+  const result = runDailyTrendCheck({
+    client_slug: FIXTURE.client_slug,
+    evaluation_date: date,
+    target_cost_per_primary: FIXTURE.target_cost_per_primary,
+    entities: [entity()],
+  })
+  return result.findings.some((f) => f.diagnosis_code === 'creative_fatigue')
+}
+
 describe('客户 C 组 A 脱敏回放（日趋势规则）', () => {
-  it('第 6–11 天验收窗内至少有一天命中 creative_fatigue（CTR 对自己 7 日均值）', () => {
+  it('第 6–11 天验收窗（2026-11-05～11-10）内命中 creative_fatigue', () => {
     const window = datesBetween(
       FIXTURE.narrative_window.acceptance_first,
       FIXTURE.narrative_window.acceptance_last,
     )
-    const hits: string[] = []
-    for (const date of window) {
-      const result = runDailyTrendCheck({
-        client_slug: FIXTURE.client_slug,
-        evaluation_date: date,
-        target_cost_per_primary: FIXTURE.target_cost_per_primary,
-        entities: [entity()],
-      })
-      if (result.findings.some((f) => f.diagnosis_code === 'creative_fatigue')) hits.push(date)
-    }
+    const hits = window.filter((date) => fatigueOn(date))
     expect(hits.length).toBeGreaterThan(0)
-    expect(hits.some((d) => d >= FIXTURE.narrative_window.acceptance_first && d <= FIXTURE.narrative_window.acceptance_last)).toBe(true)
+    expect(hits.every((d) => d >= FIXTURE.narrative_window.acceptance_first)).toBe(true)
+    expect(hits.every((d) => d <= FIXTURE.narrative_window.acceptance_last)).toBe(true)
+  })
+
+  it('验收窗开始日（叙事第 5 天 11-04）及此前不命中 CTR 疲劳', () => {
+    expect(fatigueOn('2026-11-04')).toBe(false)
+    expect(fatigueOn(FIXTURE.narrative_window.day_1)).toBe(false)
   })
 
   it('命中日含结构化证据与调方建议', () => {
     const result = runDailyTrendCheck({
       client_slug: FIXTURE.client_slug,
-      evaluation_date: '2026-11-07',
+      evaluation_date: '2026-11-05',
       target_cost_per_primary: FIXTURE.target_cost_per_primary,
       entities: [entity()],
     })
