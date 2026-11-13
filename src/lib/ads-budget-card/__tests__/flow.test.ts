@@ -306,6 +306,32 @@ describe('budget step card', () => {
     expect(h.calls).toEqual([])
   })
 
+  it('does not issue when the client turned the budget card off', async () => {
+    const h = harness(live({ stepRatio: 'off' }))
+    const f = fixture()
+    const issued = await issueBudgetCard({
+      kernel: f.kernel, clientId: CLIENT_A, clicker: OPC, order, runtime: h.runtime, locks: locks(),
+      lifetime: 'nz_day',
+    })
+    expect(issued.card).toBeNull()
+    expect(issued.reason).toMatch(/关掉了/)
+    expect(h.calls).toEqual([])
+    expect(f.tables.action_runs).toEqual([])
+  })
+
+  it('stores a day lifetime when asked and still does not write', async () => {
+    const h = harness(live())
+    const f = fixture()
+    const issued = await issueBudgetCard({
+      kernel: f.kernel, clientId: CLIENT_A, clicker: OPC, order, runtime: h.runtime, locks: locks(),
+      lifetime: 'nz_day',
+    })
+    expect(h.calls).toEqual([])
+    expect(issued.status).toBe('issued')
+    const runs = f.tables.action_runs as Array<{ input?: { lifetime?: string } }>
+    expect(runs.some((run) => run.input?.lifetime === 'nz_day')).toBe(true)
+  })
+
   it('does not keep a second budget writer', () => {
     const meta = readFileSync('src/lib/ads-budget-card/meta.ts', 'utf8')
     const kernel = readFileSync('src/lib/ads-budget-card/kernel-path.ts', 'utf8')

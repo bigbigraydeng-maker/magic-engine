@@ -6,6 +6,7 @@ import type { KernelDeps } from '@/lib/kernel/deps'
 import type { CardClicker } from '@/lib/confirmation-card/actor'
 import { assertMayClick } from '@/lib/confirmation-card/actor'
 import { issueConfirmationCard } from '@/lib/confirmation-card'
+import type { CardLifetime } from '@/lib/confirmation-card/view'
 import { guardPause, type LiveFacts } from './guard'
 import { insertHold, retireStale, type PauseHold } from './ledger'
 import { loadPrescriptionBundle, listApprovedIds } from './load'
@@ -26,19 +27,20 @@ export interface PauseIssueItem {
   readonly confirmEnabled?: boolean
 }
 
-export async function issuePauseCards(args: {
+export interface PauseIssueArgs {
   kernel: KernelDeps
   clientId: string
   clicker: CardClicker
   live: (order: PauseAdSetOrder) => Promise<LiveFacts>
   now?: Date
-}): Promise<{ ok: true; items: PauseIssueItem[] } | { ok: false; reason: string }> {
+  /** Omitted cards stay on the 30-minute clock. Daily auto cards pass nz_day. */
+  lifetime?: CardLifetime
+}
+
+export async function issuePauseCards(args: PauseIssueArgs): Promise<{ ok: true; items: PauseIssueItem[] } | { ok: false; reason: string }> {
   assertMayClick(args.clicker, args.clientId)
   const switched = await readPauseCardSwitch(args.kernel.supabase, args.clientId)
-  if (switched !== 'on') {
-    const reason = switched === 'off' ? '这个客户没开暂停广告组的确认卡。' : '暂停卡的开关读不到，没有出卡。'
-    return { ok: true, items: [{ prescriptionId: '', status: 'off', reason }] }
-  }
+  if (switched !== 'on') return { ok: true, items: [switchOff('', switched)] }
   const ids = await listApprovedIds(args.kernel.supabase, args.clientId)
   if (ids === 'unreadable') return { ok: false, reason: '已批准的处方读不到，没有出卡。' }
   const items: PauseIssueItem[] = []
@@ -46,7 +48,27 @@ export async function issuePauseCards(args: {
   return { ok: true, items }
 }
 
-async function issueOne(args: Parameters<typeof issuePauseCards>[0], prescriptionId: string): Promise<PauseIssueItem[]> {
+/** One order from an approved prescription. Same switch, guards, and ledger as the batch issuer. */
+export async function issueOnePauseCard(args: PauseIssueArgs & { order: PauseAdSetOrder }): Promise<PauseIssueItem> {
+  assertMayClick(args.clicker, args.clientId)
+  const switched = await readPauseCardSwitch(args.kernel.supabase, args.clientId)
+  if (switched !== 'on') return switchOff(args.order.prescriptionId, switched)
+  const bundle = await loadPrescriptionBundle(args.kernel.supabase, args.clientId, args.order.prescriptionId)
+  if (bundle === 'unreadable' || !bundle) {
+    return { prescriptionId: args.order.prescriptionId, status: 'blocked', reason: '这份处方读不到，没有出卡。' }
+  }
+  if (bundle.version === null) {
+    return { prescriptionId: args.order.prescriptionId, status: 'blocked', reason: '处方版本不对，没有出卡。' }
+  }
+  return issueOrder(args, args.order, bundle)
+}
+
+function switchOff(prescriptionId: string, switched: 'off' | 'unreadable'): PauseIssueItem {
+  const reason = switched === 'off' ? '这个客户没开暂停广告组的确认卡。' : '暂停卡的开关读不到，没有出卡。'
+  return { prescriptionId, status: 'off', reason }
+}
+
+async function issueOne(args: PauseIssueArgs, prescriptionId: string): Promise<PauseIssueItem[]> {
   const bundle = await loadPrescriptionBundle(args.kernel.supabase, args.clientId, prescriptionId)
   if (bundle === 'unreadable' || !bundle) return [{ prescriptionId, status: 'blocked', reason: '这份处方读不到，没有出卡。' }]
   if (bundle.version === null) return [{ prescriptionId, status: 'blocked', reason: '处方版本不对，没有出卡。' }]
@@ -56,7 +78,7 @@ async function issueOne(args: Parameters<typeof issuePauseCards>[0], prescriptio
 }
 
 async function issueOrder(
-  args: Parameters<typeof issuePauseCards>[0],
+  args: PauseIssueArgs,
   order: PauseAdSetOrder,
   bundle: Exclude<Awaited<ReturnType<typeof loadPrescriptionBundle>>, 'unreadable' | null>,
 ): Promise<PauseIssueItem> {
@@ -83,6 +105,7 @@ async function issueOrder(
     clicker: args.clicker,
     facts: { ...baseFacts, scope },
     now: args.now,
+    lifetime: args.lifetime,
   })
   const key = orderKey(order)
   await retireStale(args.kernel.supabase, args.clientId, key, card.fingerprint)

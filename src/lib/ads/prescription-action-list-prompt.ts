@@ -12,7 +12,7 @@ export function prescriptionActionListPromptSection(): string {
     '- 若仅示意结构，target 可用 `act_PLACEHOLDER`、`camp_PLACEHOLDER`、`adset_PLACEHOLDER` 这类占位（服务端保存前会校验；不确定则整段省略）。',
     '- 预算动作用 `proposed_daily_budget_cents`（整数分）；`direction`（up/down）与 `expected_metric` 可选，仅作提示。',
     '- 暂停动作必须写 `metric`（已拉取的 ads 指标 key，如 ads.account.spend）和 `reason`、`observation_days`（1–28）。',
-    '- action_list **不会自动发卡**；仍须用 phases.actions 写清 FDE 要做什么。',
+    '- 同意这份处方后，系统只按 action_list 出确认卡，不会直接改广告；仍须用 phases.actions 写清人要做什么。',
     '- 不要写顶层 `pause_ad_set` 或其它预算块；预算只进 action_list。',
   ].join('\n')
 }

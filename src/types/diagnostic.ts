@@ -469,10 +469,10 @@ export interface PrescriptionContent {
    */
   plan_seed?: unknown
   /**
-   * AD-2 — 机器可读的广告执行动作（最多一条暂停 + 一条调日预算）。AD-3 才消费发卡。
-   * 校验见 src/lib/ads/prescription-action-list.ts。
+   * AD-2 — 机器可读的广告执行动作（最多一条暂停 + 一条调日预算）。
+   * 同意处方时按此列表出确认卡，不直接改广告。校验见 src/lib/ads/prescription-action-list.ts。
    */
   action_list?: PrescriptionActionListItem[]
-  /** 旧版暂停块。action_list 的暂停行不再写入这里；AD-3 用 issueOnePauseCard。 */
+  /** 旧版暂停块。action_list 的暂停行不再写入这里。手工暂停卡入口仍读本字段；同意处方出暂停卡走 pauseCardOrderFromAction。 */
   pause_ad_set?: unknown
 }
