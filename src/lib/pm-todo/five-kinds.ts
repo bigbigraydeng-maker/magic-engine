@@ -175,6 +175,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   story_unknown_outcome: 'truth', // 系统判不了真假：Story 到底有没有发出去，只有看主页的人知道
   story_unarmed: 'review', // 已授权却没动静：发布器可能没跑
   week_pack_needs_approval: 'review', // 下一周整包还没批
+  week_plan_needs_approval: 'review', // 本周周计划包还没批
   week_pack_items_held: 'review', // 有条目被单独拦住
   social_weekly_loop_needs_human: 'review', // 下周的社媒视频排不出来，要人补片或改片
   reel_scheduled_needs_human: 'review', // 周卡批过的 Reel 到日没发出去，要人重批或撤回

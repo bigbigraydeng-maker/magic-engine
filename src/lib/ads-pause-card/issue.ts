@@ -15,6 +15,7 @@ import { pauseFacts } from './facts'
 import { readApprovalSource } from '@/lib/approval-source/read'
 import { readPauseCardSwitch } from './switch'
 import { markOrHold } from '@/lib/ads-strategy/independent-review-gate'
+import { scopeWithExecutionExperience } from '@/lib/ads/ads-execution-prescription'
 
 export interface PauseIssueItem {
   readonly prescriptionId: string
@@ -90,10 +91,19 @@ async function issueOrder(
   if (marked.kind === 'return') {
     return { prescriptionId: order.prescriptionId, status: 'blocked', reason: `独立复核退回：${marked.reason}`, confirmEnabled: false }
   }
+  const baseFacts = pauseFacts(order, marked.checks)
+  const scope = await scopeWithExecutionExperience(
+    args.kernel.supabase,
+    args.clientId,
+    'pause',
+    baseFacts.scope,
+    undefined,
+    args.now,
+  )
   const card = await issueConfirmationCard(args.kernel, {
     clientId: args.clientId,
     clicker: args.clicker,
-    facts: pauseFacts(order, marked.checks),
+    facts: { ...baseFacts, scope },
     now: args.now,
     lifetime: args.lifetime,
   })
