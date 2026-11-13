@@ -14,7 +14,8 @@ function sb(tables: Record<string, unknown[]>): SupabaseClient {
     gte: () => api,
     lte: () => api,
     order: () => api,
-    limit: async () => ({ data: rows, error: null }),
+    limit: async (n: number) => ({ data: rows.slice(0, n), error: null }),
+    range: async (from: number, to: number) => ({ data: rows.slice(from, to + 1), error: null }),
     maybeSingle: async () => ({ data: rows[0] ?? null, error: null }),
   }
   return { from: (table: string) => { rows = tables[table] ?? []; return api } } as unknown as SupabaseClient
@@ -77,6 +78,209 @@ describe('loadBreakerFacts', () => {
     expect(missing.alerts.map((item) => item.code)).toEqual(['primary_unreadable'])
   })
 })
+
+describe('account staleness does not swallow other accounts', () => {
+  const old = new Date(NOW.getTime() - 30 * 24 * 3_600_000).toISOString()
+
+  it('闲置账户快照再旧、上面还有在投标记，也不挡住在投账户的暂停卡', async () => {
+    const facts = await loadBreakerFacts(sb(tables({
+      snaps: [
+        accountSnap('act-live', NOW.toISOString()),
+        campaignSnap('act-idle', 'camp-idle', 'ACTIVE', old),
+        adSnap('act-idle', 'camp-idle', 'ad-idle', 'ACTIVE', 'DISAPPROVED', old),
+        campaignSnap('act-live', 'camp-live', 'ACTIVE', NOW.toISOString()),
+        adSnap('act-live', 'camp-live', 'ad-live', 'ACTIVE', 'ACTIVE', NOW.toISOString()),
+      ],
+      captures: [
+        capture('act-idle', 'campaign', old),
+        capture('act-idle', 'ad', old),
+        capture('act-live', 'account', NOW.toISOString()),
+        capture('act-live', 'campaign', NOW.toISOString()),
+        capture('act-live', 'ad', NOW.toISOString()),
+      ],
+      insights: [insight('act-live', 'camp-live', NOW.toISOString(), 2.5, 1)],
+    })), 'client-a', NOW)
+    if (facts === 'unreadable') throw new Error('fixture unreadable')
+    expect(facts.deliveringAccounts).toEqual(['act-live'])
+    const judged = judgeBreaker(facts)
+    expect(judged.pauses.map((item) => item.campaignId)).toEqual(['camp-live'])
+    expect(judged.pauses[0]?.rules).toEqual(['cpl_over_target'])
+    expect(judged.alerts.map((item) => item.code)).not.toContain('stale')
+  })
+
+  it('在投账户数据过期只压住它自己的卡，并留下提醒', async () => {
+    const staleAt = new Date(NOW.getTime() - 13 * 3_600_000).toISOString()
+    const facts = await loadBreakerFacts(sb(tables({
+      snaps: [
+        accountSnap('act-fresh', NOW.toISOString()),
+        campaignSnap('act-stale', 'camp-stale', 'ACTIVE', staleAt),
+        adSnap('act-stale', 'camp-stale', 'ad-stale', 'ACTIVE', 'ACTIVE', staleAt),
+        campaignSnap('act-fresh', 'camp-fresh', 'ACTIVE', NOW.toISOString()),
+        adSnap('act-fresh', 'camp-fresh', 'ad-fresh', 'ACTIVE', 'ACTIVE', NOW.toISOString()),
+      ],
+      captures: [
+        capture('act-stale', 'campaign', staleAt),
+        capture('act-stale', 'ad', staleAt),
+        capture('act-fresh', 'account', NOW.toISOString()),
+        capture('act-fresh', 'campaign', NOW.toISOString()),
+        capture('act-fresh', 'ad', NOW.toISOString()),
+      ],
+      insights: [
+        insight('act-stale', 'camp-stale', staleAt, 2.5, 1),
+        insight('act-fresh', 'camp-fresh', NOW.toISOString(), 2.5, 1),
+      ],
+    })), 'client-a', NOW)
+    if (facts === 'unreadable') throw new Error('fixture unreadable')
+    expect(facts.deliveringAccounts).toEqual(expect.arrayContaining(['act-stale', 'act-fresh']))
+    const judged = judgeBreaker(facts)
+    expect(judged.pauses.map((item) => item.campaignId)).toEqual(['camp-fresh'])
+    expect(judged.alerts).toEqual([expect.objectContaining({ code: 'stale', accountId: 'act-stale' })])
+  })
+})
+
+describe('snapshot completeness', () => {
+  it('超过 500 行历史快照时，仍按最新一次抓全判断，不报设置读不全', async () => {
+    const latest = NOW.toISOString()
+    const older = new Date(NOW.getTime() - 20 * 24 * 3_600_000).toISOString()
+    const ads = Array.from({ length: 500 }, (_, index) => adSnap('act-live', 'camp-a', `ad-${String(index).padStart(3, '0')}`, 'ACTIVE', 'ACTIVE', latest))
+    ads.push(adSnap('act-live', 'camp-a', 'ad-zzz', 'ACTIVE', 'DISAPPROVED', latest))
+    const history = Array.from({ length: 200 }, (_, index) => adSnap('act-live', 'camp-old', `old-${index}`, 'PAUSED', 'PAUSED', older))
+    const facts = await loadBreakerFacts(strictSb({
+      clients: [{ id: 'client-a', leads_config: { ads_circuit_breaker: { target_cpl_cents: 100 } }, meta_ad_account_id: 'act-live' }],
+      ad_strategy_configs: [{ client_id: 'client-a', primary_result: 'lead', target_cost_per_primary: null }],
+      marketing_plans: [{ client_id: 'client-a', status: 'approved', plan_data: { promo: { daily_total_cap_cents: 1000 } } }],
+      ad_entity_snapshots: [
+        accountSnap('act-live', latest),
+        campaignSnap('act-live', 'camp-a', 'ACTIVE', latest),
+        ...ads,
+        ...history,
+      ],
+      ad_snapshot_captures: [
+        capture('act-live', 'ad', older),
+        capture('act-live', 'campaign', older),
+        capture('act-live', 'account', latest),
+        capture('act-live', 'campaign', latest),
+        capture('act-live', 'ad', latest),
+      ],
+      ad_daily_insights: [insight('act-live', 'camp-a', latest, 1, 1)],
+    }), 'client-a', NOW)
+    if (facts === 'unreadable') throw new Error('fixture unreadable')
+    expect(facts.policyReadable).toBe(true)
+    expect(facts.policyAds).toHaveLength(501)
+    const judged = judgeBreaker(facts)
+    expect(judged.alerts.map((item) => item.code)).not.toContain('policy_unreadable')
+    expect(judged.pauses.some((item) => item.campaignId === 'camp-a' && item.rules.includes('policy_error'))).toBe(true)
+  })
+
+  it('同一天后来只抓到变更时，仍保留这次没变的在投系列', async () => {
+    const fullAt = new Date(NOW.getTime() - 6 * 3_600_000).toISOString()
+    const partialAt = new Date(NOW.getTime() - 3_600_000).toISOString()
+    const facts = await loadBreakerFacts(strictSb({
+      clients: [{ id: 'client-a', leads_config: null, meta_ad_account_id: 'act-live' }],
+      ad_strategy_configs: [{ client_id: 'client-a', primary_result: 'lead', target_cost_per_primary: null }],
+      marketing_plans: [{ client_id: 'client-a', status: 'approved', plan_data: { promo: { daily_total_cap_cents: 1000 } } }],
+      ad_entity_snapshots: [
+        accountSnap('act-live', fullAt),
+        campaignSnap('act-live', 'camp-a', 'ACTIVE', fullAt),
+        adSnap('act-live', 'camp-a', 'ad-keep', 'ACTIVE', 'ACTIVE', fullAt),
+        adSnap('act-live', 'camp-a', 'ad-new', 'ACTIVE', 'DISAPPROVED', partialAt),
+      ],
+      ad_snapshot_captures: [
+        capture('act-live', 'account', fullAt),
+        capture('act-live', 'campaign', fullAt),
+        capture('act-live', 'ad', fullAt),
+        capture('act-live', 'ad', partialAt),
+      ],
+      ad_daily_insights: [insight('act-live', 'camp-a', partialAt, 1, 1)],
+    }), 'client-a', NOW)
+    if (facts === 'unreadable') throw new Error('fixture unreadable')
+    expect(facts.policyAds.map((item) => item.effectiveStatus).sort()).toEqual(['ACTIVE', 'DISAPPROVED'])
+    expect(facts.policyReadable).toBe(true)
+    const judged = judgeBreaker(facts)
+    expect(judged.pauses.some((item) => item.campaignId === 'camp-a' && item.rules.includes('policy_error'))).toBe(true)
+  })
+})
+
+function tables(input: { snaps: unknown[]; captures: unknown[]; insights: unknown[] }): Record<string, unknown[]> {
+  return {
+    clients: [{
+      id: 'client-a',
+      leads_config: { ads_circuit_breaker: { target_cpl_cents: 100 } },
+      meta_ad_account_id: 'act-live',
+    }],
+    ad_strategy_configs: [{ client_id: 'client-a', primary_result: 'lead', target_cost_per_primary: null }],
+    marketing_plans: [{ client_id: 'client-a', status: 'approved', plan_data: { promo: { daily_total_cap_cents: 1000 } } }],
+    ad_entity_snapshots: input.snaps,
+    ad_snapshot_captures: input.captures,
+    ad_daily_insights: input.insights,
+  }
+}
+
+function capture(accountId: string, level: string, capturedAt: string) {
+  return { client_id: 'client-a', ad_account_id: accountId, level, captured_at: capturedAt, complete: true, skipped_shared: false }
+}
+
+function accountSnap(accountId: string, capturedAt: string) {
+  return {
+    client_id: 'client-a', ad_account_id: accountId, level: 'account', entity_id: accountId, entity_name: '账户',
+    campaign_id: null, adset_id: null, status: 'ACTIVE', effective_status: 'ACTIVE', captured_at: capturedAt,
+    timezone_name: 'Pacific/Auckland', currency: 'NZD',
+  }
+}
+
+function campaignSnap(accountId: string, campaignId: string, status: string, capturedAt: string) {
+  return {
+    client_id: 'client-a', ad_account_id: accountId, level: 'campaign', entity_id: campaignId, entity_name: campaignId,
+    campaign_id: campaignId, adset_id: null, status, effective_status: status, captured_at: capturedAt,
+    timezone_name: null, currency: null,
+  }
+}
+
+function adSnap(accountId: string, campaignId: string, adId: string, status: string, effective: string, capturedAt: string) {
+  return {
+    client_id: 'client-a', ad_account_id: accountId, level: 'ad', entity_id: adId, entity_name: adId,
+    campaign_id: campaignId, adset_id: 'set-a', status, effective_status: effective, captured_at: capturedAt,
+    timezone_name: null, currency: null,
+  }
+}
+
+function insight(accountId: string, campaignId: string, updatedAt: string, spend: number, leads: number) {
+  return {
+    client_id: 'client-a', ad_account_id: accountId, level: 'campaign', entity_id: campaignId, entity_name: campaignId,
+    insight_date: '2026-11-09', spend, leads, messaging_conversations: 0, updated_at: updatedAt,
+  }
+}
+
+function strictSb(tablesByName: Record<string, Array<Record<string, unknown>>>): SupabaseClient {
+  return {
+    from(table: string) {
+      const filters: Array<(row: Record<string, unknown>) => boolean> = []
+      let column = ''
+      let ascending = true
+      const api = {
+        select: () => api,
+        eq: (col: string, val: unknown) => { filters.push((row) => row[col] === val); return api },
+        in: (col: string, vals: readonly unknown[]) => { filters.push((row) => vals.includes(row[col])); return api },
+        gte: (col: string, val: unknown) => { filters.push((row) => String(row[col]) >= String(val)); return api },
+        lte: (col: string, val: unknown) => { filters.push((row) => String(row[col]) <= String(val)); return api },
+        order: (col: string, opts?: { ascending?: boolean }) => { column = col; ascending = opts?.ascending !== false; return api },
+        limit: async (n: number) => ({ data: matched().slice(0, n), error: null }),
+        range: async (from: number, to: number) => ({ data: matched().slice(from, to + 1), error: null }),
+        maybeSingle: async () => ({ data: matched()[0] ?? null, error: null }),
+      }
+      function matched(): Array<Record<string, unknown>> {
+        const rows = (tablesByName[table] ?? []).filter((row) => filters.every((fn) => fn(row)))
+        if (!column) return rows
+        return [...rows].sort((a, b) => {
+          const left = String(a[column] ?? '')
+          const right = String(b[column] ?? '')
+          return ascending ? left.localeCompare(right) : right.localeCompare(left)
+        })
+      }
+      return api
+    },
+  } as unknown as SupabaseClient
+}
 
 async function judgeLoaded(input: { primary: unknown; leads: number | null; messaging: number | null; spend: number }) {
   const facts = await loadBreakerFacts(sb({
