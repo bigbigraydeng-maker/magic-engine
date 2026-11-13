@@ -18,6 +18,14 @@ describe('parseExecutionReviewPreference', () => {
       kind: 'budget',
       tier: 'useful',
     })
+    expect(parseExecutionReviewPreference('止损减预算执行回顾：结论「有用」')).toEqual({
+      kind: 'budget',
+      tier: 'useful',
+    })
+    expect(parseExecutionReviewPreference('自动暂停广告组执行回顾：结论「没用」')).toEqual({
+      kind: 'pause',
+      tier: 'not_useful',
+    })
     expect(parseExecutionReviewPreference('暂停广告组执行回顾：结论「没用」')).toEqual({
       kind: 'pause',
       tier: 'not_useful',

@@ -7,7 +7,11 @@ import type { OutcomeStep } from '@/lib/ads-strategy/portfolio/outcome-ladder'
 import { loadOutcomeConfig } from '@/lib/ads-strategy/portfolio/outcome-config'
 import { resolveTargetCplMajor } from '@/lib/ads-strategy/client-target-cpl'
 import { supabaseAdmin } from '@/lib/supabase'
-import { BUDGET_CARD_ACTION, PAUSE_CARD_ACTION } from './executed-review'
+import {
+  BUDGET_CARD_ACTION,
+  PAUSE_CARD_ACTION,
+  type ReviewWindowKind,
+} from './executed-review'
 import type { ObjectDay } from './object-window'
 import { objectWindowDates } from './object-window'
 import type { OutcomeVerdict } from '../adapters/types'
@@ -18,6 +22,9 @@ export const ADS_EXECUTION_REVIEW_CONFIG_KEY = 'ads_execution_review'
 export interface ReviewVerdictRules {
   readonly budgetWindowDays: number
   readonly pauseWindowDays: number
+  readonly moneyBudgetWindowDays: number
+  readonly moneyPauseWindowDays: number
+  readonly campaignPauseWindowDays: number
   readonly marginPct: number
   readonly minPrimaryOutcomes: number
 }
@@ -25,6 +32,9 @@ export interface ReviewVerdictRules {
 export const DEFAULT_REVIEW_VERDICT_RULES: ReviewVerdictRules = {
   budgetWindowDays: 7,
   pauseWindowDays: 3,
+  moneyBudgetWindowDays: 7,
+  moneyPauseWindowDays: 7,
+  campaignPauseWindowDays: 7,
   marginPct: 15,
   minPrimaryOutcomes: 5,
 }
@@ -55,6 +65,9 @@ export function rulesFromLeadsConfig(leadsConfig: unknown): ReviewVerdictRules {
   return {
     budgetWindowDays: whole(block.budget_window_days, 1, 28) ?? base.budgetWindowDays,
     pauseWindowDays: whole(block.pause_window_days, 1, 28) ?? base.pauseWindowDays,
+    moneyBudgetWindowDays: whole(block.money_budget_window_days, 1, 28) ?? base.moneyBudgetWindowDays,
+    moneyPauseWindowDays: whole(block.money_pause_window_days, 1, 28) ?? base.moneyPauseWindowDays,
+    campaignPauseWindowDays: whole(block.campaign_pause_window_days, 1, 28) ?? base.campaignPauseWindowDays,
     marginPct: percent(block.margin_pct) ?? base.marginPct,
     minPrimaryOutcomes: whole(block.min_primary_outcomes, 1, 100) ?? base.minPrimaryOutcomes,
   }
@@ -64,6 +77,29 @@ function validCardWindowDays(cardWindowDays: number): boolean {
   return Number.isInteger(cardWindowDays) && cardWindowDays >= 1 && cardWindowDays <= 28
 }
 
+export function observationWindowForKind(
+  kind: ReviewWindowKind,
+  rules: ReviewVerdictRules,
+  cardWindowDays: number,
+): number {
+  if (kind === 'budget_adset') return rules.budgetWindowDays
+  if (kind === 'pause_adset') {
+    if (validCardWindowDays(cardWindowDays)) return cardWindowDays
+    return rules.pauseWindowDays
+  }
+  if (kind === 'money_budget') return rules.moneyBudgetWindowDays
+  if (kind === 'money_pause') {
+    if (validCardWindowDays(cardWindowDays)) return cardWindowDays
+    return rules.moneyPauseWindowDays
+  }
+  if (kind === 'campaign_pause') {
+    if (validCardWindowDays(cardWindowDays)) return cardWindowDays
+    return rules.campaignPauseWindowDays
+  }
+  return cardWindowDays
+}
+
+/** @deprecated Prefer `observationWindowForKind` with `reviewWindowKindFor`. */
 export function observationWindowForAction(
   actionType: string,
   rules: ReviewVerdictRules,
@@ -214,10 +250,6 @@ export async function loadClientReviewContext(clientId: string): Promise<ClientR
     targetCostPerPrimary,
     primary: outcome.config.primary,
   }
-}
-
-export function isExecutedReviewAction(actionType: string | null): boolean {
-  return actionType === BUDGET_CARD_ACTION || actionType === PAUSE_CARD_ACTION
 }
 
 function objectOf(value: unknown): Record<string, unknown> | null {
