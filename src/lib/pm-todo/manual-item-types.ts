@@ -123,6 +123,7 @@ export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
   // 整包批准：链接是要登录的后台页，探活多半判成坏链接。没人看见 = 这一周不会批。
   'week_pack_needs_approval',
   'week_pack_items_held',
+  'week_plan_needs_approval',
   // 社媒每周出稿：链接是要登录的后台页，探活多半判成坏链接。没人看见 = 下周的卡是空的。
   'social_weekly_loop_needs_human',
   // Reel 按日公开：链接是要登录的后台页。没人看见 = 批过的片到日没发，也没人知道。
@@ -272,6 +273,8 @@ export type ManualItemKind =
   | 'week_pack_needs_approval'
   /** 整包里有条目被单独拦住，没有整包撤回 */
   | 'week_pack_items_held'
+  /** 本周社媒周计划确认卡还在等批（读写库出稿后自动出卡） */
+  | 'week_plan_needs_approval'
   /** 社媒每周出稿：没东西可排 / 全被刷掉 / 读不到团目录 / 马良没审（读写库模式的回执） */
   | 'social_weekly_loop_needs_human'
   /** Reel 按日公开：批后内容 / 日子变了、错过、发失败、结果不明（读流量记录里的授权状态） */

@@ -26,6 +26,7 @@ import { budgetStepIdempotencyKey, executeCall, type BudgetExecuteResult, type B
 import { readPlanDailyTotalCap } from '@/lib/approval-source/plan-cap'
 import { sameLock, type PrescriptionLock, type VersionLockSource } from './prescription-lock'
 import type { BudgetOrder, BudgetRuntime, BudgetSnapshot } from './types'
+import { scopeWithExecutionExperience } from '@/lib/ads/ads-execution-prescription'
 
 export interface BudgetIssueResult {
   readonly status: 'issued' | 'blocked'
@@ -61,10 +62,19 @@ export async function issueBudgetCard(args: {
   const guard = guardBudget(args.order, live, null)
   const key = budgetStepIdempotencyKey(args.clientId, args.order, live.currentCents as number, locked.lock)
   if (!key) return { status: 'blocked', reason: '这张卡算不出幂等键，没有出卡。', card: null }
+  const baseFacts = budgetFacts(args.order, live, guard.checks)
+  const scope = await scopeWithExecutionExperience(
+    args.kernel.supabase,
+    args.clientId,
+    'budget',
+    baseFacts.scope,
+    undefined,
+    args.now ?? args.kernel.now(),
+  )
   const card = await issueConfirmationCard(args.kernel, {
     clientId: args.clientId,
     clicker: args.clicker,
-    facts: budgetFacts(args.order, live, guard.checks),
+    facts: { ...baseFacts, scope },
     now: args.now ?? args.kernel.now(),
     lifetime: args.lifetime,
   })

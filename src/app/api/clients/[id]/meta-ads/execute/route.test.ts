@@ -10,6 +10,8 @@
  * AFTER the ownership check and is NOT scoped to the requesting client, so a
  * draft recorded under any client for the same campaign blocks reactivation.
  */
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { NextRequest } from 'next/server'
 
@@ -168,7 +170,6 @@ beforeEach(() => {
 describe('meta-ads/execute POST — campaign belonging to another client', () => {
   it.each([
     ['ads.pause_campaign', {}],
-    ['ads.adjust_bid', { new_daily_budget: 1 }],
     ['ads.reactivate_campaign', {}],
   ])('%s on client B campaign → 403, no Meta write, no audit row', async (action_type, params) => {
     const res = await post({ action_type, campaign_id: '120220000000000002', params })
@@ -198,39 +199,25 @@ describe('meta-ads/execute POST — campaign belonging to another client', () =>
     expect(m.setCampaignStatus).not.toHaveBeenCalled()
   })
 
-  it('queues the Kernel action in Inngest and does not call a Meta writer from the route', async () => {
+  it.each([40, 60])('refuses a direct budget change (%s) before any queue or Meta read', async (newDailyBudget) => {
     m.getCampaignDetails.mockResolvedValue({
       id: '120210000000000001', name: 'A campaign', status: 'ACTIVE', daily_budget: '5000', account_id: '1111111111',
     })
-    m.otherTableInsert.mockReturnValue({
-      select: () => ({ single: vi.fn().mockResolvedValue({ data: { id: 'act1' }, error: null }) }),
+
+    const res = await post({
+      action_type: 'ads.adjust_bid',
+      campaign_id: '120210000000000001',
+      params: { new_daily_budget: newDailyBudget },
     })
 
-    const res = await post({ action_type: 'ads.adjust_bid', campaign_id: '120210000000000001', params: { new_daily_budget: 40 } })
-
-    expect(res.status).toBe(202)
-    expect(m.queueBudget).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
-      clientId: CLIENT_A,
-      campaignId: '120210000000000001',
-      adAccountId: 'act_1111111111',
-      afterCents: 4_000,
-      access: expect.objectContaining({ ok: true }),
-    }))
-    expect(m.inngestSend).toHaveBeenCalledWith(expect.objectContaining({
-      name: 'ads.campaign_budget.decrease_requested',
-      data: { client_id: CLIENT_A, action_run_id: 'bbbbbbbb-0000-4000-8000-000000000000' },
-    }))
-    expect(m.setCampaignStatus).not.toHaveBeenCalled()
-    expect(m.otherTableInsert).not.toHaveBeenCalled()
-  })
-
-  it('rejects increases before Kernel submission', async () => {
-    m.getCampaignDetails.mockResolvedValue({
-      id: '120210000000000001', name: 'A campaign', status: 'ACTIVE', daily_budget: '5000', account_id: '1111111111',
-    })
-    const res = await post({ action_type: 'ads.adjust_bid', campaign_id: '120210000000000001', params: { new_daily_budget: 60 } })
     expect(res.status).toBe(422)
+    await expect(res.json()).resolves.toMatchObject({ code: 'direct_budget_change_closed' })
     expect(m.queueBudget).not.toHaveBeenCalled()
+    expect(m.inngestSend).not.toHaveBeenCalled()
+    expect(m.getCampaignDetails).not.toHaveBeenCalled()
+    expect(m.setCampaignStatus).not.toHaveBeenCalled()
+    expect(m.requestCard).not.toHaveBeenCalled()
+    expect(m.otherTableInsert).not.toHaveBeenCalled()
   })
 
   it('polls only a budget run belonging to the authenticated client', async () => {
@@ -389,14 +376,16 @@ describe('meta-ads/execute POST — reactivation needs PM authority and a receip
     expect(m.authority).not.toHaveBeenCalled()
   })
 
-  it('lowering a budget still works for a paid client account without PM authority', async () => {
+  it('refuses a direct budget decrease without asking for PM authority or a queue', async () => {
     m.authority.mockResolvedValue({ ok: false, status: 403, error: 'x', code: 'activation_requires_pm' })
 
     const res = await post({ action_type: 'ads.adjust_bid', campaign_id: CAMP, params: { new_daily_budget: 40 } })
 
-    expect(res.status).toBe(202)
-    expect(m.queueBudget).toHaveBeenCalled()
+    expect(res.status).toBe(422)
+    await expect(res.json()).resolves.toMatchObject({ code: 'direct_budget_change_closed' })
+    expect(m.queueBudget).not.toHaveBeenCalled()
     expect(m.authority).not.toHaveBeenCalled()
+    expect(m.getCampaignDetails).not.toHaveBeenCalled()
   })
 })
 
@@ -430,6 +419,22 @@ describe('meta-ads/execute POST — hostile request bodies', () => {
     expect(res.status).toBe(400)
     expect(m.setCampaignStatus).not.toHaveBeenCalled()
     expect(m.otherTableInsert).not.toHaveBeenCalled()
+  })
+
+  it('the task drawer and this route no longer offer a direct budget write', () => {
+    const route = readFileSync(join(process.cwd(), 'src/app/api/clients/[id]/meta-ads/execute/route.ts'), 'utf8')
+    const drawer = readFileSync(join(process.cwd(), 'src/app/dashboard/clients/[id]/execution/_components/AdsFixDrawer.tsx'), 'utf8')
+    const worker = readFileSync(join(process.cwd(), 'src/lib/inngest/functions/ads-campaign-budget.ts'), 'utf8')
+    expect(route).not.toContain('queueAdsCampaignBudgetDecrease')
+    expect(route).not.toContain('ADS_CAMPAIGN_BUDGET_DECREASE_REQUESTED')
+    expect(route).toContain('requestCampaignStatusCard')
+    expect(drawer).not.toContain('ads.adjust_bid')
+    expect(drawer).not.toContain('调整日预算')
+    expect(drawer).not.toContain('new_daily_budget')
+    expect(drawer).toContain('ads.pause_campaign')
+    expect(worker).not.toContain('runQueuedAdsCampaignBudgetDecrease')
+    expect(worker).not.toContain('getCampaignDetails')
+    expect(worker).not.toContain('getMetaTokenForClient')
   })
 
   it('a valid UUID execution_item_id is accepted on reactivate', async () => {
