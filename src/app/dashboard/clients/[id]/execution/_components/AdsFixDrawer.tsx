@@ -3,9 +3,8 @@
 /**
  * AdsFixDrawer — P18.A.2
  *
- * Execution-board drawer for performing real Meta Ads actions:
- *   - Pause a campaign (stop budget bleed)
- *   - Adjust daily budget (reduce spend on high-CPA campaigns)
+ * Execution-board drawer for one Meta Ads action:
+ *   - Pause a campaign, which only asks for a confirmation card
  *
  * Data source: meta_ads_snapshots.campaigns JSONB (top campaigns by spend).
  * Execution: POST /api/clients/[id]/meta-ads/execute
@@ -26,7 +25,6 @@ interface MetaCampaign {
   cpc:           number | null
 }
 
-type ActionType = 'ads.pause_campaign' | 'ads.adjust_bid'
 type Phase = 'select' | 'confirm' | 'submitting' | 'done' | 'error'
 
 interface ExecuteResult {
@@ -50,8 +48,6 @@ export function AdsFixDrawer({ clientId, item, onClose }: Props) {
   const [campaigns, setCampaigns]         = useState<MetaCampaign[]>([])
   const [loadingCampaigns, setLoadingCampaigns] = useState(true)
   const [selected, setSelected]           = useState<MetaCampaign | null>(null)
-  const [actionType, setActionType]       = useState<ActionType>('ads.pause_campaign')
-  const [newDailyBudget, setNewDailyBudget] = useState('')
   const [phase, setPhase]                 = useState<Phase>('select')
   const [result, setResult]               = useState<ExecuteResult | null>(null)
   const [errorMsg, setErrorMsg]           = useState('')
@@ -84,13 +80,10 @@ export function AdsFixDrawer({ clientId, item, onClose }: Props) {
 
     try {
       const body: Record<string, unknown> = {
-        action_type:       actionType,
-        campaign_id:       selected.campaign_id,
+        action_type: 'ads.pause_campaign',
+        campaign_id: selected.campaign_id,
         params: {
           execution_item_id: item.id,
-          ...(actionType === 'ads.adjust_bid' && newDailyBudget
-            ? { new_daily_budget: parseFloat(newDailyBudget) }
-            : {}),
         },
       }
 
@@ -102,41 +95,6 @@ export function AdsFixDrawer({ clientId, item, onClose }: Props) {
 
       const data = await res.json() as ExecuteResult & { error?: string }
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`)
-
-      if (res.status === 202 && data.actionRunId) {
-        // The external budget write runs in Inngest. Poll its Kernel receipt so
-        // the drawer never reports success merely because queue dispatch worked.
-        for (let attempt = 0; attempt < 40; attempt += 1) {
-          await new Promise((resolve) => setTimeout(resolve, 1000))
-          const statusRes = await fetch(
-            `/api/clients/${clientId}/meta-ads/execute?runId=${encodeURIComponent(data.actionRunId)}`,
-          )
-          const statusData = await statusRes.json() as {
-            status?: string
-            humanReason?: string | null
-            receipt?: { id?: string; payload?: Partial<ExecuteResult> & { warning?: string; status?: string; reason?: string } } | null
-            error?: string
-          }
-          if (!statusRes.ok) throw new Error(statusData.error ?? `HTTP ${statusRes.status}`)
-          if (statusData.status === 'denied' || statusData.status === 'dead_letter' || statusData.status === 'failed' || statusData.status === 'workflow_failed') {
-            throw new Error(statusData.humanReason ?? statusData.receipt?.payload?.reason ?? `预算任务未执行（${statusData.status}）`)
-          }
-          if (statusData.status === 'succeeded' && statusData.receipt?.payload?.before && statusData.receipt.payload.after) {
-            setResult({
-              success: true,
-              actionId: statusData.receipt.id,
-              actionRunId: data.actionRunId,
-              campaignId: data.campaignId,
-              before: statusData.receipt.payload.before,
-              after: statusData.receipt.payload.after,
-              warning: statusData.receipt.payload.warning,
-            })
-            setPhase('done')
-            return
-          }
-        }
-        throw new Error(`预算任务仍在处理中。任务编号：${data.actionRunId}。请稍后重新打开看板查看。`)
-      }
 
       setResult(data)
       setPhase('done')
@@ -172,7 +130,7 @@ export function AdsFixDrawer({ clientId, item, onClose }: Props) {
               {item.title}
             </h2>
             <p className="mt-1 text-sm font-semibold text-slate-500">
-              暂停会先出确认卡，点确认之后才改广告。下调预算仍按原来的队列走。
+              暂停会先出确认卡，点确认之后才改广告。
             </p>
           </div>
           <button
@@ -264,11 +222,6 @@ export function AdsFixDrawer({ clientId, item, onClose }: Props) {
                     需要在 Render 环境变量中设置 META_SYSTEM_USER_TOKEN（长效 System User Token）
                   </p>
                 ) : null}
-                {errorMsg.toLowerCase().includes('safety limit') ? (
-                  <p className="mt-2 text-xs text-red-600">
-                    调整幅度超过安全上限（当前日预算的 ±20%）。如需更大幅度调整，请走 Talk to Us 人工审核。
-                  </p>
-                ) : null}
               </div>
               <button
                 onClick={() => { setPhase('confirm'); setErrorMsg('') }}
@@ -333,73 +286,20 @@ export function AdsFixDrawer({ clientId, item, onClose }: Props) {
               {selected && (
                 <div className="space-y-3">
                   <p className="text-sm font-black text-slate-800">执行动作</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      onClick={() => setActionType('ads.pause_campaign')}
-                      disabled={phase === 'submitting'}
-                      className={`rounded-xl border p-3 text-left transition-all disabled:opacity-50 ${
-                        actionType === 'ads.pause_campaign'
-                          ? 'border-red-300 bg-red-50'
-                          : 'border-slate-200 bg-white hover:border-red-200'
-                      }`}
-                    >
-                      <p className="text-sm font-black text-slate-900">暂停广告系列</p>
-                      <p className="mt-0.5 text-[11px] text-slate-500">停止所有花费，可随时恢复</p>
-                    </button>
-                    <button
-                      onClick={() => setActionType('ads.adjust_bid')}
-                      disabled={phase === 'submitting'}
-                      className={`rounded-xl border p-3 text-left transition-all disabled:opacity-50 ${
-                        actionType === 'ads.adjust_bid'
-                          ? 'border-blue-300 bg-blue-50'
-                          : 'border-slate-200 bg-white hover:border-blue-200'
-                      }`}
-                    >
-                      <p className="text-sm font-black text-slate-900">调整日预算</p>
-                      <p className="mt-0.5 text-[11px] text-slate-500">降低花费，保留投放（仅支持 CBO）</p>
-                    </button>
+                  <div className="rounded-xl border border-red-300 bg-red-50 p-3 text-left">
+                    <p className="text-sm font-black text-slate-900">暂停广告系列</p>
+                    <p className="mt-0.5 text-[11px] text-slate-500">停止所有花费，可随时恢复</p>
                   </div>
 
-                  {/* Budget input for adjust_bid */}
-                  {actionType === 'ads.adjust_bid' && (
-                    <div className="space-y-2">
-                      <label className="block text-sm font-black text-slate-800">
-                        新日预算（AUD）
-                      </label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="1"
-                        value={newDailyBudget}
-                        onChange={e => setNewDailyBudget(e.target.value)}
-                        placeholder="50.00"
-                        disabled={phase === 'submitting'}
-                        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100 disabled:opacity-50"
-                      />
-                      <p className="text-xs text-slate-400">
-                        仅适用于开启了 CBO（广告系列预算优化）的广告系列。
-                        如需调整广告组预算，请前往 Meta Ads Manager 操作。
-                      </p>
-                      <p className="text-xs font-semibold text-amber-600">
-                        ⚠ 目前只支持下调，单次最多降低当前日预算的 20%。
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Confirm summary */}
                   {phase === 'confirm' && (
                     <div className="rounded-xl border border-orange-200 bg-orange-50 p-4">
                       <p className="text-sm font-black text-orange-900">确认执行</p>
                       <p className="mt-1 text-sm text-orange-800">
                         将对广告系列「{selected.campaign_name}」执行：
-                        <strong className="ml-1">
-                          {actionType === 'ads.pause_campaign' ? '暂停' : `调整日预算至 $${newDailyBudget}`}
-                        </strong>
+                        <strong className="ml-1">暂停</strong>
                       </p>
                       <p className="mt-1 text-xs text-orange-600">
-                        {actionType === 'ads.pause_campaign'
-                          ? '这一步只提交确认卡。点确认之后才会暂停，现在不会改广告。'
-                          : '下调预算会进入原来的队列，不会在这一步直接改 Meta。'}
+                        这一步只提交确认卡。点确认之后才会暂停，现在不会改广告。
                       </p>
                     </div>
                   )}
@@ -413,16 +313,12 @@ export function AdsFixDrawer({ clientId, item, onClose }: Props) {
         {(phase === 'select' || phase === 'confirm' || phase === 'submitting') && selected && (
           <footer className="border-t border-slate-200 bg-white px-5 py-4">
             {phase === 'select' && (
-              <p className="text-center text-xs text-slate-400">请在上方选择广告系列和动作后确认</p>
+              <p className="text-center text-xs text-slate-400">请在上方选择广告系列后确认</p>
             )}
             {(phase === 'confirm' || phase === 'submitting') && (
               <button
                 onClick={() => void handleExecute()}
-                disabled={
-                  phase === 'submitting' ||
-                  !selected ||
-                  (actionType === 'ads.adjust_bid' && (!newDailyBudget || parseFloat(newDailyBudget) <= 0))
-                }
+                disabled={phase === 'submitting' || !selected}
                 className="flex w-full items-center justify-center gap-2 rounded-lg bg-orange-600 px-4 py-3 text-sm font-black text-white transition-colors hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {phase === 'submitting' ? (
@@ -433,7 +329,7 @@ export function AdsFixDrawer({ clientId, item, onClose }: Props) {
                     </svg>
                     执行中…
                   </>
-                ) : actionType === 'ads.pause_campaign' ? '提交确认卡' : '确认执行 →'}
+                ) : '提交确认卡'}
               </button>
             )}
           </footer>

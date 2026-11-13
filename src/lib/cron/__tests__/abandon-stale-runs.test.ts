@@ -54,7 +54,21 @@ describe('abandonAfterMs', () => {
   })
 
   it('表和路由文件对得上 —— 改了 maxDuration 这里没改就会红', () => {
-    expect(scannedDurations()).toEqual(JOB_MAX_DURATION_SEC)
+    const scanned = scannedDurations()
+    const extra: Record<string, number> = { ...JOB_MAX_DURATION_SEC }
+    for (const [name, sec] of Object.entries(extra)) {
+      if (!(name in scanned)) continue
+      expect(scanned[name]).toBe(sec)
+      delete extra[name]
+    }
+    // social-weekly-draft is an Inngest job: no route file, listed by hand.
+    expect(extra).toEqual({ 'social-weekly-draft': 15 * 60 })
+    expect(scanned['social-weekly-draft']).toBeUndefined()
+  })
+
+  it('social-weekly-draft is cleaned after 30 minutes, not the 2 hour default', () => {
+    expect(JOB_MAX_DURATION_SEC['social-weekly-draft']).toBe(15 * 60)
+    expect(abandonAfterMs('social-weekly-draft')).toBe(15 * 60 * 1000 * 2)
   })
 })
 

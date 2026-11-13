@@ -21,6 +21,13 @@ vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
 const imageStep = vi.hoisted(() => ({ run: vi.fn() }))
 vi.mock('@/lib/social/image-post-step', () => ({ runImagePostStep: imageStep.run }))
 vi.mock('@/lib/ai/openai-client', () => ({ getOpenAIClient: () => ({ chat: { completions: { create: vi.fn() } } }) }))
+vi.mock('@/lib/social/weekly-plan/after-draft', async (importOriginal) => {
+  const orig = await importOriginal<typeof import('@/lib/social/weekly-plan/after-draft')>()
+  return {
+    ...orig,
+    ensureWeekPlanApprovalAfterDraft: vi.fn(async () => ({ status: 'skipped', reason: 'test' })),
+  }
+})
 
 type Fn = ReturnType<typeof createSocialWeeklyDraftFunction>
 const optsOf = (fn: Fn) =>
