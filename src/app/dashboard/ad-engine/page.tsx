@@ -29,6 +29,7 @@ import LessonTrial from './_components/LessonTrial'
 import AutoJudgeAll from './_components/AutoJudgeAll'
 import AiVerdictBanner from './_components/AiVerdictBanner'
 import { trialSampleFor } from '@/lib/agent-learning/lesson-trial/eligibility'
+import { groupEngineLessons } from '@/lib/memory/lesson-groups'
 
 export const dynamic = 'force-dynamic'
 
@@ -170,9 +171,10 @@ export default async function AdEnginePage() {
   const allClients: SiteOption[] = (siteRows.data ?? []).map(c => ({ id: c.id as string, name: c.name as string }))
   const sites: SiteOption[] = (siteRows.data ?? []).filter(c => c.domain).map(c => ({ id: c.id as string, name: c.name as string }))
 
-  const active = lessons.filter(l => l.is_active)
-  const trialable = lessons.filter(l => !l.is_active && trialSampleFor(l.lesson_key, l.evidence?.kind))
-  const retired = lessons.filter(l => !l.is_active && !trialable.some(t => t.lesson_key === l.lesson_key))
+  const grouped = groupEngineLessons(lessons, (lesson) => (
+    trialSampleFor(lesson.lesson_key, lesson.evidence?.kind) !== null
+  ))
+  const { active, trial: trialable, pending, retired } = grouped
   const divergentCount = breakdowns.reduce(
     (n, c) => n + c.parents.filter(p => p.verdict === 'divergent').length, 0)
 
@@ -186,6 +188,7 @@ export default async function AdEnginePage() {
         </p>
         <div className="mt-4 flex gap-6 text-sm">
           <span><strong className="text-slate-900">{active.length}</strong> <span className="text-slate-500">条经验生效中</span></span>
+          <span><strong className="text-slate-900">{pending.length}</strong> <span className="text-slate-500">条待采纳</span></span>
           <span><strong className="text-slate-900">{retired.length}</strong> <span className="text-slate-500">条已停用</span></span>
           <span className={divergentCount > 0 ? 'text-red-700' : 'text-slate-500'}>
             <strong>{divergentCount}</strong> 个广告系列的汇总在掩盖差异
@@ -211,6 +214,20 @@ export default async function AdEnginePage() {
             <LessonCard key={l.lesson_key} lesson={l} sites={sites} clients={allClients} />
           ))}
         </div>
+
+        {pending.length > 0 && (
+          <div className="mt-6">
+            <h3 className="text-sm font-medium text-slate-800">待采纳（{pending.length} 条）</h3>
+            <p className="mt-2 text-sm text-slate-600">
+              这些还没生效。点「采纳」之后，下一次开处方才会读到。没点之前不会拿去指导客户。
+            </p>
+            <div className="mt-3 space-y-3">
+              {pending.map(l => (
+                <LessonCard key={l.lesson_key} lesson={l} sites={sites} clients={allClients} purpose="adopt" />
+              ))}
+            </div>
+          </div>
+        )}
 
         {trialable.length > 0 && (
           <details open className="mt-6">
@@ -369,7 +386,17 @@ export default async function AdEnginePage() {
   )
 }
 
-function LessonCard({ lesson: l, sites, clients }: { lesson: LessonRow; sites: SiteOption[]; clients: SiteOption[] }) {
+function LessonCard({
+  lesson: l,
+  sites,
+  clients,
+  purpose = 'toggle',
+}: {
+  lesson: LessonRow
+  sites: SiteOption[]
+  clients: SiteOption[]
+  purpose?: 'adopt' | 'toggle'
+}) {
   const redacted = Boolean(l.evidence && 'original_rationale' in l.evidence)
   const expertSource = l.evidence?.kind === 'expert_rss_candidate' && typeof l.evidence.expert === 'string'
     ? l.evidence.expert
@@ -407,7 +434,7 @@ function LessonCard({ lesson: l, sites, clients }: { lesson: LessonRow; sites: S
           {l.rationale && <p className="mt-1 text-xs leading-relaxed text-slate-600">{l.rationale}</p>}
           <p className="mt-1 font-mono text-[10px] text-slate-300">{l.lesson_key}</p>
         </div>
-        <LessonToggle lessonKey={l.lesson_key} isActive={l.is_active} />
+        <LessonToggle lessonKey={l.lesson_key} isActive={l.is_active} purpose={purpose} />
       </div>
       <LessonVerify lessonKey={l.lesson_key} lesson={l.lesson} rationale={l.rationale} sites={sites} clients={clients} />
       {!l.is_active && <AiVerdictBanner verdict={l.evidence?.ai_verdict} />}
