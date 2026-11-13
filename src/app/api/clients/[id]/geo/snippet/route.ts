@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { generateDirectiveHtml } from '@/lib/geo/html-generator'
+import { loadGeoSnippetBuildOptions } from '@/lib/geo/snippet-build-options'
 import { buildSnippets } from '@/lib/geo/snippet-builder'
 import type { GeoDirective } from '@/types/magic-engine'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
@@ -47,14 +48,16 @@ export async function GET(
     }
 
     const html = generateDirectiveHtml(data)
-    const snippets = buildSnippets(html)
+    const buildOptions = await loadGeoSnippetBuildOptions(supabaseAdmin, clientId, data)
+    const snippets = buildSnippets(html, buildOptions)
+    const siteHtml = snippets[0]?.html ?? html
 
     return NextResponse.json({
       success: true,
       directive_id: data.id,
       version: data.version,
       status: data.status,
-      html,
+      html: siteHtml,
       snippets,
     })
   } catch (err: unknown) {
