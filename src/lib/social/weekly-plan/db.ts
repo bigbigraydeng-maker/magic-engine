@@ -1,12 +1,13 @@
 /**
  * Read and store a weekly slot plan on the existing social_plans table.
- * Selects titles and counts only. Tokens, prices, and goal numbers stay out.
+ * Selects goal text and labels, plus titles and counts. Tokens, prices, and goal numbers stay out.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import { assembleInput } from './assemble'
 import { mergeApproval, readApproval, slotDigest, type PlanApproval } from './digest'
+import { readReadbackSuggestionForClient } from './readback-suggestion'
 import { WEEKLY_SLOT_PLAN_KIND, type WeeklySocialPlan } from './types'
 
 export interface StoredWeeklyPlan {
@@ -22,8 +23,9 @@ export async function loadPlanInput(
   db: SupabaseClient,
   clientId: string,
   week: { weekStart: string; weekEnd: string },
+  now: Date = new Date(),
 ): Promise<ReturnType<typeof assembleInput>> {
-  const [client, pillars, goal, themes, facts, assets, authStatuses] = await Promise.all([
+  const [client, pillars, goal, themes, facts, assets, authStatuses, readbackSuggestion] = await Promise.all([
     readClient(db, clientId),
     readPillarRow(db, clientId),
     readGoalRow(db, clientId),
@@ -31,8 +33,19 @@ export async function loadPlanInput(
     factCount(db, clientId),
     assetCount(db, clientId),
     readAuth(db, clientId),
+    readReadbackSuggestionForClient(db, clientId, now),
   ])
-  return assembleInput({ ...week, ...client, ...pillars, ...goal, ...themes, ...facts, ...assets, authStatuses })
+  return assembleInput({
+    ...week,
+    ...client,
+    ...pillars,
+    ...goal,
+    ...themes,
+    ...facts,
+    ...assets,
+    authStatuses,
+    readbackSuggestion,
+  })
 }
 
 export async function readLatestWeeklyPlan(
@@ -129,7 +142,7 @@ async function readPillarRow(db: SupabaseClient, clientId: string) {
 async function readGoalRow(db: SupabaseClient, clientId: string) {
   const { data, error } = await db
     .from('goals')
-    .select('title')
+    .select('title, fde_reasoning, intent, sub_type, awareness_subtype')
     .eq('client_id', clientId)
     .eq('status', 'active')
     .order('created_at', { ascending: false })

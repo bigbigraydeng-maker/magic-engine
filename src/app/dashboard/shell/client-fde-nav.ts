@@ -68,6 +68,7 @@ export function buildClientFdeSections(
     { key: 'daily-plan', label: '社媒每日计划', mark: '社', href: at('/daily-plan') },
     { key: 'blog', label: '博客', mark: '博', href: at('/blog') },
     { key: 'assets', label: '素材库', mark: '材', href: at('/assets') },
+    { key: 'documents', label: '资料库', mark: '资', href: at('/documents') },
     { key: 'content-factory', label: '内容工厂', mark: '厂', href: at('/content-factory') },
     ...(homeEntryVisible(facts, 'factory-clips')
       ? [{ key: 'factory-clips', label: '出片', mark: '片', href: at('/factory-clips') }]

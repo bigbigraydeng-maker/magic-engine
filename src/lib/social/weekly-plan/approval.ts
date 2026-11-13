@@ -12,9 +12,13 @@ import type { ReadState, WeeklySocialPlan } from './types'
 
 const WHAT = '同意这一周的社媒方案，Story、图文和 Reel 一起批。这次不发布。'
 
+export function weekPlanSubject(clientId: string, weekStart: string): string {
+  return `social:week-plan:${clientId.toLowerCase()}:${weekStart}`
+}
+
 export function planCardFacts(plan: WeeklySocialPlan, clientId: string, digest: string): CardFacts {
   return {
-    subjectKey: `social:week-plan:${clientId.toLowerCase()}:${plan.weekStart}`,
+    subjectKey: weekPlanSubject(clientId, plan.weekStart),
     what: WHAT,
     account: 'Facebook',
     amount: '不涉及广告花费',
@@ -22,7 +26,7 @@ export function planCardFacts(plan: WeeklySocialPlan, clientId: string, digest: 
     scope: scopeLine(plan, digest),
     hardChecks: [
       planCheck(plan),
-      readCheck('目标卡', plan.goal.read, '标题只作背景，不当条数。', '没有活跃目标卡。', '目标卡读不到。'),
+      readCheck('目标卡', plan.goal.read, '目标卡只作出稿背景，不当条数。', '没有活跃目标卡。', '目标卡读不到。'),
       readCheck('广告主题', plan.themes.read, '用客户正在用的广告主题。', '没有广告主题，没有编一个。', '广告主题读不到。'),
       { label: '发布', state: 'green', reason: '这张卡不发布。' },
     ],
