@@ -164,3 +164,45 @@ describe('toWebsiteTours', () => {
     expect(out.map((t) => t.id)).toEqual(['a', 'c', 'b'])
   })
 })
+
+describe('route_variants in the website feed', () => {
+  const OCT = {
+    id: 'oct-2027',
+    label: '16 Oct 2027',
+    note: 'Different route.',
+    departOn: ['2027-10-16', '2027-11-20'],
+    mapSlug: 'oct-map',
+    itinerary: [{ day: 1, title: 'Fly', description: 'Depart', accommodation: 'Hotel' }],
+  }
+
+  it('is an empty list when the tour has no variants', () => {
+    const [tour] = toWebsiteTours([makeTour()], [], '2027-01-01')
+    expect(tour.route_variants).toEqual([])
+  })
+
+  it('lists a variant with the dates of its visible upcoming departures only', () => {
+    const tour = makeTour({ siteExtras: { route_variants: [OCT] } })
+    const departures = [
+      makeDeparture({ id: 'a', departOn: '2027-05-08' }),
+      makeDeparture({ id: 'b', departOn: '2027-10-16' }),
+      makeDeparture({ id: 'c', departOn: '2027-11-20', status: 'closed' }),
+    ]
+    const [out] = toWebsiteTours([tour], departures, '2027-01-01')
+    expect(out.route_variants).toEqual([
+      {
+        id: 'oct-2027',
+        label: '16 Oct 2027',
+        note: 'Different route.',
+        departure_dates: ['16 October 2027'],
+        map_slug: 'oct-map',
+        itinerary: [{ day: 1, title: 'Fly', description: 'Depart', meals: [], accommodation: 'Hotel' }],
+      },
+    ])
+  })
+
+  it('drops a variant once none of its departures is visible and upcoming', () => {
+    const tour = makeTour({ siteExtras: { route_variants: [OCT] } })
+    const [out] = toWebsiteTours([tour], [makeDeparture({ departOn: '2027-05-08' })], '2027-01-01')
+    expect(out.route_variants).toEqual([])
+  })
+})

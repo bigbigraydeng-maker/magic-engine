@@ -37,6 +37,7 @@ function makeWebsiteTour(overrides: Partial<WebsiteTour> = {}): WebsiteTour {
     review_count: null,
     review_summary: null,
     related_blog_slugs: [],
+    route_variants: [],
     quick_answer: null,
     ...overrides,
   }

@@ -1,3 +1,12 @@
+export type FirstPartyRouteVariant = {
+  id: string
+  label: string
+  note: string
+  departure_dates: string[]
+  map_slug: string | null
+  itinerary: FirstPartyItineraryDay[]
+}
+
 export type FirstPartyTour = {
   id: string
   slug: string
@@ -32,6 +41,7 @@ export type FirstPartyTour = {
   review_count?: number | null
   review_summary?: string | null
   related_blog_slugs?: string[]
+  route_variants?: FirstPartyRouteVariant[]
   quick_answer?: string | null
 }
 
@@ -68,7 +78,7 @@ const TOUR_KEYS: ReadonlySet<string> = new Set([
   'departure_dates', 'departure_pricing', 'tour_cities', 'itinerary', 'inclusions', 'exclusions',
   'single_supplement', 'max_group_size', 'created_at', 'short_description', 'highlights', 'hero_image',
   'gallery', 'meta_title', 'meta_description', 'tags', 'faqs', 'sold_out', 'single_supplement_note',
-  'rating', 'review_count', 'review_summary', 'related_blog_slugs', 'quick_answer',
+  'rating', 'review_count', 'review_summary', 'related_blog_slugs', 'route_variants', 'quick_answer',
 ])
 const DAY_KEYS: ReadonlySet<string> = new Set(['day', 'title', 'description', 'meals', 'accommodation', 'festiveLabel', 'operatorLogo'])
 
@@ -180,6 +190,27 @@ function parseItinerary(value: unknown, ctx: ParseContext): FirstPartyItineraryD
   return value.flatMap((item, index) => parseItineraryDay(item, index, ctx))
 }
 
+function parseRouteVariants(value: unknown, ctx: ParseContext): FirstPartyRouteVariant[] | undefined {
+  if (!Array.isArray(value)) {
+    if (!isAbsent(value)) note(ctx, 'field_unreadable', 'route_variants')
+    return undefined
+  }
+  return value.flatMap((item, index) => {
+    if (!isRecord(item) || typeof item.id !== 'string' || typeof item.label !== 'string') {
+      note(ctx, 'route_variant_unreadable', index + 1)
+      return []
+    }
+    return [{
+      id: item.id,
+      label: item.label,
+      note: typeof item.note === 'string' ? item.note : '',
+      departure_dates: stringArray(item.departure_dates, ctx, `route_variants.${item.id}.departure_dates`),
+      map_slug: typeof item.map_slug === 'string' ? item.map_slug : null,
+      itinerary: parseItinerary(item.itinerary, ctx),
+    }]
+  })
+}
+
 function parseDeparturePricing(value: unknown, ctx: ParseContext): Record<string, string> {
   if (!isRecord(value)) {
     if (!isAbsent(value)) note(ctx, 'field_unreadable', 'departure_pricing')
@@ -209,6 +240,7 @@ function parseContentFields(value: Record<string, unknown>, ctx: ParseContext): 
     review_count: readScalar(value.review_count, isNullableNumber, ctx, 'review_count'),
     review_summary: readScalar(value.review_summary, isNullableString, ctx, 'review_summary'),
     related_blog_slugs: optStringArray(value.related_blog_slugs, ctx, 'related_blog_slugs'),
+    route_variants: parseRouteVariants(value.route_variants, ctx),
     quick_answer: readScalar(value.quick_answer, isNullableString, ctx, 'quick_answer'),
   }
   for (const key of Object.keys(out) as Array<keyof FirstPartyTour>) {

@@ -16,7 +16,7 @@ import type { CatalogSnapshot } from '../store'
 import { blankTour } from './content-fixture'
 
 const ROOT = process.cwd()
-const MIGRATION = join(ROOT, 'supabase/migrations/20261010400000_tour_catalog_content.sql')
+const MIGRATION = join(ROOT, 'supabase/migrations/20261115090000_tour_catalog_edit_site_extras.sql')
 const ASSISTANT_SOURCE = join(ROOT, 'src/lib/tour-catalog/assistant.ts')
 
 /** Keys that carry image addresses. */
@@ -69,6 +69,7 @@ const SAMPLE: Readonly<Record<string, unknown>> = {
   reviewCount: 12,
   reviewSummary: 'Loved it',
   quickAnswer: 'Ten days.',
+  siteExtras: { related_blog_slugs: ['best-time-to-visit-china'] },
 }
 
 /** What the assistant is actually allowed to change, found by asking checkProposal key by key. */
@@ -136,7 +137,7 @@ describe('the hand-written lists of tour fields agree with each other', () => {
   })
 
   it('a key that is not editable maps to no column at all', () => {
-    for (const key of ['slug', 'destination', 'tier', 'sortOrder', 'siteExtras', 'id', 'clientId']) {
+    for (const key of ['slug', 'destination', 'tier', 'sortOrder', 'id', 'clientId']) {
       expect(tourPatchToDb({ [key]: 'x' } as TourPatch), key).toEqual({})
     }
   })

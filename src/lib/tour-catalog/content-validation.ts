@@ -33,6 +33,8 @@ export interface TourContentPatch {
   reviewCount?: number | null
   reviewSummary?: string | null
   quickAnswer?: string | null
+  /** The whole site_extras object (related blogs, route variants), already validated. */
+  siteExtras?: Record<string, unknown>
 }
 
 /** All twelve keys above, in that order. */
@@ -49,6 +51,7 @@ export const CONTENT_PATCH_KEYS: readonly string[] = [
   'reviewCount',
   'reviewSummary',
   'quickAnswer',
+  'siteExtras',
 ]
 
 /** Keys only a global admin may send. */
@@ -61,6 +64,7 @@ export const SITE_ONLY_PATCH_KEYS: readonly string[] = [
   'tags',
   'faqs',
   'quickAnswer',
+  'siteExtras',
 ]
 
 export interface DayExtras {
@@ -94,7 +98,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /** Nullable single-line text: null → null, empty after trim → null. */
-function nullableText(
+export function nullableText(
   value: unknown,
   field: string,
   maxLength: number,
@@ -120,7 +124,7 @@ function nullableText(
 }
 
 /** Required single-line text: trimmed, non-empty, within the limit. */
-function requiredText(
+export function requiredText(
   value: unknown,
   field: string,
   maxLength: number,
@@ -558,5 +562,6 @@ export function contentPatchToDb(patch: TourContentPatch): Record<string, unknow
   if ('reviewCount' in patch) out.review_count = patch.reviewCount
   if ('reviewSummary' in patch) out.review_summary = patch.reviewSummary
   if ('quickAnswer' in patch) out.quick_answer = patch.quickAnswer
+  if ('siteExtras' in patch) out.site_extras = patch.siteExtras
   return out
 }
