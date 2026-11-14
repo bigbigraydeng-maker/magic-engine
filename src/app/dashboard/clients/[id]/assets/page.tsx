@@ -17,6 +17,8 @@ import {
   canBackRealPrice,
   type AssetSource,
 } from '@/lib/assets/provenance'
+import { PosterBadge, PosterReviewPanel, isPosterAsset, posterSourceAssetId } from './_components/PosterReview'
+import { UploadZone } from './_components/UploadZone'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -108,10 +110,13 @@ function AssetCard({
   clientId,
   onChanged,
   highlighted = false,
+  posterParent = null,
 }: {
   asset: ClientAsset
   clientId: string
   onChanged: () => void
+  /** AI 海报才有：它的原图（不在素材库 = null）。 */
+  posterParent?: ClientAsset | null
   /** 从「待办」深链跳进来点名要看这张图——默认展开 + 加一圈提示框，省得在网格里大海捞针。 */
   highlighted?: boolean
 }) {
@@ -160,8 +165,9 @@ function AssetCard({
           <StatusBadge status={asset.status} />
           <UseBadge use={asset.recommended_use} />
         </div>
-        <div className="absolute bottom-1.5 left-1.5 right-1.5 flex">
+        <div className="absolute bottom-1.5 left-1.5 right-1.5 flex gap-1">
           <SourceBadge source={asset.source} />
+          <PosterBadge asset={asset} />
         </div>
       </div>
 
@@ -213,8 +219,13 @@ function AssetCard({
         </div>
       )}
 
+      {/* AI 海报：对原图签字（海报不走下面的来源选择，它永远是 AI 图） */}
+      {expanded && isPosterAsset(asset) && (
+        <PosterReviewPanel asset={asset} parent={posterParent} clientId={clientId} onChanged={onChanged} />
+      )}
+
       {/* 来源确认 —— 跟分析状态无关，待分析的图也该能标来源 */}
-      {expanded && (
+      {expanded && !isPosterAsset(asset) && (
         <div
           className="px-2 pb-2 border-t border-zinc-800 pt-2 space-y-1.5"
           onClick={e => e.stopPropagation()}
@@ -244,119 +255,6 @@ function AssetCard({
               {asset.verified_at ? ` · ${asset.verified_at.slice(0, 10)}` : ''}
             </p>
           )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ─── Upload Zone ──────────────────────────────────────────────────────────────
-
-function UploadZone({ clientId, onUploaded }: { clientId: string; onUploaded: () => void }) {
-  const [dragging, setDragging] = useState(false)
-  const [uploading, setUploading] = useState(false)
-  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
-  const [errors, setErrors] = useState<string[]>([])
-  // 默认「我们拍的」：FDE 后台上传绝大多数是自己拍的或客户直接给的原件。
-  // 选错的代价只是这批料暂时打不了真价，可以在卡片上逐张改回来。
-  const [source, setSource] = useState<AssetSource>('fde_shot')
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  const upload = useCallback(async (files: FileList | File[]) => {
-    const arr = Array.from(files).filter(f => f.type.startsWith('image/'))
-    if (arr.length === 0) return
-
-    setUploading(true)
-    setErrors([])
-    setProgress({ done: 0, total: arr.length })
-
-    const BATCH = 10
-    for (let i = 0; i < arr.length; i += BATCH) {
-      const batch = arr.slice(i, i + BATCH)
-      const fd = new FormData()
-      batch.forEach(f => fd.append('files', f))
-      fd.append('source', source)
-
-      const res = await fetch(`/api/clients/${clientId}/assets`, { method: 'POST', body: fd })
-      const json = await res.json()
-      if (json.errors?.length) setErrors(prev => [...prev, ...json.errors])
-      setProgress(p => p ? { done: Math.min(p.total, p.done + batch.length), total: p.total } : null)
-    }
-
-    setUploading(false)
-    setProgress(null)
-    onUploaded()
-  }, [clientId, onUploaded, source])
-
-  const onDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    setDragging(false)
-    upload(e.dataTransfer.files)
-  }, [upload])
-
-  return (
-    <div className="mb-6">
-      {/* 来源必须在传之前选好 —— 传完再补是没人会做的事 */}
-      <div className="flex flex-wrap items-center gap-2 mb-2">
-        <span className="text-[11px] text-zinc-500">这批图哪来的：</span>
-        {FDE_UPLOAD_SOURCES.map(s => (
-          <button
-            key={s}
-            type="button"
-            onClick={() => setSource(s)}
-            className={`text-[11px] px-2 py-1 rounded border transition-colors ${
-              s === source
-                ? 'border-cyan-600 bg-cyan-950/40 text-cyan-300'
-                : 'border-zinc-700 text-zinc-400 hover:border-zinc-500'
-            }`}
-          >
-            {SOURCE_LABELS[s]}
-          </button>
-        ))}
-        {!canBackRealPrice(source) && (
-          <span className="text-[11px] text-amber-500/80">这类素材不能用在标了真实价格的内容里</span>
-        )}
-      </div>
-      <div
-        className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer
-          ${dragging ? 'border-cyan-500 bg-cyan-950/20' : 'border-zinc-700 hover:border-zinc-500'}`}
-        onDragOver={e => { e.preventDefault(); setDragging(true) }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={onDrop}
-        onClick={() => !uploading && inputRef.current?.click()}
-      >
-        <input
-          ref={inputRef}
-          type="file"
-          multiple
-          accept="image/*"
-          className="hidden"
-          onChange={e => e.target.files && upload(e.target.files)}
-        />
-
-        {uploading && progress ? (
-          <div>
-            <div className="w-full max-w-xs mx-auto bg-zinc-800 rounded-full h-2 mb-2">
-              <div
-                className="h-2 rounded-full bg-cyan-500 transition-all"
-                style={{ width: `${(progress.done / progress.total) * 100}%` }}
-              />
-            </div>
-            <p className="text-sm text-zinc-400">上传中… {progress.done} / {progress.total}</p>
-          </div>
-        ) : (
-          <>
-            <div className="text-3xl mb-2">📸</div>
-            <p className="text-sm text-zinc-300 font-medium mb-1">拖拽图片到这里，或点击选择</p>
-            <p className="text-xs text-zinc-500">支持 JPEG · PNG · WebP · HEIC · 无数量限制 · 最大 50 MB/张</p>
-            <p className="text-xs text-zinc-600 mt-1">上传后自动排队 Vision AI 分析</p>
-          </>
-        )}
-      </div>
-
-      {errors.length > 0 && (
-        <div className="mt-2 text-xs text-red-400 space-y-0.5">
-          {errors.map((e, i) => <p key={i}>⚠ {e}</p>)}
         </div>
       )}
     </div>
@@ -802,6 +700,7 @@ export default function AssetsPage() {
                 clientId={clientId}
                 onChanged={loadAssets}
                 highlighted={asset.id === highlightId}
+                posterParent={assetMap.get(posterSourceAssetId(asset) ?? '') ?? null}
               />
             ))}
           </div>

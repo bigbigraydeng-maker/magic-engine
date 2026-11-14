@@ -52,6 +52,26 @@ describe('buildImagePostPlanData', () => {
     expect(data.bundles[0].story).toBeNull()
     expect(data.command_meta.source).toBe('auto_image_post')
     expect(data.command_meta.raw_summary).toContain('china-panorama')
+    expect('poster' in data.command_meta).toBe(false)
+  })
+
+  it('carries the poster receipt into command_meta only when given', () => {
+    const poster = {
+      recipe_id: 'tour_poster_v1',
+      recipe_version: 1,
+      source_asset_id: 'asset-photo',
+      status: 'composed' as const,
+      reason: null,
+      poster_asset_id: 'asset-abc',
+      has_price: true,
+      cost_usd: 0.038,
+      provider_request_id: 'req-1',
+      created_at: '2026-11-15T00:00:00.000Z',
+      text_check: null,
+    }
+    const data = buildImagePostPlanData({ ...input, poster })
+    expect(data.command_meta.poster).toEqual(poster)
+    expect(data.command_meta.source).toBe('auto_image_post')
   })
 })
 

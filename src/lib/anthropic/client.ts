@@ -19,7 +19,7 @@ const PRICE_OUTPUT_PER_M = 15.0  // $15 / MTok
 const HAIKU_PRICE_INPUT_PER_M = 1.0
 const HAIKU_PRICE_OUTPUT_PER_M = 5.0
 
-function modelCostUsd(model: string, inputTokens: number, outputTokens: number): number {
+export function modelCostUsd(model: string, inputTokens: number, outputTokens: number): number {
   const isHaiku = model === MODEL_HAIKU
   return (inputTokens / 1_000_000) * (isHaiku ? HAIKU_PRICE_INPUT_PER_M : PRICE_INPUT_PER_M)
     + (outputTokens / 1_000_000) * (isHaiku ? HAIKU_PRICE_OUTPUT_PER_M : PRICE_OUTPUT_PER_M)
