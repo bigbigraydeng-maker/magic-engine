@@ -119,6 +119,10 @@ async function finish(
     resultLine: result.reason,
   }
   await saveHold(args.kernel.supabase, args.clientId, row, payload, ok ? row.payload.order.metric : null)
+  if (ok) {
+    const { attachPauseCardDecisionLog } = await import('@/lib/ads/decision-log/card-side-effect')
+    attachPauseCardDecisionLog(args.kernel.supabase, args.clientId, row, payload)
+  }
   const base = { status: ok ? 'executed' as const : 'failed' as const, reason: result.reason, wrote: ok, readback: result.after }
   return decided === 'again' ? withCard(args, row, base) : { ...base, card: replyFrom(decided, result.reason) }
 }

@@ -8,6 +8,8 @@ import {
   readExecutedReview,
   type ReviewAction,
 } from '@/lib/flywheel/attribution/executed-review'
+import { readAdsDecisionV1 } from '@/lib/ads/decision-log/persist'
+import type { AdsDecisionReviewVerdict } from '@/lib/ads/decision-log/types'
 import {
   DEFAULT_REVIEW_VERDICT_RULES,
   observationWindowForAction,
@@ -36,6 +38,9 @@ export interface ExecutionReviewItem {
   readonly verdict_label: string | null
   readonly reason: string | null
   readonly summary: string | null
+  readonly decision_review_verdict: AdsDecisionReviewVerdict | null
+  readonly decision_review_label: string | null
+  readonly decision_review_reason: string | null
 }
 
 export interface AdsExecutionReviewPanel {
@@ -188,6 +193,8 @@ export function buildExecutionReviewItem(
   const executedAt = text(row.executed_at)
 
   const reviewCase = reviewCaseOf(payload)
+  const decision = readAdsDecisionV1(payload)
+  const decisionReview = decision?.review_result ?? null
   const payloadBa = beforeAfterFromPayload(payload)
   const outcomeBa = beforeAfterFromOutcome(row.outcome_baseline, row.outcome_after)
 
@@ -206,6 +213,14 @@ export function buildExecutionReviewItem(
       phase_label = '观察期已满'
       verdict = reviewCase.verdict
       reason = reviewCase.reason
+    } else if (decisionReview) {
+      phase = 'concluded'
+      phase_label = '决策回头看已完成'
+      verdict = decisionVerdictToUi(decisionReview.verdict)
+      reason = decisionReview.reason_zh
+      summary = decisionReview.suggested_next_zh
+        ? `${decisionReview.reason_zh} 建议：${decisionReview.suggested_next_zh}`
+        : decisionReview.reason_zh
     } else {
       phase = 'concluded'
       phase_label = '观察期已满，结论还没写上'
@@ -231,7 +246,26 @@ export function buildExecutionReviewItem(
     verdict_label: verdict ? VERDICT_ZH[verdict] : null,
     reason,
     summary,
+    decision_review_verdict: decisionReview?.verdict ?? null,
+    decision_review_label: decisionReview ? decisionVerdictLabel(decisionReview.verdict) : null,
+    decision_review_reason: decisionReview?.reason_zh ?? null,
   }
+}
+
+const DECISION_VERDICT_ZH: Record<AdsDecisionReviewVerdict, string> = {
+  met: '达到预期',
+  not_met: '未达预期',
+  cant_tell: '看不出',
+}
+
+function decisionVerdictLabel(v: AdsDecisionReviewVerdict): string {
+  return DECISION_VERDICT_ZH[v]
+}
+
+function decisionVerdictToUi(v: AdsDecisionReviewVerdict): ExecutionVerdictUi {
+  if (v === 'met') return 'useful'
+  if (v === 'not_met') return 'not_useful'
+  return 'unclear'
 }
 
 export function buildAdsExecutionReviewPanel(input: {
