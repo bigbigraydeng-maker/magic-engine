@@ -55,7 +55,7 @@ export function indexDistributors(distributors: readonly Distributor[]): Distrib
 }
 
 /** Upline chain from the direct parent upward. Throws on a cycle. */
-export function ancestorsOf(byId: ReadonlyMap<string, Distributor>, id: string): string[] {
+export function ancestorsOf(byId: ReadonlyMap<string, { parentId: string | null }>, id: string): string[] {
   const chain: string[] = []
   const seen = new Set<string>([id])
   let current = byId.get(id)?.parentId ?? null
@@ -66,4 +66,25 @@ export function ancestorsOf(byId: ReadonlyMap<string, Distributor>, id: string):
     current = byId.get(current)?.parentId ?? null
   }
   return chain
+}
+
+/** Parent/child index for any id→parent rows. Same cycle rules as indexDistributors, without levels. */
+export function indexParents<T extends { id: string; parentId: string | null }>(rows: readonly T[]) {
+  const byId = new Map(rows.map((row) => [row.id, row]))
+  const children = new Map<string, string[]>()
+  const roots: string[] = []
+  for (const row of rows) {
+    if (row.parentId === null) {
+      roots.push(row.id)
+      continue
+    }
+    if (!byId.has(row.parentId)) {
+      throw new DistributorTreeError(`distributor ${row.id} has unknown parent ${row.parentId}`)
+    }
+    const list = children.get(row.parentId) ?? []
+    list.push(row.id)
+    children.set(row.parentId, list)
+  }
+  for (const row of rows) ancestorsOf(byId, row.id)
+  return { byId, children: children as ReadonlyMap<string, readonly string[]>, roots }
 }
