@@ -38,9 +38,17 @@ describe('buildFieldView', () => {
     expect(v.sections[0].rows[1].reason).toBe('今天联系过了')
   })
 
-  it('返回异常时不崩，给空名单', () => {
-    expect(buildFieldView(null).sections.every((s) => s.rows.length === 0)).toBe(true)
-    expect(buildFieldView({ buckets: 'x' }).queuedCount).toBe(0)
+  it('返回形状不对时不崩，并标成无效（页面据此报错，不当成今天没人）', () => {
+    expect(buildFieldView(null).valid).toBe(false)
+    expect(buildFieldView({ buckets: 'x' }).valid).toBe(false)
+    expect(buildFieldView({ buckets: [{ layer: 'something_new', total: 3, people: [] }] }).valid).toBe(false)
+    expect(buildFieldView({ buckets: [{ layer: 'waiting', total: 0, people: [] }] }).valid).toBe(true)
+  })
+
+  it('标题人数不含被手机页丢掉的人', () => {
+    const v = buildFieldView({ buckets: [{ layer: 'waiting', total: 3, people: [person({ contactId: 'a' }), person({ contactId: 'b' }), person({ contactId: 'x', doNotContact: true })] }] })
+    expect(v.sections[0].total).toBe(2)
+    expect(v.sections[0].rows).toHaveLength(2)
   })
 
   it('没有 contactId 的行丢掉，没名字的给占位', () => {

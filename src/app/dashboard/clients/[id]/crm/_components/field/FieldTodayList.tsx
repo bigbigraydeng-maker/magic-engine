@@ -5,25 +5,41 @@
  * 数据：GET /api/clients/[id]/crm/today。读失败显示原因和重试，绝不显示成「今天没人要联系」。
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { buildFieldView, type FieldView } from '@/lib/crm/field/view'
 
 type State = { kind: 'loading' } | { kind: 'error'; text: string } | { kind: 'ok'; view: FieldView; at: Date }
 
 export function FieldTodayList({ clientId }: { clientId: string }) {
   const [state, setState] = useState<State>({ kind: 'loading' })
+  // 连点刷新时只认最后一次的结果，慢回来的旧结果不覆盖新的。
+  const latest = useRef(0)
 
   const load = useCallback(async () => {
-    setState({ kind: 'loading' })
+    const mine = ++latest.current
+    const show = (s: State) => {
+      if (latest.current === mine) setState(s)
+    }
+    show({ kind: 'loading' })
     try {
       const res = await fetch(`/api/clients/${clientId}/crm/today`, { cache: 'no-store' })
       if (!res.ok) {
-        setState({ kind: 'error', text: res.status === 401 || res.status === 403 ? '你的账号没有查看权限，请重新登录。' : '名单读取失败，请重试。' })
+        show({ kind: 'error', text: res.status === 401 || res.status === 403 ? '你的账号没有查看权限，请重新登录。' : '名单读取失败，请重试。' })
         return
       }
-      setState({ kind: 'ok', view: buildFieldView(await res.json()), at: new Date() })
+      // 登录过期时请求会被带到登录页（返回的是网页不是数据）。
+      if (res.redirected || !(res.headers.get('content-type') ?? '').includes('json')) {
+        show({ kind: 'error', text: '登录可能已过期，请重新登录后再试。' })
+        return
+      }
+      const view = buildFieldView(await res.json())
+      if (!view.valid) {
+        show({ kind: 'error', text: '名单格式不对，没法显示。请重试，一直这样请告诉 Magic Engine。' })
+        return
+      }
+      show({ kind: 'ok', view, at: new Date() })
     } catch {
-      setState({ kind: 'error', text: '网络不好，名单没读到。请重试。' })
+      show({ kind: 'error', text: '网络不好，名单没读到。请重试。' })
     }
   }, [clientId])
 

@@ -48,6 +48,8 @@ export interface FieldSection {
 }
 
 export interface FieldView {
+  /** false = 接口返回的形状不对（没有分桶 / 一个认识的层都没有）。页面必须显示错误，不能当成「今天没人」。 */
+  valid: boolean
   sections: FieldSection[]
   /** 「先放着，系统盯着」那一层的人数，手机上只显示数字。 */
   queuedCount: number
@@ -91,6 +93,7 @@ export function buildFieldView(payload: unknown): FieldView {
     total: 0,
   }))
   let queuedCount = 0
+  const knownLayer = list.some((b) => b.layer === 'waiting' || b.layer === 'acted' || b.layer === 'queued')
   for (const b of list) {
     const total = typeof b.total === 'number' ? b.total : 0
     if (b.layer === 'queued') {
@@ -99,14 +102,17 @@ export function buildFieldView(payload: unknown): FieldView {
     }
     const section = sections.find((s) => s.layer === b.layer)
     if (!section) continue
-    section.total += total
     const people = Array.isArray(b.people) ? (b.people as TodayPerson[]) : []
+    let dropped = 0
     for (const p of people) {
       const row = toRow(p)
       if (row) section.rows.push(row)
+      else dropped += 1
     }
+    // 人数不含手机页主动不显示的人（别再联系 / 没有 id），保证标题上的数字对得上列表。
+    section.total += Math.max(0, total - dropped)
   }
   // 今天还没处理的排前面，处理过的沉到本层最后；同组内保持接口给的顺序。
   for (const s of sections) s.rows = [...s.rows.filter((r) => !r.done), ...s.rows.filter((r) => r.done)]
-  return { sections, queuedCount }
+  return { valid: Array.isArray(buckets) && knownLayer, sections, queuedCount }
 }
