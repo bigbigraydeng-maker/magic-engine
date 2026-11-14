@@ -38,6 +38,7 @@ import type { TourPublishRequestItemKind } from './tour-catalog-publish-request-
 import type { PlatformConnectionItemKind } from './platform-connection-items'
 import type { FacebookSyncItemKind } from './facebook-sync-items'
 import type { LeadFollowupItemKind } from './lead-followup-items'
+import type { CatalogueFollowupItemKind } from './catalogue-followup-items'
 import type { AdsAutonomyItemKind } from './ads-autonomy-items'
 import type { AdsRuleFindingItemKind } from './ads-rule-finding-items'
 import type { AdsCircuitItemKind } from './ads-circuit-items'
@@ -423,6 +424,8 @@ export type ManualItemKind =
   | FacebookSyncItemKind
   /** 客人填了表超过 24 小时没人回 / 这一栏没算出来 */
   | LeadFollowupItemKind
+  /** 发出目录之后没人跟的客人（挂着「AI 跟进中」但没有后续动作）/ 这一栏没算出来 */
+  | CatalogueFollowupItemKind
   /** Magic Bridge 全平台免费额度用到 80% 以上 —— 要不要加额度由 PM 定 */
   | 'magic_bridge_quota'
   /** Tools Lab 全站每月合计花费/次数上限用到 80% 以上（网站诊断+广告体检共用）—— 要不要加名额由 PM 定 */

@@ -40,6 +40,7 @@ import { pushWeekPackItems } from './week-pack-items'
 import { pushWeekPlanApprovalItems } from './week-plan-items'
 import { pushEmailReplyItems } from './email-reply-items'
 import { pushLeadFollowupItems } from './lead-followup-items'
+import { pushCatalogueFollowupItems } from './catalogue-followup-items'
 import { pushBindingRequestItems } from './binding-request-items'
 import { pushPageBindingItems } from './page-binding-items'
 import { pushFacebookSyncFailingItems } from './facebook-sync-items'
@@ -545,6 +546,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 客人填了表超过 24 小时没人回 —— 汇总信的开关一直关着，没有任何人被指派（CTS 积压 170 条）。
     (b) => pushLeadFollowupItems(supabase, b, ids, now, nameOf).catch((e) =>
       console.warn('[manual-items] 线索没人回待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 发出目录之后挂着「AI 跟进中」却没人跟的客人 —— AI 的后续动作还没做成程序（跟进流程整套重排的第 0 刀）
+    (b) => pushCatalogueFollowupItems(supabase, b, ids, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 发目录之后没人跟待办生成失败（不阻塞其他待办）:', e),
     ),
     // 客户交了广告账户号等核实 —— 客户以为交上去了，不下发就没人知道（AD-SEC-3）
     (b) => pushBindingRequestItems(supabase, b, ids, now, nameOf).catch((e) =>
