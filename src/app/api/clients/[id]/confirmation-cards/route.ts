@@ -10,6 +10,7 @@ import {
   listConfirmationCards,
 } from '@/lib/confirmation-card'
 import { parseIssueBody, publicError } from '@/lib/confirmation-card/http'
+import { addCreativeListExtrasByRunId } from '@/lib/ads-creative-card/hold-display'
 import { pausedDraftResultLines } from '@/lib/ads-strategy/paused-draft-submit'
 
 function clickerOf(req: Request, email: string, role: 'admin' | 'client-viewer', allowedClientId: string | null, clientId: string) {
@@ -36,10 +37,25 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   try {
     const kernel = createKernel(supabaseAdmin)
     const cards = await listConfirmationCards(kernel, params.id, clicker)
-    const lines = await pausedDraftResultLines(kernel.supabase, params.id)
+    const [draftLines, creativeExtras] = await Promise.all([
+      pausedDraftResultLines(kernel.supabase, params.id),
+      addCreativeListExtrasByRunId(kernel.supabase, params.id),
+    ])
     const shown = cards.map((card) => {
-      const line = lines.get(card.runId)
-      return line ? { ...card, statusLine: line } : card
+      const extra = creativeExtras.get(card.runId)
+      const draftLine = draftLines.get(card.runId)
+      let merged = draftLine ? { ...card, statusLine: draftLine } : card
+      if (extra) {
+        merged = { ...merged, addCreativeDetail: extra.detail }
+        if (extra.statusChip) {
+          merged = {
+            ...merged,
+            addCreativeStatusChip: extra.statusChip,
+            statusLine: extra.statusLine ?? merged.statusLine,
+          }
+        }
+      }
+      return merged
     })
     return NextResponse.json({ cards: shown })
   } catch (error) {

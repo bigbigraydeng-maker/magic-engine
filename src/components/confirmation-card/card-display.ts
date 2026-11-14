@@ -38,3 +38,16 @@ export function expiryBadgeText(expiresLabel: string): string {
 export function isMutedStatus(status: CardStatus): boolean {
   return status === 'expired' || status === 'voided'
 }
+
+export function addCreativeChipClass(chip: string): string {
+  if (chip === '已做完') return 'bg-emerald-100 text-emerald-900'
+  if (chip === '没做成') return 'bg-red-100 text-red-900'
+  return 'bg-sky-100 text-sky-900'
+}
+
+export function visibleStatusChip(card: {
+  status: CardStatus
+  addCreativeStatusChip?: string | null
+}): string {
+  return card.addCreativeStatusChip?.trim() || STATUS_CHIP_LABEL[card.status]
+}

@@ -5,8 +5,10 @@
  * The fingerprint and the approval id stay off this component.
  */
 
+import type { AddCreativeCardDetail } from '@/lib/ads-creative-card/display'
 import type { CardStatus } from '@/lib/confirmation-card/view'
-import { expiryBadgeText, touchesMetaAds } from './card-display'
+import { AddCreativeCardDetails } from './AddCreativeCardDetails'
+import { addCreativeChipClass, expiryBadgeText, touchesMetaAds } from './card-display'
 
 export interface ConfirmationCardProps {
   readonly what: string
@@ -26,6 +28,8 @@ export interface ConfirmationCardProps {
   readonly goLiveLabel?: string
   readonly onConfirm: () => void
   readonly onDecline: () => void
+  readonly addCreativeDetail?: AddCreativeCardDetail | null
+  readonly addCreativeStatusChip?: string | null
 }
 
 function DetailRow({ label, value }: { label: string; value: string }) {
@@ -43,6 +47,7 @@ export function ConfirmationCard(props: ConfirmationCardProps) {
   const showMeta = touchesMetaAds(props.what)
   const expiryBadge = expiryBadgeText(props.expiresLabel)
   const showActions = !props.goLiveHref
+  const addCreative = props.addCreativeDetail ?? null
 
   return (
     <article
@@ -56,6 +61,13 @@ export function ConfirmationCard(props: ConfirmationCardProps) {
             会改动 Meta 里的广告
           </span>
         ) : null}
+        {props.addCreativeStatusChip ? (
+          <span
+            className={`rounded-full px-2.5 py-1 font-semibold ${addCreativeChipClass(props.addCreativeStatusChip)}`}
+          >
+            {props.addCreativeStatusChip}
+          </span>
+        ) : null}
         <span className="rounded-full bg-me-charcoal/5 px-2.5 py-1 font-medium text-me-charcoal/70">
           {expiryBadge}
         </span>
@@ -63,27 +75,44 @@ export function ConfirmationCard(props: ConfirmationCardProps) {
 
       <p className="mt-4 text-lg font-bold leading-snug text-me-charcoal">{props.what}</p>
 
-      <div className="mt-5 grid gap-6 lg:grid-cols-[minmax(0,1fr)_200px]">
-        <div className="space-y-2">
-          <DetailRow label="账户：" value={props.account} />
-          <DetailRow label="金额：" value={props.amount} />
-          <DetailRow label="日期：" value={props.date} />
-          <DetailRow label="范围：" value={props.scope} />
-          {props.status === 'expired' || props.status === 'voided' ? (
-            <DetailRow label="结果：" value={props.statusLine} />
+      {addCreative ? (
+        <AddCreativeCardDetails detail={addCreative} expiresLabel={props.expiresLabel} />
+      ) : (
+        <div className="mt-5 grid gap-6 lg:grid-cols-[minmax(0,1fr)_200px]">
+          <div className="space-y-2">
+            <DetailRow label="账户：" value={props.account} />
+            <DetailRow label="金额：" value={props.amount} />
+            <DetailRow label="日期：" value={props.date} />
+            <DetailRow label="范围：" value={props.scope} />
+            {props.status === 'expired' || props.status === 'voided' ? (
+              <DetailRow label="结果：" value={props.statusLine} />
+            ) : (
+              <DetailRow label="状态：" value={props.statusLine} />
+            )}
+          </div>
+
+          <div className="rounded-xl bg-me-charcoal/[0.04] p-4">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-me-charcoal/45">变动</p>
+            <p className="mt-2 text-sm font-semibold text-me-charcoal">{props.amount}</p>
+            <p className="mt-1 text-xs text-me-charcoal/55">{props.date}</p>
+          </div>
+        </div>
+      )}
+
+      {addCreative ? (
+        <div className="mt-3 space-y-1">
+          {(props.status === 'expired' || props.status === 'voided' || props.status === 'confirmed' || props.status === 'declined') ? (
+            <DetailRow
+              label={props.status === 'expired' || props.status === 'voided' ? '结果：' : '状态：'}
+              value={props.statusLine}
+            />
           ) : (
             <DetailRow label="状态：" value={props.statusLine} />
           )}
         </div>
-
-        <div className="rounded-xl bg-me-charcoal/[0.04] p-4">
-          <p className="text-[11px] font-bold uppercase tracking-wide text-me-charcoal/45">变动</p>
-          <p className="mt-2 text-sm font-semibold text-me-charcoal">{props.amount}</p>
-          <p className="mt-1 text-xs text-me-charcoal/55">{props.date}</p>
-        </div>
-      </div>
-
-      <p className="mt-3 text-xs text-me-charcoal/55">{props.expiresLabel}</p>
+      ) : (
+        <p className="mt-3 text-xs text-me-charcoal/55">{props.expiresLabel}</p>
+      )}
 
       {props.blockedReason ? (
         <p className="mt-2 text-sm text-red-700">{props.blockedReason}</p>
