@@ -1,55 +1,67 @@
 import { describe, expect, it, vi } from 'vitest'
-import { runImageEdit, type ImageEditDeps } from '../image-edit'
 
-const req = { model: 'm', imageUrl: 'https://img/a.jpg', prompt: 'p', resolution: '2K' as const, timeoutMs: 1000 }
+vi.mock('@/lib/ai/openai-client', () => ({ getOpenAIClient: vi.fn() }))
+vi.mock('@/lib/visual/storage', () => ({ uploadFromBase64: vi.fn() }))
+
+import { imageEditCostUsd, runImageEdit, type ImageEditDeps } from '../image-edit'
+
+const REQ = { model: 'gpt-image-2.6-flare', imageUrl: 'https://store/photo.jpg', prompt: 'make a poster', clientId: 'client-1' }
+// Token counts from the 2026-11-15 live trial.
+const USAGE = { input_tokens_details: { image_tokens: 1536, text_tokens: 262 }, output_tokens: 1353 }
 
 function deps(over: Partial<ImageEditDeps> = {}): ImageEditDeps {
   return {
-    submit: vi.fn().mockResolvedValue('req-1'),
-    poll: vi.fn().mockResolvedValue({ status: 'completed', outputs: ['https://out/p.jpg'], costUsd: 0.038 }),
+    fetchSource: vi.fn().mockResolvedValue({ bytes: Buffer.from('jpg'), mimeType: 'image/jpeg' }),
+    edit: vi.fn().mockResolvedValue({ b64: 'AAAA', usage: USAGE, requestId: 'req_1' }),
+    store: vi.fn().mockResolvedValue({ storage_url: 'https://bucket/posters/p.jpg', file_size_kb: 400 }),
     ...over,
   }
 }
 
+describe('imageEditCostUsd', () => {
+  it('prices image in, text in and output tokens', () => {
+    // 1536*8 + 262*5 + 1353*30 = 12288 + 1310 + 40590 = 54188 → $0.054188
+    expect(imageEditCostUsd('gpt-image-2.6-flare', USAGE)).toBe(0.054188)
+  })
+  it('unknown model or no usage → unknown cost', () => {
+    expect(imageEditCostUsd('some-other-model', USAGE)).toBeNull()
+    expect(imageEditCostUsd('gpt-image-2.6-flare', null)).toBeNull()
+  })
+})
+
 describe('runImageEdit', () => {
-  it('submits once with the edit input and returns the first https output', async () => {
+  it('success: one edit, output stored in our bucket, cost + request id returned', async () => {
     const d = deps()
-    const r = await runImageEdit(req, d)
-    expect(r).toEqual({ ok: true, outputUrl: 'https://out/p.jpg', costUsd: 0.038, requestId: 'req-1' })
-    expect(d.submit).toHaveBeenCalledTimes(1)
-    expect(d.submit).toHaveBeenCalledWith('m', {
-      prompt: 'p',
-      images_list: ['https://img/a.jpg'],
-      resolution: '2K',
-      output_format: 'jpg',
-    })
-    expect(d.poll).toHaveBeenCalledWith('req-1', 1000)
+    const r = await runImageEdit(REQ, d)
+    expect(r).toEqual({ ok: true, outputUrl: 'https://bucket/posters/p.jpg', fileSizeKb: 400, costUsd: 0.054188, requestId: 'req_1' })
+    expect(d.edit).toHaveBeenCalledTimes(1)
+    expect(d.edit).toHaveBeenCalledWith({ model: REQ.model, image: Buffer.from('jpg'), mimeType: 'image/jpeg', prompt: REQ.prompt })
+    expect(d.store).toHaveBeenCalledWith({ base64: 'AAAA', clientId: 'client-1' })
   })
 
-  it('submit error → failure, no request id', async () => {
-    const r = await runImageEdit(req, deps({ submit: vi.fn().mockRejectedValue(new Error('402 no credit')) }))
-    expect(r).toMatchObject({ ok: false, requestId: null })
-    if (!r.ok) expect(r.reason).toContain('submit_failed')
+  it('source photo unreachable → no edit (nothing spent)', async () => {
+    const d = deps({ fetchSource: vi.fn().mockRejectedValue(new Error('HTTP 404')) })
+    const r = await runImageEdit(REQ, d)
+    expect(r).toEqual({ ok: false, reason: 'source_fetch_failed: HTTP 404', costUsd: null, requestId: null })
+    expect(d.edit).not.toHaveBeenCalled()
   })
 
-  it('poll timeout → failure with request id, never re-submits', async () => {
-    const d = deps({ poll: vi.fn().mockRejectedValue(new Error('timed out')) })
-    const r = await runImageEdit(req, d)
-    expect(r).toMatchObject({ ok: false, requestId: 'req-1' })
-    if (!r.ok) expect(r.reason).toContain('poll_failed')
-    expect(d.submit).toHaveBeenCalledTimes(1)
+  it('provider error → returned once, never re-submitted', async () => {
+    const d = deps({ edit: vi.fn().mockRejectedValue(new Error('timeout')) })
+    const r = await runImageEdit(REQ, d)
+    expect(r).toMatchObject({ ok: false, reason: 'edit_failed: timeout' })
+    expect(d.edit).toHaveBeenCalledTimes(1)
+    expect(d.store).not.toHaveBeenCalled()
   })
 
-  it('failed job keeps cost for the receipt', async () => {
-    const d = deps({ poll: vi.fn().mockResolvedValue({ status: 'failed', outputs: [], error: 'nsfw', costUsd: 0.01 }) })
-    const r = await runImageEdit(req, d)
-    expect(r).toMatchObject({ ok: false, costUsd: 0.01, requestId: 'req-1' })
-    expect(d.submit).toHaveBeenCalledTimes(1)
+  it('no image in the response → no_output, cost still reported', async () => {
+    const d = deps({ edit: vi.fn().mockResolvedValue({ b64: null, usage: USAGE, requestId: 'req_2' }) })
+    expect(await runImageEdit(REQ, d)).toEqual({ ok: false, reason: 'no_output', costUsd: 0.054188, requestId: 'req_2' })
+    expect(d.store).not.toHaveBeenCalled()
   })
 
-  it('completed but no usable output → no_output', async () => {
-    const d = deps({ poll: vi.fn().mockResolvedValue({ status: 'completed', outputs: ['http://insecure'], costUsd: undefined }) })
-    const r = await runImageEdit(req, d)
-    expect(r).toEqual({ ok: false, reason: 'no_output', costUsd: null, requestId: 'req-1' })
+  it('storage failure → fallback with the cost already spent', async () => {
+    const d = deps({ store: vi.fn().mockRejectedValue(new Error('bucket down')) })
+    expect(await runImageEdit(REQ, d)).toEqual({ ok: false, reason: 'output_store_failed: bucket down', costUsd: 0.054188, requestId: 'req_1' })
   })
 })
