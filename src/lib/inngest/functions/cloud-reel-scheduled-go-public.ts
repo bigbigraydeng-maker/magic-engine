@@ -1,7 +1,9 @@
 /**
  * Reel 定时发布编排。每 30 分钟醒一次：总开关 WEEKLY_PACK_REEL_SCHEDULED_PUBLIC 不是 'true' 就只写一行 disabled 回执；
- * 到了客户的发布时点（默认新西兰 18:00，客户配置 weekly_pack.publish_hour 可改）才处理当天已授权的 Reel；
- * 每条一个步骤、不重试；手动事件可带 dry_run 演练（只核不发）；新增函数部署后必须去 Inngest 后台 Sync 一次。
+ * 到了客户的发布时点（默认新西兰 18:00，客户配置 weekly_pack.publish_hour 可改）才处理当天已授权的 Reel。
+ * 客户开关 publish_live.reel_public 不是真，就只演练（不写公开），并留一条调度记录。
+ * 真公开后只记下帖子编号和时间，不发「已公开去建广告」的通知。
+ * 每条一个步骤、不重试；手动事件只演练；新增函数部署后必须去 Inngest 后台 Sync 一次。
  */
 import type { GetStepTools } from 'inngest'
 import { inngest, CLOUD_FN_PREFIX } from '../client'
@@ -13,6 +15,10 @@ import { runScheduledPromote, type ScheduledResult } from '@/lib/factory/publish
 import { createProductionPromoteDeps } from '@/lib/factory/publish/promote/deps'
 import { isGlobalAdminEmail } from '@/lib/auth/whitelist'
 import { nzToday } from '@/lib/factory/publish/promote/scheduled-grant'
+import { readPublishLive } from '@/lib/social/publish-gate/read-live'
+import { writePublishDispatchReceipt, type PublishDispatchReceipt } from '@/lib/social/publish-gate/receipt'
+import { noteReelResults } from '@/lib/social/publish-gate/reel-note'
+import { loadReelPublishedRef } from '@/lib/social/publish-gate/reel-ref'
 
 export const REEL_SCHEDULED_FUNCTION_ID = `${CLOUD_FN_PREFIX}reel-scheduled-go-public`
 export const REEL_SCHEDULED_CRON = 'TZ=Pacific/Auckland */30 * * * *'
@@ -57,6 +63,10 @@ export interface ReelScheduledDeps {
   loadDueOrderIds: (clientId: string, today: string) => Promise<string[]>
   runOne: (orderId: string, opts: { dryRun: boolean; executedBy: string; asOf?: string }) => Promise<ScheduledResult>
   startRun: () => Promise<string>
+  /** Absent means the client is not cleared to publish. */
+  clientPublishLive?: (clientId: string) => Promise<boolean>
+  recordDispatch?: (receipt: PublishDispatchReceipt) => Promise<void>
+  loadPublishedRef?: (orderId: string) => Promise<{ postId: string; publishedAt: string } | null>
   finishRun: (input: {
     runId: string
     startedAt: number
@@ -170,12 +180,7 @@ async function handleCron(deps: ReelScheduledDeps, step: StepLike): Promise<Tick
   const plan = await step.run('plan', async (): Promise<{ receipt: TickReceipt; due: Array<{ id: string }> }> => {
     const now = deps.now()
     const nz_date = nzDate(now)
-    if (!scheduledPublicEnabled(deps.env())) {
-      return {
-        receipt: { kind: 'tick', status: 'disabled', nz_date, dry_run: false, clients: [], no_publish: true, failures: [] },
-        due: [],
-      }
-    }
+    if (!scheduledPublicEnabled(deps.env())) return disabledTick(deps, nz_date)
     let clients: Array<{ id: string; config: unknown }>
     try {
       clients = await deps.listClients()
@@ -185,7 +190,7 @@ async function handleCron(deps: ReelScheduledDeps, step: StepLike): Promise<Tick
           kind: 'tick',
           status: 'list_failed',
           nz_date,
-          dry_run: false,
+          dry_run: true,
           clients: [],
           no_publish: true,
           failures: [`list_failed: ${errorMessage(e, 200)}`],
@@ -203,12 +208,7 @@ async function handleCron(deps: ReelScheduledDeps, step: StepLike): Promise<Tick
 
   const receipt = plan.receipt
   if (receipt.status === 'done') {
-    const executedBy = `system:week-card:${started.runId}`
-    for (const client of plan.due) {
-      receipt.clients.push(await runClient(deps, step, client.id, { today: receipt.nz_date, dryRun: false, executedBy }))
-    }
-    receipt.failures = collectFailures(receipt.clients)
-    receipt.no_publish = false
+    await publishDue(deps, step, receipt, plan.due, `system:week-card:${started.runId}`)
   }
 
   await finishTick(deps, step, started, receipt)
@@ -275,12 +275,106 @@ async function handleDue(
   if (!data.clientId) {
     receipt.failures = ['invalid_event: clientId missing']
   } else {
-    receipt.clients.push(await runClient(deps, step, data.clientId, { today: nz_date, dryRun, executedBy, asOf: data.date ?? undefined }))
-    receipt.failures = collectFailures(receipt.clients)
+    const one = await runClient(deps, step, data.clientId, { today: nz_date, dryRun, executedBy, asOf: data.date ?? undefined })
+    receipt.clients.push(one)
+    const writeError = await noteClient(deps, step, data.clientId, one.results, true)
+    if (writeError) receipt.failures.push(`${data.clientId}:receipt_write_failed:${writeError}`)
+    receipt.failures.push(...collectFailures(receipt.clients))
   }
 
   await finishTick(deps, step, started, receipt)
   return receipt
+}
+
+async function disabledTick(
+  deps: ReelScheduledDeps,
+  nz_date: string,
+): Promise<{ receipt: TickReceipt; due: Array<{ id: string }> }> {
+  if (deps.recordDispatch) {
+    await deps.recordDispatch({
+      clientId: 'unscoped',
+      kind: 'reel_public',
+      subjectRef: `tick:${nz_date}`,
+      mode: 'dry_run',
+      postId: null,
+      publishedAt: null,
+      calledPublishApi: false,
+      reason: 'master_switch_off',
+    })
+  }
+  return {
+    receipt: { kind: 'tick', status: 'disabled', nz_date, dry_run: true, clients: [], no_publish: true, failures: [] },
+    due: [],
+  }
+}
+
+async function publishDue(
+  deps: ReelScheduledDeps,
+  step: StepLike,
+  receipt: TickReceipt,
+  due: Array<{ id: string }>,
+  executedBy: string,
+): Promise<void> {
+  let anyLive = false
+  for (const client of due) {
+    const read = await readLiveFlag(deps, step, client.id)
+    if (read.error) receipt.failures.push(`${client.id}:client_switch_unreadable:${read.error}`)
+    if (read.on) anyLive = true
+    const one = await runClient(deps, step, client.id, { today: receipt.nz_date, dryRun: !read.on, executedBy })
+    receipt.clients.push(one)
+    const writeError = await noteClient(deps, step, client.id, one.results, !read.on)
+    if (writeError) receipt.failures.push(`${client.id}:receipt_write_failed:${writeError}`)
+  }
+  receipt.failures.push(...collectFailures(receipt.clients))
+  receipt.dry_run = !anyLive
+  receipt.no_publish = !anyLive
+}
+
+async function readLiveFlag(
+  deps: ReelScheduledDeps,
+  step: StepLike,
+  clientId: string,
+): Promise<{ on: boolean; error: string | null }> {
+  try {
+    return await step.run(`live-${clientId}`, async () => {
+      try {
+        const on = deps.clientPublishLive ? await deps.clientPublishLive(clientId) : false
+        return { on, error: null as string | null }
+      } catch (e) {
+        return { on: false, error: errorMessage(e, 160) }
+      }
+    })
+  } catch (e) {
+    return { on: false, error: errorMessage(e, 160) }
+  }
+}
+
+async function noteClient(
+  deps: ReelScheduledDeps,
+  step: StepLike,
+  clientId: string,
+  results: ScheduledResult[],
+  dryRun: boolean,
+): Promise<string | null> {
+  if (!deps.recordDispatch || results.length === 0) return null
+  try {
+    return await step.run(`note-${clientId}`, async () => {
+      try {
+        await noteReelResults({
+          clientId,
+          results,
+          dryRun,
+          record: deps.recordDispatch!,
+          loadRef: deps.loadPublishedRef,
+        })
+        return null
+      } catch (e) {
+        return errorMessage(e, 160)
+      }
+    })
+  } catch (e) {
+    return errorMessage(e, 160)
+  }
 }
 
 export function createReelScheduledFunction(deps: ReelScheduledDeps) {
@@ -334,6 +428,9 @@ export const reelScheduledGoPublic = createReelScheduledFunction({
       dryRun: opts.dryRun,
       asOf: opts.asOf,
     }),
+  clientPublishLive: (clientId) => readPublishLive(supabaseAdmin, clientId, 'reel_public'),
+  recordDispatch: (receipt) => writePublishDispatchReceipt(supabaseAdmin, receipt),
+  loadPublishedRef: (orderId) => loadReelPublishedRef(supabaseAdmin, orderId),
   startRun: () => startCronRunId(REEL_SCHEDULED_JOB),
   finishRun: async ({ runId, startedAt, ...rest }) => {
     await cronRunHandle(REEL_SCHEDULED_JOB, runId, startedAt).finish(rest)
