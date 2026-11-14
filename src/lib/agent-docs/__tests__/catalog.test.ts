@@ -36,6 +36,22 @@ describe('parseReadme', () => {
   })
 })
 
+describe('summary column (主要功能)', () => {
+  const withSummary = ['| 中文名 | 代号 | 主要功能 | 状态 | 档案 |', '|---|---|---|---|---|', '| 示例甲 | alpha | 盯广告并出诊断 | 在用 | 10-alpha.md |', '| 示例乙 | beta | | 在用 | 11-beta.md |'].join('\n')
+  it('reads the 主要功能 cell and leaves it empty when blank', () => {
+    const p = parseReadme(withSummary)
+    expect(p.agents.map((a) => a.summary)).toEqual(['盯广告并出诊断', ''])
+  })
+  it('carries the README summary into catalog rows', () => {
+    const root = repo({ 'docs/agents/README.md': withSummary, 'docs/agents/10-alpha.md': '# 示例甲', 'docs/agents/11-beta.md': '# 示例乙' })
+    expect(buildCatalog(root).rows.map((r) => r.summary)).toEqual(['盯广告并出诊断', ''])
+  })
+  it('falls back to the profile 定位 line when README is missing', () => {
+    const root = repo({ 'docs/agents/10-ziya.md': '# 子牙 — Agent 手册\n> 模型：Opus\n> 定位：技术大脑。负责架构。\n' })
+    expect(buildCatalog(root).rows[0].summary).toBe('技术大脑。负责架构。')
+  })
+})
+
 describe('buildCatalog', () => {
   it('README is the source of truth; unknown folders are not whitelisted', () => {
     const root = repo({

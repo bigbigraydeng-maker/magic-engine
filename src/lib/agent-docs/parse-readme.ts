@@ -2,7 +2,7 @@ import type { AgentStatus } from './types'
 
 export interface ReadmeAgentRow {
   nameZh: string; code: string; group: string; status: AgentStatus
-  profileRaw: string; playbooksRaw: string
+  profileRaw: string; playbooksRaw: string; summary: string
 }
 
 export interface ReadmeOwnershipRow { playbooksRaw: string; ownerRaw: string }
@@ -61,6 +61,7 @@ function parseAgentTable(t: Table): ReadmeAgentRow[] | null {
   const group = findCol(t.header, /分组|类别|§|^组/)
   const status = findCol(t.header, /状态/)
   const playbooks = findCol(t.header, /手册|sop|playbook/i)
+  const summary = findCol(t.header, /主要功能|功能/)
   const cell = (r: string[], c: number): string => (c >= 0 ? r[c] ?? '' : '')
   return t.rows.map((r) => ({
     nameZh: clean(cell(r, name)),
@@ -69,6 +70,7 @@ function parseAgentTable(t: Table): ReadmeAgentRow[] | null {
     status: normalizeStatus(`${cell(r, status)} ${cell(r, name)}`),
     profileRaw: cell(r, profile),
     playbooksRaw: playbooks === profile ? '' : cell(r, playbooks),
+    summary: clean(cell(r, summary)),
   }))
 }
 
