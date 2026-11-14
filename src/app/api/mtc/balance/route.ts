@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireSession } from '@/lib/auth/require-session'
-import { supabaseAdmin } from '@/lib/supabase'
 import { getMtcBalance } from '@/lib/mtc/balance'
+import { clientPortalMembershipsForUser } from '@/lib/auth/client-portal-membership'
 
 // GET /api/mtc/balance?clientId=xxx
 export async function GET(request: NextRequest) {
@@ -14,12 +14,9 @@ export async function GET(request: NextRequest) {
   }
 
   // Verify caller owns this client
-  const { data: portalUser } = await supabaseAdmin
-    .from('client_portal_users')
-    .select('client_id')
-    .eq('email', (session.user.email ?? '').toLowerCase())
-    .eq('client_id', clientId)
-    .single()
+  const { rows: memberships, error: membershipError } = await clientPortalMembershipsForUser(session.user)
+  if (membershipError) return NextResponse.json({ error: 'Authorization check failed' }, { status: 500 })
+  const portalUser = memberships.find(row => row.client_id === clientId)
 
   if (!portalUser) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })

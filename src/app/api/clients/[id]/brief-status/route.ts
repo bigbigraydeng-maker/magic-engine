@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { isBriefComplete } from '@/lib/brief/completion'
-import { supabaseAdmin } from '@/lib/supabase'
+import { clientPortalMembershipsForUser } from '@/lib/auth/client-portal-membership'
 
 // GET /api/clients/[id]/brief-status
 // Returns the UX gate state for self_serve clients. Admin/FDE users fail open.
@@ -21,13 +21,7 @@ export async function GET(
     return NextResponse.json({ complete: true, gated: false, reason: 'admin' })
   }
 
-  const email = (access.user.email ?? '').toLowerCase().trim()
-  const { data: portalRow, error } = await supabaseAdmin
-    .from('client_portal_users')
-    .select('access_type')
-    .eq('email', email)
-    .eq('client_id', params.id)
-    .maybeSingle()
+  const { rows, error } = await clientPortalMembershipsForUser(access.user)
 
   if (error) {
     return NextResponse.json(
@@ -36,6 +30,7 @@ export async function GET(
     )
   }
 
+  const portalRow = rows.find(row => row.client_id === params.id)
   if (portalRow?.access_type !== 'self_serve') {
     return NextResponse.json({ complete: true, gated: false, reason: 'bypass' })
   }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
+import { clientPortalMembershipsForUser } from '@/lib/auth/client-portal-membership'
 import { invalidateBriefCache } from '@/lib/brief/completion'
 
 // GET /api/clients/[id]/light-brief
@@ -17,13 +18,9 @@ export async function GET(
     return NextResponse.json({ brief_fields: null, brief_completed_at: 'admin' })
   }
 
-  const email = (access.user.email ?? '').toLowerCase().trim()
-  const { data: portalRow } = await supabaseAdmin
-    .from('client_portal_users')
-    .select('access_type')
-    .eq('email', email)
-    .eq('client_id', params.id)
-    .maybeSingle()
+  const { rows: memberships, error: membershipError } = await clientPortalMembershipsForUser(access.user)
+  if (membershipError) return NextResponse.json({ error: 'Failed to load workspace access' }, { status: 500 })
+  const portalRow = memberships.find(row => row.client_id === params.id)
 
   if (portalRow?.access_type !== 'self_serve') {
     return NextResponse.json({ brief_fields: null, brief_completed_at: 'bypass' })
