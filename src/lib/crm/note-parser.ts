@@ -578,7 +578,7 @@ export async function parseNote(
     )
 
     // 模型说的每个事实都要能在员工原话里找到依据，否则拿掉 / 退回原话（见 note-grounding）。
-    const grounded = groundNoteParse(raw, parsed)
+    const grounded = groundNoteParse(raw, parsed, { now, timeZone: opts.timeZone ?? 'Pacific/Auckland' })
     return {
       ...grounded,
       ...mergeRefusal(rules, parsed.do_not_contact),
@@ -587,7 +587,7 @@ export async function parseNote(
       travel_window: cleanTravelWindow(grounded.travel_window, now),
       tour_interest: cleanNullish(grounded.tour_interest),
       competitor: cleanCompetitor(grounded.competitor, brandTerms),
-      callback_at: saneCallbackInstant(cleanNullish(grounded.callback_at)),
+      callback_at: saneCallbackInstant(cleanNullish(grounded.callback_at), now),
     }
   } catch {
     // AI 挂了不能让整批导入失败 —— 规则版本已经覆盖了最要紧的三件事。
