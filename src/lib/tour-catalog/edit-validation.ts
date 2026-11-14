@@ -14,6 +14,7 @@ import { MAX_PRICE_TEXT_LENGTH, priceTextSafetyIssue, validatePriceText } from '
 import { isValidIsoDate } from './dates'
 import { hasForbiddenChars, type FieldError } from './text-rules'
 import { readOperatorLogo } from './content-fields'
+import { validateSiteExtras } from './route-variants'
 import {
   CONTENT_PATCH_KEYS,
   contentPatchToDb,
@@ -432,6 +433,10 @@ function validateListFields(
   if ('tourCities' in input) {
     const v = validateStringArray(input.tourCities, 'tourCities', errors)
     if (v !== undefined) patch.tourCities = v
+  }
+  if ('siteExtras' in input) {
+    const v = validateSiteExtras(input.siteExtras, errors, (value, errs) => validateItinerary(value, errs, ctx))
+    if (v !== undefined) patch.siteExtras = v
   }
 }
 

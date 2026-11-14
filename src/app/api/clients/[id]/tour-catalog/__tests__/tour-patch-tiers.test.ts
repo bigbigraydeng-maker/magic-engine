@@ -141,9 +141,10 @@ describe('global admin', () => {
     expect(updateTour).not.toHaveBeenCalled()
   })
 
-  it('400 for siteExtras: it is not an editable field for anyone', async () => {
-    const res = await PATCH(request({ siteExtras: { related_blog_slugs: ['x'] } }), context())
+  it('400 for a siteExtras key the catalog does not know', async () => {
+    const res = await PATCH(request({ siteExtras: { surprise: ['x'] } }), context())
     expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'invalid_fields', fields: [{ field: 'siteExtras.surprise', code: 'unknown_key' }] })
     expect(updateTour).not.toHaveBeenCalled()
   })
 })
