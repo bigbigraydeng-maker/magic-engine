@@ -12,6 +12,7 @@
  */
 
 import type { GraphBreakdownRow } from '@/lib/ads-strategy/breakdown-stats/types'
+import type { MetaActionStat } from '@/lib/meta/objective-metrics'
 
 const GRAPH_BASE = 'https://graph.facebook.com/v21.0'
 const PAGE_LIMIT = '200'
@@ -381,16 +382,18 @@ export function fetchHeartbeatAds(adAccountId: string, accessToken: string) {
   }, accessToken))
 }
 
-/** 当日按广告组拆的花费/曝光（账户时区日期由调用方给出）。 */
+/** 当日按广告组拆的花费、曝光、链接点击和 actions。只读。账户时区日期由调用方给出。 */
 export interface GraphHeartbeatInsightRow {
   adset_id?: string
   spend?: string
   impressions?: string
+  inline_link_clicks?: string
+  actions?: MetaActionStat[]
 }
 
 export function fetchHeartbeatTodayInsights(adAccountId: string, accessToken: string, day: string) {
   return readList<GraphHeartbeatInsightRow>(graphUrl(`${adAccountId}/insights`, {
-    fields: 'adset_id,spend,impressions',
+    fields: 'adset_id,spend,impressions,inline_link_clicks,actions',
     level: 'adset',
     time_range: JSON.stringify({ since: day, until: day }),
     limit: '500',

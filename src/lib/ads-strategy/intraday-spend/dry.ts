@@ -19,7 +19,17 @@ export function dryDeps(): SampleDeps {
       complete: true,
       rateLimited: false,
       adsets: [{ id: 'as_synth', campaignId: 'cmp_synth', status: 'ACTIVE' }],
-      insights: [{ adsetId: 'as_synth', spend: '8.00', impressions: '100' }],
+      insights: [{
+        adsetId: 'as_synth',
+        spend: '8.00',
+        impressions: '100',
+        inlineLinkClicks: '4',
+        actions: [
+          { action_type: 'lead', value: '2' },
+          { action_type: 'onsite_conversion.lead_grouped', value: '2' },
+          { action_type: 'onsite_conversion.messaging_conversation_started_7d', value: '1' },
+        ],
+      }],
     }),
     upsert: async (drafts: SpendDraft[]) => {
       rows.push(...drafts)
@@ -55,6 +65,6 @@ function draft(day: string, localMinute: number, spendMinor: number, sampledAt: 
   return {
     clientId: DRY_CLIENT, adAccountId: ACCOUNT, accountDay: day, sampledAt,
     localMinute, entityLevel: 'campaign', entityId: 'cmp_synth', spendMinor,
-    impressions: 10, currency: 'NZD', timezone: TZ,
+    impressions: 10, linkClicks: null, results: null, currency: 'NZD', timezone: TZ,
   }
 }

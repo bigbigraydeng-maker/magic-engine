@@ -94,7 +94,7 @@ describe('fetchHeartbeatTodayInsights', () => {
     const url = urlAt()
     expect(url.pathname).toContain('act_1/insights')
     expect(url.searchParams.get('level')).toBe('adset')
-    expect(url.searchParams.get('fields')).toBe('adset_id,spend,impressions')
+    expect(url.searchParams.get('fields')).toBe('adset_id,spend,impressions,inline_link_clicks,actions')
     expect(JSON.parse(url.searchParams.get('time_range') ?? '{}')).toEqual({
       since: '2026-10-21',
       until: '2026-10-21',

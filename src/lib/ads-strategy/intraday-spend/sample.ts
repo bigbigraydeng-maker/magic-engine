@@ -1,3 +1,8 @@
+import {
+  LEAD_ACTION_PRIORITY,
+  MESSAGING_ACTION_PRIORITY,
+  type MetaActionStat,
+} from '@/lib/meta/objective-metrics'
 import { SAMPLE_RETENTION_DAYS, SAMPLE_STEP_MINUTES } from './constants'
 
 const ZERO_DECIMAL = new Set(['JPY', 'KRW', 'VND', 'CLP'])
@@ -12,6 +17,10 @@ export interface InsightSpendRow {
   adsetId: string
   spend?: string
   impressions?: string
+  /** Meta inline_link_clicks. Omitted means unknown, not zero. */
+  inlineLinkClicks?: string
+  /** Omitted means unknown results. A present list uses the health ladder. */
+  actions?: readonly MetaActionStat[] | null
 }
 export interface SpendDraft {
   clientId: string
@@ -23,6 +32,8 @@ export interface SpendDraft {
   entityId: string
   spendMinor: number
   impressions: number
+  linkClicks: number | null
+  results: number | null
   currency: string | null
   timezone: string
 }
@@ -97,6 +108,75 @@ function impressionsOf(raw: string | undefined): number | null {
   return Math.round(n)
 }
 
+const PG_INT_MAX = 2 ** 31 - 1
+
+/** A reported count. Omitted, blank, or not a non-negative integer → null, not 0. */
+export function reportedCount(raw: string | undefined): number | null {
+  if (raw === undefined) return null
+  const trimmed = raw.trim()
+  if (trimmed === '') return null
+  const n = Number(trimmed)
+  if (!Number.isFinite(n) || n < 0) return null
+  const rounded = Math.round(n)
+  if (!Number.isSafeInteger(rounded) || rounded > PG_INT_MAX) return null
+  return rounded
+}
+
+function ladderCount(actions: readonly MetaActionStat[], priority: readonly string[]): number | null {
+  for (const wanted of priority) {
+    const hit = actions.find((row) => row.action_type === wanted)
+    if (!hit) continue
+    return reportedCount(hit.value)
+  }
+  return 0
+}
+
+/**
+ * Health convention: one lead type, one messaging type, then the larger of the two.
+ * Overlapping parent and child action types are not summed.
+ * No actions array → null (unknown), not 0.
+ */
+export function resultsFromActions(actions: readonly MetaActionStat[] | null | undefined): number | null {
+  if (!Array.isArray(actions)) return null
+  const leads = ladderCount(actions, LEAD_ACTION_PRIORITY)
+  const messaging = ladderCount(actions, MESSAGING_ACTION_PRIORITY)
+  if (leads === null || messaging === null) return null
+  return Math.max(leads, messaging)
+}
+
+interface Outcome {
+  linkClicks: number | null
+  results: number | null
+}
+
+/** A missing insight row is zero delivery. A present row with an omitted field stays unknown. */
+function outcomeOf(row: InsightSpendRow | undefined): Outcome {
+  if (!row) return { linkClicks: 0, results: 0 }
+  return {
+    linkClicks: reportedCount(row.inlineLinkClicks),
+    results: resultsFromActions(row.actions),
+  }
+}
+
+function addCount(total: number | null, next: number | null): number | null {
+  if (total === null || next === null) return null
+  return total + next
+}
+
+interface CampaignTotals {
+  spend: number
+  impressions: number
+  linkClicks: number | null
+  results: number | null
+}
+
+function addToCampaign(total: CampaignTotals, spend: number, impressions: number, outcome: Outcome): void {
+  total.spend += spend
+  total.impressions += impressions
+  total.linkClicks = addCount(total.linkClicks, outcome.linkClicks)
+  total.results = addCount(total.results, outcome.results)
+}
+
 /** ACTIVE ad sets plus one campaign sum. null = do not store. A missing insight row is 0. */
 export function draftsForAccount(input: {
   clientId: string
@@ -125,26 +205,64 @@ export function draftsForAccount(input: {
     currency: input.currency,
     timezone: input.timezone,
   }
+  return buildDrafts(live, lookup, input.currency, base)
+}
+
+type DraftBase = Omit<SpendDraft, 'entityLevel' | 'entityId' | 'spendMinor' | 'impressions' | 'linkClicks' | 'results'>
+
+function buildDrafts(
+  live: readonly LiveAdset[],
+  lookup: Map<string, InsightSpendRow>,
+  currency: string | null,
+  base: DraftBase,
+): SpendDraft[] | null {
   const adsets: SpendDraft[] = []
-  const byCampaign = new Map<string, { spend: number; impressions: number }>()
+  const byCampaign = new Map<string, CampaignTotals>()
   for (const adset of live) {
     const row = lookup.get(adset.id)
-    const spend = spendToMinor(row?.spend, input.currency)
+    const spend = spendToMinor(row?.spend, currency)
     const impressions = impressionsOf(row?.impressions)
     if (spend === null || impressions === null) return null
-    adsets.push({ ...base, entityLevel: 'adset', entityId: adset.id, spendMinor: spend, impressions })
+    const outcome = outcomeOf(row)
+    adsets.push(adsetDraft(base, adset.id, spend, impressions, outcome))
     if (!adset.campaignId) continue
-    const g = byCampaign.get(adset.campaignId) ?? { spend: 0, impressions: 0 }
-    g.spend += spend
-    g.impressions += impressions
+    const g = byCampaign.get(adset.campaignId) ?? emptyCampaign()
+    addToCampaign(g, spend, impressions, outcome)
     byCampaign.set(adset.campaignId, g)
   }
-  const campaigns: SpendDraft[] = [...byCampaign.entries()].map(([id, g]) => ({
+  return [...adsets, ...campaignDrafts(base, byCampaign)]
+}
+
+function adsetDraft(
+  base: DraftBase,
+  entityId: string,
+  spendMinor: number,
+  impressions: number,
+  outcome: Outcome,
+): SpendDraft {
+  return {
+    ...base,
+    entityLevel: 'adset',
+    entityId,
+    spendMinor,
+    impressions,
+    linkClicks: outcome.linkClicks,
+    results: outcome.results,
+  }
+}
+
+function campaignDrafts(base: DraftBase, byCampaign: Map<string, CampaignTotals>): SpendDraft[] {
+  return [...byCampaign.entries()].map(([id, g]) => ({
     ...base,
     entityLevel: 'campaign',
     entityId: id,
     spendMinor: g.spend,
     impressions: g.impressions,
+    linkClicks: g.linkClicks,
+    results: g.results,
   }))
-  return [...adsets, ...campaigns]
+}
+
+function emptyCampaign(): CampaignTotals {
+  return { spend: 0, impressions: 0, linkClicks: 0, results: 0 }
 }
