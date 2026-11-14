@@ -27,9 +27,9 @@
 候选学习卡；暂不进入共享规则正文。
 
 ## 效果回写
-尚无。
+2026-10-19 首轮只读验证（见 docs/audits/2026-10-19-social-learning-first-verification.md）：判 cannot_check。工厂 Reel 已发 21 条（仅 Facebook，CTS 20 + Oztop 1，窗口 2026-07-13~10-18），但单条表现回执全库只有 4 行（CTS，2026-09-06~09，仅点赞 1-2/评论 0，无观看/留存），带开场风格标签的仅 2/21，无法按开场类型分组且各组 n<5。
 
 ## 机器索引
 ```json
-{"pillar":"social","points":[{"key":"hook_matches_promise","text":"将与画面相符的开场方式作为单变量候选测试；效果尚无 ME 数据验证。","state":"learning","note":"不吸收外部数字阈值；优先只读历史数据。"}]}
+{"pillar":"social","points":[{"key":"hook_matches_promise","text":"将与画面相符的开场方式作为单变量候选测试；效果尚无 ME 数据验证。","state":"cannot_check","note":"缺逐条观看数据：已发 Reel 无首帧类型标签、无单条观看/留存回执；补齐后（约 2026-11 中）再验。"}]}
 ```
