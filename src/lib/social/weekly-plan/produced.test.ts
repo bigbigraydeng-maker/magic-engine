@@ -39,7 +39,7 @@ function input(): BuildInput {
 function produced(over: Partial<ProducedDrafts> = {}): ProducedDrafts {
   const empty = { requested: 0, drafted: 0, lines: [], skipped: null, error: null }
   return {
-    story: { ...empty, requested: 18, skipped: 'no_automatic_story_asset_source' },
+    story: { ...empty, requested: 18, skipped: 'no_factory_still' },
     post: {
       ...empty,
       requested: 4,
@@ -64,7 +64,7 @@ describe('applyProducedDrafts', () => {
     ])
     expect(plan.status).toBe('ready')
     expect(plan.gaps.some((gap) => gap.includes('已经生成的草稿'))).toBe(true)
-    expect(plan.gaps.some((gap) => gap.includes('没有可自动取的 Story 成片'))).toBe(true)
+    expect(plan.gaps.some((gap) => gap.includes('没有工厂静图成片'))).toBe(true)
   })
 
   it('keeps the other kinds when one kind failed', () => {

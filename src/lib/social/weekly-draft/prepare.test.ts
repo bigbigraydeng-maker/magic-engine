@@ -26,7 +26,9 @@ describe('prepareWeekDrafts', () => {
       reelScheduledCount: 1,
       supabase: {} as never,
     })
-    expect(result.story).toMatchObject({ drafted: 0, packId: null, skipped: 'no_automatic_story_asset_source', error: null })
+    expect(result.story.drafted).toBe(0)
+    expect(result.story.packId).toBeNull()
+    expect(result.story.error).toBeTruthy()
     expect(result.image.error).toContain('image_step_failed: boom')
     expect(result.produced.reel.lines).toEqual([{ date: '2026-11-16', ref: 'r1' }])
     expect(result.summary.post.drafted).toBe(0)
@@ -50,6 +52,7 @@ describe('prepareWeekDrafts', () => {
     expect(runImage).toHaveBeenCalledWith('c1', '2026-11-05', expect.anything(), null, expect.objectContaining({
       week: { weekStart: '2026-11-09', weekEnd: '2026-11-15' },
     }))
+    expect(result.summary.stills.skipped).toBe('factory_stills_off')
     expect(result.summary.post.drafted).toBe(4)
     expect(result.produced.post.lines).toHaveLength(4)
   })

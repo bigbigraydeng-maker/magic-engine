@@ -25,7 +25,12 @@ export interface ProducedDrafts {
 }
 
 const SKIP_ZH: Readonly<Record<string, string>> = {
-  no_automatic_story_asset_source: '没有可自动取的 Story 成片，没有新建周包',
+  no_factory_still: '没有工厂静图成片',
+  factory_stills_off: '静图开关关着',
+  factory_stills_unreadable: '静图成片读不到',
+  story_pack_exists: '这一周的 Story 草稿已经有了',
+  no_story_page: '没有可用的主页编号',
+  weekly_cap_reached: '静图花费到了本周上限',
   no_story_quota: '没有每周 Story 条数',
   story_count_zero: '每周 Story 条数是 0',
   story_count_over_cap: '每周 Story 条数超过一周上限',

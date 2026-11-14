@@ -56,6 +56,15 @@ export function isPosterRow(row: { vision_metadata?: unknown }): boolean {
   return readPosterLineage(row.vision_metadata) !== null
 }
 
+/** A finished factory still is not a base photo. A broken poster key must not let it back in. */
+export function isFactoryStillRow(row: { vision_metadata?: unknown }): boolean {
+  const raw = row.vision_metadata
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return false
+  const rec = raw as Record<string, unknown>
+  if (rec.kind === 'factory_still') return true
+  return typeof rec.factory_still === 'object' && rec.factory_still !== null && !Array.isArray(rec.factory_still)
+}
+
 /** 视觉分析给的 1-10 分；缺失返回 null（老数据不该被误伤）。 */
 function qualityOf(row: AssetRow): number | null {
   const raw = visionOf(row).quality_score
@@ -93,7 +102,7 @@ export function selectAssetUrls(
     .filter((r) => {
       if (!r.storage_url) return false
       if (visionOf(r).kind === 'video') return false
-      if (isPosterRow(r)) return false
+      if (isPosterRow(r) || isFactoryStillRow(r)) return false
       if (opts.requireVerified && !canBackRealPrice(r.source as string | null | undefined)) return false
       const q = qualityOf(r)
       return q == null || q >= MIN_QUALITY
@@ -197,6 +206,6 @@ export async function loadRankableClientAssets(
   //    一致的 JS 侧判断：只有明确写了 kind==='video' 才排除，键不存在按"不是视频"处理，
   //    避免同一个排除意图在两处用不同真值语义各写一份、其中一份还悄悄错了。
   return (data as RankableAssetRow[]).filter(
-    (r) => (r.vision_metadata as Record<string, unknown> | null)?.kind !== 'video' && !isPosterRow(r),
+    (r) => (r.vision_metadata as Record<string, unknown> | null)?.kind !== 'video' && !isPosterRow(r) && !isFactoryStillRow(r),
   )
 }
