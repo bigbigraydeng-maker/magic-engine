@@ -65,6 +65,9 @@ function wallToInstant(y: number, m: number, d: number, hh: number, mm: number, 
   return new Date(asUtc - tzOffsetMs(new Date(guess), timeZone))
 }
 
+/** 给笔记回电核对用：某时区「现在」的年月日、当地墙上时间 → 真实时刻（同上面两个函数，不另写一份）。 */
+export { localDate as localCalendarDate, wallToInstant as localWallToInstant }
+
 /** 三个快捷项 → 客户所在地的真实时刻（ISO）。 */
 export function resolveCallbackPreset(preset: CallbackPreset, now: Date, timeZone: string): string {
   const { y, m, d, weekday } = localDate(now, timeZone)
