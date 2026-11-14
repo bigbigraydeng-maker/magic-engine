@@ -11,6 +11,10 @@
 import type { DiscoveryReport } from '@/lib/zhangqian/types'
 import type { PrescriptionIntake, PrescriptionContent, PriorPrescriptionContext } from '@/types/diagnostic'
 import { adPlaysPromptSection, adPlaysSchemaExample } from '@/lib/ads-strategy/plan-seed/ad-plays-prompt'
+import {
+  prescriptionActionListPromptSection,
+  prescriptionActionListSchemaExample,
+} from '@/lib/ads/prescription-action-list-prompt'
 import type { GoalRow } from '@/types/strategy'
 import type { HuatuoLookupContext, TrendSummaryLite, SelfGradeWeakness } from './types'
 import { formatBenchmarksForPrompt } from './benchmarks'
@@ -53,6 +57,8 @@ export const HUATUO_GENERATION_SYSTEM_PROMPT = `你是华佗（Huà Tuó），Ma
    - 一个 Goal 至少 1 个 terminal Initiative. 不要全填 supporting.
 
 ${adPlaysPromptSection()}
+
+${prescriptionActionListPromptSection()}
 
 ## 输出语言规则
 
@@ -148,7 +154,8 @@ ${adPlaysPromptSection()}
       "amount_aud": number,
       "percentage": number
     }
-  ]
+  ],
+  ${prescriptionActionListSchemaExample()}
 }`
 
 // ─── Self-grade prompt（自评阶段）──────────────────────────────────────────────

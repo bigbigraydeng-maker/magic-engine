@@ -3,6 +3,7 @@ import type {
   PrescriptionAction, PrescriptionContent, PrescriptionPhase,
 } from '@/types/diagnostic'
 import { parseAdPlays } from '@/lib/ads-strategy/plan-seed/ad-plays'
+import { attachPrescriptionActionList, parsePrescriptionActionList } from '@/lib/ads/prescription-action-list'
 
 export const MANUAL_PRESCRIPTION_AGENT = '广告 Agent'
 
@@ -219,7 +220,12 @@ function parseContent(raw: unknown): StepResult<{ content: PrescriptionContent }
     summary: raw.summary, phases, kpi_targets: kpis.items, budget_allocation: budgets.items,
   }
   if (typeof raw.narrative === 'string') content.narrative = raw.narrative
-  return { ok: true, content }
+  if ('action_list' in raw) {
+    const actions = parsePrescriptionActionList(raw.action_list)
+    if (!actions.ok) return fail(422, actions.reason)
+    if (actions.action_list.length > 0) content.action_list = actions.action_list
+  }
+  return { ok: true, content: attachPrescriptionActionList(content) }
 }
 
 export function parseManualPrescriptionBody(body: unknown, clientId: string): ManualParseResult {
@@ -230,11 +236,18 @@ export function parseManualPrescriptionBody(body: unknown, clientId: string): Ma
   if (typeof body.goal_id !== 'string' || !body.goal_id.trim()) return fail(400, 'goal_id 必填')
   const content = parseContent(body.content)
   if (!content.ok) return content
+  let generationMeta = buildGenerationMeta(body.generation_meta, body.source_refs)
+  if (body.content && typeof body.content === 'object' && !Array.isArray(body.content) && 'action_list' in body.content) {
+    const actions = parsePrescriptionActionList((body.content as Record<string, unknown>).action_list)
+    if (actions.ok && actions.dropped_reason) {
+      generationMeta = { ...generationMeta, action_list_dropped_reason: actions.dropped_reason }
+    }
+  }
   return {
     ok: true,
     goalId: body.goal_id.trim(),
     content: content.content,
-    generationMeta: buildGenerationMeta(body.generation_meta, body.source_refs),
+    generationMeta,
   }
 }
 
