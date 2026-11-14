@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
+import type { ComposeTourPosterResult } from '@/lib/social/image-post-poster'
+
 import { produceFactoryStills } from './still-produce'
 import { planStillSlots, roomForAnother } from './still-plan'
 import { readFactoryStillConfig } from './still-config'
@@ -38,7 +40,7 @@ describe('produceFactoryStills', () => {
   it('stops before a second image once the weekly cap is used', async () => {
     const inserts: Array<{ table: string; row: Record<string, unknown> }> = []
     const supabase = capSupabase(inserts)
-    const compose = vi.fn(async () => ({
+    const compose = vi.fn(async (): Promise<ComposeTourPosterResult> => ({
       ok: true,
       assetId: 'asset-1',
       receipt: {

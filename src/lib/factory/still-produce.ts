@@ -4,6 +4,7 @@
  */
 
 import { createHash } from 'node:crypto'
+import type { SupabaseClient } from '@supabase/supabase-js'
 
 import { loadRankableClientAssets, type RankableAssetRow } from '@/lib/factory/client-asset-pool'
 import type { ComposeTourPosterResult } from '@/lib/social/image-post-poster'
