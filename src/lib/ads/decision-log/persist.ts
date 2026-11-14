@@ -1,5 +1,7 @@
 /**
  * Non-blocking persistence for ads_decision_v1 on flywheel_actions.
+ * Card ledger rows are append-only from this module: a decision is a new row,
+ * and a later review replaces only ads_decision_v1 on the latest payload.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -23,17 +25,13 @@ export async function mergeDecisionOntoCardRow(
     currentPayload: Record<string, unknown> | null
   },
 ): Promise<void> {
-  const existing = readAdsDecisionV1(input.currentPayload)
-  if (existing?.status === 'active' && existing.review_result) return
-  const payload = { ...(input.currentPayload ?? {}), ads_decision_v1: input.decision }
-  const { error } = await supabase
-    .from('flywheel_actions')
-    .update({ payload })
-    .eq('id', input.actionId)
-    .eq('client_id', input.clientId)
-  if (error) {
-    console.warn('[ads-decision-log] merge card row failed:', error.message)
-  }
+  if (readAdsDecisionV1(input.currentPayload)) return
+  const linked = await linkedDecisionExists(supabase, input.clientId, input.actionId)
+  if (linked !== false) return
+  const decision = input.decision.linked_card_action_id
+    ? input.decision
+    : { ...input.decision, linked_card_action_id: input.actionId }
+  await insertDecisionLogRow(supabase, input.clientId, decision)
 }
 
 export async function insertDecisionLogRow(
@@ -71,7 +69,12 @@ export async function patchDecisionOnRow(
     currentPayload?: Record<string, unknown> | null
   },
 ): Promise<boolean> {
-  const payload = { ...(input.currentPayload ?? {}), ads_decision_v1: input.decision }
+  const latest = await latestPayload(supabase, input.clientId, input.actionId)
+  if (!latest) {
+    console.warn('[ads-decision-log] patch skipped; latest ledger row unread')
+    return false
+  }
+  const payload = { ...latest, ads_decision_v1: input.decision }
   const { error } = await supabase
     .from('flywheel_actions')
     .update({ payload })
@@ -82,6 +85,44 @@ export async function patchDecisionOnRow(
     return false
   }
   return true
+}
+
+async function linkedDecisionExists(
+  supabase: SupabaseClient,
+  clientId: string,
+  cardActionId: string,
+): Promise<boolean | null> {
+  const { data, error } = await supabase
+    .from('flywheel_actions')
+    .select('id')
+    .eq('client_id', clientId)
+    .eq('flywheel', 'ads')
+    .eq('action_type', ADS_ACTION_TYPE.DECISION_LOG)
+    .eq('payload->ads_decision_v1->>linked_card_action_id', cardActionId)
+    .limit(1)
+  if (error || !Array.isArray(data)) {
+    if (error) console.warn('[ads-decision-log] linked decision lookup failed:', error.message)
+    return null
+  }
+  return data.length > 0
+}
+
+async function latestPayload(
+  supabase: SupabaseClient,
+  clientId: string,
+  actionId: string,
+): Promise<Record<string, unknown> | null> {
+  const { data, error } = await supabase
+    .from('flywheel_actions')
+    .select('payload')
+    .eq('id', actionId)
+    .eq('client_id', clientId)
+    .maybeSingle()
+  if (error || !data) return null
+  const payload = (data as { payload?: unknown }).payload
+  return payload !== null && typeof payload === 'object' && !Array.isArray(payload)
+    ? { ...(payload as Record<string, unknown>) }
+    : null
 }
 
 export function nzBusinessDateFromIso(iso: string, addDays: number): string {
