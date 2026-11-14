@@ -1,0 +1,40 @@
+{
+  "built_on": "2026-10-18",
+  "built_for": "atmosphere 氛围片样片（外滩日落类）；PM 10-18 批准下载这两条（经 18 号转述，18 号执行下载）",
+  "clips": [
+    {
+      "file": "atm1_shanghai_sunset_huangpu.mp4",
+      "original_file": "18803234-hd_1080_1920_30fps.mp4",
+      "source": "Pexels",
+      "id": "18803234",
+      "author": "Cfq938888 Chen",
+      "license": "Pexels License（免费商用，无需署名；不得转售原片）",
+      "url": "https://www.pexels.com/video/the-sun-is-setting-over-a-city-skyline-18803234/",
+      "sha256": "c123a27d426ca900e8d4541e92fb4acf85a8f2a5bda7e36bfdc6fcc2c9df2298",
+      "bytes": 28720946,
+      "probe": "h264 1080x1920 29.97fps 39.79s（原片带 aac 环境音，模板渲染时静音）；无旋转标记",
+      "location": "Shanghai（黄浦江，对岸为外滩一带）",
+      "location_evidence": "Pexels 页面标签含 Shanghai、Shanghai Skyline（同页另有 Mumbai/Chongqing/Mississippi 等无关标签，标签不可单独采信）；作者简介「doctor of Shanghai」；画面为黄浦江对岸的历史建筑群与过往驳船（我目视核对）",
+      "verdict": "可写 Shanghai / Huangpu River 日落；不要写具体建筑名",
+      "people": "无人像（前景驳船，远处无可辨人物）",
+      "used_in": "atmosphere 样片（待出）"
+    },
+    {
+      "file": "atm2_oriental_pearl_sunset_aerial.mp4",
+      "original_file": "15911226-hd_1080_1920_30fps.mp4",
+      "source": "Pexels",
+      "id": "15911226",
+      "author": "KJeremy",
+      "license": "Pexels License（免费商用，无需署名；不得转售原片）",
+      "url": "https://www.pexels.com/video/the-sun-is-setting-over-the-oriental-pearl-tower-15911226/",
+      "sha256": "508c5c88476448d0c798e355bd0bc428cab922454e868b209b4082bc654847c7",
+      "bytes": 10534935,
+      "probe": "h264 1080x1920 30fps 14.30s；无旋转标记",
+      "location": "Shanghai，东方明珠塔",
+      "location_evidence": "页面描述原文：Breathtaking aerial view of the Oriental Pearl Tower during sunset in Shanghai.；标签含 Shanghai、Shanghai Skyline；画面塔形与之吻合（我目视核对）",
+      "verdict": "可写 Shanghai / Oriental Pearl Tower",
+      "people": "无人像（航拍）",
+      "used_in": "atmosphere 样片（备选，14.3s 只够 ≤14s 成片）"
+    }
+  ]
+}
