@@ -9,7 +9,7 @@ import {
 import type { AddCreativeCardDetail } from '@/lib/ads-creative-card/display'
 import type { CardStatus } from '@/lib/confirmation-card/view'
 import { ConfirmationCard } from './ConfirmationCard'
-import { STATUS_CHIP_LABEL, isMutedStatus } from './card-display'
+import { STATUS_CHIP_LABEL, addCreativeChipClass, isMutedStatus, visibleStatusChip } from './card-display'
 
 export interface CardPayload {
   readonly runId: string
@@ -27,6 +27,7 @@ export interface CardPayload {
   readonly declineEnabled: boolean
   readonly blockedReason: string | null
   readonly addCreativeDetail?: AddCreativeCardDetail | null
+  readonly addCreativeStatusChip?: string | null
 }
 
 function text(value: unknown): string | null {
@@ -101,6 +102,7 @@ export function toCardPayload(value: unknown): CardPayload | null {
     declineEnabled: row.declineEnabled,
     blockedReason: row.blockedReason,
     addCreativeDetail: readAddCreativeDetail(row.addCreativeDetail),
+    addCreativeStatusChip: text(row.addCreativeStatusChip),
   }
 }
 
@@ -155,6 +157,7 @@ function CardRow({ clientId, card }: { clientId: string; card: CardPayload }) {
       setView({
         ...result,
         addCreativeDetail: result.addCreativeDetail ?? view.addCreativeDetail,
+        addCreativeStatusChip: result.addCreativeStatusChip ?? view.addCreativeStatusChip,
       })
     }
     setBusy(false)
@@ -179,6 +182,7 @@ function CardRow({ clientId, card }: { clientId: string; card: CardPayload }) {
         goLiveHref={goLive ? GO_LIVE_CONFIRM_HREF : undefined}
         goLiveLabel={goLive ? GO_LIVE_CONFIRM_LABEL : undefined}
         addCreativeDetail={view.addCreativeDetail}
+        addCreativeStatusChip={view.addCreativeStatusChip}
         onConfirm={() => { void send('confirm') }}
         onDecline={() => { void send('decline') }}
       />
@@ -215,9 +219,10 @@ function StatusChip({
 }
 
 function RecentRow({ card }: { card: CardPayload }) {
-  const chip = STATUS_CHIP_LABEL[card.status]
-  const chipClass =
-    card.status === 'confirmed'
+  const chip = visibleStatusChip(card)
+  const chipClass = card.addCreativeStatusChip
+    ? addCreativeChipClass(card.addCreativeStatusChip)
+    : card.status === 'confirmed'
       ? 'bg-sky-100 text-sky-900'
       : card.status === 'declined'
         ? 'bg-me-charcoal/10 text-me-charcoal/70'

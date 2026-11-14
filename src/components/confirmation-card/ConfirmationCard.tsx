@@ -8,7 +8,7 @@
 import type { AddCreativeCardDetail } from '@/lib/ads-creative-card/display'
 import type { CardStatus } from '@/lib/confirmation-card/view'
 import { AddCreativeCardDetails } from './AddCreativeCardDetails'
-import { expiryBadgeText, touchesMetaAds } from './card-display'
+import { addCreativeChipClass, expiryBadgeText, touchesMetaAds } from './card-display'
 
 export interface ConfirmationCardProps {
   readonly what: string
@@ -29,6 +29,7 @@ export interface ConfirmationCardProps {
   readonly onConfirm: () => void
   readonly onDecline: () => void
   readonly addCreativeDetail?: AddCreativeCardDetail | null
+  readonly addCreativeStatusChip?: string | null
 }
 
 function DetailRow({ label, value }: { label: string; value: string }) {
@@ -58,6 +59,13 @@ export function ConfirmationCard(props: ConfirmationCardProps) {
           <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2.5 py-1 font-semibold text-red-800">
             <span aria-hidden>⚠</span>
             会改动 Meta 里的广告
+          </span>
+        ) : null}
+        {props.addCreativeStatusChip ? (
+          <span
+            className={`rounded-full px-2.5 py-1 font-semibold ${addCreativeChipClass(props.addCreativeStatusChip)}`}
+          >
+            {props.addCreativeStatusChip}
           </span>
         ) : null}
         <span className="rounded-full bg-me-charcoal/5 px-2.5 py-1 font-medium text-me-charcoal/70">

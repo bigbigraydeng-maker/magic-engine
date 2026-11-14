@@ -10,7 +10,7 @@ import {
   listConfirmationCards,
 } from '@/lib/confirmation-card'
 import { parseIssueBody, publicError } from '@/lib/confirmation-card/http'
-import { addCreativeDetailsByRunId, addCreativeResultLines } from '@/lib/ads-creative-card/hold-display'
+import { addCreativeListExtrasByRunId } from '@/lib/ads-creative-card/hold-display'
 import { pausedDraftResultLines } from '@/lib/ads-strategy/paused-draft-submit'
 
 function clickerOf(req: Request, email: string, role: 'admin' | 'client-viewer', allowedClientId: string | null, clientId: string) {
@@ -37,16 +37,25 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   try {
     const kernel = createKernel(supabaseAdmin)
     const cards = await listConfirmationCards(kernel, params.id, clicker)
-    const [draftLines, creativeLines, creativeDetails] = await Promise.all([
+    const [draftLines, creativeExtras] = await Promise.all([
       pausedDraftResultLines(kernel.supabase, params.id),
-      addCreativeResultLines(kernel.supabase, params.id),
-      addCreativeDetailsByRunId(kernel.supabase, params.id),
+      addCreativeListExtrasByRunId(kernel.supabase, params.id),
     ])
     const shown = cards.map((card) => {
-      const line = creativeLines.get(card.runId) ?? draftLines.get(card.runId)
-      const addCreativeDetail = creativeDetails.get(card.runId) ?? null
-      const merged = line ? { ...card, statusLine: line } : card
-      return addCreativeDetail ? { ...merged, addCreativeDetail } : merged
+      const extra = creativeExtras.get(card.runId)
+      const draftLine = draftLines.get(card.runId)
+      let merged = draftLine ? { ...card, statusLine: draftLine } : card
+      if (extra) {
+        merged = { ...merged, addCreativeDetail: extra.detail }
+        if (extra.statusChip) {
+          merged = {
+            ...merged,
+            addCreativeStatusChip: extra.statusChip,
+            statusLine: extra.statusLine ?? merged.statusLine,
+          }
+        }
+      }
+      return merged
     })
     return NextResponse.json({ cards: shown })
   } catch (error) {

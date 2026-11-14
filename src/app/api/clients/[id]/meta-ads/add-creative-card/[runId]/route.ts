@@ -9,6 +9,7 @@ import { createKernel } from '@/lib/kernel'
 import { isUuid } from '@/lib/validation-utils'
 import { parseDecisionBody, publicError } from '@/lib/confirmation-card/http'
 import { confirmCreativeCard } from '@/lib/ads-creative-card/flow'
+import { addCreativeListExtrasForRun } from '@/lib/ads-creative-card/hold-display'
 import { makeCreativeDeps } from '@/lib/ads-creative-card/runtime'
 import { creativeCardGate } from '../access'
 
@@ -33,7 +34,16 @@ export async function POST(req: Request, { params }: { params: { id: string; run
       ...body,
     })
     if (!result.card) return NextResponse.json({ error: result.reason }, { status: 409 })
-    return NextResponse.json({ ...result.card, statusLine: result.reason })
+    const extras = await addCreativeListExtrasForRun(supabaseAdmin, params.id, params.runId)
+    const base = { ...result.card, statusLine: result.reason }
+    if (!extras) return NextResponse.json(base)
+    const withDetail = { ...base, addCreativeDetail: extras.detail }
+    if (!extras.statusChip) return NextResponse.json(withDetail)
+    return NextResponse.json({
+      ...withDetail,
+      addCreativeStatusChip: extras.statusChip,
+      statusLine: extras.statusLine ?? result.reason,
+    })
   } catch (error) {
     const mapped = publicError(error)
     if (mapped.status === 500) console.error('[add-creative-card] confirm failed')

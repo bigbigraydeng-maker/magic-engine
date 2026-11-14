@@ -57,6 +57,33 @@ describe('ConfirmationCard', () => {
     expect(screen.queryByText('账户：')).not.toBeInTheDocument()
   })
 
+  it('shows add-creative outcome chip on the card header', () => {
+    render(
+      <ConfirmationCard
+        {...base}
+        what="往这个广告组加一条图片广告"
+        statusLine="新广告已建成，状态是暂停。没有改这一组的预算。"
+        confirmEnabled={false}
+        declineEnabled={false}
+        blockedReason={null}
+        addCreativeStatusChip="已做完"
+        addCreativeDetail={{
+          imageUrl: null,
+          imageFilename: 'demo.jpg',
+          adName: '春季海报',
+          headline: '标题',
+          primaryText: '正文',
+          ctaLabel: '了解更多',
+          adSetLabel: '组',
+          newAdStatusLabel: '先暂停',
+          confirmSentence: '确认后：在这个广告组里新建一条暂停中的广告，用上面的图和文字；预算不变。',
+        }}
+      />,
+    )
+    expect(screen.getByText('已做完')).toBeInTheDocument()
+    expect(screen.getByText('新广告已建成，状态是暂停。没有改这一组的预算。')).toBeInTheDocument()
+  })
+
   it('greys out confirm and shows the reason when a hard check failed', () => {
     render(
       <ConfirmationCard
