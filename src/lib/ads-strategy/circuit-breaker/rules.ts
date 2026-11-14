@@ -3,6 +3,9 @@
  * Confirmed by Ray 2026-11-10: a confirm card when cost per primary result
  * is over twice the client's own target. Data stale for 12 hours or more
  * is a reminder only, never a pause card.
+ * Staleness is judged only for accounts that are actually delivering.
+ * An idle account cannot cancel cards for the client's other accounts.
+ * A delivering account that is stale blocks only cards that use its numbers.
  * A missing cap, target, or primary-result count is "cannot judge", not zero.
  */
 
@@ -63,6 +66,12 @@ export interface BreakerFacts {
   readonly insights: readonly InsightStamp[]
   readonly accounts: readonly string[]
   readonly freshReadable: boolean
+  /**
+   * Accounts that are actually delivering: recent spend, or a live entity
+   * in a snapshot that is still inside the stale window.
+   * Idle accounts are omitted and must not be marked stale.
+   */
+  readonly deliveringAccounts: readonly string[]
   /** null = the configured primary result is not a count this pass can read. */
   readonly primaryResult: PrimaryResultKind | null
 }
@@ -124,11 +133,10 @@ export function previousDay(day: string): string {
 
 export function judgeBreaker(facts: BreakerFacts): BreakerJudgement {
   if (!facts.settings.enabled) return { pauses: [], alerts: [] }
-  const alerts = [spendAlert(facts), cplAlert(facts), policyAlert(facts), freshAlert(facts)].flatMap((item) => item ?? [])
-  if (alerts.some((item) => item.code === 'stale' || item.code === 'fresh_unreadable')) return { pauses: [], alerts }
-  const spend = spendPause(facts)
-  const pauses = mergePauses([...(spend ? [spend] : []), ...cplPauses(facts), ...policyPauses(facts)])
-  return { pauses, alerts }
+  const alerts = collectAlerts(facts)
+  if (alerts.some((item) => item.code === 'fresh_unreadable')) return { pauses: [], alerts }
+  const staleIds = new Set(alerts.filter((item) => item.code === 'stale').map((item) => item.accountId))
+  return { pauses: judgedPauses(facts, staleIds), alerts }
 }
 
 function spendPause(facts: BreakerFacts): PauseProposal | null {
@@ -223,12 +231,47 @@ function policyAlert(facts: BreakerFacts): AlertFinding | null {
   return alert('policy_unreadable', '', '广告设置读不全，没有拿政策问题去出暂停卡。')
 }
 
-function freshAlert(facts: BreakerFacts): AlertFinding | null {
-  if (!facts.freshReadable) return alert('fresh_unreadable', '', '广告快照或花费的更新时间读不出来。这条只是提醒，不会出暂停卡。')
+function collectAlerts(facts: BreakerFacts): AlertFinding[] {
+  const head = [spendAlert(facts), cplAlert(facts), policyAlert(facts)].flatMap((item) => item ?? [])
+  return [...head, ...freshAlerts(facts)]
+}
+
+function judgedPauses(facts: BreakerFacts, staleIds: ReadonlySet<string>): PauseProposal[] {
+  const delivering = new Set(facts.deliveringAccounts ?? [])
+  const own = (pause: PauseProposal) => delivering.has(pause.accountId) && !staleIds.has(pause.accountId)
+  const spend = spendPause(spendFacts(facts, staleIds))
+  return mergePauses([
+    ...(spend && own(spend) ? [spend] : []),
+    ...cplPauses(facts).filter(own),
+    ...policyPauses(facts).filter(own),
+  ])
+}
+
+/** Drop spend from stale delivering accounts. Known spend can still justify a cap card. */
+function spendFacts(facts: BreakerFacts, staleIds: ReadonlySet<string>): BreakerFacts {
+  if (staleIds.size === 0) return facts
+  return { ...facts, spend: facts.spend.filter((row) => !staleIds.has(row.accountId)) }
+}
+
+const STALE_REMINDER = '广告设置快照或花费数据已经达到或超过约定时间没更新。这条只是提醒，不会出暂停卡。'
+const FRESH_UNREADABLE = '广告快照或花费的更新时间读不出来。这条只是提醒，不会出暂停卡。'
+
+function freshAlerts(facts: BreakerFacts): AlertFinding[] {
+  if (!facts.freshReadable) return [alert('fresh_unreadable', '', FRESH_UNREADABLE)]
+  return staleDeliveringAccounts(facts).map((accountId) => alert('stale', accountId, STALE_REMINDER))
+}
+
+function staleDeliveringAccounts(facts: BreakerFacts): string[] {
   const limit = facts.settings.staleHours || DEFAULT_STALE_HOURS
-  const stale = facts.accounts.filter((accountId) => accountIsStale(facts, accountId, limit))
-  if (stale.length === 0) return null
-  return alert('stale', stale[0] ?? '', '广告设置快照或花费数据已经达到或超过约定时间没更新。这条只是提醒，不会出暂停卡。')
+  const delivering = new Set(facts.deliveringAccounts ?? [])
+  const seen = new Set<string>()
+  const stale: string[] = []
+  for (const accountId of facts.accounts) {
+    if (!accountId || seen.has(accountId) || !delivering.has(accountId)) continue
+    seen.add(accountId)
+    if (accountIsStale(facts, accountId, limit)) stale.push(accountId)
+  }
+  return stale
 }
 
 function accountIsStale(facts: BreakerFacts, accountId: string, limit: number): boolean {
