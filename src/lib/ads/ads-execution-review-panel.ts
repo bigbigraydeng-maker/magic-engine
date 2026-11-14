@@ -2,15 +2,18 @@
  * Read-only view model: executed budget / pause cards and their post-window verdict.
  */
 import {
-  BUDGET_CARD_ACTION,
+  CAMPAIGN_PAUSE_ACTION,
+  MONEY_CARD_ACTION,
   PAUSE_CARD_ACTION,
   observationDue,
   readExecutedReview,
+  reviewExperienceKindLabel,
+  reviewWindowKindFor,
   type ReviewAction,
 } from '@/lib/flywheel/attribution/executed-review'
 import {
   DEFAULT_REVIEW_VERDICT_RULES,
-  observationWindowForAction,
+  observationWindowForKind,
   type ReviewVerdictRules,
 } from '@/lib/flywheel/attribution/review-verdict-rules'
 
@@ -112,20 +115,47 @@ function whatDoneFromPayload(actionType: string, payload: Record<string, unknown
   if (before !== null && after !== null) {
     return `日预算从 ${before} 调到 ${after}`
   }
-  const left = statusWord(payload.before)
-  const right = statusWord(payload.after)
   if (actionType === PAUSE_CARD_ACTION) {
+    const left = statusWord(payload.before)
+    const right = statusWord(payload.after)
     if (left && right) return `从${left}改成${right}`
     return '暂停了这一组'
+  }
+  if (actionType === CAMPAIGN_PAUSE_ACTION) {
+    const b = record(payload.before)
+    const a = record(payload.after)
+    const left = statusWord(b?.status)
+    const right = statusWord(a?.status)
+    if (left && right) return `从${left}改成${right}`
+    return '暂停了这一系列'
+  }
+  if (actionType === MONEY_CARD_ACTION) {
+    if (payload.lane === 'pause_adset') return '暂停了这一组'
+    if (before !== null && after !== null) return `日预算从 ${before} 调到 ${after}`
   }
   const line = text(payload.resultLine)
   return line
 }
 
-function beforeAfterFromPayload(payload: Record<string, unknown>): { before: string | null; after: string | null } {
+function beforeAfterFromPayload(
+  actionType: string | null,
+  payload: Record<string, unknown>,
+): { before: string | null; after: string | null } {
+  if (actionType === CAMPAIGN_PAUSE_ACTION) {
+    const b = record(payload.before)
+    const a = record(payload.after)
+    return { before: statusWord(b?.status), after: statusWord(a?.status) }
+  }
   const before = moneyFromCents(payload.beforeCents) ?? statusWord(payload.before)
   const after = moneyFromCents(payload.afterCents) ?? statusWord(payload.after)
   return { before, after }
+}
+
+function panelUiKind(windowKind: ReturnType<typeof reviewWindowKindFor>): 'budget' | 'pause' {
+  if (windowKind === 'pause_adset' || windowKind === 'money_pause' || windowKind === 'campaign_pause') {
+    return 'pause'
+  }
+  return 'budget'
 }
 
 function beforeAfterFromOutcome(
@@ -175,20 +205,21 @@ export function buildExecutionReviewItem(
   rules: ReviewVerdictRules = DEFAULT_REVIEW_VERDICT_RULES,
 ): ExecutionReviewItem | null {
   const actionType = row.action_type
-  if (actionType !== BUDGET_CARD_ACTION && actionType !== PAUSE_CARD_ACTION) return null
   const payload = record(row.payload)
-  if (!payload || payload.status !== 'executed') return null
+  if (!actionType || !payload || payload.status !== 'executed') return null
+  const windowKind = reviewWindowKindFor(actionType, payload)
+  if (!windowKind) return null
 
-  const kind = actionType === BUDGET_CARD_ACTION ? 'budget' as const : 'pause' as const
-  const kind_label = kind === 'budget' ? '调日预算' : '暂停广告组'
+  const kind = panelUiKind(windowKind)
+  const kind_label = reviewExperienceKindLabel(actionType, payload)
   const read = readExecutedReview(asReviewAction(row))
   const windowDays = read.kind === 'ready'
-    ? observationWindowForAction(actionType, rules, read.review.observationWindowDays)
+    ? observationWindowForKind(windowKind, rules, read.review.observationWindowDays)
     : null
   const executedAt = text(row.executed_at)
 
   const reviewCase = reviewCaseOf(payload)
-  const payloadBa = beforeAfterFromPayload(payload)
+  const payloadBa = beforeAfterFromPayload(actionType, payload)
   const outcomeBa = beforeAfterFromOutcome(row.outcome_baseline, row.outcome_after)
 
   let phase: ExecutionReviewPhase = 'incomplete'
