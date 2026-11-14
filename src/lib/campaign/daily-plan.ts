@@ -83,6 +83,8 @@ export interface CampaignDailyPlanData {
     source: 'conversation_command' | 'auto_image_post'
     received_at: string
     raw_summary: string | null
+    /** Auto image posts with a poster recipe only: what the poster attempt did (composed or fell back). */
+    poster?: CampaignDailyPosterMeta
   }
   /**
    * Human review of the Facebook Post for individual dates. This is kept
@@ -106,6 +108,32 @@ export interface CampaignDailyPlanData {
    * matching plan+review revision is what makes a re-run idempotent.
    */
   publish_meta?: CampaignDailyPublishMeta
+}
+
+/**
+ * Receipt of one poster-recipe attempt for an auto image post. Informational only:
+ * the publish gate never trusts it — it re-reads the poster's `client_assets` row.
+ */
+export interface CampaignDailyPosterMeta {
+  recipe_id: string
+  recipe_version: number
+  source_asset_id: string
+  /** composed = new poster; reused = an identical poster already existed (no new spend). */
+  status: 'composed' | 'reused' | 'fallback'
+  reason: string | null
+  poster_asset_id: string | null
+  has_price: boolean
+  /** Image-edit spend only. */
+  cost_usd: number | null
+  provider_request_id: string | null
+  created_at: string
+  /** Read-back of the poster text (null when the check never ran). */
+  text_check: {
+    status: 'match' | 'mismatch' | 'failed'
+    /** What the reader copied off the poster, truncated to 500 chars. */
+    transcribed: string | null
+    cost_usd: number | null
+  } | null
 }
 
 export type CampaignDailyPostReviewVerdict = 'PASS' | 'NEEDS_REVISION'

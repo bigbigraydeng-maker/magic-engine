@@ -6,6 +6,7 @@
  */
 import type {
   CampaignDailyPlanData,
+  CampaignDailyPosterMeta,
   CampaignDailyPostDraft,
 } from '@/lib/campaign/daily-plan'
 import { CAMPAIGN_DAILY_PLAN_KIND } from '@/lib/campaign/daily-plan'
@@ -20,6 +21,8 @@ export interface ImagePostPlanWriterInput {
   date: string // YYYY-MM-DD
   draft: CampaignDailyPostDraft
   tourSlug: string
+  /** Poster-recipe receipt; omitted → command_meta has no `poster` key (unchanged shape). */
+  poster?: CampaignDailyPosterMeta
 }
 
 export interface ImagePostPlanWriterDeps {
@@ -41,7 +44,7 @@ export type ImagePostPlanWriteResult =
 // ---------------------------------------------------------------------------
 
 export function buildImagePostPlanData(
-  input: Pick<ImagePostPlanWriterInput, 'campaignId' | 'date' | 'draft' | 'tourSlug'>,
+  input: Pick<ImagePostPlanWriterInput, 'campaignId' | 'date' | 'draft' | 'tourSlug' | 'poster'>,
 ): CampaignDailyPlanData {
   const now = new Date().toISOString()
   return {
@@ -66,6 +69,7 @@ export function buildImagePostPlanData(
       source: 'auto_image_post',
       received_at: now,
       raw_summary: `Auto-drafted image post for tour "${input.tourSlug}" on ${input.date}`,
+      ...(input.poster ? { poster: input.poster } : {}),
     },
   }
 }

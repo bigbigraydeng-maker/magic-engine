@@ -23,7 +23,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabaseAdmin } from '@/lib/supabase'
 import { projectOrFilter } from '@/lib/clients/project-scope'
-import { canBackRealPrice } from '@/lib/assets/provenance'
+import { canBackRealPrice, readPosterLineage } from '@/lib/assets/provenance'
 
 /** 每个客户最多取这么多张当底图池 —— 够轮换即可，不必全量。 */
 const MAX_ASSETS = 40
@@ -45,6 +45,15 @@ export interface AssetRow {
 
 function visionOf(row: AssetRow): Record<string, unknown> {
   return (row.vision_metadata ?? {}) as Record<string, unknown>
+}
+
+/**
+ * AI 排版海报（`vision_metadata.poster` 血统合格）不是真实素材：上面已经印了字，
+ * 再拿去当底图 / 真实照片会出「海报套海报」或把旧价格旧日期带进新片。
+ * 在内存里判（同下方 kind 的事故注释：jsonb 键不存在时 PostgREST not-eq 会误杀整批）。
+ */
+export function isPosterRow(row: { vision_metadata?: unknown }): boolean {
+  return readPosterLineage(row.vision_metadata) !== null
 }
 
 /** 视觉分析给的 1-10 分；缺失返回 null（老数据不该被误伤）。 */
@@ -84,6 +93,7 @@ export function selectAssetUrls(
     .filter((r) => {
       if (!r.storage_url) return false
       if (visionOf(r).kind === 'video') return false
+      if (isPosterRow(r)) return false
       if (opts.requireVerified && !canBackRealPrice(r.source as string | null | undefined)) return false
       const q = qualityOf(r)
       return q == null || q >= MIN_QUALITY
@@ -187,6 +197,6 @@ export async function loadRankableClientAssets(
   //    一致的 JS 侧判断：只有明确写了 kind==='video' 才排除，键不存在按"不是视频"处理，
   //    避免同一个排除意图在两处用不同真值语义各写一份、其中一份还悄悄错了。
   return (data as RankableAssetRow[]).filter(
-    (r) => (r.vision_metadata as Record<string, unknown> | null)?.kind !== 'video',
+    (r) => (r.vision_metadata as Record<string, unknown> | null)?.kind !== 'video' && !isPosterRow(r),
   )
 }

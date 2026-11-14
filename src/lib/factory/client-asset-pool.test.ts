@@ -116,3 +116,37 @@ describe('selectAssetUrls', () => {
     expect(selectAssetUrls([uploaded])).toEqual(['u'])
   })
 })
+
+// AI 排版海报（vision_metadata.poster 血统合格）不是真实素材 —— 共享取料处统一排除。
+const posterMeta = (over: Record<string, unknown> = {}) => ({
+  quality_score: 9,
+  poster: {
+    recipe_id: 'tour_poster_v1', recipe_version: 1, source_asset_id: 'a1b2c3d4-0000-4000-8000-000000000001',
+    has_price: true, text_lines: ['X'], cost_usd: 0.038, provider_request_id: null,
+    created_at: '2026-11-15T00:00:00.000Z', ...over,
+  },
+})
+
+describe('取料池排除 AI 海报', () => {
+  it('loadRankableClientAssets：合格海报行排除，照片和不合格的 poster 键保留', async () => {
+    const rows = [
+      { id: 'photo', storage_url: 'a', original_filename: 'a.jpg', vision_metadata: { scene: 'x' }, source: 'fde_shot' },
+      { id: 'poster', storage_url: 'b', original_filename: 'b.jpg', vision_metadata: posterMeta(), source: 'ai_generated' },
+      { id: 'junk', storage_url: 'c', original_filename: 'c.jpg', vision_metadata: posterMeta({ source_asset_id: 'bad' }), source: 'unknown' },
+    ]
+    const fake = fakeAssetQuery(rows)
+    const out = await loadRankableClientAssets('client-1', fake as never, null, null)
+    expect(out.map((r) => r.id).sort()).toEqual(['junk', 'photo'])
+    // 依旧不在数据库层用 jsonb not-eq 过滤
+    expect(fake.calls.some((c) => c.method === 'not' && String(c.args[0]).includes('vision_metadata'))).toBe(false)
+  })
+
+  it('selectAssetUrls：海报不进底图池（即便质量分最高、requireVerified 关着）', () => {
+    const rows: AssetRow[] = [
+      { storage_url: 'poster', vision_metadata: posterMeta(), source: 'ai_generated' },
+      { storage_url: 'photo', vision_metadata: { quality_score: 6 }, source: 'fde_shot' },
+    ]
+    expect(selectAssetUrls(rows)).toEqual(['photo'])
+    expect(selectAssetUrls(rows, 40, { requireVerified: true })).toEqual(['photo'])
+  })
+})

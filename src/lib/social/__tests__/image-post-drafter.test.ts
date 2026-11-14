@@ -11,6 +11,7 @@ import {
   type ImagePostDrafterInput,
   type ImagePostDrafterDeps,
 } from '../image-post-drafter'
+import type { PosterReceipt } from '../image-post-poster'
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -187,6 +188,84 @@ describe('draftImagePost', () => {
     })
     const result = await draftImagePost(makeInput(), deps)
     expect(result.ok).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// draftImagePost — optional poster recipe
+// ---------------------------------------------------------------------------
+
+const POSTER_ID = 'p0000000-0000-4000-8000-000000000001'
+const receipt = (over: Partial<PosterReceipt> = {}): PosterReceipt => ({
+  recipe_id: 'tour_poster_v1',
+  recipe_version: 1,
+  source_asset_id: 'x',
+  status: 'composed',
+  reason: null,
+  poster_asset_id: POSTER_ID,
+  has_price: true,
+  cost_usd: 0.038,
+  provider_request_id: 'req-1',
+  created_at: '2026-11-15T00:00:00.000Z',
+  text_check: null,
+  ...over,
+})
+
+describe('draftImagePost — composePoster', () => {
+  it('without the dep: result has no poster key and keeps the photo (unchanged behaviour)', async () => {
+    const result = await draftImagePost(makeInput(), makeDeps())
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect('poster' in result).toBe(false)
+    expect(Object.keys(result.draft).sort()).toEqual(['body', 'cta', 'cta_url', 'hook', 'image_asset_id'])
+  })
+
+  it('success: draft points at the poster, receipt returned, photo passed to the composer', async () => {
+    const calls: Array<{ tour: string; image: string }> = []
+    const deps = makeDeps({
+      composePoster: async (t, image) => {
+        calls.push({ tour: t.slug, image: image.id })
+        return { ok: true, assetId: POSTER_ID, receipt: receipt({ source_asset_id: image.id }) }
+      },
+    })
+    const plain = await draftImagePost(makeInput(), makeDeps())
+    const result = await draftImagePost(makeInput(), deps)
+    expect(result.ok && plain.ok).toBe(true)
+    if (!result.ok || !plain.ok) return
+    expect(result.draft.image_asset_id).toBe(POSTER_ID)
+    expect(calls).toEqual([{ tour: plain.tourSlug, image: plain.draft.image_asset_id }])
+    expect(result.poster).toMatchObject({ status: 'composed', poster_asset_id: POSTER_ID })
+    // copy untouched by the poster step
+    expect({ ...result.draft, image_asset_id: '' }).toEqual({ ...plain.draft, image_asset_id: '' })
+  })
+
+  it('failure: keeps the original photo and returns the fallback reason', async () => {
+    const deps = makeDeps({
+      composePoster: async (_t, image) => ({
+        ok: false,
+        reason: 'image_edit_failed: no_output',
+        receipt: receipt({ status: 'fallback', reason: 'image_edit_failed: no_output', poster_asset_id: null, source_asset_id: image.id }),
+      }),
+    })
+    const plain = await draftImagePost(makeInput(), makeDeps())
+    const result = await draftImagePost(makeInput(), deps)
+    if (!result.ok || !plain.ok) throw new Error('expected ok')
+    expect(result.draft).toEqual(plain.draft)
+    expect(result.poster).toMatchObject({ status: 'fallback', reason: 'image_edit_failed: no_output' })
+  })
+
+  it('never spends on a draft that fails fact check', async () => {
+    let called = 0
+    const deps = makeDeps({
+      checkFacts: () => ({ ...passingFactCheck, verdict: 'fail' }),
+      composePoster: async () => {
+        called++
+        return { ok: true, assetId: POSTER_ID, receipt: receipt() }
+      },
+    })
+    const result = await draftImagePost(makeInput(), deps)
+    expect(result).toEqual({ ok: false, reason: 'fact_check_fail' })
+    expect(called).toBe(0)
   })
 })
 

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { DAILY_REEL_HARD_CAP, parsePlanTier, readSocialAgentSettings, TIER_DEFAULTS } from '../tier-defaults'
+import {
+  DAILY_REEL_HARD_CAP,
+  parseImagePostRecipe,
+  parsePlanTier,
+  readSocialAgentSettings,
+  TIER_DEFAULTS,
+} from '../tier-defaults'
 
 describe('readSocialAgentSettings', () => {
   it('returns off when config is missing, null, an array, or social_agent is missing', () => {
@@ -107,5 +113,39 @@ describe('parsePlanTier', () => {
 describe('TIER_DEFAULTS', () => {
   it('has starter postPerDay of 0', () => {
     expect(TIER_DEFAULTS.starter.postPerDay).toBe(0)
+  })
+})
+
+describe('imagePostRecipe (social_agent.image_post_recipe)', () => {
+  it('defaults to null when the key is absent — opt-in only', () => {
+    expect(readSocialAgentSettings({ social_agent: { enabled: true } }, 'growth').imagePostRecipe).toBeNull()
+  })
+
+  it('reads tour_poster_v1 when enabled', () => {
+    const result = readSocialAgentSettings(
+      { social_agent: { enabled: true, image_post_recipe: 'tour_poster_v1' } },
+      'growth',
+    )
+    expect(result.imagePostRecipe).toBe('tour_poster_v1')
+    // other fields untouched by the new key
+    expect(result.imagePostPerDay).toBe(TIER_DEFAULTS.growth.postPerDay)
+    expect(result.reelPerDay).toBe(1)
+  })
+
+  it('is null when the agent is disabled, even if a recipe is configured', () => {
+    const result = readSocialAgentSettings(
+      { social_agent: { enabled: false, image_post_recipe: 'tour_poster_v1' } },
+      'growth',
+    )
+    expect(result.enabled).toBe(false)
+    expect(result.imagePostRecipe).toBeNull()
+  })
+
+  it('strict whitelist: unknown / mis-cased / non-string values read as null', () => {
+    for (const raw of ['tour_poster_v2', 'TOUR_POSTER_V1', ' tour_poster_v1', '', 1, true, null, {}]) {
+      expect(parseImagePostRecipe(raw)).toBeNull()
+      const result = readSocialAgentSettings({ social_agent: { enabled: true, image_post_recipe: raw } }, 'growth')
+      expect(result.imagePostRecipe).toBeNull()
+    }
   })
 })

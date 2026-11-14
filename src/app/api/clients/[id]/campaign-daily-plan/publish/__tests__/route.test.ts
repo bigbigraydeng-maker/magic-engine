@@ -977,6 +977,110 @@ describe('publish bridge — price claim gate', () => {
   })
 })
 
+describe('publish bridge — price claim gate: AI posters (PM 2026-11-15 rule)', () => {
+  const PARENT = 'e0000000-0000-0000-0000-000000000009'
+  /** Every Post image is a poster with a price on it; the caption itself has no price. */
+  function posterAssets(opts: {
+    signed: boolean
+    parentSource: string
+    hasPrice?: boolean
+    textLines?: string[]
+    nextDepartOn?: string | null
+  }) {
+    const posters = ASSETS.map(id => ({
+      id,
+      storage_url: `https://assets.test/${id}.jpg`,
+      mime_type: 'image/jpeg',
+      status: 'analyzed',
+      archived_at: null,
+      source: 'ai_generated',
+      verified_by: opts.signed ? 'fde@me.test' : null,
+      verified_at: opts.signed ? '2026-11-15T01:00:00.000Z' : null,
+      vision_metadata: { poster: {
+        recipe_id: 'tour_poster_v1', recipe_version: 1, source_asset_id: PARENT, has_price: opts.hasPrice ?? true,
+        text_lines: opts.textLines ?? ['China Panorama', 'From $6,999'], cost_usd: 0.038, provider_request_id: 'req-1',
+        created_at: '2026-11-15T00:00:00.000Z', next_depart_on: opts.nextDepartOn ?? null,
+      } },
+    }))
+    // The table fake answers every client_assets query with this list, so the parent's
+    // current-source lookup finds the parent row here too.
+    const parent = {
+      id: PARENT, storage_url: 'https://assets.test/parent.jpg', mime_type: 'image/jpeg', status: 'analyzed',
+      archived_at: null, source: opts.parentSource, verified_by: null, verified_at: null, vision_metadata: null,
+    }
+    return [...posters, parent]
+  }
+
+  it('unsigned poster with a price in the image is blocked even though the caption has no price', async () => {
+    stubTables({ assets: posterAssets({ signed: false, parentSource: 'client_verified' }) })
+
+    const response = await POST(request(), params)
+    const json = await response.json()
+
+    expect(response.status).toBe(409)
+    expect(json.error).toBe('PRICE_CLAIM_UNBACKED')
+    expect(json.blocked.map((b: { date: string }) => b.date)).toEqual(DATES)
+    expect(json.blocked[0].message).toContain('已对原图，确认')
+    expect(mockPublish).not.toHaveBeenCalled()
+  })
+
+  it('signed poster whose parent photo was downgraded is blocked', async () => {
+    stubTables({ assets: posterAssets({ signed: true, parentSource: 'client_provided' }) })
+
+    const response = await POST(request(), params)
+
+    expect(response.status).toBe(409)
+    expect((await response.json()).error).toBe('PRICE_CLAIM_UNBACKED')
+  })
+
+  it('signed poster with a verified parent and a still-future departure passes (dry run)', async () => {
+    stubTables({ assets: posterAssets({
+      signed: true, parentSource: 'client_verified', hasPrice: false,
+      textLines: ['China Panorama', 'Next departure 15 March 2099'], nextDepartOn: '2099-03-15',
+    }) })
+
+    const response = await POST(request(), params)
+    const json = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(json.mode).toBe('DRY_RUN')
+    expect(mockPublish).not.toHaveBeenCalled()
+  })
+
+  it('unsigned poster WITHOUT any price is still blocked — every poster needs the sign-off', async () => {
+    stubTables({ assets: posterAssets({ signed: false, parentSource: 'client_verified', hasPrice: false, textLines: ['China Panorama'] }) })
+
+    const response = await POST(request(), params)
+    const json = await response.json()
+
+    expect(response.status).toBe(409)
+    expect(json.error).toBe('POSTER_NOT_CONFIRMED')
+    expect(json.blocked.map((b: { date: string }) => b.date)).toEqual(DATES)
+  })
+
+  it('price printed on a signed poster must match the client price facts (copy has no price)', async () => {
+    // No price facts configured → the poster price cannot be verified → blocked like a caption price would be.
+    stubTables({ assets: posterAssets({ signed: true, parentSource: 'client_verified' }) })
+
+    const response = await POST(request(), params)
+
+    expect(response.status).toBe(409)
+    expect((await response.json()).error).toBe('PRICE_FACT_UNVERIFIED')
+  })
+
+  it('poster whose printed departure has passed is blocked; a departure line without a date too', async () => {
+    for (const nextDepartOn of ['2020-01-01', null]) {
+      stubTables({ assets: posterAssets({
+        signed: true, parentSource: 'client_verified', hasPrice: false,
+        textLines: ['China Panorama', 'Next departure 1 January 2020'], nextDepartOn,
+      }) })
+      const response = await POST(request(), params)
+      expect(response.status).toBe(409)
+      expect((await response.json()).error).toBe('POSTER_DEPARTURE_PASSED')
+    }
+  })
+})
+
 describe('publish bridge — first comment', () => {
   it('posts the first comment on an immediate publish, keyed to the real post id', async () => {
     stubTables()
