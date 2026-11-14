@@ -246,10 +246,16 @@ async function confirmDecision(
     const card = await decideConfirmationCard(args.kernel, decisionArgs(args))
     return { ok: card.status === 'confirmed', card }
   } catch (error) {
-    if (!(error instanceof ConfirmationCardError) || error.code !== 'not_waiting') throw error
+    if (!closedConfirm(error)) throw error
     const run = await args.kernel.requireRun(args.runId)
     return { ok: run.status === 'authorized' || run.status === 'succeeded', card: null }
   }
+}
+
+function closedConfirm(error: unknown): boolean {
+  if (!(error instanceof ConfirmationCardError)) return false
+  if (error.code === 'not_waiting') return true
+  return error.code === 'stale' && error.humanReason.includes('not_pending:')
 }
 
 async function lostRace(args: Parameters<typeof submitBudgetCard>[0]): Promise<BudgetSubmitResult> {

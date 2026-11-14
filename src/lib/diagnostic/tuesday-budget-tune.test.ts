@@ -340,6 +340,68 @@ describe('周二加减预算确认后走原来的改预算卡', () => {
     expect(later.find((card) => card.runId === shown.runId)?.status).toBe('expired')
   })
 
+  it('确认一张已过期的卡会被拒绝，台账仍停在未写', async () => {
+    const box = { current: live() }
+    const wired = ports(box)
+    const f = fixture(50000, 'decrease')
+    const cut = proposal({ direction: 'decrease', afterCents: 2400 })
+    const late = new Date('2026-11-02T11:00:00.000Z')
+    const [row] = await issueTuesdayBudgetTunes(f.kernel, [cut], wired)
+    const shown = await shownCard(f, row.runId ?? '')
+    const done = await submitBudgetCard({ ...submitOf(f, shown, box, wired), now: late })
+    expect(done.status).toBe('blocked')
+    expect(done.wroteMeta).toBe(false)
+    expect(done.reason).toMatch(/没有确认成功/)
+    expect(wired.calls).toEqual([])
+    expect(holdPayload(f)).toMatchObject({ status: 'holding', writeAttempted: false, wroteMeta: false })
+    const later = await listConfirmationCards(f.kernel, CLIENT_A, OPC, late)
+    expect(later.find((card) => card.runId === shown.runId)?.status).toBe('expired')
+  })
+
+  it('同一张卡连点两次确认只写一次', async () => {
+    const box = { current: live() }
+    const wired = ports(box)
+    const f = fixture(50000, 'decrease')
+    const cut = proposal({ direction: 'decrease', afterCents: 2400 })
+    const [row] = await issueTuesdayBudgetTunes(f.kernel, [cut], wired)
+    const shown = await shownCard(f, row.runId ?? '')
+    const args = submitOf(f, shown, box, wired)
+    const first = await submitBudgetCard(args)
+    const second = await submitBudgetCard(args)
+    expect(first.status).toBe('executed')
+    expect(second.status).toBe('executed')
+    expect(wired.calls).toHaveLength(1)
+    expect(executedHolds(f)).toHaveLength(1)
+  })
+
+  it('看到的内容对不上时，确认不会改预算', async () => {
+    const box = { current: live() }
+    const wired = ports(box)
+    const f = fixture(50000, 'decrease')
+    const cut = proposal({ direction: 'decrease', afterCents: 2400 })
+    const [row] = await issueTuesdayBudgetTunes(f.kernel, [cut], wired)
+    const shown = await shownCard(f, row.runId ?? '')
+    const attempt = submitBudgetCard({ ...submitOf(f, shown, box, wired), fingerprint: 'not-this-card' })
+    await expect(attempt).rejects.toThrow(/不是这一张卡/)
+    expect(wired.calls).toEqual([])
+    expect(holdPayload(f).status).toBe('holding')
+  })
+
+  it('同一张卡同时点两次确认也只写一次', async () => {
+    const box = { current: live() }
+    const wired = ports(box)
+    const f = fixture(50000, 'decrease')
+    const cut = proposal({ direction: 'decrease', afterCents: 2400 })
+    const [row] = await issueTuesdayBudgetTunes(f.kernel, [cut], wired)
+    const shown = await shownCard(f, row.runId ?? '')
+    const args = submitOf(f, shown, box, wired)
+    const settled = await Promise.allSettled([submitBudgetCard(args), submitBudgetCard(args)])
+    expect(wired.calls).toHaveLength(1)
+    expect(executedHolds(f)).toHaveLength(1)
+    const failures = settled.filter((item) => item.status === 'rejected')
+    expect(failures).toEqual([])
+  })
+
   it('这周没有现成金额时不出卡，也不去准备执行', async () => {
     const open = () => {
       throw new Error('不该打开执行')
@@ -399,6 +461,16 @@ function submitOf(
     locks: wired.locks,
     path: wired.path,
   }
+}
+
+function holdPayload(f: ReturnType<typeof fixture>): { status?: string; writeAttempted?: boolean; wroteMeta?: boolean } {
+  const row = f.tables.flywheel_actions[0] as { payload?: { status?: string; writeAttempted?: boolean; wroteMeta?: boolean } } | undefined
+  return row?.payload ?? {}
+}
+
+function executedHolds(f: ReturnType<typeof fixture>): unknown[] {
+  return (f.tables.flywheel_actions as Array<{ payload?: { status?: string } }>)
+    .filter((row) => row.payload?.status === 'executed')
 }
 
 function cardLifetime(f: ReturnType<typeof fixture>, runId: string): string | null {
