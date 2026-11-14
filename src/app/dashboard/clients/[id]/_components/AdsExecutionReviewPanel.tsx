@@ -75,6 +75,12 @@ function ReviewRow({ item }: { item: ExecutionReviewItem }) {
       {item.phase === 'concluded' && item.summary ? (
         <p className="mt-2 text-sm text-me-charcoal/80 leading-relaxed">{item.summary}</p>
       ) : null}
+      {item.decision_review_label ? (
+        <p className="mt-2 text-sm text-me-charcoal/80 leading-relaxed">
+          决策回头看：{item.decision_review_label}
+          {item.decision_review_reason ? ` — ${item.decision_review_reason}` : ''}
+        </p>
+      ) : null}
       {item.phase === 'concluded' && (item.verdict === 'unclear' || item.verdict === 'unsure' || item.verdict === 'not_useful') && item.reason ? (
         <p className="mt-1 text-xs text-me-charcoal/60">原因：{item.reason}</p>
       ) : null}
