@@ -62,6 +62,7 @@ export function checkReelFacts(args: {
     aliasesByTourId: args.source.aliasesByTourId,
     catalogVersion: args.source.catalogVersion,
     today: args.today,
+    bannedPhrases: args.source.bannedPhrases,
   })
   const overlayChecked = args.only !== 'first_comment' && overlay !== null
   return { result, overlayChecked }
@@ -78,6 +79,7 @@ const LABEL: Record<FactItem['kind'], string> = {
   tour_not_sellable: '团已不在售',
   ambiguous_tour_name: '团名对不上唯一的团',
   ambiguous_tour_link: '链接对不上唯一的团',
+  banned_phrase: '禁用词',
   check_error: '核对出错',
 }
 
