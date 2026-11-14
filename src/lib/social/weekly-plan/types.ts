@@ -65,6 +65,9 @@ export interface WeeklyPlanSlot {
   contentGroupLabel: string
   theme: string | null
   themeId: string | null
+  /** Set only when this line is a draft that was actually generated. */
+  date?: string | null
+  draftRef?: string | null
   reason: string
 }
 

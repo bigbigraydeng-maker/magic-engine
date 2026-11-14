@@ -1,9 +1,7 @@
 /**
- * Self-contained Inngest step that drafts image posts for one client on one date.
- *
- * Called from the weekly-draft handleDue as a single step.  Loads its own data
- * (tours, assets, recent slugs, campaign, settings) so the caller only passes
- * clientId + date + a small deps bag.
+ * Drafts image posts for one client.
+ * With a weekly count and a target week, spreads that many drafts across the week.
+ * Otherwise keeps the existing one-day path.
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { loadPublishedTourFacts } from '@/lib/tour-catalog/store-publish'
@@ -29,6 +27,13 @@ import {
   type ComposeTourPosterResult,
   type PosterReceipt,
 } from './image-post-poster'
+import {
+  autoImagePostDate,
+  datesStillNeeded,
+  decideImagePostBatch,
+  type ImagePostBatch,
+  type WeekWindow,
+} from './image-post-week'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -37,6 +42,8 @@ import {
 export interface ImagePostStepDeps {
   supabase: SupabaseClient
   callLLM: (prompt: string) => Promise<string>
+  /** Target week. When set together with a weekly count, drafts are spread across that week. */
+  week?: WeekWindow | null
   /** Test seam for the poster recipe. Production leaves it unset and real deps are built. */
   poster?: {
     loadBrief?: (clientId: string) => Promise<{ vi_colors?: unknown; website?: unknown } | null>
@@ -48,6 +55,12 @@ export interface ImagePostStepReceipt {
   attempted: number
   drafted: number
   planIds: string[]
+  /** Dates of the drafts written in this call, same order as planIds. */
+  dates: string[]
+  /** Weekly count this call was aiming at. Absent on the per-day path. */
+  requested?: number
+  /** Every auto image post on the target week after this call. Week mode only. */
+  weekLines?: Array<{ date: string; ref: string }>
   skipped: string | null
   error: string | null
   /** Only when a poster recipe is on: one entry per poster attempt (composed or fallback + reason). */
@@ -176,96 +189,176 @@ export async function runImagePostStep(
   planTier: unknown,
   deps: ImagePostStepDeps,
 ): Promise<ImagePostStepReceipt> {
+  const batch = decideImagePostBatch({ config: clientConfig, week: deps.week ?? null })
+  const weekDates = await weekDatesToDraft(deps, clientId, batch)
+  if (weekDates.receipt) return weekDates.receipt
+
   const settings = readSocialAgentSettings(clientConfig, planTier)
-  if (settings.imagePostPerDay <= 0) {
-    return { attempted: 0, drafted: 0, planIds: [], skipped: 'imagePostPerDay=0', error: null }
+  const dates = weekDates.dates ?? (settings.imagePostPerDay > 0 ? Array.from({ length: settings.imagePostPerDay }, () => date) : [])
+  if (dates.length === 0) {
+    return { attempted: 0, drafted: 0, planIds: [], dates: [], skipped: 'imagePostPerDay=0', error: null }
   }
 
-  // Load published tour catalog
-  const tourRead = await loadPublishedTourFacts(deps.supabase, clientId, date)
-  if (!tourRead.published || tourRead.tours.length === 0) {
-    return { attempted: 0, drafted: 0, planIds: [], skipped: 'no_published_tours', error: null }
+  const requested = batch.action === 'week' ? batch.requested : undefined
+  const catalogDate = weekDates.dates ? weekDates.catalogDate : date
+  const written = await writeImageDrafts(clientId, dates, catalogDate, settings.imagePostRecipe, requested, deps)
+  if (!weekDates.existing) return written
+  return {
+    ...written,
+    weekLines: [...weekDates.existing.lines, ...written.dates.map((date, i) => ({ date, ref: written.planIds[i] ?? '' }))],
   }
+}
 
-  // Load client assets (the shared pool already leaves AI posters out — no poster-of-a-poster).
+async function weekDatesToDraft(
+  deps: ImagePostStepDeps,
+  clientId: string,
+  batch: ImagePostBatch,
+): Promise<{ dates?: string[]; catalogDate: string; existing?: ExistingPosts; receipt?: ImagePostStepReceipt }> {
+  if (batch.action === 'day') return { catalogDate: '' }
+  if (batch.action === 'week-skip') {
+    return { catalogDate: '', receipt: emptyImageReceipt(batch.skipped, null, batch.requested ?? undefined) }
+  }
+  const existing = await loadAutoImagePosts(deps.supabase, clientId, batch)
+  if (existing === 'unreadable') {
+    return { catalogDate: batch.weekStart, receipt: emptyImageReceipt(null, 'existing_posts_unreadable', batch.requested) }
+  }
+  const dates = datesStillNeeded(batch.dates, existing.counts)
+  if (dates.length === 0) {
+    return {
+      catalogDate: batch.weekStart,
+      receipt: { ...emptyImageReceipt('already_drafted', null, batch.requested), weekLines: existing.lines },
+    }
+  }
+  return { dates, catalogDate: batch.weekStart, existing }
+}
+
+function emptyImageReceipt(skipped: string | null, error: string | null, requested?: number): ImagePostStepReceipt {
+  const receipt: ImagePostStepReceipt = { attempted: 0, drafted: 0, planIds: [], dates: [], skipped, error }
+  if (requested !== undefined) receipt.requested = requested
+  return receipt
+}
+
+interface ExistingPosts {
+  counts: Map<string, number>
+  lines: Array<{ date: string; ref: string }>
+}
+
+async function loadAutoImagePosts(
+  supabase: SupabaseClient,
+  clientId: string,
+  week: WeekWindow,
+): Promise<ExistingPosts | 'unreadable'> {
+  const { data, error } = await supabase
+    .from('social_plans')
+    .select('id, plan_data')
+    .eq('client_id', clientId)
+    .order('created_at', { ascending: false })
+    .limit(200)
+  if (error) return 'unreadable'
+  const counts = new Map<string, number>()
+  const lines: Array<{ date: string; ref: string }> = []
+  for (const row of data ?? []) {
+    const rec = recordOf(row)
+    const date = autoImagePostDate(rec?.plan_data, week)
+    if (!date) continue
+    counts.set(date, (counts.get(date) ?? 0) + 1)
+    lines.push({ date, ref: typeof rec?.id === 'string' ? rec.id : '' })
+  }
+  return { counts, lines }
+}
+
+function recordOf(raw: unknown): Record<string, unknown> | null {
+  return typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? raw as Record<string, unknown> : null
+}
+
+async function writeImageDrafts(
+  clientId: string,
+  dates: string[],
+  catalogDate: string,
+  recipeId: ReturnType<typeof readSocialAgentSettings>['imagePostRecipe'],
+  requested: number | undefined,
+  deps: ImagePostStepDeps,
+): Promise<ImagePostStepReceipt> {
+  const tourRead = await loadPublishedTourFacts(deps.supabase, clientId, catalogDate)
+  if (!tourRead.published || tourRead.tours.length === 0) return emptyImageReceipt('no_published_tours', null, requested)
   const assets = await loadRankableClientAssets(clientId, deps.supabase)
-  if (assets.length === 0) {
-    return { attempted: 0, drafted: 0, planIds: [], skipped: 'no_client_assets', error: null }
-  }
-
-  // Find active campaign
+  if (assets.length === 0) return emptyImageReceipt('no_client_assets', null, requested)
   const campaigns = await getActiveCampaigns(clientId)
-  if (campaigns.length === 0) {
-    return { attempted: 0, drafted: 0, planIds: [], skipped: 'no_active_campaign', error: null }
-  }
-  const campaignId = campaigns[0].id
+  if (campaigns.length === 0) return emptyImageReceipt('no_active_campaign', null, requested)
+  return draftEachDate(clientId, dates, tourRead.tours, assets, campaigns[0].id, recipeId, requested, deps)
+}
 
-  // Load recent slugs to avoid repetition
+async function draftEachDate(
+  clientId: string,
+  dates: string[],
+  tours: PublishedTourFact[],
+  assets: Awaited<ReturnType<typeof loadRankableClientAssets>>,
+  campaignId: string,
+  recipeId: ReturnType<typeof readSocialAgentSettings>['imagePostRecipe'],
+  requested: number | undefined,
+  deps: ImagePostStepDeps,
+): Promise<ImagePostStepReceipt> {
   const recentSlugs = await loadRecentImagePostSlugs(deps.supabase, clientId, 7)
-
-  // Draft
-  const ctaBaseUrl = `https://www.ctstours.co.nz/tours`
-  const composePoster = settings.imagePostRecipe
-    ? await buildPosterComposer(settings.imagePostRecipe, clientId, date, deps)
-    : null
-  const drafterDeps = {
+  const planIds: string[] = []
+  const draftedDates: string[] = []
+  let posters: PosterReceipt[] | null = null
+  const copyDeps = {
     generateCopy: (tour: Parameters<typeof generateImagePostCopy>[0], asset: Parameters<typeof generateImagePostCopy>[1]) =>
       generateImagePostCopy(tour, asset, { callLLM: deps.callLLM }),
     checkFacts,
     scanOutboundClaims,
-    ...(composePoster ? { composePoster } : {}),
   }
-
-  const planIds: string[] = []
-  const posters: PosterReceipt[] | null = composePoster ? [] : null
-  const count = settings.imagePostPerDay
-
-  for (let i = 0; i < count; i++) {
+  for (let i = 0; i < dates.length; i++) {
+    const slotDate = dates[i]
+    const composePoster = recipeId ? await buildPosterComposer(recipeId, clientId, slotDate, deps) : null
+    if (composePoster && posters === null) posters = []
     const result = await draftImagePost(
-      {
-        clientId,
-        date,
-        tours: tourRead.tours,
-        assets,
-        recentTourSlugs: [...recentSlugs, ...planIds.map(() => '')],
-        ctaBaseUrl,
-      },
-      drafterDeps,
+      { clientId, date: slotDate, tours, assets, recentTourSlugs: [...recentSlugs], ctaBaseUrl: 'https://www.ctstours.co.nz/tours' },
+      { ...copyDeps, ...(composePoster ? { composePoster } : {}) },
     )
-
-    if (!result.ok) {
-      return withPosters({ attempted: i + 1, drafted: planIds.length, planIds, skipped: null, error: result.reason }, posters)
-    }
+    if (!result.ok) return finishDraft(i + 1, planIds, draftedDates, null, result.reason, posters, requested)
     if (result.poster) posters?.push(result.poster)
-
     const writeResult = await writeImagePostPlan(
-      { clientId, campaignId, date, draft: result.draft, tourSlug: result.tourSlug, poster: result.poster },
-      {
-        insertPlan: async (row) => {
-          const { data, error } = await deps.supabase
-            .from('social_plans')
-            .insert({
-              client_id: row.client_id,
-              campaign_id: row.campaign_id,
-              platform: row.platform,
-              wave_number: row.wave_number,
-              plan_data: row.plan_data,
-            })
-            .select('id')
-            .single()
-          if (error) throw new Error(error.message)
-          return { id: data.id }
-        },
-      },
+      { clientId, campaignId, date: slotDate, draft: result.draft, tourSlug: result.tourSlug, poster: result.poster },
+      { insertPlan: (row) => insertSocialPlan(deps.supabase, row) },
     )
-
-    if (!writeResult.ok) {
-      return withPosters({ attempted: i + 1, drafted: planIds.length, planIds, skipped: null, error: writeResult.error }, posters)
-    }
-
+    if (!writeResult.ok) return finishDraft(i + 1, planIds, draftedDates, null, writeResult.error, posters, requested)
     planIds.push(writeResult.planId)
+    draftedDates.push(slotDate)
     recentSlugs.push(result.tourSlug)
   }
+  return finishDraft(dates.length, planIds, draftedDates, null, null, posters, requested)
+}
 
-  return withPosters({ attempted: count, drafted: planIds.length, planIds, skipped: null, error: null }, posters)
+function finishDraft(
+  attempted: number,
+  planIds: string[],
+  dates: string[],
+  skipped: string | null,
+  error: string | null,
+  posters: PosterReceipt[] | null,
+  requested: number | undefined,
+): ImagePostStepReceipt {
+  const receipt: ImagePostStepReceipt = { attempted, drafted: planIds.length, planIds, dates, skipped, error }
+  if (requested !== undefined) receipt.requested = requested
+  return withPosters(receipt, posters)
+}
+
+async function insertSocialPlan(
+  supabase: SupabaseClient,
+  row: { client_id: string; campaign_id: string; platform: string; wave_number: number; plan_data: unknown },
+): Promise<{ id: string }> {
+  const { data, error } = await supabase
+    .from('social_plans')
+    .insert({
+      client_id: row.client_id,
+      campaign_id: row.campaign_id,
+      platform: row.platform,
+      wave_number: row.wave_number,
+      plan_data: row.plan_data,
+    })
+    .select('id')
+    .single()
+  if (error) throw new Error(error.message)
+  return { id: (data as { id: string }).id }
 }

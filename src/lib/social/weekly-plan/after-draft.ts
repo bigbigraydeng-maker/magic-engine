@@ -15,6 +15,7 @@ import { targetWeek } from '@/lib/social/week-pack/cadence'
 
 import { openWeekPlanApproval, weekPlanSubject } from './approval'
 import { readLatestWeeklyPlan, type StoredWeeklyPlan } from './db'
+import type { ProducedDrafts } from './produced'
 import { buildAndSaveWeeklyPlan } from './run'
 
 export interface WeekPlanApprovalAfterDraftReceipt {
@@ -97,6 +98,7 @@ export async function ensureWeekPlanApprovalAfterDraft(
   clientId: string,
   now: Date,
   deps: WeekPlanApprovalAfterDraftDeps = defaultWeekPlanAfterDraftDeps(),
+  produced: ProducedDrafts | null = null,
 ): Promise<WeekPlanApprovalAfterDraftReceipt> {
   const week = targetWeek(now)
   const subjectKey = weekPlanSubject(clientId, week.weekStart)
@@ -115,7 +117,7 @@ export async function ensureWeekPlanApprovalAfterDraft(
     return { status: 'skipped', reason: 'already_approved' }
   }
 
-  const saved = await deps.buildAndSave(db, clientId, now)
+  const saved = await deps.buildAndSave(db, clientId, now, produced)
   if (saved === 'error') return { status: 'error', reason: 'plan_save_failed' }
 
   const stored: StoredWeeklyPlan = {

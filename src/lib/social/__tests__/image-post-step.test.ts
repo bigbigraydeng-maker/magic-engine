@@ -105,7 +105,7 @@ describe('runImagePostStep — poster recipe opt-in', () => {
   it('off (no key): no brief read, no edit call, photo kept, receipt and plan shape unchanged', async () => {
     const inserted: Inserted[] = []
     const r = await run(config(), inserted)
-    expect(r).toEqual({ attempted: 1, drafted: 1, planIds: ['social_plans-new'], skipped: null, error: null })
+    expect(r).toEqual({ attempted: 1, drafted: 1, planIds: ['social_plans-new'], dates: ['2027-01-01'], skipped: null, error: null })
     expect(mocks.getActiveBrief).not.toHaveBeenCalled()
     expect(mocks.runImageEdit).not.toHaveBeenCalled()
     expect(inserted.map((i) => i.table)).toEqual(['social_plans'])
@@ -189,4 +189,69 @@ describe('runImagePostStep — poster recipe opt-in', () => {
     expect(r.posters?.[0]).toMatchObject({ reason: 'no_brand_primary_colour' })
   })
 
+})
+
+const WEEK = { weekStart: '2026-11-16', weekEnd: '2026-11-22' }
+
+function weekSupabase(inserted: Inserted[], existing: unknown[] = []): SupabaseClient {
+  const from = (table: string) => {
+    let usedGte = false
+    const chain = {
+      select: () => chain,
+      eq: () => chain,
+      gte: () => { usedGte = true; return chain },
+      order: () => chain,
+      is: () => chain,
+      limit: () => Promise.resolve({
+        data: table === 'social_plans' && !usedGte ? existing : [],
+        error: null,
+      }),
+      insert: (row: Record<string, unknown>) => {
+        inserted.push({ table, row })
+        return { select: () => ({ single: () => Promise.resolve({ data: { id: `plan-${inserted.length}` }, error: null }) }) }
+      },
+    }
+    return chain
+  }
+  return { from } as unknown as SupabaseClient
+}
+
+function existingPost(date: string, id: string) {
+  return { id, plan_data: { command_meta: { source: 'auto_image_post' }, days: [{ date }] } }
+}
+
+describe('runImagePostStep — weekly count', () => {
+  it('drafts the weekly count on different days even when the social agent is off', async () => {
+    const inserted: Inserted[] = []
+    const r = await runImagePostStep(CLIENT, '2026-11-14', {
+      social_agent: { enabled: false },
+      social_week: { post_per_week: 4 },
+    }, null, { supabase: weekSupabase(inserted), callLLM: vi.fn(), week: WEEK })
+    expect(r.drafted).toBe(4)
+    expect(r.dates).toEqual(['2026-11-16', '2026-11-18', '2026-11-20', '2026-11-22'])
+    expect(r.weekLines).toHaveLength(4)
+    expect(inserted.filter((row) => row.table === 'social_plans')).toHaveLength(4)
+    expect(r.posters).toBeUndefined()
+  })
+
+  it('does not write again when those dates already have drafts', async () => {
+    const inserted: Inserted[] = []
+    const existing = ['2026-11-16', '2026-11-18', '2026-11-20', '2026-11-22'].map((date, i) => existingPost(date, `old-${i}`))
+    const r = await runImagePostStep(CLIENT, '2026-11-14', {
+      social_week: { post_per_week: 4 },
+    }, null, { supabase: weekSupabase(inserted, existing), callLLM: vi.fn(), week: WEEK })
+    expect(r).toMatchObject({ drafted: 0, skipped: 'already_drafted', error: null })
+    expect(r.weekLines?.map((line) => line.ref)).toEqual(['old-0', 'old-1', 'old-2', 'old-3'])
+    expect(inserted).toEqual([])
+    expect(mocks.loadPublishedTourFacts).not.toHaveBeenCalled()
+  })
+
+  it('treats a configured weekly zero as zero even when the agent is on', async () => {
+    const r = await runImagePostStep(CLIENT, '2026-11-14', {
+      social_agent: { enabled: true, image_post_per_day: 1 },
+      social_week: { post_per_week: 0 },
+    }, null, { supabase: weekSupabase([]), callLLM: vi.fn(), week: WEEK })
+    expect(r).toMatchObject({ drafted: 0, skipped: 'post_per_week=0', requested: 0 })
+    expect(mocks.loadPublishedTourFacts).not.toHaveBeenCalled()
+  })
 })
