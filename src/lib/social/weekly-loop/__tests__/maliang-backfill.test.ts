@@ -70,6 +70,14 @@ describe('sumWeeklyMaliangSpend', () => {
     ])
     expect(total).toBeCloseTo(0.35)
   })
+
+  it('sums each per-review charge entry instead of one lump spent_usd', () => {
+    const total = sumWeeklyMaliangSpend([
+      { maliang_backfill: { charges_usd: [0.05, 0.05, 0.05, 0.05], spent_usd: 0.05 } },
+      { maliang_backfill: { charges_usd: [0.05], spent_usd: 0.25 } },
+    ])
+    expect(total).toBeCloseTo(0.25)
+  })
 })
 
 describe('backfillVideoUrl', () => {

@@ -4,6 +4,7 @@ import {
   createWeeklyLoopDbDeps,
   listWeeklyLoopClients,
   loadWeeklyMaliangSpend,
+  mergeMaliangBackfillOnFinish,
   parseOrderRow,
   reserveWeeklyMaliangSpend,
   weeklyLoopEnabled,
@@ -343,36 +344,125 @@ describe('loadWeeklyMaliangSpend', () => {
 })
 
 describe('reserveWeeklyMaliangSpend', () => {
-  function reserveDb(result: { data: unknown; error: unknown }, calls: Array<[string, unknown]>): SupabaseClient {
-    const chain = {
-      update: (patch: unknown) => (calls.push(['update', patch]), chain),
-      eq: (col: string, val: unknown) => (calls.push([`eq:${col}`, val]), chain),
-      select: () => Promise.resolve(result),
+  function makeStatefulReserveDb(): { db: SupabaseClient; summary: () => unknown } {
+    const stored: { summary: unknown } = { summary: null }
+    let expectRead = true
+    const readChain = {
+      select: () => readChain,
+      eq: () => readChain,
+      maybeSingle: () => Promise.resolve({ data: stored, error: null }),
     }
-    return { from: (table: string) => (calls.push(['from', table]), chain) } as never
+    const updateChain = {
+      update: (patch: { summary: unknown }) => {
+        stored.summary = patch.summary
+        return updateChain
+      },
+      eq: () => updateChain,
+      select: () => Promise.resolve({ data: [{ id: 'run-1' }], error: null }),
+    }
+    const db = {
+      from: () => {
+        if (expectRead) {
+          expectRead = false
+          return readChain
+        }
+        expectRead = true
+        return updateChain
+      },
+    } as never
+    return { db, summary: () => stored.summary }
   }
 
-  it('books the spend on this run row only while it is still running', async () => {
+  function reserveDb(readResult: { data: unknown; error: unknown }, updateResult: { data: unknown; error: unknown }): SupabaseClient {
+    let expectRead = true
+    const readChain = {
+      select: () => readChain,
+      eq: () => readChain,
+      maybeSingle: () => Promise.resolve(readResult),
+    }
+    const updateChain = {
+      update: (patch: unknown) => (calls.push(['update', patch]), updateChain),
+      eq: (col: string, val: unknown) => (calls.push([`update-eq:${col}`, val]), updateChain),
+      select: () => Promise.resolve(updateResult),
+    }
     const calls: Array<[string, unknown]> = []
-    await reserveWeeklyMaliangSpend(reserveDb({ data: [{ id: 'run-1' }], error: null }, calls), {
-      runId: 'run-1',
-      clientId: 'c1',
-      spentUsd: 0.1,
+    const db = {
+      from: (table: string) => {
+        calls.push(['from', table])
+        if (expectRead) {
+          expectRead = false
+          return readChain
+        }
+        expectRead = true
+        return updateChain
+      },
+    } as never
+    return Object.assign(db, { __calls: calls })
+  }
+
+  it('appends one charge each call on this run row only while it is still running', async () => {
+    const { db, summary } = makeStatefulReserveDb()
+    await reserveWeeklyMaliangSpend(db, { runId: 'run-1', clientId: 'c1', chargeUsd: 0.05 })
+    await reserveWeeklyMaliangSpend(db, { runId: 'run-1', clientId: 'c1', chargeUsd: 0.05 })
+
+    expect(summary()).toMatchObject({
+      client_id: 'c1',
+      maliang_backfill: { charges_usd: [0.05, 0.05], spent_usd: 0.1, reserved: true },
     })
-    expect(calls).toContainEqual(['from', 'cron_run_logs'])
-    expect(calls).toContainEqual(['eq:id', 'run-1'])
-    expect(calls).toContainEqual(['eq:job_name', 'social-weekly-draft'])
-    expect(calls).toContainEqual(['eq:status', 'running'])
-    const patch = calls.find(([k]) => k === 'update')?.[1] as { summary: Record<string, unknown> }
-    expect(patch.summary).toMatchObject({ client_id: 'c1', maliang_backfill: { spent_usd: 0.1 } })
   })
 
   it('throws when no row was booked, so the caller does not call the model', async () => {
     await expect(
-      reserveWeeklyMaliangSpend(reserveDb({ data: [], error: null }, []), { runId: 'x', clientId: 'c1', spentUsd: 0.05 }),
+      reserveWeeklyMaliangSpend(reserveDb({ data: null, error: null }, { data: [], error: null }), {
+        runId: 'x',
+        clientId: 'c1',
+        chargeUsd: 0.05,
+      }),
     ).rejects.toThrow('maliang_spend_reserve_failed')
     await expect(
-      reserveWeeklyMaliangSpend(reserveDb({ data: null, error: { message: 'down' } }, []), { runId: 'x', clientId: 'c1', spentUsd: 0.05 }),
+      reserveWeeklyMaliangSpend(reserveDb({ data: null, error: { message: 'down' } }, { data: [], error: null }), {
+        runId: 'x',
+        clientId: 'c1',
+        chargeUsd: 0.05,
+      }),
     ).rejects.toThrow('maliang_spend_reserve_failed')
+  })
+
+  it('after four reserves an interrupted run still counts four charges for the week', async () => {
+    const { db, summary } = makeStatefulReserveDb()
+    for (let i = 0; i < 4; i++) {
+      await reserveWeeklyMaliangSpend(db, { runId: 'run-1', clientId: 'c1', chargeUsd: 0.05 })
+    }
+
+    const since = new Date('2026-11-01T00:00:00Z')
+    const spendDb = {
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            gte: () => ({
+              eq: () => ({
+                order: () => ({
+                  limit: () => Promise.resolve({ data: [{ summary: summary() }], error: null }),
+                }),
+              }),
+            }),
+          }),
+        }),
+      }),
+    } as never
+    expect(await loadWeeklyMaliangSpend(spendDb, 'c1', since)).toBeCloseTo(0.2)
+  })
+
+  it('finish-run keeps more reserved charges than a partial receipt would report', () => {
+    const reserved = [0.05, 0.05, 0.05, 0.05]
+    const merged = mergeMaliangBackfillOnFinish(
+      {
+        kind: 'client_run',
+        client_id: 'c1',
+        maliang_backfill: { spent_usd: 0.05, charges_usd: [0.05] },
+      },
+      reserved,
+    )
+    expect(merged.maliang_backfill).toMatchObject({ charges_usd: reserved, spent_usd: 0.2 })
   })
 })

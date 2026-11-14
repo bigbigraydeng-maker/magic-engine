@@ -33,6 +33,8 @@ export interface MaliangBackfillReceipt {
   off_reason: string | null
   cap_usd: number
   spent_before_usd: number
+  /** One entry per charged model call (preferred for weekly spend totals). */
+  charges_usd?: number[]
   /** Model calls made in this run x REVIEW_V2_ESTIMATE_USD. */
   spent_usd: number
   /** Targets x REVIEW_V2_ESTIMATE_USD: what this run would spend if every target is reviewed. */
@@ -64,18 +66,55 @@ export function maliangWeeklyCapUsd(config: unknown): number {
   return Math.min(raw, MALIANG_WEEKLY_CAP_MAX_USD)
 }
 
-/** Sum `maliang_backfill.spent_usd` across weekly summaries; bad entries count as 0. */
+function sumValidCharges(charges: readonly unknown[]): number {
+  let total = 0
+  for (const charge of charges) {
+    if (typeof charge !== 'number' || !Number.isFinite(charge) || charge < 0) continue
+    total += charge
+  }
+  return total
+}
+
+/** Sum one backfill block: per-review `charges_usd` when present, else legacy `spent_usd`. */
+export function maliangBackfillSpendTotal(backfill: unknown): number {
+  if (!isRecord(backfill)) return 0
+  const charges = backfill.charges_usd
+  if (Array.isArray(charges) && charges.length > 0) return sumValidCharges(charges)
+  const spent = backfill.spent_usd
+  if (typeof spent !== 'number' || !Number.isFinite(spent) || spent < 0) return 0
+  return spent
+}
+
+/** Sum 马良 spend across weekly run summaries; bad entries count as 0. */
 export function sumWeeklyMaliangSpend(summaries: readonly unknown[]): number {
   let total = 0
   for (const summary of summaries) {
     if (!isRecord(summary)) continue
-    const backfill = summary.maliang_backfill
-    if (!isRecord(backfill)) continue
-    const spent = backfill.spent_usd
-    if (typeof spent !== 'number' || !Number.isFinite(spent) || spent < 0) continue
-    total += spent
+    total += maliangBackfillSpendTotal(summary.maliang_backfill)
   }
   return total
+}
+
+/** Append one per-review charge ledger on the run row. */
+export function nextMaliangChargeLedger(
+  backfill: unknown,
+  chargeUsd: number,
+): { charges_usd: number[]; spent_usd: number } {
+  const prior = isRecord(backfill) && Array.isArray(backfill.charges_usd) ? backfill.charges_usd : []
+  const charges_usd = [...prior.filter((c) => typeof c === 'number' && Number.isFinite(c) && c >= 0), chargeUsd]
+  return { charges_usd, spent_usd: sumValidCharges(charges_usd) }
+}
+
+/**
+ * Keep whichever charge ledger is longer so finish-run never drops reserves written
+ * before a crash or a partial receipt.
+ */
+export function mergeMaliangChargeLedgers(
+  reservedCharges: readonly number[],
+  receiptCharges: readonly number[],
+): number[] {
+  if (receiptCharges.length >= reservedCharges.length) return [...receiptCharges]
+  return [...reservedCharges]
 }
 
 /** Build a public https video url from a storage path, or null when unusable. */

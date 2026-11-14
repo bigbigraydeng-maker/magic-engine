@@ -302,7 +302,7 @@ describe('social-weekly-draft · 马良 backfill', () => {
     await run(deps, due({ mode: 'write' }))
 
     expect(deps.reserveMaliangSpend).toHaveBeenCalledTimes(1)
-    expect(deps.reserveMaliangSpend).toHaveBeenCalledWith({ runId: 'run-1', clientId: 'c1', spentUsd: 0.05 })
+    expect(deps.reserveMaliangSpend).toHaveBeenCalledWith({ runId: 'run-1', clientId: 'c1', chargeUsd: 0.05 })
     expect(vi.mocked(deps.reserveMaliangSpend).mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(deps.reviewVideo).mock.invocationCallOrder[0],
     )
@@ -336,17 +336,34 @@ describe('social-weekly-draft · 马良 backfill', () => {
     expect(receipt.maliang_backfill?.spent_usd).toBe(0)
   })
 
-  it('second review books the cumulative amount of this run', async () => {
+  it('four reviews book four per-call charges in the backfill receipt', async () => {
+    const loop = makeLoopDeps()
+    loop.loadOrders = vi.fn(async () => ({
+      rows: [row('w1'), row('w4'), row('w5'), row('w6')],
+      truncated: false,
+    }))
+    const deps = makeDeps(WRITE_ENV, loop)
+    const receipt = await run(deps, due({ mode: 'write' }))
+
+    expect(deps.reserveMaliangSpend).toHaveBeenCalledTimes(4)
+    vi.mocked(deps.reserveMaliangSpend).mock.calls.forEach(([arg]) => {
+      expect(arg.chargeUsd).toBeCloseTo(0.05)
+    })
+    expect(receipt.maliang_backfill?.charges_usd).toHaveLength(4)
+    expect(receipt.maliang_backfill?.spent_usd).toBeCloseTo(0.2)
+  })
+
+  it('each review books one per-call charge (not one lump for the whole run)', async () => {
     const loop = makeLoopDeps()
     loop.loadOrders = vi.fn(async () => ({ rows: [row('w1'), row('w4')], truncated: false }))
     const deps = makeDeps(WRITE_ENV, loop)
     const receipt = await run(deps, due({ mode: 'write' }))
 
     expect(deps.reviewVideo).toHaveBeenCalledTimes(2)
-    const booked = vi.mocked(deps.reserveMaliangSpend).mock.calls.map(([a]) => a.spentUsd)
+    const booked = vi.mocked(deps.reserveMaliangSpend).mock.calls.map(([a]) => a.chargeUsd)
     expect(booked).toHaveLength(2)
-    expect(booked[0]).toBeCloseTo(0.05)
-    expect(booked[1]).toBeCloseTo(0.1)
+    expect(booked).toEqual([0.05, 0.05])
+    expect(receipt.maliang_backfill?.charges_usd).toEqual([0.05, 0.05])
     expect(receipt.maliang_backfill?.spent_usd).toBeCloseTo(0.1)
   })
 
