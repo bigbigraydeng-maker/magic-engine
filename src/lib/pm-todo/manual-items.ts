@@ -35,10 +35,12 @@ import { socialReadbackOutcomeEnabled } from '@/lib/social/readback-outcome-reco
 import { pushPriceFactItems } from './price-fact-items'
 import { pushTourCatalogPublishRequestItems } from './tour-catalog-publish-request-items'
 import { pushAutoPublishItems } from './auto-publish-items'
+import { isLiveFor, readAutoPublishSwitches } from '@/lib/campaign/daily-plan-auto-publish-decide'
 import { pushStoryLiteItems } from './story-lite-items'
 import { pushWeekPackItems } from './week-pack-items'
 import { pushWeekPlanApprovalItems } from './week-plan-items'
 import { pushEmailReplyItems } from './email-reply-items'
+
 import { pushLeadFollowupItems } from './lead-followup-items'
 import { pushBindingRequestItems } from './binding-request-items'
 import { pushPageBindingItems } from './page-binding-items'
@@ -120,6 +122,18 @@ import { pushLibaiItems } from './libai-items'
 import { pushBaozhengItems } from './baozheng-items'
 import { pushFactoryWinnerItems } from './factory-winner-items'
 import { pushSimaqianReviewItems } from './simaqian-review-items'
+
+/** Live for THIS client: the global switch and the allow-list must both agree (same rule as the publisher and the status page). */
+function autoPublishLiveFor(clientId: string): boolean {
+  return isLiveFor(
+    readAutoPublishSwitches({
+      DAILY_PLAN_AUTO_PUBLISH_LIVE: process.env.DAILY_PLAN_AUTO_PUBLISH_LIVE,
+      DAILY_PLAN_AUTO_PUBLISH_CLIENTS: process.env.DAILY_PLAN_AUTO_PUBLISH_CLIENTS,
+    }),
+    clientId,
+  )
+}
+
 
 /**
  * 每周自动重扫名单里的客户 id —— 与 site-audit-weekly 同一判据：在用 + seo_config.weekly_blog + 有域名。
@@ -371,7 +385,7 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
       console.warn('[manual-items] 团目录上架请求待办读取失败（不阻塞其他待办）:', e),
     ),
     // 自动发布没发出去 / 不确定发没发出去 / 已授权却没动静 —— 人不在场，不捞出来没人知道
-    (b) => pushAutoPublishItems(supabase, b, now, nameOf, { live: process.env.DAILY_PLAN_AUTO_PUBLISH_LIVE === 'true' }).catch((e) =>
+    (b) => pushAutoPublishItems(supabase, b, now, nameOf, { live: autoPublishLiveFor }).catch((e) =>
       console.warn('[manual-items] 自动发布待办检查失败（不阻塞其他待办）:', e),
     ),
     // Story 自动发布没发出去 / 不知道发没发出去 / 已授权却没动静

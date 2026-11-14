@@ -154,6 +154,79 @@ export async function claimAttempt(input: {
   return data !== null
 }
 
+/** Statuses a manual publish may take over: nothing has gone out and nobody is waiting on them. */
+const MANUAL_TAKEOVER_STATUSES: AutoPublishAttemptStatus[] = ['dry_run', 'missed_window', 'failed_final', 'failed_retryable']
+
+/**
+ * Claim a date for a manual publish. Same row as the unattended publisher (`unique(plan_id, date)`), `auth_id` null.
+ *
+ * Takes a fresh INSERT when the date has no row. When it has one, only a row where nothing went out and nobody is
+ * waiting can be taken over (a practice run, a missed window, a failure) — and a RECALLED tombstone, because a
+ * person pressing "确认发布" on a recalled date is an explicit decision (the caller puts the tombstone back if the post
+ * does not go out). Any other row (claimed, published, unknown_outcome, a real block) refuses.
+ */
+export async function claimManualAttempt(input: {
+  clientId: string
+  planId: string
+  date: string
+  requestId: string
+  now: Date
+}): Promise<{ claimed: false } | { claimed: true; restoreRecalled: boolean }> {
+  const now = input.now.toISOString()
+
+  const { error: insertError } = await supabaseAdmin.from(ATTEMPTS_TABLE).insert({
+    auth_id: null,
+    client_id: input.clientId,
+    plan_id: input.planId,
+    date: input.date,
+    attempt_no: 1,
+    status: 'claimed',
+    request_id: input.requestId,
+    provider_impact: 'NONE',
+    updated_at: now,
+  })
+  if (!insertError) return { claimed: true, restoreRecalled: false }
+  if (insertError.code !== UNIQUE_VIOLATION) throw insertError
+
+  const { data: existing, error: readError } = await supabaseAdmin
+    .from(ATTEMPTS_TABLE)
+    .select('status, reason_code, attempt_no')
+    .eq('plan_id', input.planId)
+    .eq('client_id', input.clientId)
+    .eq('date', input.date)
+    .maybeSingle()
+  if (readError) throw readError
+  if (!existing) return { claimed: false }
+
+  const row = existing as { status: AutoPublishAttemptStatus; reason_code: string | null; attempt_no: number }
+  const recalled = row.status === 'blocked' && row.reason_code === 'RECALLED'
+  if (!recalled && !MANUAL_TAKEOVER_STATUSES.includes(row.status)) return { claimed: false }
+
+  let update = supabaseAdmin
+    .from(ATTEMPTS_TABLE)
+    .update({
+      status: 'claimed',
+      auth_id: null,
+      request_id: input.requestId,
+      attempt_no: row.attempt_no + 1,
+      reason_code: null,
+      next_retry_at: null,
+      post_id: null,
+      scheduled_publish_time: null,
+      provider_impact: 'NONE',
+      updated_at: now,
+    })
+    .eq('plan_id', input.planId)
+    .eq('client_id', input.clientId)
+    .eq('date', input.date)
+    .eq('status', row.status)
+  update = recalled ? update.eq('reason_code', 'RECALLED') : update
+  const { data: taken, error: updateError } = await update.select('id').maybeSingle()
+  if (updateError) throw updateError
+
+  return taken === null ? { claimed: false } : { claimed: true, restoreRecalled: recalled }
+}
+
 /** The columns a finisher may set on an attempt row. */
 export interface AttemptPatch {
   status: AutoPublishAttemptStatus
@@ -282,6 +355,23 @@ export async function listFreshClaims(planId: string, clientId: string, since: D
     .eq('client_id', clientId)
     .eq('status', 'claimed')
     .gte('updated_at', since.toISOString())
+
+  if (error) throw error
+
+  return (data ?? []) as AttemptRecord[]
+}
+
+/**
+ * Attempts whose outcome nobody has confirmed: Facebook may already hold the Post. That is `unknown_outcome`, plus a
+ * `claimed` row that has not been touched since `staleBefore` (the sweep has not turned it into `unknown_outcome` yet).
+ */
+export async function listUnconfirmedAttempts(planId: string, clientId: string, staleBefore: Date): Promise<AttemptRecord[]> {
+  const { data, error } = await supabaseAdmin
+    .from(ATTEMPTS_TABLE)
+    .select('*')
+    .eq('plan_id', planId)
+    .eq('client_id', clientId)
+    .or(`status.eq.unknown_outcome,and(status.eq.claimed,updated_at.lt.${staleBefore.toISOString()})`)
 
   if (error) throw error
 

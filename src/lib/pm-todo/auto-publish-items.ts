@@ -314,7 +314,8 @@ export async function pushAutoPublishItems(
   items: ManualItem[],
   now: Date,
   nameOf: (clientId: string) => string,
-  opts: { live: boolean },
+  /** `live` may be a per-client answer: the global switch alone does not make a client live (it must be on the allow-list too). */
+  opts: { live: boolean | ((clientId: string) => boolean) },
 ): Promise<void> {
   const today = nzDate(now)
   const tomorrow = addDays(today, 1)
@@ -404,6 +405,7 @@ export async function pushAutoPublishItems(
   }
 
   for (const [clientId, dates] of Array.from(unarmedByClient.entries())) {
-    items.push(buildUnarmedItem(clientId, nameOf(clientId), dates, opts.live))
+    const live = typeof opts.live === 'function' ? opts.live(clientId) : opts.live
+    items.push(buildUnarmedItem(clientId, nameOf(clientId), dates, live))
   }
 }
