@@ -20,6 +20,9 @@ import { runOpportunities, type DataCompleteness } from '../portfolio/opportunit
 import { buildDigestGoalContext } from '../portfolio/goal-context'
 import { safeBuildAdsScorecard, type AdsScorecard } from '../portfolio/scorecard'
 import { loadQualifiedBlock } from '../portfolio/qualified-leads-loader'
+import { resolveTargetCplCents } from '../client-target-cpl'
+import { judgePatrolCost, type PatrolCostVerdict } from './patrol-cost'
+import { loadAdHealthPatrolSurface, type AdHealthPatrolSurface } from './patrol-ad-health'
 import type { AccountInput, AdLevelCoverage, Diagnosis, ExcludedEntity } from '../portfolio/diagnostics/types'
 import type { DigestGoalContext } from '../portfolio/internal-digest'
 
@@ -144,6 +147,10 @@ export interface GrowthStatePayload {
    * 只给员工版：客户版走 growth-client-view 的白名单，不含这一栏。老行没有这个字段。
    */
   scorecard?: AdsScorecard | { error: string }
+  /** 按广告组滚动 3 天单次成本连续偏高（只读判据，不出动作） */
+  patrolCost?: PatrolCostVerdict
+  /** 当日广告体检警报摘要（来自 ad_health_narratives） */
+  adHealth?: AdHealthPatrolSurface | null
 }
 
 export interface BuildGrowthStateResult {
@@ -161,6 +168,8 @@ export function buildHeadline(
   opportunities: Diagnosis[],
   completeness: DataCompleteness,
   goal: DigestGoalContext | null,
+  patrolCost: PatrolCostVerdict | null = null,
+  adHealth: AdHealthPatrolSurface | null = null,
 ): string {
   const hits = problems.filter(d => d.status === 'hit').length
   const opps = opportunities.filter(d => d.status === 'hit').length
@@ -175,10 +184,33 @@ export function buildHeadline(
 
   if (hits > 0) parts.push(`${hits} 件要看的事`)
   if (opps > 0) parts.push(`${opps} 个可以加力的地方`)
-  if (hits === 0 && opps === 0) parts.push(completeness === 'partial' ? '数据没拉全，今天只看不动' : '今天没发现要紧的事')
-  else if (completeness === 'partial') parts.push('（数据没拉全，机会没判）')
+
+  if (patrolCost?.status === 'stale' && patrolCost.summaryLines[0]) {
+    parts.push(patrolCost.summaryLines[0])
+  } else if (patrolCost && patrolCost.flags.length > 0) {
+    parts.push(`${patrolCost.flags.length} 个广告组单次成本连续偏高`)
+  }
+  if (adHealth) parts.push(`广告体检：${adHealth.headline}`)
+
+  if (hits === 0 && opps === 0 && !(patrolCost && patrolCost.flags.length > 0) && !adHealth) {
+    parts.push(completeness === 'partial' ? '数据没拉全，今天只看不动' : '今天没发现要紧的事')
+  } else if (completeness === 'partial') parts.push('（数据没拉全，机会没判）')
 
   return parts.join('，')
+}
+
+async function loadPatrolTargetCplMajor(clientId: string): Promise<number | null> {
+  const [clientRow, strategyRow, plans] = await Promise.all([
+    supabaseAdmin.from('clients').select('leads_config').eq('id', clientId).maybeSingle(),
+    supabaseAdmin.from('ad_strategy_configs').select('target_cost_per_primary').eq('client_id', clientId).maybeSingle(),
+    supabaseAdmin.from('marketing_plans').select('plan_data').eq('client_id', clientId).eq('status', 'approved'),
+  ])
+  const cents = resolveTargetCplCents({
+    strategyMajor: (strategyRow.data as { target_cost_per_primary?: unknown } | null)?.target_cost_per_primary,
+    leadsConfig: (clientRow.data as { leads_config?: unknown } | null)?.leads_config,
+    planRows: (plans.data ?? []) as { plan_data?: unknown }[],
+  })
+  return cents === null ? null : cents / 100
 }
 
 /**
@@ -195,6 +227,11 @@ export async function buildGrowthState(
   try {
     const evaluatedAt = new Date().toISOString()
     const input = await loadDiagnosisInput(clientId, date, evaluatedAt)
+    const [targetMajor, adHealth] = await Promise.all([
+      loadPatrolTargetCplMajor(clientId),
+      loadAdHealthPatrolSurface(clientId, date),
+    ])
+    const patrolCost = judgePatrolCost(input, targetMajor, evaluatedAt)
     const completeness = resolveCompleteness({
       accounts: [...syncAccounts],
       capturesComplete: capturesComplete(input.accounts),
@@ -218,7 +255,7 @@ export async function buildGrowthState(
     if (!('error' in scorecard)) scorecard.qualified = await loadQualifiedBlock(input)
 
     const payload: GrowthStatePayload = {
-      headline: buildHeadline(problems, opportunityRun.opportunities, completeness.completeness, goal),
+      headline: buildHeadline(problems, opportunityRun.opportunities, completeness.completeness, goal, patrolCost, adHealth),
       dataCompleteness: completeness.completeness,
       completenessReasons: completeness.reasons,
       problems,
@@ -230,6 +267,8 @@ export async function buildGrowthState(
       goal,
       evaluatedAt,
       scorecard,
+      patrolCost,
+      adHealth,
     }
 
     const { error } = await supabaseAdmin.from('ads_growth_states').upsert(
