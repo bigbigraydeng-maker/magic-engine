@@ -113,3 +113,54 @@ export async function takeOverManually(args: TakeoverOffArgs, store: TakeoverSto
   }
   return { status: 200, body: { ok: true, alreadyOff: false } }
 }
+
+/** The system stop line wrote this off event (lib/crm/ai-takeover/stop-line-run.ts). */
+export const STOPLINE_ACTOR_ID = 'system:followup-stopline'
+
+/**
+ * Only "came back" and "talked" are judgements staff can overrule. Booked, do-not-contact and stage are facts:
+ * staff change those facts themselves, not the AI mark.
+ */
+export function stopIsResumable(state: { on: boolean; actor?: string | null; sourceRef?: string | null }): boolean {
+  if (state.on || state.actor !== STOPLINE_ACTOR_ID) return false
+  const ref = state.sourceRef ?? ''
+  return /^stopline:[^:]+:(came_back|touch):/.test(ref)
+}
+
+export type ResumeResult =
+  | { status: 200; body: { ok: true; since: string } }
+  | { status: number; body: { ok: false; reason: string; message: string } }
+
+/** 「判错了，继续让 AI 跟进」: a staff member overrules a system stop. Never a system actor. Stage is not touched. */
+export async function resumeAfterSystemStop(args: TakeoverOffArgs, store: TakeoverStoreDeps): Promise<ResumeResult> {
+  if (args.actorEmail.trim() === '' || args.actorEmail.startsWith('system:')) {
+    return { status: 403, body: { ok: false, reason: 'staff_only', message: '只有员工本人能改判。' } }
+  }
+  let events
+  try {
+    events = await store.loadEvents(args.clientId, args.contactId)
+  } catch {
+    return { status: 503, body: { ok: false, reason: 'unreadable', message: '暂时读不到这位客人的跟进状态，请稍后再试。' } }
+  }
+  const replay = events.some((e) => e.sourceRef === `resume:${args.clientRef}`)
+  if (!replay && !stopIsResumable(takeoverState(events))) {
+    return { status: 409, body: { ok: false, reason: 'not_resumable', message: '这位客人现在不是被系统自动停掉的，请刷新页面看最新状态。' } }
+  }
+  const written = await recordTakeover(
+    {
+      clientId: args.clientId,
+      contactId: args.contactId,
+      kind: 'ai_takeover_on',
+      actor: args.actorEmail,
+      reason: '员工改判：系统判错了，继续让 AI 跟进',
+      catalogVersion: null,
+      sourceRef: `resume:${args.clientRef}`,
+    },
+    store,
+  )
+  if (!written.ok) return { status: 500, body: { ok: false, reason: written.reason, message: written.message } }
+  if (written.since === null) {
+    return { status: 409, body: { ok: false, reason: 'not_resumed', message: '没改上，请刷新页面再点一下。' } }
+  }
+  return { status: 200, body: { ok: true, since: written.since } }
+}

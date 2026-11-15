@@ -12,7 +12,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 interface View {
-  takeover: { on: true; since: string; actor: string } | { on: false; offAt: string | null; actor: string | null }
+  takeover:
+    | { on: true; since: string; actor: string }
+    | { on: false; offAt: string | null; actor: string | null; reason?: string | null; sourceRef?: string | null }
   cameBack: { kind: string; at: string } | null
   catalogue: { templateKey: string; versionLabel: string; validUntil: string } | null
   compose:
@@ -96,7 +98,60 @@ export function CatalogueTakeoverPanel({
   if (view.takeover.on) {
     return <TakeoverOn base={base} view={view} since={view.takeover.since} actor={view.takeover.actor} name={name} onSaved={onSaved} reload={reload} />
   }
-  return <CatalogueCard base={base} view={view} name={name} onSaved={onSaved} reload={reload} />
+  return (
+    <>
+      <SystemStopNotice base={base} takeover={view.takeover} name={name} onSaved={onSaved} reload={reload} />
+      <CatalogueCard base={base} view={view} name={name} onSaved={onSaved} reload={reload} />
+    </>
+  )
+}
+
+const STOPLINE_ACTOR = 'system:followup-stopline'
+/** Same rule as lib/crm/ai-takeover/actions.ts stopIsResumable (the server checks again). */
+const RESUMABLE = /^stopline:[^:]+:(came_back|touch):/
+
+/** The daily stop line took this guest back to staff: say when and why; a judgement call can be overruled. */
+function SystemStopNotice({ base, takeover, name, onSaved, reload }: {
+  base: string; takeover: View['takeover']; name: string
+  onSaved: (msg: string, reload?: boolean) => void; reload: () => Promise<void>
+}) {
+  const [busy, setBusy] = useState(false)
+  const refRef = useRef(globalThis.crypto.randomUUID())
+  if (takeover.on || takeover.actor !== STOPLINE_ACTOR || !takeover.offAt) return null
+  const resumable = RESUMABLE.test(takeover.sourceRef ?? '')
+  const resume = async () => {
+    setBusy(true)
+    try {
+      const { status, json } = await postJson(`${base}/ai-takeover-resume`, { clientRef: refRef.current })
+      if (status !== 200) throw new Error(str(json.message, str(json.error, '没改上，再点一下试试')))
+      onSaved(`✓ 已改判 —— 继续让 AI 跟进 ${name}，从明天起不在今天要联系里`, true)
+      await reload()
+    } catch (err) {
+      onSaved(err instanceof Error ? err.message : '没改上，再点一下试试', false)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div data-testid="system-stop-notice" className="mb-2 w-full rounded-lg border border-me-charcoal/10 bg-me-ivory px-3 py-2.5">
+      <p className="text-[13px] text-me-charcoal">
+        {when(takeover.offAt)} 系统停止了 AI 跟进，交回给你：{takeover.reason ?? '没有写原因'}
+      </p>
+      {resumable && (
+        <>
+          <button
+            type="button"
+            onClick={() => void resume()}
+            disabled={busy}
+            className="mt-2 w-full rounded-lg border border-me-charcoal/20 bg-white px-3 py-2 text-[13px] font-bold text-me-charcoal disabled:opacity-50"
+          >
+            {busy ? '改着…' : '判错了，继续让 AI 跟进'}
+          </button>
+          <p className="mt-1 text-[12px] text-me-charcoal/50">只在系统看错了的时候点（比如那通电话其实没跟客人说上话）。不会发信，也不改阶段。</p>
+        </>
+      )}
+    </div>
+  )
 }
 
 function TakeoverOn({ base, view, since, actor, name, onSaved, reload }: {
@@ -121,7 +176,7 @@ function TakeoverOn({ base, view, since, actor, name, onSaved, reload }: {
   return (
     <div data-testid="takeover-on" className="w-full rounded-lg border border-me-charcoal/10 bg-white px-3 py-2.5">
       <p className="text-[13px] text-me-charcoal">
-        系统在跟进这位客人。{when(since)} 交给 AI 跟进（{actor} 点的）。客人一回信、填表或来电，系统就停手，他会回到「今天要联系」。
+        系统在跟进这位客人。{when(since)} 交给 AI 跟进（{actor} 点的）。客人一回信、填表或来电，或者有人跟他真聊上了，系统第二天早上就停手，他会回到「今天要联系」。
       </p>
       {view.cameBack && (
         <p className="mt-1.5 text-[13px] font-bold text-[#C2453A]">客人回来了（{when(view.cameBack.at)}）—— 请你接手跟他联系。</p>
@@ -134,7 +189,7 @@ function TakeoverOn({ base, view, since, actor, name, onSaved, reload }: {
       >
         {busy ? '改着…' : '收回人工'}
       </button>
-      <p className="mt-1 text-[12px] text-me-charcoal/50">只有员工手动点这里才收回。收回后系统不再自动跟进他，小标消失。</p>
+      <p className="mt-1 text-[12px] text-me-charcoal/50">点这里马上收回。收回后系统不再自动跟进他，小标消失。</p>
     </div>
   )
 }

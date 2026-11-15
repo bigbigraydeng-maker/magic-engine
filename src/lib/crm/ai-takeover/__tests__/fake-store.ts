@@ -20,7 +20,7 @@ export function fakeStore(opts: { failInsert?: boolean; failMirror?: boolean; cl
       calls.push('load')
       return events
         .filter((x) => x.clientId === clientId && x.contactId === contactId)
-        .map((x) => ({ kind: x.kind, createdAt: x.createdAt, actor: x.actor, sourceRef: x.sourceRef }))
+        .map((x) => ({ kind: x.kind, createdAt: x.createdAt, actor: x.actor, sourceRef: x.sourceRef, reason: x.reason }))
     },
     async setMirror(clientId, contactId, since) {
       calls.push('mirror')

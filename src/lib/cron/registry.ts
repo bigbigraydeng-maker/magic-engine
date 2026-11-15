@@ -366,6 +366,11 @@ const CRON_REGISTRY_ENTRIES = [
   // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/promo-plan-daily-watch.ts 的 PROMO_WATCH_CRON。
   // 🔴 新增函数，部署后必须去 Inngest 后台 Sync 一次，否则安静地不跑。
   { service: 'inngest:cloud-promo-plan-daily-watch', jobName: 'promo-plan-daily-watch', schedule: '10 7 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-10-15' },
+  // 发目录之后「AI 跟进中」的停线检查：每天新西兰 07:30（今日待办 08:00 之前）。订团 / 别再联系 / 阶段停营销 / 客人回来 /
+  // 员工真聊上了，就把「AI 跟进中」撤掉、放回员工名单。唯一的写是跟进记录和镜像列；不发信、不改阶段。
+  // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/crm-followup-stopline.ts 的 STOPLINE_CRON。
+  // 🔴 新增函数，部署后必须去 Inngest 后台 Sync 一次，否则安静地不跑。
+  { service: 'inngest:cloud-crm-followup-stopline', jobName: 'crm-followup-stopline', schedule: '30 7 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-16' },
   // 广告开投前「追踪与环境就绪」检查：每天新西兰 07:00 查一遍（只读：不写 Meta / GA4 / 官网，不发布，不扣费），
   // 回执写 cron_run_logs 并发事件 ads.tracking_preflight.checked。
   // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/ads-tracking-preflight.ts 的 TRACKING_PREFLIGHT_CRON。
