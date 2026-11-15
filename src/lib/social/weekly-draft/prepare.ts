@@ -12,6 +12,8 @@ import { draftStoryWeekPack } from '@/lib/social/story-week-pack'
 import { planStoryWeekDraft, type StoryWeekDraftReceipt } from '@/lib/social/story-week-draft'
 import type { ProducedDrafts, ProducedKind, ProducedLine } from '@/lib/social/weekly-plan/produced'
 
+import { loadScheduledReelsForWeek, mergeScheduledReels } from './reel-lines'
+
 export interface WeekDraftSummary {
   stills: { drafted: number; skipped: string | null; error: string | null; note: string }
   story: { drafted: number; skipped: string | null; error: string | null; note: string }
@@ -33,11 +35,12 @@ export async function prepareWeekDrafts(input: {
   reelScheduled: ReadonlyArray<{ id: string; publishOn: string }>
   reelScheduledCount: number
   supabase: SupabaseClient
+  loadExistingReels?: typeof loadScheduledReelsForWeek
 }): Promise<PreparedWeekDrafts> {
   const stills = await safeStills(input)
   const story = await safeStory(input)
   const image = await safeImage(input)
-  const reel = reelKind(input.reelScheduled, input.reelScheduledCount)
+  const reel = await reelLinesForCard(input)
   const produced = {
     story: storyKind(story),
     post: imageKind(image),
@@ -148,6 +151,28 @@ function imageKind(image: ImagePostStepReceipt): ProducedKind {
     lines,
     skipped: image.drafted === 0 ? image.skipped : null,
     error: image.error,
+  }
+}
+
+async function reelLinesForCard(input: {
+  clientId: string
+  now: Date
+  reelScheduled: ReadonlyArray<{ id: string; publishOn: string }>
+  reelScheduledCount: number
+  supabase: SupabaseClient
+  loadExistingReels?: typeof loadScheduledReelsForWeek
+}): Promise<ProducedKind> {
+  const fresh = reelKind(input.reelScheduled, input.reelScheduledCount)
+  if (fresh.error) return fresh
+  const week = targetWeek(input.now)
+  const load = input.loadExistingReels ?? loadScheduledReelsForWeek
+  try {
+    const existing = await load(input.supabase, input.clientId, week)
+    if (existing === 'unreadable') return { ...fresh, error: 'existing_reels_unreadable' }
+    const merged = mergeScheduledReels(input.reelScheduled, existing, week)
+    return reelKind(merged, merged.length)
+  } catch {
+    return { ...fresh, error: 'existing_reels_unreadable' }
   }
 }
 
