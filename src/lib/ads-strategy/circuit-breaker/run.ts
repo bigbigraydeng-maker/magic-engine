@@ -6,8 +6,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { requestCampaignStatusCard, type CampaignRequest } from '@/lib/action-submission/campaign-status-card'
 import { applyBreaker, BREAKER_ACTION, type ApplyDeps, type BreakerEvent } from './apply'
+import { intradayPauses } from './intraday'
 import { loadBreakerFacts } from './load'
-import { judgeBreaker } from './rules'
+import { judgeBreaker, type BreakerJudgement } from './rules'
 
 export interface BreakerRunResult {
   readonly paused: false
@@ -32,6 +33,23 @@ export async function runAdsCircuitBreaker(
   })
   if (!applied.recorded) return { paused: false, cards: applied.cards, alerts: applied.alerts, error: '熔断提醒没能记下' }
   return { paused: false, cards: applied.cards, alerts: applied.alerts }
+}
+
+/** Same card and same ledger row as the daily pass. Only the CPL rules, not the daily cap. */
+export async function proposeBreakerJudgement(
+  sb: SupabaseClient,
+  clientId: string,
+  day: string,
+  judged: BreakerJudgement,
+): Promise<BreakerRunResult> {
+  const applied = await applyBreaker({
+    day,
+    pauses: intradayPauses(judged),
+    alerts: [],
+    deps: depsFor(sb, clientId),
+  })
+  if (!applied.recorded) return { paused: false, cards: applied.cards, alerts: 0, error: '熔断提醒没能记下' }
+  return { paused: false, cards: applied.cards, alerts: 0 }
 }
 
 function depsFor(sb: SupabaseClient, clientId: string): ApplyDeps {
