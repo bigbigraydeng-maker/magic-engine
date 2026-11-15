@@ -1,6 +1,5 @@
 import type { CostMetric } from '@/lib/ads-strategy/portfolio/goal-context'
 
-/** Matches PR #3880 `EarlyWarningEmailFacts` — shared by email and Telegram copy. */
 export interface EarlyWarningAlertFacts {
   clientName: string
   clientId: string

@@ -171,12 +171,7 @@ async function sendTelegramBindCodeEmail(
   mailer: BindMailer | null = defaultBindMailer(),
 ): Promise<'sent' | 'no_api_key' | 'send_failed'> {
   if (!mailer) return 'no_api_key'
-  const text = [
-    '你在 Telegram 绑定 Magic Engine 广告预警通知。',
-    `确认码：${code}`,
-    '请在 15 分钟内在 ME 广告预警机器人对话里直接发送这 6 位数字（不要加 /start）。',
-    '如果你没发起绑定，忽略这封邮件即可。',
-  ].join('\n')
+  const text = `ME 广告预警 Telegram 绑定。确认码：${code}。15 分钟内在此机器人对话回复 6 位数字。非本人请忽略。`
   const r = await mailer.send({ to, subject: `ME 广告预警 Telegram 确认码 ${code}`, text })
   return r.ok ? 'sent' : 'send_failed'
 }
