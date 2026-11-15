@@ -1,8 +1,8 @@
 /**
  * POST /api/clients/[id]/crm/contacts/[cid]/ai-takeover-off
  *
- * 「收回人工」：员工手动把这位客人从「AI 跟进中」收回来。**只有员工点这里才收回**（PM 2026-11-08）：
- * 打电话、客人回信都不会自动摘。先写一条 ai_takeover_off 记录，再清镜像列；镜像列没清上就报「只改了一半，再点一下」
+ * 「收回人工」：员工手动把这位客人从「AI 跟进中」收回来（PM 2026-11-08）。另外每天早上的停线检查
+ * （lib/crm/ai-takeover/stop-line-run.ts，PM 2026-11-12）会在客人回来 / 员工真聊上 / 订团等情况下自动收回。先写一条 ai_takeover_off 记录，再清镜像列；镜像列没清上就报「只改了一半，再点一下」
  * （写法同 contacts/[cid]/dnc/route.ts）。不改阶段。
  *
  * Body: { clientRef: string }  幂等键，双击只记一笔。

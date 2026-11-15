@@ -17,11 +17,13 @@ export interface TakeoverEvent {
   actor: string
   /** Idempotency key of the click that wrote it (null when unknown). */
   sourceRef?: string | null
+  /** Plain-language reason stored with the event (null when none). */
+  reason?: string | null
 }
 
 export type TakeoverState =
   | { on: true; since: string; actor: string }
-  | { on: false; offAt: string | null; actor: string | null }
+  | { on: false; offAt: string | null; actor: string | null; reason?: string | null; sourceRef?: string | null }
 
 export function isTakeoverKind(v: unknown): v is TakeoverKind {
   return v === 'ai_takeover_on' || v === 'ai_takeover_off'
@@ -48,7 +50,7 @@ export function takeoverState(events: readonly TakeoverEvent[]): TakeoverState {
   }
   if (latest === null) return { on: false, offAt: null, actor: null }
   if (latest.kind === 'ai_takeover_on') return { on: true, since: latest.createdAt, actor: latest.actor }
-  return { on: false, offAt: latest.createdAt, actor: latest.actor }
+  return { on: false, offAt: latest.createdAt, actor: latest.actor, reason: latest.reason ?? null, sourceRef: latest.sourceRef ?? null }
 }
 
 /** The value the mirror column should hold for this log. */
