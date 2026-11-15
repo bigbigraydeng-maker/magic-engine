@@ -77,7 +77,13 @@ async function readAccount(adAccountId: string, token: string, day: string) {
     complete: insights.complete && !limited(insights.error),
     rateLimited: limited(insights.error),
     adsets: mapped,
-    insights: insights.rows.map((row) => ({ adsetId: row.adset_id ?? '', spend: row.spend, impressions: row.impressions })),
+    insights: insights.rows.map((row) => ({
+      adsetId: row.adset_id ?? '',
+      spend: row.spend,
+      impressions: row.impressions,
+      inlineLinkClicks: row.inline_link_clicks,
+      actions: row.actions,
+    })),
   }
 }
 function limited(error: GraphReadError | null): boolean {

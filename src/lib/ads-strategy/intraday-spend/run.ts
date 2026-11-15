@@ -10,6 +10,7 @@ import {
   draftsForAccount,
   localMinuteOfDay,
   retentionCutoff,
+  type InsightSpendRow,
   type SpendDraft,
 } from './sample'
 import { pacingFromSamples, sinceDay, type PacingPayload } from './view'
@@ -17,7 +18,7 @@ export interface AccountRead {
   complete: boolean
   rateLimited: boolean
   adsets: { id: string; campaignId: string | null; status: string | null }[]
-  insights: { adsetId: string; spend?: string; impressions?: string }[]
+  insights: InsightSpendRow[]
 }
 export interface SampleDeps {
   listClients(): Promise<{ id: string }[]>

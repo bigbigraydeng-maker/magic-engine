@@ -137,6 +137,7 @@ function paceAccount(ticks: readonly Tick[], today: string): AccountPace | null 
         accountDay: today,
         localMinute: latest.localMinute,
         cumulativeSpend: latest.spendMinor,
+        // Clicks and results are stored on the sample. The spend forecast does not use them.
         cumulativeResults: null,
         cumulativeLinkClicks: null,
         cumulativeImpressions: latest.impressions,
