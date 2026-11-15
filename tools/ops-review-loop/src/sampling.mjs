@@ -108,9 +108,8 @@ export function shouldRequestCodexReview({ risk, pr, sha, ratePercent = C_SAMPLE
 /**
  * Whether this head may draw an optional 子牙 / 魏征 / 狄仁杰 spot check.
  *
- * B only, and only when the stable sample selects it. A uses the two required
- * sign-offs instead. C is not their lane. The result is never an input to
- * `decideMerge`: a `review: false` here must not stop a B or C auto-merge.
+ * B only, and only when the stable sample selects it. A and C are not their
+ * lane. The result is never an input to `decideMerge`.
  *
  * @param {{risk: string, pr: number|string, sha: string, ratePercent?: number}} input
  * @returns {{review: boolean, reason: string}}
@@ -119,7 +118,7 @@ export function shouldRequestLegacySpotCheck({ risk, pr, sha, ratePercent = B_SP
   if (risk !== 'B') {
     const reason =
       risk === 'A' || risk === 'C'
-        ? `${risk} 级不抽子牙/魏征/狄仁杰（A 级只认两方签字，C 级不抽查）`
+        ? `${risk} 级不抽子牙/魏征/狄仁杰（不挡合并）`
         : `风险等级 \`${risk}\` 不抽查，也不挡合并`
     return { review: false, reason }
   }

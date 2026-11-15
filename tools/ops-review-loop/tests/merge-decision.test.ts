@@ -77,13 +77,13 @@ describe('decideMerge — fork', () => {
   })
 })
 
-describe('decideMerge — B and C（Ray 2026-10-26「只有 P0 审」）', () => {
-  it('不是 P0 的 B 级：直接开自动合并，不要任何人签字', () => {
+describe('decideMerge — B and C（签字和 p0 都不挡，Ray 2026-11-16）', () => {
+  it('B 级直接开自动合并，不要任何人签字', () => {
     const result = decideMerge({ risk: 'B', draft: false, fork: false, p0: false, signoff: undefined })
     expect(result.pass).toBe(true)
     expect(result.decision).toBe(MERGE_DECISION.ENABLE_AUTO_MERGE)
     expect(result.tier).toBe('auto')
-    expect(result.reason).toContain('不是 P0')
+    expect(result.reason).toContain('都不挡')
   })
 
   it('不是 P0 的 C 级：同上', () => {
@@ -120,82 +120,32 @@ describe('decideMerge — B and C（Ray 2026-10-26「只有 P0 审」）', () =>
     }
   })
 
-  it('🔴 打了 p0 标签：必须有 Claude Code 对当前这次提交的签字才开', () => {
+  it('🔴 打了 p0、或读不到 p0、或签字没到，都不挡 B/C（Ray 2026-11-16）', () => {
     for (const risk of ['B', 'C']) {
-      const blocked = decideMerge({ risk, draft: false, fork: false, p0: true })
-      expect(blocked.pass, risk).toBe(false)
-      expect(blocked.decision, risk).toBe(MERGE_DECISION.DISABLE_AUTO_MERGE)
-      expect(blocked.reason, risk).toContain('标了 p0')
-
-      const signed = decideMerge({ risk, draft: false, fork: false, p0: true, claudeSignoff: { clear: true } })
-      expect(signed.pass, risk).toBe(true)
-      expect(signed.decision, risk).toBe(MERGE_DECISION.ENABLE_AUTO_MERGE)
+      for (const p0 of [true, false, 'false', undefined, null, 'yes']) {
+        const result = decideMerge({
+          risk,
+          draft: false,
+          fork: false,
+          p0,
+          claudeSignoff: { clear: false, reason: '签的是更早的提交，当前这次还没签' },
+        })
+        expect(result.pass, `${risk} ${String(p0)}`).toBe(true)
+        expect(result.decision, `${risk} ${String(p0)}`).toBe(MERGE_DECISION.ENABLE_AUTO_MERGE)
+        expect(result.reason, `${risk} ${String(p0)}`).not.toContain('标了 p0')
+        expect(result.reason, `${risk} ${String(p0)}`).not.toContain('读不到 p0')
+      }
     }
   })
 
-  it('🔴 p0 读不出来时当成「是 P0」拦住，但原因要说清是「读不到」而不是「标了」', () => {
-    for (const p0 of [undefined, null, 'yes', 1, {}]) {
-      const result = decideMerge({ risk: 'B', draft: false, fork: false, p0 })
-      expect(result.decision, String(p0)).toBe(MERGE_DECISION.DISABLE_AUTO_MERGE)
-      // 谎称「标了 p0」会让人去找一个不存在的标签
-      expect(result.reason, String(p0)).toContain('读不到 p0 标签')
-      expect(result.reason, String(p0)).not.toContain('标了 p0')
-    }
-    // 只有明确的 false / 'false' 才算「不是 P0」
-    for (const p0 of [false, 'false']) {
-      expect(decideMerge({ risk: 'B', draft: false, fork: false, p0 }).decision, String(p0)).toBe(
-        MERGE_DECISION.ENABLE_AUTO_MERGE,
-      )
-    }
-  })
-
-  it('p0 标着、签字只对更早的提交 → 不开', () => {
-    const result = decideMerge({
-      risk: 'B',
-      draft: false,
-      fork: false,
-      p0: true,
-      claudeSignoff: { clear: false, reason: '签的是更早的提交，当前这次还没签' },
-    })
-    expect(result.decision).toBe(MERGE_DECISION.DISABLE_AUTO_MERGE)
-    expect(result.reason).toContain('更早的提交')
-  })
-
-  it('🔴 p0 标着时，字符串 "true" 的签字不算签字（失败朝严）', () => {
-    const result = decideMerge({
-      risk: 'C',
-      draft: false,
-      fork: false,
-      p0: true,
-      claudeSignoff: { clear: 'true' },
-    })
-    expect(result.decision).toBe(MERGE_DECISION.DISABLE_AUTO_MERGE)
-  })
-
-  it('🔴 A 级：Codex 签了也不算，只认 Claude Code 对当前这次提交的签字', () => {
+  it('🔴 A 级没签字也能放行：检查全绿、对话已解决、确认没碰到留给 Ray 的路径', () => {
     const result = decideMerge({
       risk: 'A',
       draft: false,
       fork: false,
-      signoff: COMPLETE_SIGNOFF,
-      codexReview: CODEX_CLEAR,
+      signoff: undefined,
+      codexReview: { clear: false, reason: 'Codex 还没审' },
       claudeSignoff: { clear: false, reason: 'Claude Code 还没签过当前这次提交' },
-      requiredChecksGreen: true,
-      conversationsResolved: true,
-      rayHold: false,
-    })
-    expect(result.pass).toBe(false)
-    expect(result.decision).toBe(MERGE_DECISION.DISABLE_AUTO_MERGE)
-    expect(result.tier).toBe('blocked')
-    expect(result.reason).toContain('Claude Code')
-  })
-
-  it('🔴 A 级：只有 Claude Code 一签 + 检查全绿 + 对话全解决 → 自动合并（Codex 那一签已去掉，等它是永久阻塞）', () => {
-    const result = decideMerge({
-      risk: 'A',
-      draft: false,
-      fork: false,
-      claudeSignoff: { clear: true },
       requiredChecksGreen: true,
       conversationsResolved: true,
       rayHold: false,
@@ -203,6 +153,43 @@ describe('decideMerge — B and C（Ray 2026-10-26「只有 P0 审」）', () =>
     expect(result.pass).toBe(true)
     expect(result.decision).toBe(MERGE_DECISION.ENABLE_AUTO_MERGE)
     expect(result.tier).toBe('auto')
+    expect(result.needsRayMerge).toBe(false)
+    expect(result.reason).not.toContain('Claude Code')
+  })
+
+  it('🔴 A 级必过检查没绿，或对话没解决，照旧不放行', () => {
+    const checksRed = decideMerge({
+      risk: 'A',
+      draft: false,
+      fork: false,
+      claudeSignoff: { clear: true },
+      requiredChecksGreen: false,
+      conversationsResolved: true,
+      rayHold: false,
+    })
+    expect(checksRed.decision).toBe(MERGE_DECISION.DISABLE_AUTO_MERGE)
+    expect(checksRed.reason).toContain('必过检查还没全绿')
+
+    const threadsOpen = decideMerge({
+      risk: 'A',
+      draft: false,
+      fork: false,
+      requiredChecksGreen: true,
+      conversationsResolved: false,
+      rayHold: false,
+    })
+    expect(threadsOpen.decision).toBe(MERGE_DECISION.DISABLE_AUTO_MERGE)
+    expect(threadsOpen.reason).toContain('审查对话')
+
+    const stringly = decideMerge({
+      risk: 'A',
+      draft: false,
+      fork: false,
+      requiredChecksGreen: 'true',
+      conversationsResolved: 'true',
+      rayHold: false,
+    })
+    expect(stringly.decision).toBe(MERGE_DECISION.DISABLE_AUTO_MERGE)
   })
 
   it('🔴 A 级碰库表/Meta 凭证/广告花费（rayHold）→ 签了也不自动合', () => {
@@ -228,21 +215,16 @@ describe('decideMerge — A', () => {
     expect(result.tier).toBe('blocked')
   })
 
-  it('blocks an A PR while Claude Code has not signed this head', () => {
+  it('A 级没签字、但检查和对话也没确认 → 仍拦住，原因不提签字', () => {
     const result = decideMerge({ risk: 'A', draft: false, fork: false, signoff: INCOMPLETE_SIGNOFF, rayHold: false })
     expect(result.pass).toBe(false)
     expect(result.decision).toBe(MERGE_DECISION.DISABLE_AUTO_MERGE)
-    expect(result.reason).toContain('Claude Code')
-  })
-
-  it('A 级没有任何签字输入 → 拦住，并点名还缺谁（Codex 已不是签字人）', () => {
-    const result = decideMerge({ risk: 'A', draft: false, fork: false, signoff: undefined, rayHold: false })
-    expect(result.pass).toBe(false)
-    expect(result.reason).toContain('Claude Code')
+    expect(result.reason).toContain('必过检查还没全绿')
+    expect(result.reason).not.toContain('Claude Code')
     expect(result.reason).not.toContain('ziya')
   })
 
-  it('does not treat the old three roles as a completed A-level sign-off', () => {
+  it('does not treat the old three roles as a reason to skip the checks', () => {
     const result = decideMerge({ risk: 'A', draft: false, fork: false, signoff: OLD_THREE_SIGNOFF })
     expect(result.pass).toBe(false)
     expect(result.decision).toBe(MERGE_DECISION.DISABLE_AUTO_MERGE)
@@ -324,18 +306,12 @@ describe('decideMerge — the enable implication holds over every combination', 
                         expect(fork, 'enable but fork !== false').toBe(false)
                         expect(rayHold, `enable while Ray must merge: ${label}`).not.toBe(true)
                         if (risk === 'A') {
-                          // A 级的四个条件一个都不能少（Codex 已不是其中之一）
-                          expect(claudeSignoff && claudeSignoff.clear === true, label).toBe(true)
+                          // 签字不是放行条件（Ray 2026-11-16）。检查、对话、rayHold 一个都不能少。
                           expect(requiredChecksGreen, label).toBe(true)
                           expect(conversationsResolved, label).toBe(true)
                           expect(rayHold, label).toBe(false)
                         } else {
                           expect(risk === 'B' || risk === 'C', `enable but risk not in {A,B,C}: ${label}`).toBe(true)
-                          // 🔴 B/C 开自动合并，只有两种合法来源：不是 P0，或者 P0 但已签字。
-                          //    少了这条，「P0 没签也能开」这种回归会从穷举里溜过去。
-                          const notP0 = p0 === false || p0 === 'false'
-                          const signed = claudeSignoff !== null && claudeSignoff !== undefined && claudeSignoff.clear === true
-                          expect(notP0 || signed, `enable on a P0 without a sign-off: ${label}`).toBe(true)
                         }
                       }
                      }

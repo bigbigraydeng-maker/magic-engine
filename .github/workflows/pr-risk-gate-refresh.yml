@@ -1,19 +1,17 @@
 name: PR risk gate refresh
 
-# Re-evaluates the merge gate when Codex reviews or Claude Code signs off.
-# A clean Codex review is an issue comment (`codex-review-state:v1`, full
-# commit sha), not a review object (#3086, #3091). Codex updates that comment
-# in place, so `edited` counts too. A Claude sign-off is the same kind of
-# comment (`me-review-signoff`, or a comment from the trusted login). When
-# the light checks finish, this runs again so an A-level PR can arm
-# auto-merge once they are green. Every required check other than Risk gate
-# is published by that workflow, so its completion is the retrigger. It does
-# not listen to this workflow or to the risk-gate workflow: that would loop.
+# Re-evaluates the merge gate when a review comment lands or the light checks
+# finish. Sign-off comments still retrigger the gate (a comment can resolve a
+# thread) but neither a Codex review nor a Claude Code sign-off is required
+# to arm auto-merge (Ray 2026-11-16). A `p0` label does not block. When the
+# light checks finish, this runs again so a PR can arm auto-merge once they
+# are green. Every required check other than Risk gate is published by that
+# workflow, so its completion is the retrigger. It does not listen to this
+# workflow or to the risk-gate workflow: that would loop.
 #
 # This file is separate from `pr-risk-gate.yml` on purpose. An `issue_comment`
 # run is attached to the default-branch SHA. A job here named "Risk gate"
-# would put that required check on main — green after a clean review, red
-# when the head is still unreviewed. The job below has a different name. The
+# would put that required check on main. The job below has a different name. The
 # script writes a check run named "Risk gate" onto the PR head, then exits 0
 # so this job does not paint main red. Failing to write that check still
 # fails the job.

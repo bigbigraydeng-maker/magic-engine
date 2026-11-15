@@ -84,14 +84,14 @@ describe('A-level auto-merge', () => {
     expect(result.tier).toBe('auto')
   })
 
-  it('does not enable when Claude has not signed this head', () => {
+  it('enables when Claude has not signed this head, as long as checks and threads are clear', () => {
     const result = ready({ claudeSignoff: { clear: false, reason: 'Claude Code 还没签过当前这次提交' } })
-    expect(result.decision).toBe(MERGE_DECISION.DISABLE_AUTO_MERGE)
-    expect(result.pass).toBe(false)
-    expect(result.reason).toContain('Claude Code')
+    expect(result.decision).toBe(MERGE_DECISION.ENABLE_AUTO_MERGE)
+    expect(result.pass).toBe(true)
+    expect(result.reason).not.toContain('Claude Code')
   })
 
-  it('does not enable when either sign-off is for an older head', () => {
+  it('still enables when either sign-off is for an older head', () => {
     const codexReview = evaluateCodexHeadReview({
       head: HEAD,
       trustedLogin: CODEX,
@@ -125,7 +125,8 @@ describe('A-level auto-merge', () => {
       conversationsResolved: true,
       rayHold: false,
     })
-    expect(result.decision).toBe(MERGE_DECISION.DISABLE_AUTO_MERGE)
+    expect(result.decision).toBe(MERGE_DECISION.ENABLE_AUTO_MERGE)
+    expect(result.pass).toBe(true)
   })
 
   it('accepts an APPROVED review or a dedicated SIGNED-OFF line, and ignores a refusal', () => {
@@ -225,18 +226,19 @@ describe('paths Ray still merges by hand', () => {
     ]) {
       const result = held(path)
       expect(result.hold, path).toBe(true)
-      expect(
-        decideMerge({
-          risk: 'A',
-          draft: false,
-          fork: false,
-          codexReview: { clear: true },
-          claudeSignoff: { clear: true },
-          requiredChecksGreen: true,
-          conversationsResolved: true,
-          rayHold: result.hold,
-        }).decision,
-      ).toBe(MERGE_DECISION.DISABLE_AUTO_MERGE)
+      const decision = decideMerge({
+        risk: 'A',
+        draft: false,
+        fork: false,
+        codexReview: { clear: false },
+        claudeSignoff: { clear: false },
+        requiredChecksGreen: true,
+        conversationsResolved: true,
+        rayHold: result.hold,
+      })
+      expect(decision.decision, path).toBe(MERGE_DECISION.DISABLE_AUTO_MERGE)
+      expect(decision.needsRayMerge, path).toBe(true)
+      expect(decision.reason, path).toContain('Ray')
     }
   })
 
@@ -569,9 +571,19 @@ describe('paths Ray still merges by hand', () => {
     expect(source).not.toContain('assessRayMergeHold(files, sourcePaths')
   })
 
-  it('fails closed when the file list cannot be read, and a held path blocks B as well', () => {
+  it('fails closed when the file list cannot be read, and a held path blocks A and B', () => {
     expect(assessRayMergeHold(undefined).hold).toBe(true)
     expect(assessRayMergeHold([]).hold).toBe(true)
+    const unread = decideMerge({
+      risk: 'A',
+      draft: false,
+      fork: false,
+      requiredChecksGreen: true,
+      conversationsResolved: true,
+      rayHold: assessRayMergeHold(undefined).hold,
+    })
+    expect(unread.decision).toBe(MERGE_DECISION.DISABLE_AUTO_MERGE)
+    expect(unread.needsRayMerge).toBe(true)
     const result = decideMerge({
       risk: 'B',
       draft: false,
