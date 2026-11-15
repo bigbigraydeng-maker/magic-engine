@@ -41,6 +41,7 @@ import type { LeadFollowupItemKind } from './lead-followup-items'
 import type { CatalogueFollowupItemKind } from './catalogue-followup-items'
 import type { AdsAutonomyItemKind } from './ads-autonomy-items'
 import type { AdsRuleFindingItemKind } from './ads-rule-finding-items'
+import type { AdsHealthPatrolItemKind } from './ads-health-patrol-items'
 import type { AdsCircuitItemKind } from './ads-circuit-items'
 import type { AdsServicePauseItemKind } from './ads-service-pause-items'
 import type { AdsAccountStatusItemKind } from './ads-account-status-items'
@@ -345,6 +346,7 @@ export type ManualItemKind =
   | AdsAutonomyItemKind
   /** 每日广告巡检的广告级规则（D2 素材疲劳 / D10 点进去之后差了）：要人拍板改不改，系统不会自动改 */
   | AdsRuleFindingItemKind
+  | AdsHealthPatrolItemKind
   | AdsCircuitItemKind
   /** 服务把一条在投的广告系列暂停了 —— 要不要恢复由人点确认卡 */
   | AdsServicePauseItemKind
