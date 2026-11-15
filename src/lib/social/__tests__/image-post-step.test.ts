@@ -8,7 +8,6 @@ const mocks = vi.hoisted(() => ({
   loadRankableClientAssets: vi.fn(),
   getActiveCampaigns: vi.fn(),
   getActiveBrief: vi.fn(),
-  uploadFromUrl: vi.fn(),
   runImageEdit: vi.fn(),
   readPosterText: vi.fn(),
 }))
@@ -17,7 +16,6 @@ vi.mock('@/lib/tour-catalog/store-publish', () => ({ loadPublishedTourFacts: moc
 vi.mock('@/lib/factory/client-asset-pool', () => ({ loadRankableClientAssets: mocks.loadRankableClientAssets }))
 vi.mock('@/lib/content/campaign-injector', () => ({ getActiveCampaigns: mocks.getActiveCampaigns }))
 vi.mock('@/lib/content/brief-injector', () => ({ getActiveBrief: mocks.getActiveBrief }))
-vi.mock('@/lib/visual/storage', () => ({ uploadFromUrl: mocks.uploadFromUrl }))
 vi.mock('@/lib/visual/image-edit', () => ({ runImageEdit: mocks.runImageEdit }))
 vi.mock('@/lib/visual/poster-text-reader', () => ({ readPosterText: mocks.readPosterText }))
 vi.mock('@/lib/social/weekly-loop/fact-check', () => ({
@@ -92,8 +90,7 @@ beforeEach(() => {
   mocks.loadRankableClientAssets.mockResolvedValue([photo])
   mocks.getActiveCampaigns.mockResolvedValue([{ id: 'camp-1' }])
   mocks.getActiveBrief.mockResolvedValue({ vi_colors: { primary: '#C8102E', secondary: '#D4AF37' }, website: 'https://www.example.co.nz' })
-  mocks.uploadFromUrl.mockResolvedValue({ storage_url: 'https://bucket/poster.jpg', file_size_kb: 200 })
-  mocks.runImageEdit.mockResolvedValue({ ok: true, outputUrl: 'https://out/p.jpg', costUsd: 0.038, requestId: 'req-1' })
+  mocks.runImageEdit.mockResolvedValue({ ok: true, outputUrl: 'https://bucket/posters/p.jpg', fileSizeKb: 200, costUsd: 0.038, requestId: 'req-1' })
   mocks.readPosterText.mockResolvedValue({
     ok: true,
     text: 'China Panorama\n14 Days\nFrom $6,999\nNext departure 15 March 2027\nexample.co.nz',
@@ -149,7 +146,7 @@ describe('runImagePostStep — poster recipe opt-in', () => {
     const existing = [{
       id: 'poster-old',
       vision_metadata: { poster: {
-        recipe_id: 'tour_poster_v1', recipe_version: 1, source_asset_id: PHOTO_ID, has_price: true, text_lines: [],
+        recipe_id: 'tour_poster_v1', recipe_version: 2, source_asset_id: PHOTO_ID, has_price: true, text_lines: [],
         cost_usd: 0.038, provider_request_id: null, created_at: '2026-11-01T00:00:00.000Z', next_depart_on: null,
       } },
     }]
@@ -160,6 +157,22 @@ describe('runImagePostStep — poster recipe opt-in', () => {
     expect(mocks.runImageEdit).not.toHaveBeenCalled()
     expect(planRow(inserted).bundles[0].post.image_asset_id).toBe('poster-old')
     expect(r.posters?.[0]).toMatchObject({ status: 'reused' })
+  })
+
+  it('on + only an older-version poster stored: not reused, a new edit is made', async () => {
+    const existing = [{
+      id: 'poster-v1',
+      vision_metadata: { poster: {
+        recipe_id: 'tour_poster_v1', recipe_version: 1, source_asset_id: PHOTO_ID, has_price: true, text_lines: [],
+        cost_usd: 0.038, provider_request_id: null, created_at: '2026-11-01T00:00:00.000Z', next_depart_on: null,
+      } },
+    }]
+    const inserted: Inserted[] = []
+    await runImagePostStep(CLIENT, '2027-01-01', config('tour_poster_v1'), null, {
+      supabase: fakeSupabase(inserted, existing), callLLM: vi.fn(),
+    })
+    expect(mocks.runImageEdit).toHaveBeenCalledTimes(1)
+    expect(planRow(inserted).bundles[0].post.image_asset_id).toBe('client_assets-new')
   })
 
   it('on + edit failure: falls back to the photo, reason on the receipt, single submit', async () => {

@@ -38,7 +38,7 @@ const tour = (over: Partial<PublishedTourFact> = {}): PublishedTourFact => ({
 describe('recipe registry', () => {
   it('tour_poster_v1 is frozen and resolvable', () => {
     const r = resolvePosterRecipe('tour_poster_v1')
-    expect(r).toEqual({ id: 'tour_poster_v1', version: 1, model: 'minimax-h3-image-edit', resolution: '2K' })
+    expect(r).toEqual({ id: 'tour_poster_v1', version: 2, model: 'gpt-image-2.6-flare' })
     expect(Object.isFrozen(POSTER_RECIPES)).toBe(true)
     expect(Object.isFrozen(POSTER_RECIPES.tour_poster_v1)).toBe(true)
   })
@@ -152,7 +152,7 @@ describe('buildTourPosterPrompt — labelled format (worked in the live trial)',
   })
 
   it('no vendor or client names in the shared prompt', () => {
-    expect(buildTourPosterPrompt(lines, brand).toLowerCase()).not.toMatch(/muapi|minimax|cts/)
+    expect(buildTourPosterPrompt(lines, brand).toLowerCase()).not.toMatch(/muapi|minimax|openai|gpt|cts/)
   })
 })
 

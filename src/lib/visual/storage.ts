@@ -18,21 +18,24 @@ export async function uploadFromBase64(params: {
   assetType: 'image' | 'video' | 'avatar_video'
   variant?: 1 | 2
   folder?: string
+  /** Defaults to PNG (existing callers). */
+  mimeType?: 'image/png' | 'image/jpeg'
 }): Promise<{ storage_url: string; file_size_kb: number }> {
-  const { base64, clientId, postId, assetType, variant = 1, folder } = params
+  const { base64, clientId, postId, assetType, variant = 1, folder, mimeType = 'image/png' } = params
+  const ext = mimeType === 'image/jpeg' ? 'jpg' : 'png'
 
   const bytes = Buffer.from(base64, 'base64')
   const fileSizeKb = Math.round(bytes.length / 1024)
 
   const timestamp = Date.now()
   const subPath = folder ?? postId ?? 'misc'
-  const path = `${clientId}/${subPath}/${assetType}-v${variant}-${timestamp}.png`
+  const path = `${clientId}/${subPath}/${assetType}-v${variant}-${timestamp}.${ext}`
 
   await ensureBucket()
 
   const { error } = await supabaseAdmin.storage
     .from(BUCKET)
-    .upload(path, bytes, { contentType: 'image/png', upsert: true })
+    .upload(path, bytes, { contentType: mimeType, upsert: true })
 
   if (error) throw error
 
