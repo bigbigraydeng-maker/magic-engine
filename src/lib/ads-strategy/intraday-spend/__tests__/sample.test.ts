@@ -3,7 +3,15 @@ import { readFileSync } from 'fs'
 import path from 'path'
 import { DRY_CLIENT, DRY_NOW, dryDeps } from '../dry'
 import { runIntradaySample, type SampleDeps } from '../run'
-import { accountDayKey, bucketMinute, draftsForAccount, localMinuteOfDay, spendToMinor } from '../sample'
+import {
+  accountDayKey,
+  bucketMinute,
+  draftsForAccount,
+  localMinuteOfDay,
+  reportedCount,
+  resultsFromActions,
+  spendToMinor,
+} from '../sample'
 
 const base = {
   clientId: 'c1', adAccountId: 'act_synth', accountDay: '2026-11-09',
@@ -53,12 +61,71 @@ describe('intraday spend sample', () => {
     expect(drafts?.map((row) => [row.entityLevel, row.entityId, row.spendMinor])).toEqual([
       ['adset', 'as_a', 100], ['adset', 'as_c', 250], ['campaign', 'cmp_synth', 350],
     ])
+    expect(drafts?.map((row) => [row.linkClicks, row.results])).toEqual([
+      [null, null], [null, null], [null, null],
+    ])
     expect(draftsForAccount({ ...base, adsets: [], insights: [], insightsComplete: false })).toBeNull()
     expect(draftsForAccount({
       ...base,
       adsets: [{ id: 'as_a', campaignId: 'cmp_synth', status: 'ACTIVE' }],
       insights: [{ adsetId: 'as_a', spend: 'nope' }],
     })).toBeNull()
+  })
+
+  it('maps link clicks and results without summing overlapping actions', () => {
+    const drafts = draftsForAccount({
+      ...base,
+      adsets: [
+        { id: 'as_a', campaignId: 'cmp_synth', status: 'ACTIVE' },
+        { id: 'as_c', campaignId: 'cmp_synth', status: 'ACTIVE' },
+        { id: 'as_d', campaignId: 'cmp_synth', status: 'ACTIVE' },
+      ],
+      insights: [
+        {
+          adsetId: 'as_a', spend: '1.00', impressions: '10', inlineLinkClicks: '4',
+          actions: [
+            { action_type: 'lead', value: '2' },
+            { action_type: 'onsite_conversion.lead_grouped', value: '2' },
+            { action_type: 'onsite_conversion.messaging_conversation_started_7d', value: '1' },
+            { action_type: 'purchase', value: '9' },
+          ],
+        },
+        { adsetId: 'as_c', spend: '2.50', impressions: '20', inlineLinkClicks: '1', actions: [] },
+      ],
+    })
+    expect(drafts?.map((row) => [row.entityId, row.linkClicks, row.results])).toEqual([
+      ['as_a', 4, 2],
+      ['as_c', 1, 0],
+      ['as_d', 0, 0],
+      ['cmp_synth', 5, 2],
+    ])
+  })
+
+  it('keeps omitted clicks and actions null instead of zero', () => {
+    const drafts = draftsForAccount({
+      ...base,
+      adsets: [
+        { id: 'as_a', campaignId: 'cmp_synth', status: 'ACTIVE' },
+        { id: 'as_c', campaignId: 'cmp_synth', status: 'ACTIVE' },
+      ],
+      insights: [
+        { adsetId: 'as_a', spend: '1.00', impressions: '10' },
+        {
+          adsetId: 'as_c', spend: '1.00', impressions: '10',
+          inlineLinkClicks: 'nope',
+          actions: [{ action_type: 'lead', value: 'n/a' }],
+        },
+      ],
+    })
+    expect(drafts?.map((row) => [row.entityId, row.linkClicks, row.results])).toEqual([
+      ['as_a', null, null],
+      ['as_c', null, null],
+      ['cmp_synth', null, null],
+    ])
+    expect(resultsFromActions(undefined)).toBeNull()
+    expect(resultsFromActions(null)).toBeNull()
+    expect(reportedCount(undefined)).toBeNull()
+    expect(reportedCount('0')).toBe(0)
   })
 
   it('does not call Meta when the timezone is unknown, hidden, or shared', async () => {
@@ -99,7 +166,13 @@ describe('intraday spend sample', () => {
   })
 
   it('dry run stores today and drops the row past the retention window', async () => {
-    const receipt = await runIntradaySample(dryDeps(), { now: DRY_NOW, sleep: async () => {}, dryRun: true })
+    const deps = dryDeps()
+    const receipt = await runIntradaySample(deps, { now: DRY_NOW, sleep: async () => {}, dryRun: true })
+    const today = (await deps.loadSamples(DRY_CLIENT, '2026-11-09')).filter((row) => row.accountDay === '2026-11-09')
+    expect(today.map((row) => [row.entityLevel, row.linkClicks, row.results])).toEqual([
+      ['adset', 4, 2],
+      ['campaign', 4, 2],
+    ])
     expect(receipt.rows).toBe(2)
     expect(receipt.purged).toBe(1)
     expect(receipt.accountsSampled).toBe(1)
@@ -110,6 +183,8 @@ describe('intraday spend sample', () => {
   it('names the heartbeat read functions and no budget write', () => {
     const src = readFileSync(path.join(__dirname, '../prod.ts'), 'utf8')
     expect(src).toContain('fetchHeartbeatTodayInsights')
+    expect(src).toContain('inline_link_clicks')
+    expect(src).toContain('actions')
     expect(src).toContain('fetchHeartbeatAdsets')
     expect(src).not.toContain('graph.facebook.com')
     expect(src).not.toMatch(/daily_budget|ads_update|method:\s*'POST'/)
