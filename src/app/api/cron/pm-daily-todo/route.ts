@@ -3,7 +3,8 @@ import { Resend } from 'resend'
 import { supabaseAdmin } from '@/lib/supabase'
 import { startCronRun } from '@/lib/cron/run-logger'
 import { meMailFrom, ME_MAIL_TO_ADDRESS } from '@/lib/email/sender'
-import { loadTodoCounts, buildTodoEmail, nzWeekday } from '@/lib/pm-todo/daily-todo'
+import { loadTodoCounts, buildTodoEmail, buildTodoView, nzWeekday } from '@/lib/pm-todo/daily-todo'
+import { pushMorningTodo } from '@/lib/telegram/push'
 import { openFactoryWinnerRounds } from '@/lib/pm-todo/factory-winner-items'
 
 /**
@@ -81,6 +82,16 @@ export async function GET(req: NextRequest) {
       throw new Error(`Resend error: ${String(sendError)}`)
     }
 
+    let telegram: 'sent' | 'skipped' | 'failed' = 'skipped'
+    if (process.env.TELEGRAM_TODO_PUSH_ENABLED === 'true') {
+      try {
+        telegram = await pushMorningTodo({ weekday, dateLabel: nzDateLabel, view: buildTodoView(counts) })
+      } catch (err) {
+        telegram = 'failed'
+        console.error('[pm-daily-todo] telegram', err instanceof Error ? err.message : 'error')
+      }
+    }
+
     await cronRun.finish({
       processed: 1,
       completed: 1,
@@ -90,6 +101,7 @@ export async function GET(req: NextRequest) {
         weekday,
         winner_rounds_opened: winnerRounds.opened.length,
         winner_rounds_failed: winnerRounds.failed.length,
+        telegram,
       },
     })
 

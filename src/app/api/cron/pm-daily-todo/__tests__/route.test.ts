@@ -25,6 +25,9 @@ vi.mock('@/lib/pm-todo/daily-todo', () => ({
   nzWeekday: () => 2,
   loadTodoCounts: async () => { h.order.push('load'); return {} },
   buildTodoEmail: () => ({ subject: 's', html: '<p/>', totalItems: 3 }),
+  buildTodoView: () => ({ sections: [], totalItems: 0, blindSpots: [], routedToDev: 0, routedToWeekly: 0, cronFailures24h: 0 }),
+  DAY_THEMES: {},
+  ZH_DAYS: ['周日', '周一', '周二', '周三', '周四', '周五', '周六'],
 }))
 vi.mock('@/lib/pm-todo/factory-winner-items', () => ({
   openFactoryWinnerRounds: async () => {
@@ -45,6 +48,7 @@ beforeEach(() => {
   h.finish.mockClear()
   vi.stubEnv('CRON_SECRET', 's3cret')
   vi.stubEnv('RESEND_API_KEY', 'k')
+  vi.stubEnv('TELEGRAM_TODO_PUSH_ENABLED', '')
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 
@@ -54,7 +58,7 @@ describe('pm-daily-todo 开轮顺序', () => {
     expect(res.status).toBe(200)
     expect(h.order).toEqual(['open', 'load', 'send'])
     expect(h.finish).toHaveBeenCalledWith(expect.objectContaining({
-      summary: expect.objectContaining({ winner_rounds_opened: 1, winner_rounds_failed: 0 }),
+      summary: expect.objectContaining({ winner_rounds_opened: 1, winner_rounds_failed: 0, telegram: 'skipped' }),
     }))
   })
 

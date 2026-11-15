@@ -9,6 +9,7 @@ import { contentFingerprint, normalizeFacts, type CardFacts } from './facts'
 import { ensureConfirmationPolicy } from './policy'
 import { listPendingCards } from './records'
 import { ConfirmationCardError } from './errors'
+import { notifyIssuedConfirmationCardSafe } from '@/lib/telegram/notify-hook'
 import { settleExpired, voidStaleCard } from './settle'
 import { isExpired, presentCard, readStoredCard, type CardLifetime, type ConfirmationCardView } from './view'
 
@@ -110,7 +111,7 @@ export async function issueConfirmationCard(
   const run = fresh ?? await openRun(deps, args.clientId, args.clicker, facts, fingerprint, now, lifetime)
   const decisionId = run.authorization_decision_id
   if (!decisionId) throw new ConfirmationCardError('invalid', '确认卡没有挂上审批编号，没有当成已确认。')
-  return presentCard({
+  const card = presentCard({
     run,
     decisionId,
     decisionReason: '',
@@ -118,4 +119,14 @@ export async function issueConfirmationCard(
     clicker: args.clicker,
     now,
   })
+  await notifyIssuedConfirmationCardSafe({
+    clientId: args.clientId,
+    what: card.what,
+    account: card.account,
+    amount: card.amount,
+    date: card.date,
+    scope: card.scope,
+    expiresLabel: card.expiresLabel,
+  })
+  return card
 }

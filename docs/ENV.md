@@ -158,6 +158,11 @@
 | `RESEND_API_KEY_<账号>`（如 `RESEND_API_KEY_CTS`） | ME 自动发给客人的信（欢迎信等）用的发信钥匙，按发信账号分开；**缺了宁可不发，绝不借系统那把**。PM 11-10 回「共用」：CTS 这把是 ME 系统 Resend 账号里新建、只限 news. 域名的钥匙。只能 PM 本人填 | Render-web | ✅ |
 | `UNSUBSCRIBE_SIGNING_SECRET` / `_PREV` | 自动信里一键退订链接的签名密钥（至少 32 位；`_PREV` 只在换密钥时短暂保留旧的）。缺了退订页显示「Sorry, that did not work」、自动信不会发 | Render-web | ✅ |
 | `ME_MAIL_FROM` / `ME_MAIL_TO` | ME 内部通知收发件人 | Render-web | ❌ |
+| `TELEGRAM_BOT_TOKEN` | 现有机器人 **@magicengine_ray_bot** 的发消息钥匙。2026-11-16 搜了本仓库（含 git 历史）、本账号可见的 GitHub 代码和议题：没有这个用户名，也没有旧的 `TELEGRAM_` 变量名，回调地址没有接在这份代码里。不要新建机器人，把这只机器人已有的钥匙填到这里。代码只发 `sendMessage`，没有 `setWebhook` / `getWebhookInfo` | Render-web | ❌ |
+| `TELEGRAM_WEBHOOK_SECRET` | 校验请求头 `X-Telegram-Bot-Api-Secret-Token`。缺了 `/api/webhooks/telegram` 一律 503。ME **不会**自己去登记回调地址：如果这只机器人的回调已经指向别的服务，把本地址登记上去会把原来的地址换掉。在换之前，那个服务可以把同一份更新原样转到本路由，并带上同一个请求头 | Render-web | ❌ |
+| `TELEGRAM_OWNER_USER_ID` | 只认这一位 Telegram 用户（Ray 自己的 user id）。别人的更新直接拒绝，不回复 | Render-web | ❌ |
+| `TELEGRAM_OWNER_CHAT_ID` | 只认这一条聊天（Ray 自己的 chat id）。和上面的用户 id 必须同时对上 | Render-web | ❌ |
+| `TELEGRAM_OWNER_EMAIL` | 上面那位对上之后，映射成确认卡里的负责人身份（OPC 登录邮箱）。本 PR 只映射，不执行点卡。没填则收得到更新但身份是空的，仍然不执行 | Render-web | ❌ |
 | `FACTORY_REVIEWER_EMAILS` | Factory 审核通知收件人 | Render-web | ❌ |
 | `OUTREACH_FROM_EMAIL` / `_REPLY_EMAIL` | 线索外联邮件收发地址（P35） | Render-web | ❌ |
 | `OUTREACH_SENDER_NAME` / `_SENDER_FIRST_NAME` / `_SENDER_COMPANY` / `_WEBSITE` | 外联邮件署名 | Render-web | ❌ |
@@ -221,6 +226,7 @@
 | `ENABLE_REAL_GENERATION` | `.env.example` 有，代码 0 引用 | ⚠️ 待清理 |
 | `FACTORY_QUALITY_GUARD_DISABLED` | 内容工厂成片文案品控（竞品品牌/占位字幕/人称口吻）总闸，设 `true` 临时全局关停 Jev 调用（确定性的字幕重复检测不受影响，照常跑）。默认开 | Render-web |
 | `MESSENGER_VERIFIER_SEMANTIC_DISABLED` | CTS Messenger AI 客服 verifier 的 Jev 语义补充判断（brand_redline/number_claim 换措辞绕过）总闸，设 `true` 临时全局关停 Jev 调用（七道正则闸不受影响，照常跑）。默认开 | Render-web |
+| `TELEGRAM_TODO_PUSH_ENABLED` | 今日待办推到现有 Telegram 机器人的总闸。必须严格等于 `true`。**未配 = 关**：早间清单和「刚出了一张确认卡」都不发，确认卡本身照常生成。关着的时候也不回复 webhook。只发文字和链接，没有按钮 | Render-web |
 
 ## 12. 只在脚本 / 测试里用 — **不需要配到任何平台**
 
