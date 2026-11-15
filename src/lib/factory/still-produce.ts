@@ -128,10 +128,12 @@ async function makeOne(
 ): Promise<{ ok: boolean; spent: number | null; stopped: string | null }> {
   const compose = deps.compose ?? ((input) => composeFactoryStill(deps.supabase, input))
   const result = await compose({ clientId, date: slot.date, tour, asset, website, aspect: slot.aspect })
-  const billed = result.receipt.cost_usd ?? (result.receipt.provider_request_id ? FACTORY_STILL_COST_ESTIMATE_USD : 0)
+  const unknownBill = unknownProviderBill(result)
+  const billed = unknownBill ? FACTORY_STILL_COST_ESTIMATE_USD : knownBill(result)
   const spent = await recordStillSpend(deps.supabase, order, billed, `${slot.role}-${slot.date}`)
   if (spent === 'ledger_failed') return { ok: false, spent: null, stopped: 'ledger_failed' }
   order.spentUsd = spent
+  if (unknownBill) return { ok: false, spent, stopped: 'provider_unknown_billing' }
   if (!result.ok) return { ok: false, spent, stopped: null }
   const stamped = await stampStill(deps, clientId, result.assetId, slot, order.id, website, tour.name)
   return { ok: stamped, spent, stopped: stamped ? null : 'still_stamp_failed' }
@@ -183,6 +185,16 @@ function sha256OfHttps(url: string): Promise<string | null> {
     return createHash('sha256').update(Buffer.from(await res.arrayBuffer())).digest('hex')
   }).catch(() => null)
 }
+function unknownProviderBill(result: ComposeTourPosterResult): boolean {
+  if (result.ok || !result.reason.includes('edit_failed_maybe_billed')) return false
+  const requestId = result.receipt.provider_request_id
+  return result.receipt.cost_usd == null && (requestId === null || requestId === '')
+}
+
+function knownBill(result: ComposeTourPosterResult): number {
+  return result.receipt.cost_usd ?? (result.receipt.provider_request_id ? FACTORY_STILL_COST_ESTIMATE_USD : 0)
+}
+
 function sameSlot(still: FactoryStill, slot: StillSlot): boolean {
   return still.role === slot.role && still.aspect === slot.aspect && still.slotDate === slot.date
 }
@@ -195,6 +207,7 @@ function skipNote(code: string): string {
   const notes: Record<string, string> = {
     weekly_cap_reached: '静图花费到了本周上限，剩下的没有再生成。',
     ledger_failed: '静图花费记不进账，停下了，避免接着花。',
+    provider_unknown_billing: '改图没有回报价，已按估价记账并停下，避免接着花。',
     still_stamp_failed: '静图成片没有标上工单血统，停下了。',
     daily_order_cap: '今天的工单已经到了每天上限，没有再开工单。',
     no_factory_goal: '没有进行中的目标，没有开工单。',

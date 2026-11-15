@@ -66,6 +66,33 @@ describe('produceFactoryStills', () => {
     expect(order?.row).toMatchObject({ status: 'closed', order_type: 'fresh_angle' })
     expect(JSON.stringify(order?.row.brief)).toContain('asset_only')
   })
+
+  it('books the estimate and stops when the edit may have billed without a cost', async () => {
+    const inserts: Array<{ table: string; row: Record<string, unknown> }> = []
+    const compose = vi.fn(async (): Promise<ComposeTourPosterResult> => ({
+      ok: false,
+      reason: 'image_edit_failed: edit_failed_maybe_billed: timeout',
+      receipt: {
+        recipe_id: 'tour_poster_v1', recipe_version: 1, source_asset_id: 'photo-1', status: 'fallback',
+        reason: 'image_edit_failed: edit_failed_maybe_billed: timeout', poster_asset_id: null, has_price: false,
+        cost_usd: null, provider_request_id: null, created_at: '2026-11-12T00:00:00.000Z', text_check: null,
+      },
+    }))
+    const receipt = await produceFactoryStills('c1', {
+      factory_stills: { enabled: true, weekly_cap_usd: 1 },
+      social_week: { post_per_week: 2 },
+    }, WEEK_NOW, {
+      supabase: capSupabase(inserts) as never,
+      compose,
+      hashUrl: async () => 'ab'.repeat(32),
+    })
+    expect(compose).toHaveBeenCalledTimes(1)
+    expect(receipt.drafted).toBe(0)
+    expect(receipt.skipped).toBe('provider_unknown_billing')
+    expect(receipt.spentUsd).toBe(0.04)
+    const ledger = inserts.find((row) => row.table === 'factory_balance_ledger')
+    expect(ledger?.row).toMatchObject({ entry_type: 'spend', amount_usd: -0.04, work_order_id: 'wo-1' })
+  })
 })
 
 function capSupabase(inserts: Array<{ table: string; row: Record<string, unknown> }>) {
