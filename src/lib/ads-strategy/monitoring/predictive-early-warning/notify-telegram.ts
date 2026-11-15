@@ -39,7 +39,6 @@ export function defaultTelegramSender(token?: string): TelegramSender | null {
   }
 }
 
-/** Sends the same plain-text alert to bound FDE chats. Never invents chat ids — caller passes an allow-list. */
 export async function deliverEarlyWarningTelegram(
   chatIds: readonly string[],
   text: string,
