@@ -79,6 +79,23 @@ describe('decideStopLine', () => {
     expect(decideStopLine({ ...all, hasActiveBooking: null, doNotContact: false, stage: null })?.rule).toBe('came_back')
   })
 
+  it('only the telephony system\'s own call records are calls; AI voice, imports and automated rows never count', () => {
+    const voipline: StaffTouch = { id: 'v1', channel: 'phone', source: 'voipline', occurredAt: after(600), metadata: { customer_spoke: 'yes' } }
+    expect(decideStopLine(input({ outboundPhone: [voipline] }))?.rule).toBe('talked')
+    const aiVoice: StaffTouch = { id: 'a1', channel: 'phone', source: 'voice', occurredAt: after(600), metadata: { outcome: 'spoke', automated: true } }
+    const imported: StaffTouch = { id: 'i1', channel: 'phone', source: 'sheet_import', occurredAt: after(600), metadata: { outcome: 'spoke' } }
+    const approx = note('n1', after(600), 'spoke')
+    approx.metadata = { outcome: 'spoke', time_is_approximate: true }
+    const automatedNote = note('n2', after(600), 'spoke')
+    automatedNote.metadata = { outcome: 'spoke', automated: true }
+    expect(decideStopLine(input({ outboundPhone: [aiVoice, imported, approx, automatedNote] }))).toBeNull()
+  })
+
+  it('the reason says when "talked" rests on the phone system\'s outcome rather than a call analysis', () => {
+    expect(decideStopLine(input({ outboundPhone: [call('c1', after(600), { outcome: 'spoke' })] }))?.why).toContain('按电话系统的结果推断')
+    expect(decideStopLine(input({ outboundPhone: [call('c2', after(600), { customer_spoke: 'yes' })] }))?.why).toContain('通话分析')
+  })
+
   it('a stage that keeps marketing does not stop the line', () => {
     expect(decideStopLine(input({ stage: { key: 'contacted', label: '已联系', stopsMarketing: false } }))).toBeNull()
   })

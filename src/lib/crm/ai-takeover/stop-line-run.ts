@@ -17,6 +17,7 @@ import { isDoNotContact } from '@/lib/crm/dnc'
 import { toReengageTouchRow, type CameBackRow } from './came-back'
 import { createTakeoverStore } from './prod'
 import { recordTakeover, type TakeoverStoreDeps } from './store'
+import { takeoverState } from './state'
 import { STOPLINE_ACTOR_ID } from './actions'
 import { decideStopLine, type StaffTouch, type StopRule } from './stop-line'
 
@@ -44,14 +45,20 @@ export interface StoplineGuestResult {
   contact_id: string
   rule: StopRule
   evidence_ref: string
-  /** written = event inserted; already = this evidence was already recorded; would = dry run; failed = write failed */
-  write: 'written' | 'already' | 'would' | 'failed'
+  /**
+   * written = event inserted and the guest is off; already = this evidence was recorded before and the guest is off;
+   * would = dry run; skipped = the guest's follow-up changed since it was read (left alone, checked again tomorrow);
+   * failed = the write failed or the guest is still in follow-up after it.
+   */
+  write: 'written' | 'already' | 'would' | 'skipped' | 'failed'
 }
 
 export interface StoplineClientReceipt {
   client_id: string
   in_takeover: number
   stopped: StoplineGuestResult[]
+  /** Guests whose stage key is not in the client's stage list: checked without the stage rule, listed for a human. */
+  unknown_stage: string[]
   error: string | null
 }
 
@@ -88,13 +95,13 @@ async function loadClientInputs(sb: SupabaseClient, clientId: string) {
     sb.from('client_pipeline_stages').select('stage_key, label, marketing_action, is_terminal')
       .eq('client_id', clientId).order('sort_order', { ascending: true }).range(from, to),
   )
-  // Timestamps are compared as instants, never as strings (precision differs between rows).
-  const minSince = guests.reduce<string | null>((m, g) => (m === null || Date.parse(g.ai_takeover_since) < Date.parse(m) ? g.ai_takeover_since : m), null)
-  if (minSince === null) return { guests, stages, touches: [], bookings: [] }
+  if (guests.length === 0) return { guests, stages, touches: [], bookings: [] }
   const ids = guests.map((g) => g.id)
+  // The whole history of these guests, not only after takeover-on: the do-not-contact verdict needs older
+  // corrections (dnc_cleared) to outrank a stale contacts.do_not_contact flag.
   const touchParts = await Promise.all(chunks(ids).map((part) => fetchAll<TouchRow>((from, to) =>
     sb.from('contact_touchpoints').select('id, contact_id, channel, direction, occurred_at, summary, raw, metadata, source')
-      .eq('client_id', clientId).in('contact_id', part).gt('occurred_at', minSince)
+      .eq('client_id', clientId).in('contact_id', part)
       .order('occurred_at', { ascending: true }).order('id', { ascending: true }).range(from, to),
   )))
   const bookingParts = await Promise.all(chunks(ids).map((part) => fetchAll<{ id: string; contact_id: string }>((from, to) =>
@@ -115,7 +122,7 @@ async function checkClient(
   try {
     inputs = await loadClientInputs(sb, clientId)
   } catch (err) {
-    return { client_id: clientId, in_takeover: 0, stopped: [], error: err instanceof Error ? err.message : String(err) }
+    return { client_id: clientId, in_takeover: 0, stopped: [], unknown_stage: [], error: err instanceof Error ? err.message : String(err) }
   }
   const stageOf = new Map(inputs.stages.map((s) => [s.stage_key, s]))
   const touchesOf = new Map<string, TouchRow[]>()
@@ -123,15 +130,19 @@ async function checkClient(
   const bookingOf = new Map(inputs.bookings.map((b) => [b.contact_id, b]))
 
   const stopped: StoplineGuestResult[] = []
+  const unknownStage: string[] = []
   for (const g of inputs.guests) {
+    // Timestamps are compared as instants, never as strings (precision differs between rows).
     const sinceMs = Date.parse(g.ai_takeover_since)
-    const mine = (touchesOf.get(g.id) ?? []).filter((t) => Date.parse(t.occurred_at) > sinceMs)
+    const all = touchesOf.get(g.id) ?? []
+    const mine = all.filter((t) => Date.parse(t.occurred_at) > sinceMs)
     const stageRow = g.stage ? stageOf.get(g.stage) : undefined
+    if (g.stage && stageRow === undefined) unknownStage.push(g.id)
     const decision = decideStopLine({
       since: g.ai_takeover_since,
       now,
       hasActiveBooking: bookingOf.get(g.id) ?? null,
-      doNotContact: isDoNotContact(g.do_not_contact === true, mine.map((t) => ({
+      doNotContact: isDoNotContact(g.do_not_contact === true, all.map((t) => ({
         outcome: typeof t.metadata?.outcome === 'string' ? t.metadata.outcome : null,
         flagged: t.metadata?.do_not_contact === true,
         occurredAt: t.occurred_at,
@@ -154,6 +165,18 @@ async function checkClient(
       stopped.push({ ...base, write: 'would' })
       continue
     }
+    // Re-read just before writing: a staff click (收回人工, or a new catalogue) since the batch read means this
+    // evidence belongs to an old round of follow-up. Leave the guest alone; tomorrow's run sees the new state.
+    try {
+      const current = takeoverState(await store.loadEvents(clientId, g.id))
+      if (!current.on || Date.parse(current.since) !== sinceMs) {
+        stopped.push({ ...base, write: 'skipped' })
+        continue
+      }
+    } catch {
+      stopped.push({ ...base, write: 'failed' })
+      continue
+    }
     const res = await recordTakeover(
       {
         clientId,
@@ -162,13 +185,17 @@ async function checkClient(
         actor: STOPLINE_ACTOR,
         reason: decision.why,
         catalogVersion: null,
-        sourceRef: `stopline:${g.id}:${decision.evidenceRef}`.slice(0, 200),
+        // The takeover-on instant is part of the key: the same fact (stage, do-not-contact) in a later round of
+        // follow-up is a new stop, not a duplicate of the old one.
+        sourceRef: `stopline:${g.id}:${sinceMs}:${decision.evidenceRef}`.slice(0, 200),
       },
       store,
     )
-    stopped.push({ ...base, write: !res.ok ? 'failed' : res.inserted ? 'written' : 'already' })
+    // A write that leaves the guest in follow-up did not do its job: report it, never as success.
+    const write = !res.ok || res.since !== null ? 'failed' : res.inserted ? 'written' : 'already'
+    stopped.push({ ...base, write })
   }
-  return { client_id: clientId, in_takeover: inputs.guests.length, stopped, error: null }
+  return { client_id: clientId, in_takeover: inputs.guests.length, stopped, unknown_stage: unknownStage, error: null }
 }
 
 export async function runStopline(

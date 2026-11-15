@@ -124,7 +124,7 @@ export const STOPLINE_ACTOR_ID = 'system:followup-stopline'
 export function stopIsResumable(state: { on: boolean; actor?: string | null; sourceRef?: string | null }): boolean {
   if (state.on || state.actor !== STOPLINE_ACTOR_ID) return false
   const ref = state.sourceRef ?? ''
-  return /^stopline:[^:]+:(came_back|touch):/.test(ref)
+  return /^stopline:[^:]+:\d+:(came_back|touch):/.test(ref)
 }
 
 export type ResumeResult =

@@ -11,8 +11,10 @@
  *   3. stage      — the guest's stage stops marketing (won / handed to after-sales / stop marketing / terminal)
  *   4. came_back  — the guest reached out after takeover-on (form, answered inbound call, real email, chat message)
  *   5. talked     — a staff member reached the guest after takeover-on:
- *                     · a call the call analysis says the guest spoke on ('yes' or 'unclear');
- *                       with no analysis yet, the call's recorded outcome counts when it says they talked
+ *                     · a telephony call record the call analysis says the guest spoke on ('yes' or 'unclear');
+ *                       with no analysis yet, the call's recorded outcome counts when it says they talked (this
+ *                       outcome comes from the phone system and may rest on call length; the reason says so)
+ *                     · AI voice-agent calls, spreadsheet imports and automated / approximate-time rows never count
  *                     · a staff note whose parsed outcome says the guest was reached (anything but no answer /
  *                       bad number / a do-not-contact correction); notes in the first hour after takeover-on are
  *                       ignored — they describe the call that led to sending the catalogue
@@ -25,6 +27,7 @@ import { customerCameBack, type CameBack } from './came-back'
 import type { ReengageTouch } from '@/lib/crm/dnc-reengage'
 import { FUTURE_TOLERANCE_MS } from '@/lib/crm/dnc-reengage'
 import { customerSpokeOf } from '@/lib/crm/customer-spoke'
+import { SYSTEM_CALL_SOURCES } from '@/lib/crm/email-templates/call-evidence'
 
 export type StopRule = 'booked' | 'dnc' | 'stage' | 'came_back' | 'talked'
 
@@ -85,32 +88,41 @@ function outcomeOf(t: StaffTouch): string | null {
   return typeof o === 'string' && o !== '' ? o : null
 }
 
-/** Did this outbound phone touch reach the guest? null = cannot tell (proves nothing). */
-function reached(t: StaffTouch): boolean | null {
+type Reach = 'analysis' | 'call_outcome' | 'note'
+
+/**
+ * Did this outbound phone touch reach the guest, and on what evidence? null = it proves nothing.
+ * Only the telephony system's own call records (SYSTEM_CALL_SOURCES) are calls; `me_manual` is a staff note; any other
+ * source (AI voice agent, spreadsheet imports) is not a staff conversation. Automated or approximate-time rows never count.
+ */
+function reached(t: StaffTouch): Reach | null {
+  const meta = t.metadata ?? {}
+  if (meta.automated === true || meta.time_is_approximate === true) return null
   const outcome = outcomeOf(t)
-  if (t.source === 'twilio') {
+  if (t.source !== null && SYSTEM_CALL_SOURCES.includes(t.source)) {
     const spoke = customerSpokeOf(t.metadata)
-    if (spoke === 'yes' || spoke === 'unclear') return true
-    if (spoke === 'no') return false
-    if (outcome === null) return null
-    return CALL_TALKED.has(outcome)
+    if (spoke === 'yes' || spoke === 'unclear') return 'analysis'
+    if (spoke === 'no') return null
+    return outcome !== null && CALL_TALKED.has(outcome) ? 'call_outcome' : null
   }
-  // A staff note (typed by a person). No parsed outcome = "unsure" = counts as talked.
-  return outcome === null || !NOT_REACHED.has(outcome)
+  if (t.source !== 'me_manual') return null
+  // A staff note. No parsed outcome = "unsure" = counts as talked.
+  return outcome === null || !NOT_REACHED.has(outcome) ? 'note' : null
 }
 
-function firstStaffTalk(input: StopLineInput): StaffTouch | null {
+function firstStaffTalk(input: StopLineInput): { touch: StaffTouch; how: Reach } | null {
   const from = ms(input.since)
   if (Number.isNaN(from)) return null
   const latestOk = input.now.getTime() + FUTURE_TOLERANCE_MS
-  let best: StaffTouch | null = null
+  let best: { touch: StaffTouch; how: Reach } | null = null
   for (const t of input.outboundPhone) {
     if (t.channel !== 'phone') continue
     const at = ms(t.occurredAt)
     if (Number.isNaN(at) || at <= from || at > latestOk) continue
-    if (t.source !== 'twilio' && at - from < NOTE_GRACE_MS) continue
-    if (reached(t) !== true) continue
-    if (best === null || at < ms(best.occurredAt)) best = t
+    const how = reached(t)
+    if (how === null) continue
+    if (how === 'note' && at - from < NOTE_GRACE_MS) continue
+    if (best === null || at < ms(best.touch.occurredAt)) best = { touch: t, how }
   }
   return best
 }
@@ -131,8 +143,12 @@ export function decideStopLine(input: StopLineInput): StopDecision | null {
   }
   const talk = firstStaffTalk(input)
   if (talk !== null) {
-    const how = talk.source === 'twilio' ? '电话里跟客人聊上了' : '员工记了一笔，跟客人联系上了'
-    return { rule: 'talked', evidenceRef: `touch:${talk.id}`, at: talk.occurredAt, why: `${how}，交回员工跟进。` }
+    const how = talk.how === 'analysis'
+      ? '电话里跟客人聊上了（通话分析）'
+      : talk.how === 'call_outcome'
+        ? '电话记录显示聊上了（还没有通话分析，按电话系统的结果推断）'
+        : '员工记了一笔，跟客人联系上了'
+    return { rule: 'talked', evidenceRef: `touch:${talk.touch.id}`, at: talk.touch.occurredAt, why: `${how}，交回员工跟进。` }
   }
   return null
 }

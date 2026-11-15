@@ -56,13 +56,17 @@ export const crmFollowupStopline = inngest.createFunction(
       await inngest.send({ id: receipt.request_id, name: STOPLINE_EVENT, data: receipt })
     })
     await step.run('finish-run', async () => {
+      // Counted in guests. A client that could not be read has no guest count; it is named in `error`,
+      // which makes the run log partial instead of a silent "completed".
       const guests = receipt.clients.reduce((n, c) => n + c.in_takeover, 0)
-      const failed = receipt.clients.reduce((n, c) => n + (c.error ? 1 : 0) + c.stopped.filter((s) => s.write === 'failed').length, 0)
+      const failed = receipt.clients.reduce((n, c) => n + c.stopped.filter((s) => s.write === 'failed').length, 0)
+      const unreadable = receipt.clients.filter((c) => c.error !== null).map((c) => `${c.client_id}: ${c.error}`)
       await cronRunHandle(STOPLINE_JOB, started.runId, started.startedAt).finish({
         processed: guests,
         completed: guests - failed,
-        failed,
+        failed: failed + unreadable.length,
         summary: { ...receipt },
+        ...(receipt.error || unreadable.length > 0 ? { error: [receipt.error, ...unreadable].filter(Boolean).join('; ') } : {}),
       })
     })
     return receipt

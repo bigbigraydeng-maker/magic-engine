@@ -108,7 +108,7 @@ export function CatalogueTakeoverPanel({
 
 const STOPLINE_ACTOR = 'system:followup-stopline'
 /** Same rule as lib/crm/ai-takeover/actions.ts stopIsResumable (the server checks again). */
-const RESUMABLE = /^stopline:[^:]+:(came_back|touch):/
+const RESUMABLE = /^stopline:[^:]+:\d+:(came_back|touch):/
 
 /** The daily stop line took this guest back to staff: say when and why; a judgement call can be overruled. */
 function SystemStopNotice({ base, takeover, name, onSaved, reload }: {
