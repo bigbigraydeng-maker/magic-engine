@@ -2,10 +2,11 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { applyBreaker } from '../apply'
-import { hoursIntoLocalDay, judgeBreaker, type BreakerFacts, type SpendRow } from '../rules'
+import { hoursIntoLocalDay, judgeBreaker, type AdSetSpendRow, type BreakerFacts, type SpendRow } from '../rules'
 import { defaultBreakerSettings, readBreakerSettings } from '../settings'
 
 const NOW = new Date('2026-11-09T00:00:00.000Z')
+const WINDOW = ['2026-11-08', '2026-11-07', '2026-11-06'] as const
 
 function row(over: Partial<SpendRow> = {}): SpendRow {
   return {
@@ -21,10 +22,31 @@ function row(over: Partial<SpendRow> = {}): SpendRow {
   }
 }
 
+function adset(over: Partial<AdSetSpendRow> = {}): AdSetSpendRow {
+  return {
+    accountId: 'act-demo',
+    campaignId: 'camp-a',
+    campaignName: '春季系列',
+    adsetId: 'set-a',
+    adsetName: '春季组',
+    day: WINDOW[0],
+    spendCents: 0,
+    primaryCount: 0,
+    currency: 'NZD',
+    adsetLive: true,
+    ...over,
+  }
+}
+
+function windowOf(days: readonly Partial<AdSetSpendRow>[]): AdSetSpendRow[] {
+  return WINDOW.map((day, index) => adset({ day, ...(days[index] ?? {}) }))
+}
+
 function facts(over: Partial<BreakerFacts> = {}): BreakerFacts {
   return {
     now: NOW,
     localDate: '2026-11-09',
+    nzDate: '2026-11-09',
     yesterday: '2026-11-08',
     hoursElapsed: 12,
     capCents: 1000,
@@ -32,6 +54,8 @@ function facts(over: Partial<BreakerFacts> = {}): BreakerFacts {
     settings: defaultBreakerSettings(),
     spend: [],
     spendReadable: true,
+    adsetSpend: [],
+    adsetSpendReadable: true,
     policyAds: [],
     policyReadable: true,
     captures: [{ accountId: 'act-demo', capturedAt: NOW.toISOString(), complete: true }],
@@ -76,40 +100,69 @@ describe('judgeBreaker', () => {
     expect(judged.alerts.map((item) => item.code)).toEqual(['no_live_campaign'])
   })
 
-  it('花费超过目标线索成本的两倍且没有线索时，提议暂停', () => {
+  it('三个完整日花费超过目标两倍且没有线索时，提议暂停广告组', () => {
     const judged = judgeBreaker(facts({
       settings: { ...defaultBreakerSettings(), targetCplCents: 100 },
-      spend: [row({ spendCents: 250, primaryCount: 0 })],
+      adsetSpend: windowOf([
+        { spendCents: 80, primaryCount: 0 },
+        { spendCents: 80, primaryCount: 0 },
+        { spendCents: 50, primaryCount: 0 },
+      ]),
     }))
-    expect(judged.pauses[0]?.rules).toEqual(['cpl_zero_leads'])
-    expect(judged.pauses[0]?.summary).toBe('最近这一天有花费，但没有线索，花费已经高于约定的目标线索成本倍数。系统没有暂停。请在确认卡上点确认，才会暂停。')
+    expect(judged.pauses).toHaveLength(1)
+    expect(judged.pauses[0]).toMatchObject({ rules: ['cpl_zero_leads'], unit: 'adset', adsetId: 'set-a' })
+    expect(judged.pauses[0]?.summary).toContain('三个完整日')
+    expect(judged.pauses[0]?.summary).toContain('这个广告组')
     expect(judged.alerts).toEqual([])
   })
 
-  it('单次主结果成本刚好等于两倍不出卡，超过才出', () => {
+  it('只有一天很差、三天合计没超过两倍时不出卡', () => {
+    const judged = judgeBreaker(facts({
+      settings: { ...defaultBreakerSettings(), targetCplCents: 100 },
+      adsetSpend: windowOf([
+        { spendCents: 500, primaryCount: 0 },
+        { spendCents: 100, primaryCount: 4 },
+        { spendCents: 100, primaryCount: 4 },
+      ]),
+    }))
+    expect(judged.pauses).toEqual([])
+  })
+
+  it('三天合计刚好等于两倍不出卡，超过才出；没有目标也不出', () => {
     const settings = { ...defaultBreakerSettings(), targetCplCents: 100 }
-    const exact = judgeBreaker(facts({ settings, spend: [row({ spendCents: 200, primaryCount: 1 })] }))
-    const over = judgeBreaker(facts({ settings, spend: [row({ spendCents: 201, primaryCount: 1 })] }))
-    const twoExact = judgeBreaker(facts({ settings, spend: [row({ spendCents: 400, primaryCount: 2 })] }))
-    const twoOver = judgeBreaker(facts({ settings, spend: [row({ spendCents: 401, primaryCount: 2 })] }))
-    const zeroExact = judgeBreaker(facts({ settings, spend: [row({ spendCents: 200, primaryCount: 0 })] }))
-    const noTarget = judgeBreaker(facts({ spend: [row({ spendCents: 250, primaryCount: 0 })] }))
+    const exact = judgeBreaker(facts({ settings, adsetSpend: windowOf([{ spendCents: 200, primaryCount: 1 }, { spendCents: 0, primaryCount: 0 }, { spendCents: 0, primaryCount: 0 }]) }))
+    const over = judgeBreaker(facts({ settings, adsetSpend: windowOf([{ spendCents: 201, primaryCount: 1 }, { spendCents: 0, primaryCount: 0 }, { spendCents: 0, primaryCount: 0 }]) }))
+    const twoExact = judgeBreaker(facts({ settings, adsetSpend: windowOf([{ spendCents: 200, primaryCount: 1 }, { spendCents: 200, primaryCount: 1 }, { spendCents: 0, primaryCount: 0 }]) }))
+    const twoOver = judgeBreaker(facts({ settings, adsetSpend: windowOf([{ spendCents: 201, primaryCount: 1 }, { spendCents: 200, primaryCount: 1 }, { spendCents: 0, primaryCount: 0 }]) }))
+    const zeroExact = judgeBreaker(facts({ settings, adsetSpend: windowOf([{ spendCents: 200, primaryCount: 0 }, { spendCents: 0, primaryCount: 0 }, { spendCents: 0, primaryCount: 0 }]) }))
+    const noTarget = judgeBreaker(facts({ adsetSpend: windowOf([{ spendCents: 250, primaryCount: 0 }, { spendCents: 0, primaryCount: 0 }, { spendCents: 0, primaryCount: 0 }]) }))
     expect(exact.pauses).toEqual([])
     expect(twoExact.pauses).toEqual([])
     expect(zeroExact.pauses).toEqual([])
     expect(over.pauses[0]?.rules).toEqual(['cpl_over_target'])
+    expect(over.pauses[0]?.unit).toBe('adset')
     expect(over.pauses[0]?.summary).toContain('单次线索成本')
     expect(twoOver.pauses[0]?.rules).toEqual(['cpl_over_target'])
     expect(noTarget.pauses).toEqual([])
   })
 
-  it('开聊客户单次成本超过两倍时出卡，刚好两倍不出', () => {
+  it('已经暂停的广告组不再出卡', () => {
+    const judged = judgeBreaker(facts({
+      settings: { ...defaultBreakerSettings(), targetCplCents: 100 },
+      adsetSpend: windowOf([{ spendCents: 250, primaryCount: 0, adsetLive: false }]),
+    }))
+    expect(judged.pauses).toEqual([])
+  })
+
+  it('开聊客户三天合计超过两倍时出卡，刚好两倍不出', () => {
     const settings = { ...defaultBreakerSettings(), targetCplCents: 100 }
     const exact = judgeBreaker(facts({
-      primaryResult: 'messaging_started', settings, spend: [row({ spendCents: 200, primaryCount: 1 })],
+      primaryResult: 'messaging_started', settings,
+      adsetSpend: windowOf([{ spendCents: 200, primaryCount: 1 }]),
     }))
     const over = judgeBreaker(facts({
-      primaryResult: 'messaging_started', settings, spend: [row({ spendCents: 201, primaryCount: 1 })],
+      primaryResult: 'messaging_started', settings,
+      adsetSpend: windowOf([{ spendCents: 201, primaryCount: 1 }]),
     }))
     expect(exact.pauses).toEqual([])
     expect(over.pauses[0]?.rules).toEqual(['cpl_over_target'])
@@ -120,17 +173,17 @@ describe('judgeBreaker', () => {
     const judged = judgeBreaker(facts({
       primaryResult: 'messaging_started',
       settings: { ...defaultBreakerSettings(), targetCplCents: 100 },
-      spend: [row({ spendCents: 250, primaryCount: 4 })],
+      adsetSpend: windowOf([{ spendCents: 250, primaryCount: 4 }]),
     }))
     expect(judged.pauses).toEqual([])
     expect(judged.alerts).toEqual([])
   })
 
-  it('主结果是开聊、开聊为 0 且花费超过目标倍数时出卡', () => {
+  it('主结果是开聊、开聊为 0 且三天花费超过目标倍数时出卡', () => {
     const judged = judgeBreaker(facts({
       primaryResult: 'messaging_started',
       settings: { ...defaultBreakerSettings(), targetCplCents: 100 },
-      spend: [row({ spendCents: 250, primaryCount: 0 })],
+      adsetSpend: windowOf([{ spendCents: 250, primaryCount: 0 }]),
     }))
     expect(judged.pauses[0]?.rules).toEqual(['cpl_zero_leads'])
     expect(judged.pauses[0]?.summary).toContain('没有开聊')
@@ -140,7 +193,7 @@ describe('judgeBreaker', () => {
     const judged = judgeBreaker(facts({
       primaryResult: null,
       settings: { ...defaultBreakerSettings(), targetCplCents: 100 },
-      spend: [row({ spendCents: 250, primaryCount: null })],
+      adsetSpend: windowOf([{ spendCents: 250, primaryCount: null }]),
     }))
     expect(judged.pauses).toEqual([])
     expect(judged.alerts.map((item) => item.code)).toEqual(['primary_unreadable'])
@@ -205,9 +258,13 @@ describe('judgeBreaker', () => {
       ],
       insights: [{ accountId: 'act-live', updatedAt: NOW.toISOString() }],
       settings: { ...defaultBreakerSettings(), targetCplCents: 100 },
-      spend: [row({ accountId: 'act-live', campaignId: 'camp-live', campaignName: '在投系列', spendCents: 250, primaryCount: 1 })],
+      adsetSpend: windowOf([
+        { accountId: 'act-live', campaignId: 'camp-live', adsetId: 'set-live', spendCents: 250, primaryCount: 1 },
+        { accountId: 'act-live', campaignId: 'camp-live', adsetId: 'set-live', spendCents: 0, primaryCount: 0 },
+        { accountId: 'act-live', campaignId: 'camp-live', adsetId: 'set-live', spendCents: 0, primaryCount: 0 },
+      ]),
     }))
-    expect(judged.pauses.map((item) => item.campaignId)).toEqual(['camp-live'])
+    expect(judged.pauses.map((item) => item.adsetId)).toEqual(['set-live'])
     expect(judged.pauses[0]?.rules).toEqual(['cpl_over_target'])
     expect(judged.alerts.map((item) => item.code)).not.toContain('stale')
   })
@@ -226,12 +283,16 @@ describe('judgeBreaker', () => {
         { accountId: 'act-fresh', updatedAt: NOW.toISOString() },
       ],
       settings: { ...defaultBreakerSettings(), targetCplCents: 100 },
-      spend: [
-        row({ accountId: 'act-stale', campaignId: 'camp-stale', campaignName: '旧系列', spendCents: 250, primaryCount: 1 }),
-        row({ accountId: 'act-fresh', campaignId: 'camp-fresh', campaignName: '新系列', spendCents: 250, primaryCount: 1 }),
+      adsetSpend: [
+        ...windowOf([
+          { accountId: 'act-stale', campaignId: 'camp-stale', adsetId: 'set-stale', spendCents: 250, primaryCount: 1 },
+        ]),
+        ...windowOf([
+          { accountId: 'act-fresh', campaignId: 'camp-fresh', adsetId: 'set-fresh', spendCents: 250, primaryCount: 1 },
+        ]),
       ],
     }))
-    expect(judged.pauses.map((item) => item.campaignId)).toEqual(['camp-fresh'])
+    expect(judged.pauses.map((item) => item.adsetId)).toEqual(['set-fresh'])
     expect(judged.alerts).toEqual([expect.objectContaining({ code: 'stale', accountId: 'act-stale' })])
   })
 
@@ -360,6 +421,44 @@ describe('applyBreaker', () => {
     expect(result.skipped).toBe(1)
   })
 
+  it('同一广告组同一天只出一张暂停卡', async () => {
+    const pauses = judgeBreaker(facts({
+      settings: { ...defaultBreakerSettings(), targetCplCents: 100 },
+      adsetSpend: windowOf([{ spendCents: 250, primaryCount: 0 }]),
+    })).pauses
+    expect(pauses).toHaveLength(1)
+    const keys: string[] = []
+    const first = await applyBreaker({
+      day: '2026-11-08',
+      nzDay: '2026-11-09',
+      pauses,
+      alerts: [],
+      deps: {
+        issuePause: async (args) => {
+          expect(args.unit).toBe('adset')
+          expect(args.adsetId).toBe('set-a')
+          return { ok: true, runId: 'run-1' }
+        },
+        alreadyOpen: async (key) => { keys.push(key); return false },
+        record: async () => true,
+      },
+    })
+    const second = await applyBreaker({
+      day: '2026-11-09',
+      pauses,
+      alerts: [],
+      deps: {
+        issuePause: async () => { throw new Error('should not issue') },
+        alreadyOpen: async () => true,
+        record: async () => true,
+      },
+    })
+    expect(first.cards).toBe(1)
+    expect(keys).toEqual(['pause-adset:set-a:2026-11-09'])
+    expect(second.cards).toBe(0)
+    expect(second.skipped).toBe(1)
+  })
+
   it('只提醒的情况不去申请暂停卡', async () => {
     let issued = 0
     const old = new Date(NOW.getTime() - 13 * 3_600_000).toISOString()
@@ -390,6 +489,7 @@ describe('no Meta write in this folder', () => {
       const source = readFileSync(join(dir, name), 'utf8')
       expect(source).not.toContain('graph.facebook')
       expect(source).not.toContain('setCampaignStatus')
+      expect(source).not.toContain('setAdSetStatus')
       expect(source).not.toContain('ads_circuit_events')
     }
   })

@@ -5,7 +5,8 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { requestCampaignStatusCard, type CampaignRequest } from '@/lib/action-submission/campaign-status-card'
-import { applyBreaker, BREAKER_ACTION, type ApplyDeps, type BreakerEvent } from './apply'
+import { issueBreakerPauseCard } from '@/lib/ads-pause-card/breaker-card'
+import { applyBreaker, BREAKER_ACTION, type ApplyDeps, type BreakerEvent, type PauseIssueArgs } from './apply'
 import { loadBreakerFacts } from './load'
 import { judgeBreaker } from './rules'
 
@@ -25,21 +26,39 @@ export async function runAdsCircuitBreaker(
   if (facts === 'unreadable') return { paused: false, cards: 0, alerts: 0, error: '读不到熔断需要的广告记录' }
   const judged = judgeBreaker(facts)
   const applied = await applyBreaker({
-    day: facts.localDate ?? now.toISOString().slice(0, 10),
+    day: facts.localDate ?? facts.nzDate ?? now.toISOString().slice(0, 10),
+    nzDay: facts.nzDate ?? undefined,
     pauses: judged.pauses,
     alerts: judged.alerts,
-    deps: depsFor(sb, clientId),
+    deps: depsFor(sb, clientId, now),
   })
   if (!applied.recorded) return { paused: false, cards: applied.cards, alerts: applied.alerts, error: '熔断提醒没能记下' }
   return { paused: false, cards: applied.cards, alerts: applied.alerts }
 }
 
-function depsFor(sb: SupabaseClient, clientId: string): ApplyDeps {
+function depsFor(sb: SupabaseClient, clientId: string, now: Date): ApplyDeps {
   return {
-    issuePause: (args) => issueCampaign(sb, clientId, args),
+    issuePause: (args) => issuePause(sb, clientId, args, now),
     alreadyOpen: (subjectKey) => openEvent(sb, clientId, subjectKey),
     record: (event) => insertEvent(sb, clientId, event),
   }
+}
+
+async function issuePause(
+  sb: SupabaseClient,
+  clientId: string,
+  args: PauseIssueArgs,
+  now: Date,
+): Promise<{ ok: true; runId: string } | { ok: false; reason: string }> {
+  if (args.unit === 'adset' && args.adsetId) {
+    return issueBreakerPauseCard(sb, clientId, {
+      adsetId: args.adsetId,
+      campaignId: args.campaignId,
+      accountId: args.accountId,
+      name: args.name,
+    }, now)
+  }
+  return issueCampaign(sb, clientId, args)
 }
 
 async function issueCampaign(
