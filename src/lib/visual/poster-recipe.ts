@@ -15,18 +15,22 @@ export type PosterRecipeId = 'tour_poster_v1'
 
 export interface PosterRecipe {
   id: PosterRecipeId
+  /** Bumped when the model or prompt changes, so an older poster is never reused as a newer one. */
   version: number
   /** Image-edit model id (the Visual Studio "edit image" model). */
   model: string
-  resolution: '2K'
 }
 
+/**
+ * v2 (2026-11-15, PM「生成图片都转用 openai image 接口」): the v1 model misspelt poster text
+ * in 3 of 5 live runs (e.g. "derpature", "Xiu02scan"); the same facts, photos and prompt on
+ * the OpenAI image-edit model passed the text check 2 of 2.
+ */
 export const POSTER_RECIPES: Readonly<Record<PosterRecipeId, Readonly<PosterRecipe>>> = Object.freeze({
   tour_poster_v1: Object.freeze({
     id: 'tour_poster_v1',
-    version: 1,
-    model: 'minimax-h3-image-edit',
-    resolution: '2K',
+    version: 2,
+    model: 'gpt-image-2.6-flare',
   }),
 })
 

@@ -43,10 +43,9 @@ const EXPECTED_LINES = ['China Panorama', '14 Days', 'From $6,999 pp twin share'
 
 function deps(over: Partial<ComposeTourPosterDeps> = {}): ComposeTourPosterDeps {
   return {
-    runImageEdit: vi.fn().mockResolvedValue({ ok: true, outputUrl: 'https://out/p.jpg', costUsd: 0.038, requestId: 'req-1' }),
+    runImageEdit: vi.fn().mockResolvedValue({ ok: true, outputUrl: 'https://bucket/visual-assets/p.jpg', fileSizeKb: 300, costUsd: 0.038, requestId: 'req-1' }),
     readPosterText: vi.fn().mockResolvedValue({ ok: true, text: EXPECTED_LINES.join('\n'), costUsd: 0.002 }),
     findExistingPoster: vi.fn().mockResolvedValue(null),
-    uploadFromUrl: vi.fn().mockResolvedValue({ storage_url: 'https://bucket/visual-assets/p.jpg', file_size_kb: 300 }),
     insertPosterAsset: vi.fn().mockResolvedValue({ id: 'poster-1' }),
     now: () => NOW,
     ...over,
@@ -54,17 +53,16 @@ function deps(over: Partial<ComposeTourPosterDeps> = {}): ComposeTourPosterDeps 
 }
 
 describe('composeTourPoster', () => {
-  it('success: one edit, upload to bucket, client_assets row per spec', async () => {
+  it('success: one edit (output already in our bucket), client_assets row per spec', async () => {
     const d = deps()
     const r = await composeTourPoster(input(), d)
     expect(r).toMatchObject({ ok: true, assetId: 'poster-1' })
     expect(d.runImageEdit).toHaveBeenCalledTimes(1)
     expect(d.runImageEdit).toHaveBeenCalledWith(expect.objectContaining({
-      model: 'minimax-h3-image-edit',
+      model: 'gpt-image-2.6-flare',
       imageUrl: 'https://store/photo.jpg',
-      resolution: '2K',
+      clientId: 'client-1',
     }))
-    expect(d.uploadFromUrl).toHaveBeenCalledWith({ sourceUrl: 'https://out/p.jpg', clientId: 'client-1', assetType: 'image', folder: 'posters' })
 
     const row = vi.mocked(d.insertPosterAsset).mock.calls[0][0]
     expect(row).toMatchObject({
@@ -80,7 +78,7 @@ describe('composeTourPoster', () => {
     })
     expect(row.vision_metadata.poster).toEqual({
       recipe_id: 'tour_poster_v1',
-      recipe_version: 1,
+      recipe_version: 2,
       source_asset_id: PHOTO_ID,
       has_price: true,
       text_lines: ['China Panorama', '14 Days', 'From $6,999 pp twin share', 'Next departure 15 March 2027', 'example.co.nz'],
@@ -95,8 +93,8 @@ describe('composeTourPoster', () => {
       status: 'composed', poster_asset_id: 'poster-1', cost_usd: 0.038, reason: null,
       text_check: { status: 'match', cost_usd: 0.002 },
     })
-    // text is read off the provider output, before upload
-    expect(d.readPosterText).toHaveBeenCalledWith('https://out/p.jpg')
+    // text is read off the stored output before the row is written
+    expect(d.readPosterText).toHaveBeenCalledWith('https://bucket/visual-assets/p.jpg')
     expect(row.original_filename).toBe(posterFilename(recipe, 'china-panorama', '2027-01-01'))
   })
 
@@ -111,7 +109,6 @@ describe('composeTourPoster', () => {
       expect(r.receipt.text_check?.transcribed).toContain('derparture')
       expect(r.receipt.cost_usd).toBe(0.038)
     }
-    expect(d.uploadFromUrl).not.toHaveBeenCalled()
     expect(d.insertPosterAsset).not.toHaveBeenCalled()
   })
 
@@ -132,7 +129,7 @@ describe('composeTourPoster', () => {
       originalFilename: posterFilename(recipe, 'china-panorama', '2027-01-01'),
       sourceAssetId: PHOTO_ID,
       recipeId: 'tour_poster_v1',
-      recipeVersion: 1,
+      recipeVersion: 2,
     })
   })
 
@@ -172,20 +169,17 @@ describe('composeTourPoster', () => {
   })
 
   it('edit failure → fallback with cost + request id, nothing stored', async () => {
-    const d = deps({ runImageEdit: vi.fn().mockResolvedValue({ ok: false, reason: 'poll_failed: timed out', costUsd: null, requestId: 'req-9' }) })
+    const d = deps({ runImageEdit: vi.fn().mockResolvedValue({ ok: false, reason: 'edit_failed: timed out', costUsd: null, requestId: 'req-9' }) })
     const r = await composeTourPoster(input(), d)
     expect(r.ok).toBe(false)
     if (!r.ok) {
-      expect(r.reason).toBe('image_edit_failed: poll_failed: timed out')
+      expect(r.reason).toBe('image_edit_failed: edit_failed: timed out')
       expect(r.receipt).toMatchObject({ status: 'fallback', provider_request_id: 'req-9' })
     }
-    expect(d.uploadFromUrl).not.toHaveBeenCalled()
     expect(d.insertPosterAsset).not.toHaveBeenCalled()
   })
 
-  it('upload / insert failure → fallback, cost still on the receipt', async () => {
-    const up = await composeTourPoster(input(), deps({ uploadFromUrl: vi.fn().mockRejectedValue(new Error('bucket down')) }))
-    expect(up).toMatchObject({ ok: false, receipt: { cost_usd: 0.038, status: 'fallback' } })
+  it('insert failure → fallback, cost still on the receipt', async () => {
     const ins = await composeTourPoster(input(), deps({ insertPosterAsset: vi.fn().mockRejectedValue(new Error('check violation')) }))
     expect(ins).toMatchObject({ ok: false, receipt: { cost_usd: 0.038 } })
     if (!ins.ok) expect(ins.reason).toContain('poster_insert_failed')

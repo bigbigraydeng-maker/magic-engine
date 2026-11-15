@@ -149,3 +149,51 @@ describe('imagePostRecipe (social_agent.image_post_recipe)', () => {
     }
   })
 })
+
+describe('standalone image posts (agent off)', () => {
+  const read = (agent: Record<string, unknown>) => readSocialAgentSettings({ social_agent: agent }, 'growth')
+
+  it('drafts image posts without turning on the daily agent or reels', () => {
+    const r = read({ image_post_standalone: true, image_post_per_day: 1, image_post_recipe: 'tour_poster_v1' })
+    expect(r.enabled).toBe(false)
+    expect(r.reelPerDay).toBe(0)
+    expect(r.reelSource).toBe('off')
+    expect(r.imagePostPerDay).toBe(1)
+    expect(r.imagePostSource).toBe('client')
+    expect(r.imagePostRecipe).toBe('tour_poster_v1')
+  })
+
+  it('caps the standalone quota at the daily hard cap', () => {
+    expect(read({ image_post_standalone: true, image_post_per_day: 5 }).imagePostPerDay).toBe(1)
+  })
+
+  it('stays off without the explicit switch, without a quota, or with a non-integer quota', () => {
+    const cases: Record<string, unknown>[] = [
+      { image_post_per_day: 1 },
+      { image_post_standalone: 'true', image_post_per_day: 1 },
+      { image_post_standalone: true },
+      { image_post_standalone: true, image_post_per_day: 0 },
+      { image_post_standalone: true, image_post_per_day: 1.5 },
+      { image_post_standalone: true, image_post_per_day: '1' },
+    ]
+    for (const agent of cases) {
+      const r = read(agent)
+      expect(r.imagePostPerDay).toBe(0)
+      expect(r.imagePostSource).toBe('off')
+      expect(r.imagePostRecipe).toBeNull()
+      expect(r.enabled).toBe(false)
+    }
+  })
+
+  it('does not use the tier default for standalone image posts', () => {
+    expect(read({ image_post_standalone: true }).imagePostPerDay).toBe(0)
+  })
+
+  it('leaves enabled-agent behaviour unchanged', () => {
+    const r = read({ enabled: true, image_post_standalone: true, image_post_per_day: 0 })
+    expect(r.enabled).toBe(true)
+    expect(r.imagePostPerDay).toBe(0)
+    expect(r.reelPerDay).toBe(TIER_DEFAULTS.growth.reelPerDay)
+  })
+})
+

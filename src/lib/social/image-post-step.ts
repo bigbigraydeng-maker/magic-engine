@@ -16,7 +16,6 @@ import { draftImagePost } from './image-post-drafter'
 import { writeImagePostPlan } from './image-post-plan-writer'
 import { generateImagePostCopy } from './image-post-generate-copy'
 import { getActiveBrief } from '@/lib/content/brief-injector'
-import { uploadFromUrl } from '@/lib/visual/storage'
 import { runImageEdit } from '@/lib/visual/image-edit'
 import { readPosterText } from '@/lib/visual/poster-text-reader'
 import { readPosterLineage } from '@/lib/assets/provenance'
@@ -79,7 +78,6 @@ async function buildPosterComposer(
 
   const composeDeps: ComposeTourPosterDeps = {
     runImageEdit: (req) => runImageEdit(req),
-    uploadFromUrl: (params) => uploadFromUrl(params),
     readPosterText: (url) => readPosterText(url),
     findExistingPoster: (q) => findExistingPoster(deps.supabase, q),
     insertPosterAsset: async (row) => {

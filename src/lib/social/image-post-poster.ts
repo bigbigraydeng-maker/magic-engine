@@ -2,7 +2,7 @@
  * Compose a tour poster from a real photo for an auto image post.
  *
  * photo + published tour facts + brand colours → image-edit model → read the text back
- * and check it → stored as a new `client_assets` row (source ai_generated, with
+ * and check it → registered as a new `client_assets` row (source ai_generated, with
  * `vision_metadata.poster` lineage). Any failure returns `{ ok: false }` with a receipt;
  * the caller keeps the original photo. Never re-submits a failed edit (each submit is
  * billed), and reuses an identical poster that already exists instead of paying again.
@@ -60,12 +60,6 @@ export interface ComposeTourPosterDeps {
   runImageEdit: (req: ImageEditRequest) => Promise<ImageEditResult>
   /** Transcribe the text on the generated image (copy only — matching is done here). */
   readPosterText: (imageUrl: string) => Promise<PosterTextRead>
-  uploadFromUrl: (params: {
-    sourceUrl: string
-    clientId: string
-    assetType: 'image'
-    folder: string
-  }) => Promise<{ storage_url: string; file_size_kb: number }>
   insertPosterAsset: (row: PosterAssetRow) => Promise<{ id: string }>
   /** An identical poster already stored for this client (same recipe, tour, date, photo). */
   findExistingPoster: (q: ExistingPosterQuery) => Promise<{ id: string } | null>
@@ -127,7 +121,7 @@ export async function composeTourPoster(
     model: input.recipe.model,
     imageUrl: input.asset.storage_url,
     prompt: buildTourPosterPrompt(posterLines, input.brand),
-    resolution: input.recipe.resolution,
+    clientId: input.clientId,
   })
   const spend = { cost_usd: edit.costUsd, provider_request_id: edit.requestId }
   if (!edit.ok) return fail(`image_edit_failed: ${edit.reason}`, spend)
@@ -142,6 +136,7 @@ export async function composeTourPoster(
     lines: posterLines,
     createdAt,
     outputUrl: edit.outputUrl,
+    fileSizeKb: edit.fileSizeKb,
     filename,
   }, { ...base, ...spend, text_check: checked.receipt }, fail)
 }
@@ -196,22 +191,12 @@ async function checkPosterText(
 async function storePoster(
   input: ComposeTourPosterInput,
   deps: ComposeTourPosterDeps,
-  made: { lines: TourPosterLines; createdAt: string; outputUrl: string; filename: string },
+  // The edit adapter already stored the output in our bucket; only the row is written here.
+  made: { lines: TourPosterLines; createdAt: string; outputUrl: string; fileSizeKb: number; filename: string },
   receipt: PosterReceipt,
   fail: Fail,
 ): Promise<ComposeTourPosterResult> {
   const carry = { cost_usd: receipt.cost_usd, provider_request_id: receipt.provider_request_id, text_check: receipt.text_check }
-  let stored: { storage_url: string; file_size_kb: number }
-  try {
-    stored = await deps.uploadFromUrl({
-      sourceUrl: made.outputUrl,
-      clientId: input.clientId,
-      assetType: 'image',
-      folder: 'posters',
-    })
-  } catch (e) {
-    return fail(`poster_upload_failed: ${short(e)}`, carry)
-  }
 
   const lineage: PosterLineage = {
     recipe_id: input.recipe.id,
@@ -227,9 +212,9 @@ async function storePoster(
   try {
     const { id } = await deps.insertPosterAsset({
       client_id: input.clientId,
-      storage_url: stored.storage_url,
+      storage_url: made.outputUrl,
       original_filename: made.filename,
-      file_size_bytes: stored.file_size_kb * 1024,
+      file_size_bytes: made.fileSizeKb * 1024,
       mime_type: 'image/jpeg',
       status: 'analyzed',
       source: 'ai_generated',
