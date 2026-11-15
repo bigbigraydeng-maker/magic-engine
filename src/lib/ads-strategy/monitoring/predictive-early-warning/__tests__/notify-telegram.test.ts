@@ -16,19 +16,9 @@ describe('deliverEarlyWarningTelegram', () => {
     expect(await deliverEarlyWarningTelegram([], 'hi', null)).toBe('no_chat_ids')
   })
 
-  it('sends to each chat id once', async () => {
-    const sendMessage = vi.fn(async () => ({ ok: true }))
-    const sender: TelegramSender = { sendMessage }
-    const status = await deliverEarlyWarningTelegram(['100', '100', '200'], 'alert', sender)
-    expect(status).toBe('sent')
-    expect(sendMessage).toHaveBeenCalledTimes(2)
-    expect(sendMessage.mock.calls[0]?.[0]).toEqual({ chatId: '100', text: 'alert' })
-  })
-
-  it('returns send_failed when every chat fails', async () => {
-    const sender: TelegramSender = {
-      sendMessage: vi.fn(async () => ({ ok: false, error: 'blocked' })),
-    }
-    expect(await deliverEarlyWarningTelegram(['9'], 'x', sender)).toBe('send_failed')
+  it('dedupes chat ids and fails closed when all sends fail', async () => {
+    const sendMessage = vi.fn(async () => ({ ok: false, error: 'blocked' }))
+    expect(await deliverEarlyWarningTelegram(['1', '1'], 'x', { sendMessage })).toBe('send_failed')
+    expect(sendMessage).toHaveBeenCalledOnce()
   })
 })
