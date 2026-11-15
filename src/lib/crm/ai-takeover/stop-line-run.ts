@@ -170,6 +170,9 @@ async function checkClient(
     try {
       const current = takeoverState(await store.loadEvents(clientId, g.id))
       if (!current.on || Date.parse(current.since) !== sinceMs) {
+        // Bring the mirror column in line with the log (it is what recordTakeover would write). Without this, a mirror
+        // left behind by an earlier half-written click would make this guest "skipped" every morning, unseen.
+        await store.setMirror(clientId, g.id, current.on ? current.since : null)
         stopped.push({ ...base, write: 'skipped' })
         continue
       }

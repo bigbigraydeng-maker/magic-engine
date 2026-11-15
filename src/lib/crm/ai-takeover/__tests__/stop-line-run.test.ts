@@ -25,7 +25,16 @@ function db(tables: Tables, writes: string[]) {
       writes.push(`${method} ${table}`)
       return new Response('[]', { status: 201, headers: { 'content-type': 'application/json' } })
     }
-    return new Response(JSON.stringify(tables[table] ?? []), { status: 200, headers: { 'content-type': 'application/json' } })
+    // Apply the filters the code sends (client_id=eq.X, contact_id=in.(…)), so a query that forgets one fails here.
+    let rows = tables[table] ?? []
+    const client = url.searchParams.get('client_id')
+    if (client !== null) rows = rows.filter((r) => `eq.${String(r.client_id)}` === client)
+    const ids = url.searchParams.get('contact_id')
+    if (ids !== null && ids.startsWith('in.(')) {
+      const set = new Set(ids.slice(4, -1).split(',').map((v) => v.replace(/^"|"$/g, '')))
+      rows = rows.filter((r) => set.has(String(r.contact_id)))
+    }
+    return new Response(JSON.stringify(rows), { status: 200, headers: { 'content-type': 'application/json' } })
   }
   return createClient('https://proj.supabase.co', 'service-key', { global: { fetch: stub } })
 }
@@ -40,14 +49,14 @@ async function onSince(store: ReturnType<typeof fakeStore>): Promise<string> {
 function tables(since: string, extra: Partial<Tables> = {}): Tables {
   return {
     contacts: [{ id: P, client_id: CLIENT, ai_takeover_since: since, do_not_contact: false, stage: 'contacted' }],
-    client_pipeline_stages: [{ stage_key: 'contacted', label: '已联系', marketing_action: 'nurture', is_terminal: false }],
+    client_pipeline_stages: [{ client_id: CLIENT, stage_key: 'contacted', label: '已联系', marketing_action: 'nurture', is_terminal: false }],
     contact_touchpoints: [],
     crm_bookings: [],
     ...extra,
   }
 }
 
-const talkedCall = (at: string) => ({ id: 't1', contact_id: P, channel: 'phone', direction: 'outbound', occurred_at: at, summary: null, raw: null, source: 'twilio', metadata: { customer_spoke: 'yes' } })
+const talkedCall = (at: string) => ({ id: 't1', client_id: CLIENT, contact_id: P, channel: 'phone', direction: 'outbound', occurred_at: at, summary: null, raw: null, source: 'twilio', metadata: { customer_spoke: 'yes' } })
 const later = (iso: string, minutes: number) => new Date(Date.parse(iso) + minutes * 60_000).toISOString()
 
 describe('runStopline', () => {
@@ -79,7 +88,7 @@ describe('runStopline', () => {
   it('an old do-not-contact correction outranks a stale flag: the guest is not stopped as do-not-contact', async () => {
     const store = fakeStore()
     const since = await onSince(store)
-    const cleared = { id: 'n0', contact_id: P, channel: 'phone', direction: 'outbound', occurred_at: later(since, -600), summary: null, raw: null, source: 'me_manual', metadata: { outcome: 'dnc_cleared' } }
+    const cleared = { id: 'n0', client_id: CLIENT, contact_id: P, channel: 'phone', direction: 'outbound', occurred_at: later(since, -600), summary: null, raw: null, source: 'me_manual', metadata: { outcome: 'dnc_cleared' } }
     const t = tables(since, { contact_touchpoints: [cleared] })
     t.contacts[0].do_not_contact = true
     const r = await runStopline(db(t, []), { dryRun: true, now: NOW, store: store.deps })
@@ -103,7 +112,7 @@ describe('runStopline', () => {
     const won = (since: string) => {
       const t = tables(since)
       t.contacts[0].stage = 'won'
-      t.client_pipeline_stages.push({ stage_key: 'won', label: '已成交', marketing_action: 'won', is_terminal: true })
+      t.client_pipeline_stages.push({ client_id: CLIENT, stage_key: 'won', label: '已成交', marketing_action: 'won', is_terminal: true })
       return t
     }
     expect((await runStopline(db(won(since1), []), { dryRun: false, now: NOW, store: store.deps })).clients[0].stopped[0].write).toBe('written')
@@ -122,5 +131,25 @@ describe('runStopline', () => {
     t.contacts[0].stage = 'mystery'
     const r = await runStopline(db(t, []), { dryRun: true, now: NOW, store: store.deps })
     expect(r.clients[0].unknown_stage).toEqual([P])
+  })
+
+  it('another client\'s rows never decide for this client (every read is scoped by client_id)', async () => {
+    const store = fakeStore()
+    const since = await onSince(store)
+    const OTHER = 'c0000000-0000-4000-8000-000000000002'
+    const t = tables(since, { contact_touchpoints: [{ ...talkedCall(later(since, 300)), client_id: OTHER }] })
+    t.crm_bookings = [{ id: 'b9', client_id: OTHER, contact_id: P, status: 'active' }]
+    const r = await runStopline(db(t, []), { dryRun: true, now: NOW, store: store.deps })
+    expect(r.clients[0].stopped).toEqual([])
+  })
+
+  it('a mirror out of line with the log is repaired instead of being skipped silently every day', async () => {
+    const store = fakeStore()
+    const since = await onSince(store)
+    await recordTakeover({ clientId: CLIENT, contactId: P, kind: 'ai_takeover_off', actor: 'lisa@x.co', reason: null, catalogVersion: null, sourceRef: 'off:k' }, store.deps)
+    store.mirror.set(`${CLIENT}/${P}`, since) // a half-written click left the old time behind
+    const r = await runStopline(db(tables(since, { contact_touchpoints: [talkedCall(later(since, 300))] }), []), { dryRun: false, now: NOW, store: store.deps })
+    expect(r.clients[0].stopped[0].write).toBe('skipped')
+    expect(store.mirror.get(`${CLIENT}/${P}`)).toBeNull()
   })
 })
