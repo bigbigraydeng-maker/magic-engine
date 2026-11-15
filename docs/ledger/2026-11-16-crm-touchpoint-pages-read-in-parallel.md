@@ -2,7 +2,7 @@
 id: 2026-11-16-crm-touchpoint-pages-read-in-parallel
 title: CRM 名单慢的第一步修法：联系记录从「一页一页排队取」改成「同时取」
 status: decided
-owner: claude
+owner: agent
 decided_on: 2026-11-16
 source: session:96dc6edf
 verify_by: 2026-11-18
