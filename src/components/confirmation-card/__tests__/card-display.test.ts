@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { expiryBadgeText, touchesMetaAds } from '../card-display'
+import { expiryBadgeText, touchesMetaAds, visibleStatusChip } from '../card-display'
 
 describe('card-display', () => {
   it('flags meta-touching cards from the what line', () => {
@@ -11,6 +11,11 @@ describe('card-display', () => {
     expect(expiryBadgeText('请在 11月10日 23:59（新西兰时间）前点。过了要重新出一张。')).toBe(
       '今天 23:59 前有效（新西兰时间）',
     )
+  })
+
+  it('uses add-creative outcome chip when present', () => {
+    expect(visibleStatusChip({ status: 'confirmed', addCreativeStatusChip: '已做完' })).toBe('已做完')
+    expect(visibleStatusChip({ status: 'confirmed', addCreativeStatusChip: null })).toBe('已确认（还没开始做）')
   })
 
   it('shows urgent countdown copy for short windows', () => {
