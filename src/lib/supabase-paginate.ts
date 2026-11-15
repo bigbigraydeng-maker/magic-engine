@@ -84,3 +84,52 @@ export async function fetchAllBatched<T>(
   }
   return out
 }
+
+export interface CountedPageResult<T> extends PageResult<T> {
+  count?: number | null
+}
+
+/**
+ * Read the first page together with the exact row count, then every remaining page at once.
+ *
+ * Sequential paging costs one round trip per 1000 rows; on a ten-page table that was
+ * the largest single delay in the CRM list. Completeness is still proven, not assumed:
+ * the merged result must contain exactly `count` distinct rows. Any mismatch (rows
+ * inserted or deleted between the two waves, a missing count) falls back to the
+ * sequential `fetchAll`, so the caller never receives a silently partial table.
+ *
+ * @param page  returns one page; request the exact count only when `withCount` is true
+ * @param keyOf stable unique key of a row, used to detect rows that shifted between pages
+ */
+export async function fetchAllParallel<T>(
+  page: (from: number, to: number, withCount: boolean) => PromiseLike<CountedPageResult<T>>,
+  keyOf: (row: T) => string,
+  hardCap = 100_000,
+): Promise<T[]> {
+  const sequential = () => fetchAll<T>((from, to) => page(from, to, false), hardCap)
+  const first = await page(0, PAGE_SIZE - 1, true)
+  if (first.error) throw new Error(first.error.message)
+  const head = first.data ?? []
+  const total = first.count
+  if (typeof total !== 'number' || !Number.isInteger(total) || total < 0) return sequential()
+  if (total >= hardCap) {
+    throw new Error(`fetchAll 触到 ${hardCap} 行上限，数据可能不完整 —— 这里需要改成流式或收窄查询条件`)
+  }
+  const starts: number[] = []
+  for (let from = PAGE_SIZE; from < total; from += PAGE_SIZE) starts.push(from)
+  const rest = await Promise.all(starts.map((from) => page(from, from + PAGE_SIZE - 1, false)))
+  const seen = new Set<string>()
+  const out: T[] = []
+  for (const result of [first, ...rest]) {
+    if (result.error) throw new Error(result.error.message)
+    for (const row of result.data ?? []) {
+      const key = keyOf(row)
+      // A repeated row means the table moved between the two waves.
+      if (seen.has(key)) return sequential()
+      seen.add(key)
+      out.push(row)
+    }
+  }
+  if (out.length !== total || head.length !== Math.min(total, PAGE_SIZE)) return sequential()
+  return out
+}

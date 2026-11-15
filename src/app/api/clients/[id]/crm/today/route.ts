@@ -48,7 +48,7 @@ import {
   readDomainRules,
   type ContactKind,
 } from '@/lib/crm/contact-kind'
-import { fetchAll } from '@/lib/supabase-paginate'
+import { fetchAll, fetchAllParallel } from '@/lib/supabase-paginate'
 
 interface RouteParams {
   params: { id: string }
@@ -162,13 +162,18 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
           .order('contact_id', { ascending: true })
           .range(from, to),
       ),
-      fetchAll<TouchRow>((from, to) =>
-        supabaseAdmin
-          .from('contact_touchpoints')
-          .select('contact_id, channel, direction, occurred_at, summary, raw, metadata, source')
-          .eq('client_id', clientId)
-          .order('occurred_at', { ascending: false })
-          .range(from, to),
+      // Ten pages for CTS: read them at once instead of one after another.
+      // `id` is the tie-break that keeps page boundaries stable and proves completeness.
+      fetchAllParallel<TouchRow & { id: string }>(
+        (from, to, withCount) =>
+          supabaseAdmin
+            .from('contact_touchpoints')
+            .select('id, contact_id, channel, direction, occurred_at, summary, raw, metadata, source', withCount ? { count: 'exact' } : undefined)
+            .eq('client_id', clientId)
+            .order('occurred_at', { ascending: false })
+            .order('id', { ascending: false })
+            .range(from, to),
+        (row) => row.id,
       ),
       fetchAll<StageRow>((from, to) =>
         supabaseAdmin
