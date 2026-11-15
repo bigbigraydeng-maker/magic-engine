@@ -1,10 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
-/**
- * `client_portal_users` has no jsonb column (migration not allowed). Bindings live in
- * each customer's existing `clients.leads_config`, keyed by `client_portal_users.id`
- * for that client — the smallest per-FDE jsonb already used across ME.
- */
+/** No jsonb on `client_portal_users`; chats live in each customer's `clients.leads_config` by portal user id. */
 export const FDE_TELEGRAM_CHATS_KEY = 'me_fde_telegram_chats'
 export const FDE_TELEGRAM_PENDING_KEY = 'me_fde_telegram_pending_active'
 
