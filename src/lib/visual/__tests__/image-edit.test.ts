@@ -49,7 +49,7 @@ describe('runImageEdit', () => {
   it('provider error → returned once, never re-submitted', async () => {
     const d = deps({ edit: vi.fn().mockRejectedValue(new Error('timeout')) })
     const r = await runImageEdit(REQ, d)
-    expect(r).toMatchObject({ ok: false, reason: 'edit_failed: timeout' })
+    expect(r).toMatchObject({ ok: false, reason: 'edit_failed_maybe_billed: timeout', costUsd: null })
     expect(d.edit).toHaveBeenCalledTimes(1)
     expect(d.store).not.toHaveBeenCalled()
   })

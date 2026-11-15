@@ -39,7 +39,11 @@ export interface ImageEditDeps {
   store: (params: { base64: string; clientId: string }) => Promise<{ storage_url: string; file_size_kb: number }>
 }
 
-/** USD per 1M tokens, from the provider's model page (read 2026-11-15). Unknown model → cost unknown. */
+/**
+ * USD per 1M tokens, from the provider's model page (read 2026-11-15). Unknown model → cost unknown.
+ * Re-check against the provider's pricing page when the monthly bill is reconciled: a price rise
+ * here would silently under-report poster cost on receipts.
+ */
 const PRICES_PER_M: Readonly<Record<string, { imageIn: number; textIn: number; out: number }>> = {
   'gpt-image-2.6-flare': { imageIn: 8, textIn: 5, out: 30 },
 }
@@ -115,8 +119,8 @@ export async function runImageEdit(
   try {
     out = await deps.edit({ model: req.model, image: source.bytes, mimeType: source.mimeType, prompt: req.prompt })
   } catch (e) {
-    // May or may not have been billed; never re-submit.
-    return { ok: false, reason: `edit_failed: ${short(e)}`, costUsd: null, requestId: null }
+    // May or may not have been billed (cost unknown, not zero); never re-submit.
+    return { ok: false, reason: `edit_failed_maybe_billed: ${short(e)}`, costUsd: null, requestId: null }
   }
 
   const costUsd = imageEditCostUsd(req.model, out.usage)
