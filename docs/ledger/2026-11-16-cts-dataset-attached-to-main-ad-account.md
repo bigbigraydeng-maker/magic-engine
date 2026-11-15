@@ -5,6 +5,8 @@ status: done
 owner: agent
 decided_on: 2026-11-16
 source: session:f2f2eb69
+done_on: 2026-11-16
+done_ref: pr:3870
 ---
 PM 11-16 回「挂数据集」，并要求这一步写进流程（他此前不知道要做这一步）。
 已做：在 Meta 商务设置里把「CTS Tours 数据」绑定到广告账户 2775766642787274；用 Meta 广告工具读回，该账户的数据集列表里已出现「CTS Tours 数据」。原先只绑着另一个账户 CTS（尾号 0470），没动。
