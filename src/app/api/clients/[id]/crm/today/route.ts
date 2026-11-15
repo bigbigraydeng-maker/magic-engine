@@ -49,6 +49,7 @@ import {
   type ContactKind,
 } from '@/lib/crm/contact-kind'
 import { fetchAll, fetchAllParallel } from '@/lib/supabase-paginate'
+import { finishShadowCompare, readListVersion, shadowEnabled } from '@/lib/crm/list-read-shadow'
 
 interface RouteParams {
   params: { id: string }
@@ -138,6 +139,9 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   let emailIdentities: IdentityRow[]
   let touches: TouchRow[]
   let stageRows: StageRow[]
+  // Shadow comparison (design slice 2): read the list version before any data read starts.
+  const shadow = shadowEnabled()
+  const versionBefore = shadow ? await readListVersion(supabaseAdmin, clientId) : null
   try {
     ;[contacts, emailIdentities, touches, stageRows] = await Promise.all([
       fetchAll<ContactRow>((from, to) =>
@@ -227,6 +231,17 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     clientRow = data as { leads_config: unknown } | null
   } catch {
     // 同上：读不到就按没配处理
+  }
+
+  if (shadow) {
+    finishShadowCompare(supabaseAdmin, 'today', clientId, versionBefore, {
+      contacts,
+      identities: emailIdentities,
+      touchpoints: touches,
+      stages: stageRows,
+      quotedNames: [...quotedNames].sort(),
+      client: [clientRow],
+    })
   }
 
   const byContact = new Map<string, TouchRow[]>()

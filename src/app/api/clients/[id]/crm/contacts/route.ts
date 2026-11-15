@@ -40,6 +40,7 @@ import { SECTION_KEYS, type SectionKey } from '@/lib/crm/list-sections'
 import { loadLatestBriefByContact, loadLatestBriefByContactCached, type BriefByContact } from '@/lib/crm/brief-lookup'
 import { fetchAll } from '@/lib/supabase-paginate'
 import { loadPriorityTouchpoints } from '@/lib/crm/priority-touchpoints'
+import { finishShadowCompare, readListVersion, shadowEnabled } from '@/lib/crm/list-read-shadow'
 import { loadTakeoverSince } from '@/lib/crm/ai-takeover/prod'
 import { createStepTimer, type StepTimer } from '@/lib/http/step-timing'
 import { orderContactIdsByLatestTouch, scanLatestTouchContactIds, type TouchRowLite } from '@/lib/crm/contact-touch-order'
@@ -784,9 +785,14 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
   // Enrichment reads the same tenant-wide inputs regardless of the filtered contact list.
   // Start it with the other reads instead of waiting for all of them to finish.
   // Request-local only: both consumers use this client's same conversation rows.
+  const filters = contactFilterParams(query)
+  // Shadow comparison (design slice 2): only the unfiltered view, whose reads are the whole tenant.
+  // The version must be read before any data read starts; see lib/crm/list-read-shadow.
+  const shadow = shadowEnabled() && query.q === null && filters.stages === null && filters.orExpr === null
+  const versionBefore = shadow ? await readListVersion(supabaseAdmin, clientId) : null
+  if (shadow) timer.step('list_version')
   const sharedConversations = loadAllEnrichmentConversations(supabaseAdmin, clientId)
   sharedConversations.catch(() => undefined)
-  const filters = contactFilterParams(query)
   const contactsRead = fetchAll<ContactRow>((from, to) => {
     let b = supabaseAdmin.from('contacts').select(PAGE_CONTACT_COLUMNS).eq('client_id', clientId)
     if (filters.stages !== null) b = b.in('stage', filters.stages)
@@ -862,6 +868,17 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
     )
   }
   timer.step('priority_reads')
+  if (shadow) {
+    const conversations = await sharedConversations.catch(() => null)
+    finishShadowCompare(supabaseAdmin, 'contacts_priority', clientId, versionBefore, {
+      contacts,
+      touchpoints: touches,
+      stages: stageRows,
+      briefs: [...briefs.entries()],
+      client: [{ leadsConfig, country: clientCountry }],
+      ...(conversations === null ? {} : { conversations }),
+    })
+  }
 
   // 系统账号（WhatsApp Business 等）不是客人，不进「智能」视图的任何一栏。
   contacts = contacts.filter((c) => !isSystemAccountName(c.display_name))
