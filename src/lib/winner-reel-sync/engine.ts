@@ -14,7 +14,7 @@
 import { createClient } from '@supabase/supabase-js'
 
 import { fetchCTRForAds, listAdsInAdSet } from '../meta/ads-manager'
-import { getAdSetStatus } from '../meta/adsets'
+import { getAdSetOptimizationGoal, getAdSetStatus } from '../meta/adsets'
 import { getRegisteredAccountIds } from '../meta/campaign-ownership'
 import { fetchPagePosts, getPageAccessToken, rankVideoWinners } from '../meta/page-posts'
 import { getMetaTokenForClient } from '../meta/token-manager'
@@ -289,6 +289,8 @@ export type PromotionTarget =
       adsetId: string
       /** Page-post ids (the part after `<page>_`) already promoted in the pool ad set. */
       promotedPostIds: ReadonlySet<string>
+      /** The pool ad set's Meta optimization goal; null when it could not be read. */
+      optimizationGoal: string | null
     }
   | { ok: false; reason: string }
 
@@ -305,11 +307,14 @@ export async function loadPromotionTarget(clientId: string): Promise<PromotionTa
     if (!token) return { ok: false, reason: '读不到广告账户的钥匙，没法建推广广告。' }
     const ownership = await assertConfigOwnedByClient(cfg, clientId, token)
     if (!ownership.ok) return { ok: false, reason: ownership.reason }
-    const ads = await listAdsInAdSet(cfg.targetAdsetId, token)
+    const [ads, optimizationGoal] = await Promise.all([
+      listAdsInAdSet(cfg.targetAdsetId, token),
+      getAdSetOptimizationGoal(cfg.targetAdsetId, token),
+    ])
     const promotedPostIds = new Set(
       ads.map((ad) => ad.effectiveObjectStoryId?.split('_')[1]).filter((id): id is string => Boolean(id)),
     )
-    return { ok: true, pageId: cfg.fbPageId, adAccountId: cfg.adAccountId, adsetId: cfg.targetAdsetId, promotedPostIds }
+    return { ok: true, pageId: cfg.fbPageId, adAccountId: cfg.adAccountId, adsetId: cfg.targetAdsetId, promotedPostIds, optimizationGoal }
   } catch (error) {
     return { ok: false, reason: `读推广池广告组出错：${error instanceof Error ? error.message : String(error)}` }
   }

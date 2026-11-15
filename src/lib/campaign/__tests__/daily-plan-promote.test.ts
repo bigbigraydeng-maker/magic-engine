@@ -105,6 +105,7 @@ function deps(over: Partial<PromoteDeps> = {}): PromoteDeps {
     posterNextDepart: vi.fn(async () => null),
     target: vi.fn(async () => ({
       ok: true as const, pageId: PAGE, adAccountId: 'act_11', adsetId: '301', promotedPostIds: new Set<string>(),
+      optimizationGoal: 'LANDING_PAGE_VIEWS',
     })),
     now: () => new Date('2026-11-19T03:00:00.000Z'),
     ...over,
@@ -187,9 +188,22 @@ describe('daily plan promote check', () => {
     const missing = await checkDailyPlanPromotion(deps({ target: vi.fn(async () => ({ ok: false as const, reason: '没有配推广池广告组' })) }), input)
     expect(missing).toEqual({ ok: false, reason: '没有配推广池广告组' })
     const dup = await checkDailyPlanPromotion(deps({
-      target: vi.fn(async () => ({ ok: true as const, pageId: PAGE, adAccountId: 'act_11', adsetId: '301', promotedPostIds: new Set(['1750182150247306']) })),
+      target: vi.fn(async () => ({ ok: true as const, pageId: PAGE, adAccountId: 'act_11', adsetId: '301', promotedPostIds: new Set(['1750182150247306']), optimizationGoal: 'LANDING_PAGE_VIEWS' })),
     }), input)
     expect(dup).toEqual({ ok: false, reason: expect.stringContaining('已经在推广池') })
+  })
+
+  it('refuses a pool ad set that cannot carry a photo post, or whose goal cannot be read', async () => {
+    const pool = (optimizationGoal: string | null) => deps({
+      target: vi.fn(async () => ({
+        ok: true as const, pageId: PAGE, adAccountId: 'act_11', adsetId: '301', promotedPostIds: new Set<string>(), optimizationGoal,
+      })),
+    })
+    for (const goal of ['THRUPLAY', 'LEAD_GENERATION']) {
+      expect(await checkDailyPlanPromotion(pool(goal), input)).toEqual({ ok: false, reason: expect.stringContaining('图片帖放进去会被 Facebook 拒掉') })
+    }
+    expect(await checkDailyPlanPromotion(pool(null), input)).toEqual({ ok: false, reason: expect.stringContaining('读不到推广池广告组的投放目标') })
+    expect((await checkDailyPlanPromotion(pool('LINK_CLICKS'), input)).ok).toBe(true)
   })
 
   it('refuses a missing plan, or a date with no live Post', async () => {

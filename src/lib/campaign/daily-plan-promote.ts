@@ -6,8 +6,8 @@
  *   public    a scheduled photo must already be public; its feed story id is
  *             read from Graph (the receipt only holds the photo id)
  *   poster    an AI poster's printed next departure must not have passed
- *   target    the client's pool ad set, ownership-checked; the Post must not
- *             already be an ad there
+ *   target    the client's pool ad set, ownership-checked, with a goal that can
+ *             carry a photo post; the Post must not already be an ad there
  *
  * This file never writes to Meta. The card's confirm runs the same check again
  * (`recheckDailyPlanPromotion`) and only then creates a paused ad; opening it
@@ -23,6 +23,20 @@ import type { PromotionTarget } from '@/lib/winner-reel-sync/engine'
 
 const STORY_ID = /^\d{5,25}_\d{5,25}$/
 const BARE_ID = /^\d{5,25}$/
+
+/**
+ * Pool ad-set goals that cannot carry a published photo post: video-only goals
+ * reject a photo creative, and lead-form goals need a lead form, not a post.
+ * Which ad set image posts should go to is the ads agent's call; this only
+ * stops a card that would fail at Meta on confirm.
+ */
+const PHOTO_INCOMPATIBLE_GOALS: ReadonlySet<string> = new Set([
+  'THRUPLAY',
+  'TWO_SECOND_CONTINUOUS_VIDEO_VIEWS',
+  'VIDEO_VIEWS',
+  'LEAD_GENERATION',
+  'QUALITY_LEAD',
+])
 
 export type PromoteCheck =
   | { ok: true; intent: AddIntent }
@@ -78,6 +92,10 @@ export async function checkDailyPlanPromotion(
   const target = await deps.target(input.clientId)
   if (!target.ok) return no(target.reason)
   if (target.pageId !== registered) return no('推广池广告组配的主页跟这个客户登记的主页对不上，不能推广。')
+  if (target.optimizationGoal === null) return no('读不到推广池广告组的投放目标，核对不了能不能放图片帖，没有出卡。')
+  if (PHOTO_INCOMPATIBLE_GOALS.has(target.optimizationGoal)) {
+    return no('广告那边还没准备好放图片帖的推广组：现在这个推广组只收视频或留资表单，图片帖放进去会被 Facebook 拒掉。没有出卡。')
+  }
   const postId = storyId.split('_')[1] ?? ''
   if (target.promotedPostIds.has(postId)) return no('这条帖子已经在推广池广告组里了，不用再建。')
 
