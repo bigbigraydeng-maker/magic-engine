@@ -38,6 +38,7 @@ function facts(over: Partial<BreakerFacts> = {}): BreakerFacts {
     insights: [{ accountId: 'act-demo', updatedAt: NOW.toISOString() }],
     accounts: ['act-demo'],
     freshReadable: true,
+    deliveringAccounts: ['act-demo'],
     primaryResult: 'lead',
     ...over,
   }
@@ -191,6 +192,82 @@ describe('judgeBreaker', () => {
     }))
     expect(judged.pauses.map((item) => item.rules)).toEqual([['spend_over_cap']])
     expect(judged.alerts).toEqual([])
+  })
+
+  it('闲置账户数据再旧，也不挡住另一个在投账户的暂停卡', () => {
+    const old = new Date(NOW.getTime() - 30 * 24 * 3_600_000).toISOString()
+    const judged = judgeBreaker(facts({
+      accounts: ['act-idle', 'act-live'],
+      deliveringAccounts: ['act-live'],
+      captures: [
+        { accountId: 'act-idle', capturedAt: old, complete: true },
+        { accountId: 'act-live', capturedAt: NOW.toISOString(), complete: true },
+      ],
+      insights: [{ accountId: 'act-live', updatedAt: NOW.toISOString() }],
+      settings: { ...defaultBreakerSettings(), targetCplCents: 100 },
+      spend: [row({ accountId: 'act-live', campaignId: 'camp-live', campaignName: '在投系列', spendCents: 250, primaryCount: 1 })],
+    }))
+    expect(judged.pauses.map((item) => item.campaignId)).toEqual(['camp-live'])
+    expect(judged.pauses[0]?.rules).toEqual(['cpl_over_target'])
+    expect(judged.alerts.map((item) => item.code)).not.toContain('stale')
+  })
+
+  it('在投账户数据过期只压住它自己的卡，并记一条提醒', () => {
+    const old = new Date(NOW.getTime() - 13 * 3_600_000).toISOString()
+    const judged = judgeBreaker(facts({
+      accounts: ['act-stale', 'act-fresh'],
+      deliveringAccounts: ['act-stale', 'act-fresh'],
+      captures: [
+        { accountId: 'act-stale', capturedAt: old, complete: true },
+        { accountId: 'act-fresh', capturedAt: NOW.toISOString(), complete: true },
+      ],
+      insights: [
+        { accountId: 'act-stale', updatedAt: old },
+        { accountId: 'act-fresh', updatedAt: NOW.toISOString() },
+      ],
+      settings: { ...defaultBreakerSettings(), targetCplCents: 100 },
+      spend: [
+        row({ accountId: 'act-stale', campaignId: 'camp-stale', campaignName: '旧系列', spendCents: 250, primaryCount: 1 }),
+        row({ accountId: 'act-fresh', campaignId: 'camp-fresh', campaignName: '新系列', spendCents: 250, primaryCount: 1 }),
+      ],
+    }))
+    expect(judged.pauses.map((item) => item.campaignId)).toEqual(['camp-fresh'])
+    expect(judged.alerts).toEqual([expect.objectContaining({ code: 'stale', accountId: 'act-stale' })])
+  })
+
+  it('别的在投账户数据过期时，不用它的花费去比每天上限；看得清的花费已经超了仍出卡', () => {
+    const old = new Date(NOW.getTime() - 13 * 3_600_000).toISOString()
+    const shared = {
+      accounts: ['act-stale', 'act-fresh'],
+      deliveringAccounts: ['act-stale', 'act-fresh'],
+      captures: [
+        { accountId: 'act-stale', capturedAt: old, complete: true },
+        { accountId: 'act-fresh', capturedAt: NOW.toISOString(), complete: true },
+      ],
+      insights: [
+        { accountId: 'act-stale', updatedAt: old },
+        { accountId: 'act-fresh', updatedAt: NOW.toISOString() },
+      ],
+      capCents: 1000,
+    }
+    const under = judgeBreaker(facts({
+      ...shared,
+      spend: [
+        row({ accountId: 'act-stale', campaignId: 'camp-stale', spendCents: 900, primaryCount: 5 }),
+        row({ accountId: 'act-fresh', campaignId: 'camp-fresh', spendCents: 200, primaryCount: 5 }),
+      ],
+    }))
+    const over = judgeBreaker(facts({
+      ...shared,
+      spend: [
+        row({ accountId: 'act-stale', campaignId: 'camp-stale', spendCents: 100, primaryCount: 5 }),
+        row({ accountId: 'act-fresh', campaignId: 'camp-fresh', spendCents: 1500, primaryCount: 5 }),
+      ],
+    }))
+    expect(under.pauses).toEqual([])
+    expect(under.alerts.map((item) => item.code)).toEqual(['stale'])
+    expect(over.pauses.map((item) => item.campaignId)).toEqual(['camp-fresh'])
+    expect(over.pauses[0]?.rules).toEqual(['spend_over_cap'])
   })
 
   it('更新时间读不出来时，即使花费已超上限，也不出暂停卡', () => {
