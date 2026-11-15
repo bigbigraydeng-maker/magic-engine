@@ -11,7 +11,6 @@ import { getActiveBrief } from '@/lib/content/brief-injector'
 import { composeTourPoster, type ComposeTourPosterResult } from '@/lib/social/image-post-poster'
 import { readPosterBrand, resolvePosterRecipe } from '@/lib/visual/poster-recipe'
 import { readPosterText } from '@/lib/visual/poster-text-reader'
-import { uploadFromUrl } from '@/lib/visual/storage'
 import { runImageEdit } from '@/lib/visual/image-edit'
 
 import type { StillAspect } from './still-config'
@@ -38,7 +37,6 @@ export async function composeFactoryStill(
   }, {
     runImageEdit: (req) => runImageEdit(req),
     readPosterText: (url) => readPosterText(url),
-    uploadFromUrl: (params) => uploadFromUrl(params),
     findExistingPoster: (q) => findPoster(supabase, q),
     insertPosterAsset: async (row) => insertAsset(supabase, input.clientId, row),
   })
