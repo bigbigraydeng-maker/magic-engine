@@ -24,6 +24,7 @@ const ROOT = join(process.cwd(), '.github/workflows')
 const RISK_GATE_PATH = join(ROOT, 'pr-risk-gate.yml')
 const RISK_GATE_REFRESH_PATH = join(ROOT, 'pr-risk-gate-refresh.yml')
 const CI_PATH = join(ROOT, 'pr-light-checks.yml')
+const ENABLE_AUTO_MERGE_PATH = join(process.cwd(), 'tools/ops-review-loop/src/enable-auto-merge.mjs')
 
 interface WorkflowStep {
   id?: string
@@ -77,17 +78,22 @@ const COMMENT_PREDICATES = [
 const SHA_PIN = /@[0-9a-f]{40}\b/
 
 function expectEnableBoundToReviewedHead(steps: WorkflowStep[]) {
-  const enableStep = steps.find((step) => step.run?.includes('gh pr merge --auto --merge'))
+  const enableStep = steps.find((step) => step.run?.includes('enable-auto-merge.mjs'))
   expect(enableStep?.env?.HEAD_SHA).toContain('steps.pr.outputs.head')
   expect(enableStep?.env?.HEAD_SHA).not.toContain('github.sha')
-  const run = enableStep?.run ?? ''
-  const mergeAt = run.indexOf('gh pr merge --auto --merge')
-  expect(run).toContain('gh pr view')
-  expect(run).toContain('head-check.mjs --plan-auto-merge')
-  expect(run).toContain('--match-head-commit "$HEAD_SHA"')
-  expect(run.indexOf('--plan-auto-merge')).toBeLessThan(mergeAt)
-  expect(run.indexOf('exit 0')).toBeLessThan(mergeAt)
-  expect(run).not.toContain('|| true')
+  expect(enableStep?.run?.trim()).toBe('node tools/ops-review-loop/src/enable-auto-merge.mjs')
+  const script = readFileSync(ENABLE_AUTO_MERGE_PATH, 'utf8')
+  // The command itself lives in the script, which both workflows call. A stale
+  // head returns before any merge, and `--admin` is rejected rather than forwarded.
+  expect(script).toContain('planAutoMergeEnable')
+  expect(script).toContain("'--match-head-commit'")
+  expect(script).toContain("'--auto'")
+  expect(script).toContain("'--merge'")
+  expect(script).toContain("args.includes('--admin')")
+  expect(script).not.toContain('|| true')
+  expect(script).not.toContain('continue-on-error')
+  expect(script).toContain('叠放 PR 不支持自动合并；闸已判可合，需由有权限的人或 agent 手动合并（先合栈底）')
+  expect(script).toContain('stack{number}')
 }
 
 describe('Risk gate workflow: the judge lives on main', () => {
@@ -165,12 +171,14 @@ describe('Risk gate workflow: the judge lives on main', () => {
   })
 
   it('toggles auto-merge both ways through gh, never merging directly', () => {
-    expect(riskGate.steps.some((s) => s.run?.includes('gh pr merge --auto --merge'))).toBe(true)
+    expect(riskGate.steps.some((s) => s.run?.includes('enable-auto-merge.mjs'))).toBe(true)
     expect(riskGate.steps.some((s) => s.run?.includes('gh pr merge --disable-auto'))).toBe(true)
+    expect(riskGate.source).not.toContain('gh pr merge --auto')
+    expect(existsSync(ENABLE_AUTO_MERGE_PATH), 'enable-auto-merge.mjs 没了 —— 开启步骤会静默失败').toBe(true)
   })
 
   it("enables auto-merge only from the gate's own 'enable' decision", () => {
-    const enableStep = riskGate.steps.find((s) => s.run?.includes('gh pr merge --auto --merge'))
+    const enableStep = riskGate.steps.find((s) => s.run?.includes('enable-auto-merge.mjs'))
     expect(enableStep?.if?.trim()).toBe("steps.gate.outputs.decision == 'enable'")
     expectEnableBoundToReviewedHead(riskGate.steps)
   })
@@ -337,9 +345,10 @@ describe('Risk gate refresh: comment runs publish on the PR head and do not canc
   })
 
   it('toggles auto-merge only from the gate decision, and never interpolates event data into a run block', () => {
-    const enableStep = riskRefresh.steps.find((step) => step.run?.includes('gh pr merge --auto --merge'))
+    const enableStep = riskRefresh.steps.find((step) => step.run?.includes('enable-auto-merge.mjs'))
     expect(enableStep?.if?.trim()).toBe("steps.gate.outputs.decision == 'enable'")
     expectEnableBoundToReviewedHead(riskRefresh.steps)
+    expect(riskRefresh.source).not.toContain('gh pr merge --auto')
     expect(riskRefresh.steps.some((step) => step.run?.includes('gh pr merge --disable-auto'))).toBe(true)
     for (const step of riskRefresh.steps) {
       if (step.run) expect(step.run).not.toContain('${{')
