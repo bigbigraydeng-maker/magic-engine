@@ -35,6 +35,7 @@ describe('GET ad-intraday-spend-sample', () => {
     expect(body.proposal.cards).toBe(1)
     expect(body.proposal.todos).toBe(0)
     expect(body.proposal.action).toBe('decrease')
+    expect(body.cpl).toMatchObject({ cards: 1, kind: 'judged' })
     expect(fetchSpy.mock.calls.length).toBe(before)
   })
 })

@@ -9,6 +9,7 @@ import type { KernelDeps } from '@/lib/kernel/deps'
 import { dailyTotalCapCents } from '@/lib/marketing-plan/promo/daily-total-cap'
 import { isExpired, readStoredCard } from '@/lib/confirmation-card/view'
 import type { CardResolution } from '@/lib/confirmation-card/decide'
+import type { IntradayRecheck } from '@/lib/ads-strategy/circuit-breaker/intraday'
 import { DEFAULT_STALE_HOURS } from '@/lib/ads-strategy/circuit-breaker/settings'
 import { loadBreakerFacts } from '@/lib/ads-strategy/circuit-breaker/load'
 import { judgeBreaker } from '@/lib/ads-strategy/circuit-breaker/rules'
@@ -27,6 +28,7 @@ export const MANY_PLANS = '这位客户有不止一份已批准的广告计划�
 export const NO_CAP = '已批准的计划里还没有每天广告总上限，没有改广告。'
 export const PLAN_UNREAD = '已批准的计划读不出来，没有改广告。'
 export const NZ_DAY_EXPIRED = '过了当天新西兰时间 23:59 没人点，这张卡作废了。'
+export const SAMPLE_STALE = '今天的花费样本已经过期，没有改广告。'
 
 interface CaptureRow {
   captured_at?: string
@@ -97,6 +99,7 @@ export async function recheckBreakerPause(
     plan?: typeof singleApprovedPlanReason
     load?: typeof loadBreakerFacts
     capture?: typeof captureIsFresh
+    intraday?: () => Promise<IntradayRecheck>
   } = {},
 ): Promise<string | null> {
   const plan = await (ports.plan ?? singleApprovedPlanReason)(sb, clientId)
@@ -107,8 +110,33 @@ export async function recheckBreakerPause(
   const capture = await (ports.capture ?? captureIsFresh)(sb, clientId, accountId, now, maxAge)
   if (capture === 'unread') return SNAPSHOT_UNREAD
   if (capture === 'stale') return STALE_SNAPSHOT
-  const still = judgeBreaker(facts).pauses.some((pause) => pause.campaignId === campaignId)
-  return still ? null : RULE_CLEARED
+  const dailyStill = judgeBreaker(facts).pauses.some((pause) => pause.campaignId === campaignId)
+  const intraday = await intradayOf(ports, sb, clientId, campaignId, now)
+  return combineRecheck(dailyStill, intraday)
+}
+
+function combineRecheck(dailyStill: boolean, intraday: IntradayRecheck): string | null {
+  if (dailyStill || intraday === 'holding') return null
+  if (intraday === 'stale') return SAMPLE_STALE
+  if (intraday === 'unread') return DATA_UNREAD
+  return RULE_CLEARED
+}
+
+async function intradayOf(
+  ports: { plan?: unknown; load?: unknown; capture?: unknown; intraday?: () => Promise<IntradayRecheck> },
+  sb: SupabaseClient,
+  clientId: string,
+  campaignId: string,
+  now: Date,
+): Promise<IntradayRecheck> {
+  if (ports.intraday) return ports.intraday()
+  if (ports.plan || ports.load || ports.capture) return 'skip'
+  try {
+    const { intradayPauseStill } = await import('@/lib/ads-strategy/circuit-breaker/intraday-run')
+    return await intradayPauseStill(sb, clientId, campaignId, now)
+  } catch {
+    return 'unread'
+  }
 }
 
 export async function recheckScaleFallback(
