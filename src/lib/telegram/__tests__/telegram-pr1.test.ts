@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 import { inspectTelegramUpdate, opcApproverFor } from '../ingress'
+import { TELEGRAM_SEND_TIMEOUT_MS } from '../client'
 import { formatIssuedCard, formatMorningTodo } from '../messages'
+import { notifyIssuedConfirmationCardSafe } from '../notify-hook'
 import { notifyIssuedConfirmationCard, pushMorningTodo } from '../push'
 import { POST } from '@/app/api/webhooks/telegram/route'
 import type { TodoView } from '@/lib/pm-todo/daily-todo'
@@ -230,4 +232,20 @@ describe('telegram push flag', () => {
     expect(body.reply_markup).toBeUndefined()
     expect(body.text).toContain('没有按钮')
   })
+
+  it('a fetch that never returns does not hold the card notice', async () => {
+    vi.stubEnv('TELEGRAM_TODO_PUSH_ENABLED', 'true')
+    vi.stubEnv('TELEGRAM_BOT_TOKEN', 'test-token')
+    vi.stubEnv('TELEGRAM_OWNER_USER_ID', OWNER)
+    vi.stubEnv('TELEGRAM_OWNER_CHAT_ID', CHAT)
+    const errors: unknown[][] = []
+    vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => { errors.push(args) })
+    vi.stubGlobal('fetch', () => new Promise(() => {}))
+    const started = Date.now()
+    await notifyIssuedConfirmationCardSafe(notice)
+    const elapsed = Date.now() - started
+    expect(elapsed).toBeGreaterThan(1000)
+    expect(elapsed).toBeLessThan(TELEGRAM_SEND_TIMEOUT_MS + 2000)
+    expect(JSON.stringify(errors)).not.toContain('test-token')
+  }, 15_000)
 })

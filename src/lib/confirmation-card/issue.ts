@@ -119,6 +119,7 @@ export async function issueConfirmationCard(
     clicker: args.clicker,
     now,
   })
+  // The notice waits, but the send itself stops at 5 seconds, so a stuck bot cannot hold the card.
   await notifyIssuedConfirmationCardSafe({
     clientId: args.clientId,
     what: card.what,
