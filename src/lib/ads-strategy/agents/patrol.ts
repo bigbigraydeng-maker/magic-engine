@@ -170,6 +170,7 @@ export function buildHeadline(
   goal: DigestGoalContext | null,
   patrolCost: PatrolCostVerdict | null = null,
   adHealth: AdHealthPatrolSurface | null = null,
+  earlyWarningLine: string | null = null,
 ): string {
   const hits = problems.filter(d => d.status === 'hit').length
   const opps = opportunities.filter(d => d.status === 'hit').length
@@ -191,8 +192,9 @@ export function buildHeadline(
     parts.push(`${patrolCost.flags.length} 个广告组单次成本连续偏高`)
   }
   if (adHealth) parts.push(`广告体检：${adHealth.headline}`)
+  if (earlyWarningLine) parts.push(earlyWarningLine)
 
-  if (hits === 0 && opps === 0 && !(patrolCost && patrolCost.flags.length > 0) && !adHealth) {
+  if (hits === 0 && opps === 0 && !(patrolCost && patrolCost.flags.length > 0) && !adHealth && !earlyWarningLine) {
     parts.push(completeness === 'partial' ? '数据没拉全，今天只看不动' : '今天没发现要紧的事')
   } else if (completeness === 'partial') parts.push('（数据没拉全，机会没判）')
 
@@ -227,9 +229,13 @@ export async function buildGrowthState(
   try {
     const evaluatedAt = new Date().toISOString()
     const input = await loadDiagnosisInput(clientId, date, evaluatedAt)
-    const [targetMajor, adHealth] = await Promise.all([
+    const { loadPatrolEarlyWarningLine } = await import(
+      '@/lib/ads-strategy/monitoring/predictive-early-warning/run'
+    )
+    const [targetMajor, adHealth, earlyWarningLine] = await Promise.all([
       loadPatrolTargetCplMajor(clientId),
       loadAdHealthPatrolSurface(clientId, date),
+      loadPatrolEarlyWarningLine(supabaseAdmin, clientId, date),
     ])
     const patrolCost = judgePatrolCost(input, targetMajor, evaluatedAt)
     const completeness = resolveCompleteness({
@@ -255,7 +261,15 @@ export async function buildGrowthState(
     if (!('error' in scorecard)) scorecard.qualified = await loadQualifiedBlock(input)
 
     const payload: GrowthStatePayload = {
-      headline: buildHeadline(problems, opportunityRun.opportunities, completeness.completeness, goal, patrolCost, adHealth),
+      headline: buildHeadline(
+        problems,
+        opportunityRun.opportunities,
+        completeness.completeness,
+        goal,
+        patrolCost,
+        adHealth,
+        earlyWarningLine,
+      ),
       dataCompleteness: completeness.completeness,
       completenessReasons: completeness.reasons,
       problems,

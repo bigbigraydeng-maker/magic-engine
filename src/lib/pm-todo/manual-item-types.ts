@@ -51,6 +51,7 @@ import type {
   AdsDailySpendOverCapNoticeItemKind,
   AdsPlanDailyCapMissingItemKind,
 } from './ads-agent-stale-items'
+import type { AdsPredictiveEarlyWarningItemKind } from './ads-predictive-early-warning-items'
 import type { AdsPlanDeliveryStageMissingItemKind } from './ads-plan-delivery-stage-items'
 import type { AdsCircuitBreakerAlertKind, AdsCircuitBreakerPauseKind } from './ads-circuit-breaker-items'
 import type { GoalRolloverItemKind } from './goal-rollover-items'
@@ -355,6 +356,7 @@ export type ManualItemKind =
   | AdsAgentSyncStaleItemKind
   | AdsAgentDailyPullGapItemKind
   | AdsDailySpendOverCapNoticeItemKind
+  | AdsPredictiveEarlyWarningItemKind
   | AdsPlanDailyCapMissingItemKind
   | AdsPlanDeliveryStageMissingItemKind
   | AdsCircuitBreakerPauseKind

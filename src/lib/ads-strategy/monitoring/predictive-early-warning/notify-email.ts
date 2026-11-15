@@ -1,10 +1,5 @@
-/**
- * Best-effort FDE email for predictive ad alerts. Telegram is not wired (see BLOCKERS in PR).
- */
-
 import { Resend } from 'resend'
 import { meMailFrom } from '@/lib/email/sender'
-import { describeSendError } from '@/lib/ads-strategy/digest'
 import type { CostMetric } from '@/lib/ads-strategy/portfolio/goal-context'
 import { metricLabel } from './compare'
 
@@ -79,6 +74,13 @@ export async function deliverEarlyWarningEmail(
   return 'sent'
 }
 
-export function sendErrorMessage(error: unknown): string {
-  return describeSendError(error)
+export type EarlyWarningChannelResult = EarlyWarningEmailStatus | 'telegram_unconfigured'
+
+export interface EarlyWarningChannels {
+  email(to: string[], facts: EarlyWarningEmailFacts): Promise<EarlyWarningChannelResult>
+  telegram?(_chatIds: string[], _text: string): Promise<'telegram_unconfigured'>
+}
+
+export function defaultEarlyWarningChannels(): EarlyWarningChannels {
+  return { email: (to, facts) => deliverEarlyWarningEmail(to, facts), telegram: async () => 'telegram_unconfigured' }
 }

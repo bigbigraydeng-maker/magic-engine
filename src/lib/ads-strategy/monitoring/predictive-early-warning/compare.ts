@@ -1,8 +1,3 @@
-/**
- * Intraday-style early warning: today's cost per primary result vs trailing 7 complete days.
- * Pure functions only — callers supply spend/results from existing tables.
- */
-
 import type { CostMetric } from '@/lib/ads-strategy/portfolio/goal-context'
 import {
   OVER_AVG_NUM,

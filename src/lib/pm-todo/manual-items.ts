@@ -54,6 +54,7 @@ import { pushToolsWideBudgetItems } from './tools-wide-budget-items'
 import { pushAdsAutonomySyncItems } from './ads-autonomy-items'
 import { pushAdsRuleFindingItems } from './ads-rule-finding-items'
 import { pushAdsHealthPatrolItems } from './ads-health-patrol-items'
+import { pushAdsPredictiveEarlyWarningItems } from './ads-predictive-early-warning-items'
 import { pushAdsCircuitItems } from './ads-circuit-items'
 import { pushAdsCircuitBreakerItems } from './ads-circuit-breaker-items'
 import { pushAdsServicePauseItems } from './ads-service-pause-items'
@@ -453,6 +454,9 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     ),
     (b) => pushAdsHealthPatrolItems(supabase, b, now, nameOf).catch((e) =>
       console.warn('[manual-items] 广告体检警报待办生成失败（不阻塞其他待办）:', e),
+    ),
+    (b) => pushAdsPredictiveEarlyWarningItems(supabase, b, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 广告预警待办生成失败（不阻塞其他待办）:', e),
     ),
     // 广告熔断中的账户 —— 判据是"现在还处在熔断中吗"，不是时间窗口（v2.5 §6.2 派生态）
     (b) => pushAdsCircuitItems(supabase, b, nameOf).catch((e) =>
