@@ -157,6 +157,9 @@
 | `RESEND_WEBHOOK_SECRET_SYSTEM` | Resend 回调验签（`/api/webhooks/resend/system`，ME 系统邮件账号的送达回执入库口）。值是 Resend 后台建回调后给出的 `whsec_…`；**缺了或格式不对，回调一律回 503**。**Render 里尚未配**（等 PM 放行，只能 PM 本人填），设计稿 `docs/specs/2026-11-01-me-provider-event-intake-p1-design-v0.md` §6 | Render-web | ✅ |
 | `RESEND_API_KEY_<账号>`（如 `RESEND_API_KEY_CTS`） | ME 自动发给客人的信（欢迎信等）用的发信钥匙，按发信账号分开；**缺了宁可不发，绝不借系统那把**。PM 11-10 回「共用」：CTS 这把是 ME 系统 Resend 账号里新建、只限 news. 域名的钥匙。只能 PM 本人填 | Render-web | ✅ |
 | `UNSUBSCRIBE_SIGNING_SECRET` / `_PREV` | 自动信里一键退订链接的签名密钥（至少 32 位；`_PREV` 只在换密钥时短暂保留旧的）。缺了退订页显示「Sorry, that did not work」、自动信不会发 | Render-web | ✅ |
+| `TELEGRAM_BOT_TOKEN_ME` | FDE 广告预警 Telegram 机器人（BotFather token；未配则 Telegram 通道返回 `telegram_unconfigured`） | Render-web | ✅ |
+| `ME_FDE_TELEGRAM_STORE_CLIENT_ID` | 存 FDE Telegram chat id 绑定的锚点客户 `clients.id`（仅用作 `leads_config` jsonb 载体，选内部/运营客户一行即可） | Render-web | ✅ |
+| `TELEGRAM_WEBHOOK_SECRET_ME` | Telegram webhook `secret_token`（可选；设了则 `/api/webhooks/telegram/me-ads-alerts` 校验 `X-Telegram-Bot-Api-Secret-Token`） | Render-web | ❌ |
 | `ME_MAIL_FROM` / `ME_MAIL_TO` | ME 内部通知收发件人 | Render-web | ❌ |
 | `FACTORY_REVIEWER_EMAILS` | Factory 审核通知收件人 | Render-web | ❌ |
 | `OUTREACH_FROM_EMAIL` / `_REPLY_EMAIL` | 线索外联邮件收发地址（P35） | Render-web | ❌ |
