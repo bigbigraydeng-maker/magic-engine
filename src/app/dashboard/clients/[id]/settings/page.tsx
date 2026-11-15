@@ -40,6 +40,7 @@ import { CmsPanel } from '../_components/CmsPanel'
 import { MailboxPanel } from './_components/MailboxPanel'
 import { AdStrategyPanel } from './_components/AdStrategyPanel'
 import { PauseAdSetCardSwitchPanel } from './_components/PauseAdSetCardSwitchPanel'
+import { ActivateAdCardSwitchPanel } from './_components/ActivateAdCardSwitchPanel'
 import { AddCreativeCardSwitchPanel } from './_components/AddCreativeCardSwitchPanel'
 import { AdOutcomePanel } from './_components/AdOutcomePanel'
 import { QualifiedStagesPanel } from './_components/QualifiedStagesPanel'
@@ -152,6 +153,9 @@ function TabBody({
               <PauseAdSetCardSwitchPanel clientId={clientId} />
               <div className="mt-3">
                 <AddCreativeCardSwitchPanel clientId={clientId} />
+              </div>
+              <div className="mt-3">
+                <ActivateAdCardSwitchPanel clientId={clientId} />
               </div>
             </div>
             <div className="mt-3"><AdOutcomePanel clientId={clientId} /></div>

@@ -234,6 +234,9 @@ export const ADS_ACTION_TYPE = {
   /** Add one image ad into an existing ad set after a person confirms the card. */
   ADD_AD_CREATIVE: 'ads.add_ad_creative',
 
+  /** Turn one paused ad on after a person confirms the card. Does not raise the budget. */
+  ACTIVATE_AD: 'ads.activate_ad',
+
   /** Add a negative keyword to stop wasted spend (third_party, meta) */
   ADD_NEGATIVE_KEYWORD: 'ads.add_negative_keyword',
 

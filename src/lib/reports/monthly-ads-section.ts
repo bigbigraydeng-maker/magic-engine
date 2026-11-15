@@ -87,6 +87,7 @@ const ACTION_LABEL_ZH: Record<string, string> = {
   'ads.adjust_bid': '调整日预算',
   'ads.adjust_adset_daily_budget': '调整广告组日预算',
   'ads.add_ad_creative': '往广告组加一条图片广告',
+  'ads.activate_ad': '把一条暂停的广告开起来',
   'ads.add_negative_keyword': '添加否定关键词',
   'ads.create_ad': '新建广告',
 }

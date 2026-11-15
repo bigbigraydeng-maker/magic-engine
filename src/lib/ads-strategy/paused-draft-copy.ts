@@ -7,6 +7,8 @@ import { isWinnerReelCard } from '@/lib/winner-reel-sync/copy'
 export const PAUSED_DRAFT_WHAT = '批准建 Meta 暂停草稿并送审'
 export const PAUSE_AD_SET_WHAT = '暂停这个广告组'
 export const ADD_CREATIVE_WHAT = '往这个广告组加一条图片广告'
+export const ACTIVATE_AD_WHAT = '把一条暂停的广告开起来'
+export const ACTIVATE_AD_SENTENCE = '确认后：这条广告从暂停变成在投，分这个组现有的每日预算，不加预算'
 export const CAMPAIGN_PAUSE_WHAT = '暂停这个广告系列'
 export const CAMPAIGN_RESUME_WHAT = '恢复这个广告系列'
 export const VIDEO_UPLOAD_WHAT = '把这条成片传到广告账户'
@@ -25,6 +27,9 @@ export function pausedDraftClickUrl(clientId: string, runId: string, what: strin
   }
   if (what === ADD_CREATIVE_WHAT) {
     return `/api/clients/${client}/meta-ads/add-creative-card/${run}`
+  }
+  if (what === ACTIVATE_AD_WHAT) {
+    return `/api/clients/${client}/meta-ads/activate-ad-card/${run}`
   }
   if (what === CAMPAIGN_PAUSE_WHAT || what === CAMPAIGN_RESUME_WHAT) {
     return `/api/clients/${client}/meta-ads/campaign-status-card/${run}`
