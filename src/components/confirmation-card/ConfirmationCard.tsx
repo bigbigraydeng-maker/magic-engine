@@ -28,6 +28,12 @@ export interface ConfirmationCardProps {
   readonly onDecline: () => void
 }
 
+function outcomeChip(line: string): { label: string; tone: string } | null {
+  if (line.startsWith('已做完')) return { label: '已做完', tone: 'bg-sky-100 text-sky-900' }
+  if (line.startsWith('没做成')) return { label: '没做成', tone: 'bg-red-100 text-red-800' }
+  return null
+}
+
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="text-sm leading-relaxed text-me-charcoal">
@@ -43,6 +49,7 @@ export function ConfirmationCard(props: ConfirmationCardProps) {
   const showMeta = touchesMetaAds(props.what)
   const expiryBadge = expiryBadgeText(props.expiresLabel)
   const showActions = !props.goLiveHref
+  const chip = outcomeChip(props.statusLine)
 
   return (
     <article
@@ -69,6 +76,11 @@ export function ConfirmationCard(props: ConfirmationCardProps) {
           <DetailRow label="金额：" value={props.amount} />
           <DetailRow label="日期：" value={props.date} />
           <DetailRow label="范围：" value={props.scope} />
+          {chip ? (
+            <p>
+              <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${chip.tone}`}>{chip.label}</span>
+            </p>
+          ) : null}
           {props.status === 'expired' || props.status === 'voided' ? (
             <DetailRow label="结果：" value={props.statusLine} />
           ) : (

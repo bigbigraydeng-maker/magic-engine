@@ -1,5 +1,8 @@
+import { listPausedAds } from '@/lib/ads-activate-card/paused'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { supabaseAdmin } from '@/lib/supabase'
 import { AdsExecutionReviewPanel } from '../_components/AdsExecutionReviewPanel'
+import { ActivateAdEntry } from './activate-ad-entry'
 import { AddCreativeEntry } from './add-creative-entry'
 
 export const dynamic = 'force-dynamic'
@@ -20,6 +23,8 @@ export default async function ConfirmationCardsPage({
     )
   }
 
+  const pausedAds = await listPausedAds(supabaseAdmin, params.id)
+
   return (
     <div className="px-6 py-8 md:px-10 md:py-10">
       <header className="max-w-3xl">
@@ -29,6 +34,7 @@ export default async function ConfirmationCardsPage({
         </p>
       </header>
       <div className="max-w-3xl space-y-8">
+        <ActivateAdEntry clientId={params.id} choices={pausedAds} />
         <AddCreativeEntry clientId={params.id} />
         <AdsExecutionReviewPanel clientId={params.id} />
       </div>
