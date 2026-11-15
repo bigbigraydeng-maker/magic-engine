@@ -5,12 +5,17 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 
+import { produceFactoryStills, type StillProduceReceipt } from '@/lib/factory/still-produce'
 import { isoDate, nzCalendar, targetWeek } from '@/lib/social/week-pack/cadence'
 import { runImagePostStep, type ImagePostStepReceipt } from '@/lib/social/image-post-step'
+import { draftStoryWeekPack } from '@/lib/social/story-week-pack'
 import { planStoryWeekDraft, type StoryWeekDraftReceipt } from '@/lib/social/story-week-draft'
 import type { ProducedDrafts, ProducedKind, ProducedLine } from '@/lib/social/weekly-plan/produced'
 
+import { loadScheduledReelsForWeek, mergeScheduledReels } from './reel-lines'
+
 export interface WeekDraftSummary {
+  stills: { drafted: number; skipped: string | null; error: string | null; note: string }
   story: { drafted: number; skipped: string | null; error: string | null; note: string }
   post: { drafted: number; skipped: string | null; error: string | null }
   reel: { drafted: number; skipped: string | null; error: string | null }
@@ -30,39 +35,59 @@ export async function prepareWeekDrafts(input: {
   reelScheduled: ReadonlyArray<{ id: string; publishOn: string }>
   reelScheduledCount: number
   supabase: SupabaseClient
+  loadExistingReels?: typeof loadScheduledReelsForWeek
 }): Promise<PreparedWeekDrafts> {
-  const story = safeStory(input.config)
+  const stills = await safeStills(input)
+  const story = await safeStory(input)
   const image = await safeImage(input)
-  const reel = reelKind(input.reelScheduled, input.reelScheduledCount)
+  const reel = await reelLinesForCard(input)
   const produced = {
     story: storyKind(story),
     post: imageKind(image),
     reel,
   }
-  return { story, image, produced, summary: summaryOf(produced, story.note, image.drafted) }
+  return { story, image, produced, summary: summaryOf(produced, story, stills, image.drafted) }
 }
 
 export function prepareWeekDraftsFailed(message: string): PreparedWeekDrafts {
-  const story = safeStory(null)
+  const story = failedStory(message)
+  const stills: StillProduceReceipt = { drafted: 0, skipped: null, error: message, spentUsd: 0, note: '静图这一步没有跑。' }
   const image: ImagePostStepReceipt = {
     attempted: 0, drafted: 0, planIds: [], dates: [], skipped: null, error: `image_step_failed: ${message}`,
   }
   const produced: ProducedDrafts = {
-    story: { ...storyKind(story), error: message },
+    story: storyKind(story),
     post: imageKind(image),
     reel: { requested: null, drafted: 0, lines: [], skipped: null, error: message },
   }
-  return { story: { ...story, error: message }, image, produced, summary: summaryOf(produced, story.note, 0) }
+  return { story, image, produced, summary: summaryOf(produced, story, stills, 0) }
 }
 
-function safeStory(config: unknown): StoryWeekDraftReceipt {
+function failedStory(message: string): StoryWeekDraftReceipt {
+  return {
+    ...planStoryWeekDraft(null),
+    error: message,
+    note: '这一步失败了，没有新建周包。',
+  }
+}
+
+async function safeStills(input: { clientId: string; now: Date; config: unknown; supabase: SupabaseClient }): Promise<StillProduceReceipt> {
   try {
-    return planStoryWeekDraft(config)
+    return await produceFactoryStills(input.clientId, input.config, input.now, { supabase: input.supabase })
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    return { drafted: 0, skipped: null, error: `still_step_failed: ${message}`.slice(0, 300), spentUsd: 0, note: '静图这一步失败了，没有再花钱。' }
+  }
+}
+
+async function safeStory(input: { clientId: string; now: Date; config: unknown; supabase: SupabaseClient }): Promise<StoryWeekDraftReceipt> {
+  try {
+    return await draftStoryWeekPack(input.clientId, input.config, input.now, input.supabase)
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
     return {
       requested: null, drafted: 0, packId: null, skipped: null, error: message.slice(0, 300),
-      source: 'none', note: 'Story 这一步失败了，没有新建周包。',
+      source: 'none', note: 'Story 这一步失败了，没有新建周包。', lines: [],
     }
   }
 }
@@ -107,7 +132,14 @@ async function safeImage(input: {
 }
 
 function storyKind(story: StoryWeekDraftReceipt): ProducedKind {
-  return { requested: story.requested, drafted: story.drafted, lines: [], skipped: story.skipped, error: story.error }
+  const lines = story.lines ?? []
+  return {
+    requested: story.requested,
+    drafted: lines.length > 0 ? lines.length : story.drafted,
+    lines,
+    skipped: story.drafted === 0 ? story.skipped : null,
+    error: story.error,
+  }
 }
 
 function imageKind(image: ImagePostStepReceipt): ProducedKind {
@@ -119,6 +151,28 @@ function imageKind(image: ImagePostStepReceipt): ProducedKind {
     lines,
     skipped: image.drafted === 0 ? image.skipped : null,
     error: image.error,
+  }
+}
+
+async function reelLinesForCard(input: {
+  clientId: string
+  now: Date
+  reelScheduled: ReadonlyArray<{ id: string; publishOn: string }>
+  reelScheduledCount: number
+  supabase: SupabaseClient
+  loadExistingReels?: typeof loadScheduledReelsForWeek
+}): Promise<ProducedKind> {
+  const fresh = reelKind(input.reelScheduled, input.reelScheduledCount)
+  if (fresh.error) return fresh
+  const week = targetWeek(input.now)
+  const load = input.loadExistingReels ?? loadScheduledReelsForWeek
+  try {
+    const existing = await load(input.supabase, input.clientId, week)
+    if (existing === 'unreadable') return { ...fresh, error: 'existing_reels_unreadable' }
+    const merged = mergeScheduledReels(input.reelScheduled, existing, week)
+    return reelKind(merged, merged.length)
+  } catch {
+    return { ...fresh, error: 'existing_reels_unreadable' }
   }
 }
 
@@ -147,9 +201,15 @@ function zipLines(dates: string[] | undefined, ids: string[]): ProducedLine[] {
   return lines.filter((line) => line.date !== '' || line.ref !== '')
 }
 
-function summaryOf(produced: ProducedDrafts, storyNote: string, imageNew: number): WeekDraftSummary {
+function summaryOf(
+  produced: ProducedDrafts,
+  story: StoryWeekDraftReceipt,
+  stills: StillProduceReceipt,
+  imageNew: number,
+): WeekDraftSummary {
   return {
-    story: { drafted: produced.story.drafted, skipped: produced.story.skipped, error: produced.story.error, note: storyNote },
+    stills: { drafted: stills.drafted, skipped: stills.skipped, error: stills.error, note: stills.note },
+    story: { drafted: story.drafted, skipped: story.skipped, error: story.error, note: story.note },
     post: { drafted: imageNew, skipped: produced.post.skipped, error: produced.post.error },
     reel: { drafted: produced.reel.drafted, skipped: produced.reel.skipped, error: produced.reel.error },
   }
