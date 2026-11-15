@@ -14,6 +14,10 @@
 -- 这一刀不改任何页面行为：只多记一行。撤回办法见文件末尾。
 -- ════════════════════════════════════════════════════════════════════════════
 
+-- 给 10 张热表挂触发器要逐张拿锁。线上正好有长事务握着其中一张时，宁可 3 秒后整体失败重来，
+-- 也不要排队等它、把后面所有写入一起堵住。
+set lock_timeout = '3s';
+
 create table public.crm_list_change_log (
   id bigint generated always as identity primary key,
   -- 故意不加外键：这张表只是记号，任何情况下都不能因为它让业务表的写入失败。
@@ -25,18 +29,20 @@ create index crm_list_change_log_client_idx
   on public.crm_list_change_log (client_id, id);
 
 comment on table public.crm_list_change_log is
-  'CRM 名单输入表的改动记号，只追加。某客户的行数没变 = 名单的输入没变。设计稿 2026-11-16。';
+  'CRM 名单输入表的改动记号，只追加。某客户的行数没变 = 名单的输入没变。不许删行或改行：删 1 行同时新记 1 行，行数不变，名单会一直用旧数据且不报错；要清理就先换版本算法。设计稿 2026-11-16。';
 
 alter table public.crm_list_change_log enable row level security;
 
-create policy crm_list_change_log_service_role
+-- 只读：行只由触发器（以表主人身份）写入。service_role 也不许增删改，免得「行数」被改回去。
+create policy crm_list_change_log_service_role_read
   on public.crm_list_change_log
-  for all
+  for select
   to service_role
-  using (true)
-  with check (true);
+  using (true);
 
-revoke all on public.crm_list_change_log from anon, authenticated;
+revoke all on public.crm_list_change_log from anon, authenticated, service_role;
+grant select on public.crm_list_change_log to service_role;
+revoke all on sequence public.crm_list_change_log_id_seq from anon, authenticated, service_role;
 
 -- ────────────────────────────────────────────────────────────────────────────
 -- 触发器函数。SECURITY DEFINER：不管是谁在写业务表，这一行记号都要能记上；
@@ -60,13 +66,14 @@ begin
     insert into public.crm_list_change_log (client_id)
     select distinct o.client_id from old_rows o where o.client_id is not null;
   else
+    -- full join：主键 id 被改掉的行两边对不上，也要记（旧行的客户和新行的客户各记一次）。
     insert into public.crm_list_change_log (client_id)
     select distinct x.client_id
     from (
       select o.client_id as old_client, n.client_id as new_client
       from old_rows o
-      join new_rows n on n.id = o.id
-      where to_jsonb(o) is distinct from to_jsonb(n)
+      full join new_rows n on n.id = o.id
+      where o.id is null or n.id is null or to_jsonb(o) is distinct from to_jsonb(n)
     ) changed
     cross join lateral (values (changed.old_client), (changed.new_client)) as x (client_id)
     where x.client_id is not null;
@@ -95,9 +102,9 @@ begin
     insert into public.crm_list_change_log (client_id)
     select distinct c.client_id
     from old_rows o
-    join new_rows n on n.id = o.id
+    full join new_rows n on n.id = o.id
     join public.conversations c on c.id in (o.conversation_id, n.conversation_id)
-    where to_jsonb(o) is distinct from to_jsonb(n);
+    where o.id is null or n.id is null or to_jsonb(o) is distinct from to_jsonb(n);
   end if;
   return null;
 end;
@@ -162,7 +169,16 @@ create trigger crm_list_change_log_upd after update of leads_config, country on 
   when (old.leads_config is distinct from new.leads_config or old.country is distinct from new.country)
   execute function public.crm_list_change_log_for_client_row();
 
+reset lock_timeout;
+
 -- ────────────────────────────────────────────────────────────────────────────
+-- 已知不会记的三种写法（都会让名单用到旧数据，做这些事之后要手动给相关客户补一行记号，
+-- 或者重启网站服务让内存里的旧数据作废）：
+--   1. TRUNCATE 这些表；
+--   2. 先 ALTER TABLE ... DISABLE TRIGGER 再写；
+--   3. session_replication_role = replica 下的写入。
+-- 另：clients 上若以后加了 BEFORE 触发器去改 leads_config / country，而语句本身没写这两列，也不会记。
+--
 -- 撤回（整段可直接执行；业务表数据不受影响）：
 --   drop trigger if exists crm_list_change_log_ins on public.<上面 9 张表>;
 --   drop trigger if exists crm_list_change_log_upd on public.<上面 9 张表和 clients>;

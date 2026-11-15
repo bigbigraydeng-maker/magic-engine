@@ -102,3 +102,20 @@ do $$ begin
   begin set local role authenticated; insert into public.crm_list_change_log (client_id) values (gen_random_uuid()); raise exception 'FAIL authenticated could write the log';
   exception when insufficient_privilege then raise notice 'ok   authenticated cannot write the log'; end;
 end $$;
+
+-- review round (2026-11-16): changed primary key, and the log is read-only even for service_role
+update contact_stage_events set id = gen_random_uuid() where client_id = :A;
+select pg_temp.expect('row whose id changed is still recorded', pg_temp.n(:A), 18);
+do $$ begin
+  begin set local role service_role; delete from public.crm_list_change_log; raise exception 'FAIL service_role could delete from the log';
+  exception when insufficient_privilege then raise notice 'ok   service_role cannot delete from the log'; end;
+end $$;
+do $$ begin
+  begin set local role service_role; insert into public.crm_list_change_log (client_id) values (gen_random_uuid()); raise exception 'FAIL service_role could insert into the log';
+  exception when insufficient_privilege then raise notice 'ok   service_role cannot insert into the log'; end;
+end $$;
+set role service_role;
+insert into contacts (client_id, display_name) values (:A, 'By service_role');
+reset role;
+select pg_temp.expect('service_role business write still recorded', pg_temp.n(:A), 19);
+show lock_timeout;
