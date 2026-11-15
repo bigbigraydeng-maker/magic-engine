@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { buildEarlyWarningText, type EarlyWarningAlertFacts } from './alert-copy'
 import type { EarlyWarningChannels, EarlyWarningEmailStatus } from './channels'
-import { chatIdsForPortalUsers, loadFdeTelegramStore } from './fde-telegram-store'
+import { loadChatIdsForClientRecipients } from './fde-telegram-persist'
 import type { EarlyWarningTelegramStatus } from './notify-telegram'
 import type { FdePortalRecipient } from './fde-recipients'
 
@@ -17,6 +17,7 @@ export interface FdeOutreachResult {
 export async function deliverEarlyWarningToFde(
   sb: SupabaseClient,
   channels: EarlyWarningChannels,
+  clientId: string,
   recipients: readonly FdePortalRecipient[],
   facts: EarlyWarningAlertFacts,
 ): Promise<FdeOutreachResult> {
@@ -25,13 +26,11 @@ export async function deliverEarlyWarningToFde(
   let telegram: EarlyWarningTelegramStatus | 'skipped' = 'skipped'
   const fn = channels.telegram
   if (fn && recipients.length > 0) {
-    const store = await loadFdeTelegramStore(sb)
-    const chatIds = store
-      ? chatIdsForPortalUsers(
-          store,
-          recipients.map((r) => r.portalUserId),
-        )
-      : []
+    const chatIds = await loadChatIdsForClientRecipients(
+      sb,
+      clientId,
+      recipients.map((r) => r.portalUserId),
+    )
     try {
       telegram = await fn(chatIds, buildEarlyWarningText(facts))
     } catch {

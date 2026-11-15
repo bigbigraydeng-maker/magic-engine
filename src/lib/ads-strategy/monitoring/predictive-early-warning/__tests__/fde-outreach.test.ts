@@ -35,9 +35,13 @@ describe('deliverEarlyWarningToFde', () => {
         }),
       }),
     } as never
-    const result = await deliverEarlyWarningToFde(sb, channels, [
-      { portalUserId: '11111111-1111-1111-1111-111111111111', email: 'fde@example.test' },
-    ], FACTS)
+    const result = await deliverEarlyWarningToFde(
+      sb,
+      channels,
+      FACTS.clientId,
+      [{ portalUserId: '11111111-1111-1111-1111-111111111111', email: 'fde@example.test' }],
+      FACTS,
+    )
     expect(result.email).toBe('sent')
     expect(result.telegram).toBe('send_failed')
   })
@@ -45,7 +49,7 @@ describe('deliverEarlyWarningToFde', () => {
   it('does not call telegram when handler missing', async () => {
     const email = vi.fn(async () => 'sent')
     const sb = { from: vi.fn() } as never
-    const result = await deliverEarlyWarningToFde(sb, { email }, [], FACTS)
+    const result = await deliverEarlyWarningToFde(sb, { email }, FACTS.clientId, [], FACTS)
     expect(result.telegram).toBe('skipped')
     expect(result.email).toBe('sent')
   })
