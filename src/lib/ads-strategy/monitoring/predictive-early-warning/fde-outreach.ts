@@ -1,7 +1,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { bareAddress, isInternalEmail } from '@/lib/ads-strategy/portfolio/diagnostics/internal-email'
-import { buildEarlyWarningText, type EarlyWarningAlertFacts } from './alert-copy'
-import type { EarlyWarningChannels, EarlyWarningEmailStatus } from './channels'
+import {
+  buildEarlyWarningText,
+  type EarlyWarningChannels,
+  type EarlyWarningEmailFacts,
+  type EarlyWarningEmailStatus,
+} from './notify-email'
 import { loadChatIdsForClientRecipients } from './fde-telegram-persist'
 import type { EarlyWarningTelegramStatus } from './notify-telegram'
 
@@ -39,7 +43,7 @@ export async function deliverEarlyWarningToFde(
   channels: EarlyWarningChannels,
   clientId: string,
   recipients: readonly FdePortalRecipient[],
-  facts: EarlyWarningAlertFacts,
+  facts: EarlyWarningEmailFacts,
 ): Promise<FdeOutreachResult> {
   const email = await channels.email(
     recipients.map((r) => r.email),

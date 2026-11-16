@@ -23,9 +23,6 @@ function replyText(chatId: string, text: string): Promise<void> {
   return sender.sendMessage({ chatId, text }).then(() => undefined)
 }
 
-/**
- * Telegram Bot API webhook — FDE self-serve bind only (no outbound to unknown chats except short replies here).
- */
 export async function POST(req: NextRequest) {
   const secret = process.env.TELEGRAM_WEBHOOK_SECRET_ME?.trim()
   if (secret) {

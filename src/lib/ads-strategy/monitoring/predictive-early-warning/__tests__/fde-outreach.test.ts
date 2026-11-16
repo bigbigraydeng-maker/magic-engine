@@ -1,9 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { EarlyWarningAlertFacts } from '../alert-copy'
-import type { EarlyWarningChannels } from '../channels'
+import type { EarlyWarningChannels, EarlyWarningEmailFacts } from '../notify-email'
 import { deliverEarlyWarningToFde } from '../fde-outreach'
 
-const FACTS: EarlyWarningAlertFacts = {
+const FACTS: EarlyWarningEmailFacts = {
   clientName: 'Demo Client',
   clientId: '00000000-0000-0000-0000-000000000099',
   entityId: 'adset-1',

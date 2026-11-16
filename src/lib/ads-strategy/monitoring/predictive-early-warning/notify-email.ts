@@ -2,6 +2,7 @@ import { Resend } from 'resend'
 import { meMailFrom } from '@/lib/email/sender'
 import type { CostMetric } from '@/lib/ads-strategy/portfolio/goal-context'
 import { metricLabel } from './compare'
+import { deliverEarlyWarningTelegram, type EarlyWarningTelegramStatus } from './notify-telegram'
 
 export interface EarlyWarningEmailFacts {
   clientName: string
@@ -74,13 +75,16 @@ export async function deliverEarlyWarningEmail(
   return 'sent'
 }
 
-export type EarlyWarningChannelResult = EarlyWarningEmailStatus | 'telegram_unconfigured'
+export type EarlyWarningChannelResult = EarlyWarningEmailStatus | EarlyWarningTelegramStatus
 
 export interface EarlyWarningChannels {
   email(to: string[], facts: EarlyWarningEmailFacts): Promise<EarlyWarningChannelResult>
-  telegram?(_chatIds: string[], _text: string): Promise<'telegram_unconfigured'>
+  telegram?(chatIds: string[], text: string): Promise<EarlyWarningTelegramStatus>
 }
 
 export function defaultEarlyWarningChannels(): EarlyWarningChannels {
-  return { email: (to, facts) => deliverEarlyWarningEmail(to, facts), telegram: async () => 'telegram_unconfigured' }
+  return {
+    email: (to, facts) => deliverEarlyWarningEmail(to, facts),
+    telegram: (chatIds, text) => deliverEarlyWarningTelegram(chatIds, text),
+  }
 }

@@ -9,12 +9,12 @@ import type { IntradayAdsetSnap } from '@/lib/ads-strategy/intraday-spend/run'
 import { evaluateDailySpendOverCapNotice } from '@/lib/ads-strategy/monitoring/spend-cap-notice'
 import { APP_BASE } from '@/lib/pm-todo/binding-request-items'
 import { evaluateEntityEarlyWarning, type EntityDayTotals } from './compare'
-import { bareAddress, isInternalEmail } from '@/lib/ads-strategy/portfolio/diagnostics/internal-email'
 import {
   defaultEarlyWarningChannels,
   type EarlyWarningChannels,
   type EarlyWarningEmailFacts,
 } from './notify-email'
+import { deliverEarlyWarningToFde, listFdePortalRecipients } from './fde-outreach'
 import {
   PATROL_KEY,
   RECEIPTS_KEY,
@@ -33,15 +33,6 @@ export interface PredictiveEarlyWarningReceipt {
   alerts: number
   capEmails: number
   skippedNoFde: number
-}
-
-async function fdeEmails(sb: SupabaseClient, clientId: string): Promise<string[]> {
-  const { data, error } = await sb.from('client_portal_users').select('email').eq('client_id', clientId).eq('access_type', 'fde')
-  if (error) return []
-  const cleaned = ((data ?? []) as Array<{ email?: string | null }>)
-    .map((row) => (typeof row.email === 'string' ? bareAddress(row.email.trim()) : ''))
-    .filter((email) => email.length > 0 && isInternalEmail(email))
-  return Array.from(new Set(cleaned))
 }
 
 function count(metric: CostMetric, leads: number, messaging: number): number {
@@ -101,8 +92,8 @@ export async function runPredictiveEarlyWarning(
     const cfg = parsePredictiveEarlyWarningConfig(leadsConfig)
     const outcome = await loadOutcomeConfig(clientId)
     const metric = metricOf(outcome.config.leading, outcome.config.primary)
-    const fde = await fdeEmails(sb, clientId)
-    const skipNote = fde.length === 0 ? 'no FDE configured, push skipped' : null
+    const fdeRecipients = await listFdePortalRecipients(sb, clientId)
+    const skipNote = fdeRecipients.length === 0 ? 'no FDE configured, push skipped' : null
     if (skipNote) out.skippedNoFde += 1
     const prior = readReceipts(leadsConfig)
     const next: ReceiptMap = { ...prior }
@@ -136,14 +127,20 @@ export async function runPredictiveEarlyWarning(
             : `${label} ${entityId} 今日单次成本偏高`,
         )
         next[key] = { accountDay, cprMajor: verdict.todayCprMajor, zeroResults: verdict.zeroResults }
-        if (fde.length > 0) {
-          const st = await channels.email(fde, fact(name, clientId, entityId, level, metric, accountDay, snap, verdict))
-          if (st === 'sent') out.alerts += 1
+        if (fdeRecipients.length > 0) {
+          const delivered = await deliverEarlyWarningToFde(
+            sb,
+            channels,
+            clientId,
+            fdeRecipients,
+            fact(name, clientId, entityId, level, metric, accountDay, snap, verdict),
+          )
+          if (delivered.email === 'sent') out.alerts += 1
         }
       }
     }
-    if (fde.length > 0 && prior[`cap:${accountDay}`]?.accountDay !== accountDay) {
-      out.capEmails += (await capMail(sb, clientId, name, accountDay, fde, channels, next)) ? 1 : 0
+    if (fdeRecipients.length > 0 && prior[`cap:${accountDay}`]?.accountDay !== accountDay) {
+      out.capEmails += (await capMail(sb, clientId, name, accountDay, fdeRecipients, channels, next)) ? 1 : 0
     }
     await patchLeadsConfigState(sb, clientId, {
       [RECEIPTS_KEY]: next,
@@ -193,7 +190,7 @@ async function capMail(
   clientId: string,
   clientName: string,
   accountDay: string,
-  fde: string[],
+  fdeRecipients: Awaited<ReturnType<typeof listFdePortalRecipients>>,
   channels: EarlyWarningChannels,
   next: ReceiptMap,
 ): Promise<boolean> {
@@ -214,9 +211,9 @@ async function capMail(
     }
   }
   if (!facts) return false
-  const st = await channels.email(fde, facts)
-  if (st === 'sent') next[`cap:${accountDay}`] = { accountDay, cprMajor: null, zeroResults: false }
-  return st === 'sent'
+  const delivered = await deliverEarlyWarningToFde(sb, channels, clientId, fdeRecipients, facts)
+  if (delivered.email === 'sent') next[`cap:${accountDay}`] = { accountDay, cprMajor: null, zeroResults: false }
+  return delivered.email === 'sent'
 }
 
 export async function loadPatrolEarlyWarningLine(sb: SupabaseClient, clientId: string, accountDay: string): Promise<string | null> {
