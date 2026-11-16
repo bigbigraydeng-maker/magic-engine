@@ -19,7 +19,9 @@ import { collectWinnerSuggestions, type WinnerSuggestions } from '@/lib/winner-r
 import { proposeActivateCard } from '@/lib/winner-reel-sync/propose'
 import { claimHold, holdForCard, saveHold, type HoldRow } from '@/lib/winner-reel-sync/ledger'
 import { bindLaunchToApprovedPlan, type LaunchBind } from '@/lib/ads-launch/plan-gate'
-import type { ProposalHold, ProposalKind } from '@/lib/winner-reel-sync/intents'
+import type { DailyPlanOrigin, ProposalHold, ProposalKind } from '@/lib/winner-reel-sync/intents'
+import { checkDailyPlanPromotionLive } from '@/lib/campaign/daily-plan-promote-live'
+import type { PromoteCheck } from '@/lib/campaign/daily-plan-promote'
 
 export interface WinnerActor {
   triggeredBy: string
@@ -45,6 +47,8 @@ export interface WinnerResult {
 export interface WinnerPorts {
   decide(input: ConfirmWinnerInput): Promise<ConfirmationCardView>
   recheck(clientId: string, skipFatiguePause: boolean): Promise<WinnerSuggestions>
+  /** Re-run the daily-plan promote check for a card that came from the promote button. */
+  recheckDailyPlan(clientId: string, origin: DailyPlanOrigin): Promise<PromoteCheck>
   token(clientId: string): Promise<string | null>
   createPaused(input: PausedCreate): Promise<{ adId: string }>
   readPlacement(adId: string, token: string): Promise<AdPlacement | null>
@@ -118,6 +122,7 @@ function defaultPorts(sb: KernelDeps['supabase']): WinnerPorts {
       fingerprint: input.fingerprint,
     }),
     recheck: (clientId, skipFatiguePause) => collectWinnerSuggestions(clientId, { skipFatiguePause }),
+    recheckDailyPlan: (clientId, origin) => checkDailyPlanPromotionLive(sb, { clientId, planId: origin.planId, date: origin.date }),
     token: getMetaTokenForClient,
     createPaused: (input) => createAdFromPost({ ...input, status: 'PAUSED' }),
     readPlacement: readAdPlacement,
@@ -153,6 +158,14 @@ async function decline(sb: KernelDeps['supabase'], input: ConfirmWinnerInput, ro
 
 async function stillValid(input: ConfirmWinnerInput, hold: ProposalHold, ports: WinnerPorts): Promise<boolean> {
   if (hold.kind === 'activate') return placementIs(input.clientId, hold, ports, 'PAUSED')
+  if (hold.kind === 'add_paused' && hold.origin?.kind === 'daily_plan') {
+    const check = await ports.recheckDailyPlan(input.clientId, hold.origin)
+    return check.ok
+      && check.intent.postId === hold.postId
+      && check.intent.adsetId === hold.adsetId
+      && check.intent.adAccountId === hold.adAccountId
+      && check.intent.pageId === hold.pageId
+  }
   const plan = await ports.recheck(input.clientId, hold.kind === 'add_paused')
   if (plan.status !== 'ok') return false
   if (hold.kind === 'add_paused') return plan.adds.some((item) => item.postId === hold.postId && item.adsetId === hold.adsetId)
@@ -209,7 +222,7 @@ async function createdAd(ports: WinnerPorts, hold: ProposalHold, token: string):
 
 async function remember(ports: WinnerPorts, clientId: string, hold: ProposalHold, adId: string): Promise<void> {
   try {
-    await ports.link({ clientId, adId, postId: hold.postId ?? '', pageId: hold.pageId, createdBy: 'winner_reel_sync' })
+    await ports.link({ clientId, adId, postId: hold.postId ?? '', pageId: hold.pageId, createdBy: hold.origin?.kind === 'daily_plan' ? 'daily_plan_promote' : 'winner_reel_sync' })
   } catch {
     // 片子对应关系丢了也不能再去建一次广告。
   }
