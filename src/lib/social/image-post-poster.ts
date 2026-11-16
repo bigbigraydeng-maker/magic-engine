@@ -32,6 +32,8 @@ export interface ComposeTourPosterInput {
   recipe: Readonly<PosterRecipe>
   brand: PosterBrand | null
   website: string | null
+  /** Factory still frame. Absent keeps the old poster prompt and filename. */
+  aspect?: '9:16' | '4:5'
 }
 
 export interface PosterAssetRow {
@@ -82,8 +84,20 @@ function short(e: unknown): string {
 }
 
 /** Stable per (recipe, tour, date) — also the dedupe key together with the source photo. */
-export function posterFilename(recipe: Pick<PosterRecipe, 'id'>, tourSlug: string, date: string): string {
-  return `poster-${recipe.id}-${tourSlug}-${date}.jpg`
+export function posterFilename(
+  recipe: Pick<PosterRecipe, 'id'>,
+  tourSlug: string,
+  date: string,
+  aspect?: string,
+): string {
+  const tag = aspect ? `-${aspect.replace(':', 'x')}` : ''
+  return `poster-${recipe.id}-${tourSlug}-${date}${tag}.jpg`
+}
+
+function frameClause(aspect: '9:16' | '4:5' | undefined): string {
+  if (aspect === '9:16') return '\nFrame the poster 9:16, 1080 by 1920.'
+  if (aspect === '4:5') return '\nFrame the poster 4:5, 1080 by 1350.'
+  return ''
 }
 
 export async function composeTourPoster(
@@ -113,14 +127,14 @@ export async function composeTourPoster(
   if (!input.brand) return fail('no_brand_primary_colour')
   if (!input.asset.storage_url) return fail('source_image_missing')
 
-  const filename = posterFilename(input.recipe, input.tour.slug, input.date)
+  const filename = posterFilename(input.recipe, input.tour.slug, input.date, input.aspect)
   const reused = await findReusable(input, deps, filename)
   if (reused) return reused === 'lookup_failed' ? fail('existing_poster_lookup_failed') : reusedResult(base, reused.id)
 
   const edit = await deps.runImageEdit({
     model: input.recipe.model,
     imageUrl: input.asset.storage_url,
-    prompt: buildTourPosterPrompt(posterLines, input.brand),
+    prompt: buildTourPosterPrompt(posterLines, input.brand) + frameClause(input.aspect),
     clientId: input.clientId,
   })
   const spend = { cost_usd: edit.costUsd, provider_request_id: edit.requestId }

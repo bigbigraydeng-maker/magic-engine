@@ -386,11 +386,12 @@ export interface GraphHeartbeatInsightRow {
   adset_id?: string
   spend?: string
   impressions?: string
+  actions?: Array<{ action_type: string; value: string }>
 }
 
 export function fetchHeartbeatTodayInsights(adAccountId: string, accessToken: string, day: string) {
   return readList<GraphHeartbeatInsightRow>(graphUrl(`${adAccountId}/insights`, {
-    fields: 'adset_id,spend,impressions',
+    fields: 'adset_id,spend,impressions,actions',
     level: 'adset',
     time_range: JSON.stringify({ since: day, until: day }),
     limit: '500',

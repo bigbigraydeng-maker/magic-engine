@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { fetchAll, fetchAllBatched } from '../supabase-paginate'
+import { fetchAll, fetchAllBatched, fetchAllParallel } from '../supabase-paginate'
 
 /** 假装一张有 n 行的表，每次最多回 1000 行（Supabase 的真实行为）。 */
 function fakeTable(n: number, opts: { cap?: number } = {}) {
@@ -104,5 +104,70 @@ describe('有限并行分页', () => {
       ? { data: null, error: { message: '读失败' } }
       : { data: Array.from({ length: 1000 }, (_, i) => from + i), error: null })).rejects.toThrow('读失败')
     await expect(fetchAllBatched(fakeTable(5000).page, 2000)).rejects.toThrow(/上限/)
+  })
+})
+
+describe('先数总数、再把剩下的页一次读完', () => {
+  type Row = { id: number }
+  const key = (r: Row) => String(r.id)
+  /** A table whose content can change between the first page and the later pages. */
+  function movingTable(initial: number[], afterFirst?: (rows: number[]) => number[]) {
+    let rows = initial
+    const calls: Array<[number, number, boolean]> = []
+    const page = async (from: number, to: number, withCount: boolean) => {
+      calls.push([from, to, withCount])
+      const result = { data: rows.slice(from, to + 1).map((id) => ({ id })), error: null, count: withCount ? rows.length : null }
+      if (withCount && afterFirst) { rows = afterFirst(rows); afterFirst = undefined }
+      return result
+    }
+    return { page, calls }
+  }
+  const ids = (n: number) => Array.from({ length: n }, (_, i) => i)
+
+  it('9329 行：一次带总数的首页 + 九页同时读，一行不少、顺序不变', async () => {
+    const t = movingTable(ids(9329))
+    const rows = await fetchAllParallel<Row>(t.page, key)
+    expect(rows.map((r) => r.id)).toEqual(ids(9329))
+    expect(t.calls).toHaveLength(10)
+    expect(t.calls.filter((c) => c[2])).toEqual([[0, 999, true]])
+  })
+
+  it('不满一页只读一次；空表返回空', async () => {
+    const small = movingTable(ids(610))
+    expect(await fetchAllParallel<Row>(small.page, key)).toHaveLength(610)
+    expect(small.calls).toHaveLength(1)
+    expect(await fetchAllParallel<Row>(movingTable([]).page, key)).toEqual([])
+  })
+
+  it('正好整页（2000 行）不多读也不漏', async () => {
+    const t = movingTable(ids(2000))
+    expect(await fetchAllParallel<Row>(t.page, key)).toHaveLength(2000)
+    expect(t.calls).toHaveLength(2)
+  })
+
+  it('两波之间插进新行：改走逐页读，结果仍是完整的新表', async () => {
+    const t = movingTable(ids(2500), (rows) => [-1, ...rows])
+    const rows = await fetchAllParallel<Row>(t.page, key)
+    expect(rows.map((r) => r.id)).toEqual([-1, ...ids(2500)])
+  })
+
+  it('两波之间删掉一行：改走逐页读，不返回缺行的结果', async () => {
+    const t = movingTable(ids(2500), (rows) => rows.filter((id) => id !== 5))
+    const rows = await fetchAllParallel<Row>(t.page, key)
+    expect(rows.map((r) => r.id)).toEqual(ids(2500).filter((id) => id !== 5))
+  })
+
+  it('拿不到总数就逐页读全', async () => {
+    const t = fakeTable(2500)
+    const rows = await fetchAllParallel<{ id: number }>((from, to) => t.page(from, to), (r) => String(r.id))
+    expect(rows).toHaveLength(2500)
+  })
+
+  it('任何一页报错或超过上限都抛错，不给半份数据', async () => {
+    const failing = async (from: number, _to: number, withCount: boolean) => from === 1000
+      ? { data: null, error: { message: '读失败' }, count: null }
+      : { data: ids(1000).map((i) => ({ id: from + i })), error: null, count: withCount ? 3000 : null }
+    await expect(fetchAllParallel<Row>(failing, key)).rejects.toThrow('读失败')
+    await expect(fetchAllParallel<Row>(movingTable(ids(5000)).page, key, 2000)).rejects.toThrow(/上限/)
   })
 })

@@ -98,108 +98,109 @@ beforeEach(() => {
   })
 })
 
-describe('runImagePostStep — poster recipe opt-in', () => {
-  it('off (no key): no brief read, no edit call, photo kept, receipt and plan shape unchanged', async () => {
+describe('runImagePostStep — factory stills only', () => {
+  it('skips when there is no factory still, and does not use the photo pool', async () => {
     const inserted: Inserted[] = []
     const r = await run(config(), inserted)
-    expect(r).toEqual({ attempted: 1, drafted: 1, planIds: ['social_plans-new'], skipped: null, error: null })
-    expect(mocks.getActiveBrief).not.toHaveBeenCalled()
+    expect(r).toMatchObject({ drafted: 0, skipped: 'no_factory_still', error: null })
+    expect(inserted).toEqual([])
     expect(mocks.runImageEdit).not.toHaveBeenCalled()
-    expect(inserted.map((i) => i.table)).toEqual(['social_plans'])
-    const plan = planRow(inserted)
-    expect(plan.bundles[0].post.image_asset_id).toBe(PHOTO_ID)
-    expect(Object.keys(plan.command_meta).sort()).toEqual(['raw_summary', 'received_at', 'source'])
+    expect(mocks.loadRankableClientAssets).not.toHaveBeenCalled()
+    expect(mocks.loadPublishedTourFacts).not.toHaveBeenCalled()
   })
 
-  it('unknown recipe value is treated as off', async () => {
-    const r = await run(config('tour_poster_v9'), [])
-    expect(r.posters).toBeUndefined()
-    expect(mocks.runImageEdit).not.toHaveBeenCalled()
-  })
-
-  it('on + success: poster row written, draft uses it, cost on step receipt + command_meta', async () => {
+  it('drafts from a 4:5 factory still and does not edit another image', async () => {
     const inserted: Inserted[] = []
-    const r = await run(config('tour_poster_v1'), inserted)
-    expect(mocks.getActiveBrief).toHaveBeenCalledTimes(1)
-    expect(mocks.runImageEdit).toHaveBeenCalledTimes(1)
-    expect(inserted.map((i) => i.table)).toEqual(['client_assets', 'social_plans'])
-    expect(inserted[0].row).toMatchObject({ client_id: CLIENT, source: 'ai_generated', status: 'analyzed' })
-    const plan = planRow(inserted)
-    expect(plan.bundles[0].post.image_asset_id).toBe('client_assets-new')
-    expect(plan.command_meta.poster).toMatchObject({ status: 'composed', poster_asset_id: 'client_assets-new', source_asset_id: PHOTO_ID })
-    expect(r.posters).toHaveLength(1)
-    expect(r.posterCostUsd).toBe(0.04) // edit 0.038 + read-back 0.002
-    expect(r.error).toBeNull()
-  })
-
-  it('on + misspelt poster text: falls back to the photo, both costs counted', async () => {
-    mocks.readPosterText.mockResolvedValue({ ok: true, text: 'China Panorama\nNext derparture', costUsd: 0.002 })
-    const inserted: Inserted[] = []
-    const r = await run(config('tour_poster_v1'), inserted)
-    expect(inserted.map((i) => i.table)).toEqual(['social_plans'])
-    expect(planRow(inserted).bundles[0].post.image_asset_id).toBe(PHOTO_ID)
-    expect(r.posters?.[0]).toMatchObject({ status: 'fallback', reason: 'text_mismatch' })
-    expect(r.posterCostUsd).toBe(0.04)
-  })
-
-  it('on + an identical poster already stored: reused, no new edit submitted', async () => {
-    const existing = [{
-      id: 'poster-old',
-      vision_metadata: { poster: {
-        recipe_id: 'tour_poster_v1', recipe_version: 2, source_asset_id: PHOTO_ID, has_price: true, text_lines: [],
-        cost_usd: 0.038, provider_request_id: null, created_at: '2026-11-01T00:00:00.000Z', next_depart_on: null,
-      } },
-    }]
-    const inserted: Inserted[] = []
-    const r = await runImagePostStep(CLIENT, '2027-01-01', config('tour_poster_v1'), null, {
-      supabase: fakeSupabase(inserted, existing), callLLM: vi.fn(),
+    const r = await runImagePostStep(CLIENT, '2027-01-01', config(), null, {
+      supabase: fakeSupabase(inserted, [feedStill('2027-01-01', 'still-1')]),
+      callLLM: vi.fn(),
     })
+    expect(r).toMatchObject({ drafted: 1, planIds: ['social_plans-new'], dates: ['2027-01-01'], error: null })
     expect(mocks.runImageEdit).not.toHaveBeenCalled()
-    expect(planRow(inserted).bundles[0].post.image_asset_id).toBe('poster-old')
-    expect(r.posters?.[0]).toMatchObject({ status: 'reused' })
+    expect(planRow(inserted).bundles[0].post.image_asset_id).toBe('still-1')
   })
+})
 
-  it('on + only an older-version poster stored: not reused, a new edit is made', async () => {
-    const existing = [{
-      id: 'poster-v1',
-      vision_metadata: { poster: {
-        recipe_id: 'tour_poster_v1', recipe_version: 1, source_asset_id: PHOTO_ID, has_price: true, text_lines: [],
-        cost_usd: 0.038, provider_request_id: null, created_at: '2026-11-01T00:00:00.000Z', next_depart_on: null,
-      } },
-    }]
+const WEEK = { weekStart: '2026-11-16', weekEnd: '2026-11-22' }
+
+function feedStill(date: string, id: string) {
+  return {
+    id,
+    storage_url: `https://cdn.example/${id}.jpg`,
+    vision_metadata: {
+      kind: 'factory_still',
+      factory_still: {
+        aspect: '4:5', role: 'post', slot_date: date,
+        sha256: 'ab'.repeat(32), text_line: 'China Panorama',
+        source_ref: 'https://example.com/tours', work_order_id: 'wo-1',
+      },
+    },
+  }
+}
+
+function weekSupabase(inserted: Inserted[], plans: unknown[] = [], stills: unknown[] = []): SupabaseClient {
+  const from = (table: string) => {
+    let usedGte = false
+    const chain = {
+      select: () => chain,
+      eq: () => chain,
+      gte: () => { usedGte = true; return chain },
+      order: () => chain,
+      is: () => chain,
+      limit: () => Promise.resolve({
+        data: table === 'social_plans' && !usedGte ? plans : table === 'client_assets' ? stills : [],
+        error: null,
+      }),
+      insert: (row: Record<string, unknown>) => {
+        inserted.push({ table, row })
+        return { select: () => ({ single: () => Promise.resolve({ data: { id: `plan-${inserted.length}` }, error: null }) }) }
+      },
+    }
+    return chain
+  }
+  return { from } as unknown as SupabaseClient
+}
+
+function existingPost(date: string, id: string) {
+  return { id, plan_data: { command_meta: { source: 'auto_image_post' }, days: [{ date }] } }
+}
+
+describe('runImagePostStep — weekly count', () => {
+  it('drafts one post per still on the spread days and ignores the photo pool', async () => {
     const inserted: Inserted[] = []
-    await runImagePostStep(CLIENT, '2027-01-01', config('tour_poster_v1'), null, {
-      supabase: fakeSupabase(inserted, existing), callLLM: vi.fn(),
+    const dates = ['2026-11-16', '2026-11-18', '2026-11-20', '2026-11-22']
+    const r = await runImagePostStep(CLIENT, '2026-11-14', {
+      social_agent: { enabled: false },
+      social_week: { post_per_week: 4 },
+    }, null, {
+      supabase: weekSupabase(inserted, [], dates.map((date, i) => feedStill(date, `still-${i}`))),
+      callLLM: vi.fn(),
+      week: WEEK,
     })
-    expect(mocks.runImageEdit).toHaveBeenCalledTimes(1)
-    expect(planRow(inserted).bundles[0].post.image_asset_id).toBe('client_assets-new')
-  })
-
-  it('on + edit failure: falls back to the photo, reason on the receipt, single submit', async () => {
-    mocks.runImageEdit.mockResolvedValue({ ok: false, reason: 'no_output', costUsd: 0.038, requestId: 'req-2' })
-    const inserted: Inserted[] = []
-    const r = await run(config('tour_poster_v1'), inserted)
-    expect(mocks.runImageEdit).toHaveBeenCalledTimes(1)
-    expect(planRow(inserted).bundles[0].post.image_asset_id).toBe(PHOTO_ID)
-    expect(r.drafted).toBe(1)
-    expect(r.posters?.[0]).toMatchObject({ status: 'fallback', reason: 'image_edit_failed: no_output' })
-    expect(r.posterCostUsd).toBe(0.038)
-  })
-
-  it('on + no brand colour: no edit call, photo kept, reason recorded', async () => {
-    mocks.getActiveBrief.mockResolvedValue({ vi_colors: { primary: 'red' }, website: null })
-    const inserted: Inserted[] = []
-    const r = await run(config('tour_poster_v1'), inserted)
+    expect(r.drafted).toBe(4)
+    expect(r.dates).toEqual(dates)
+    expect(mocks.loadRankableClientAssets).not.toHaveBeenCalled()
     expect(mocks.runImageEdit).not.toHaveBeenCalled()
-    expect(planRow(inserted).bundles[0].post.image_asset_id).toBe(PHOTO_ID)
-    expect(r.posters?.[0]).toMatchObject({ status: 'fallback', reason: 'no_brand_primary_colour' })
-    expect(r.posterCostUsd).toBe(0)
   })
 
-  it('brief read failure counts as no brand colour', async () => {
-    mocks.getActiveBrief.mockRejectedValue(new Error('db down'))
-    const r = await run(config('tour_poster_v1'), [])
-    expect(r.posters?.[0]).toMatchObject({ reason: 'no_brand_primary_colour' })
+  it('does not write again when those dates already have drafts', async () => {
+    const inserted: Inserted[] = []
+    const existing = ['2026-11-16', '2026-11-18', '2026-11-20', '2026-11-22'].map((date, i) => existingPost(date, `old-${i}`))
+    const r = await runImagePostStep(CLIENT, '2026-11-14', {
+      social_week: { post_per_week: 4 },
+    }, null, { supabase: weekSupabase(inserted, existing), callLLM: vi.fn(), week: WEEK })
+    expect(r).toMatchObject({ drafted: 0, skipped: 'already_drafted', error: null })
+    expect(r.weekLines?.map((line) => line.ref)).toEqual(['old-0', 'old-1', 'old-2', 'old-3'])
+    expect(inserted).toEqual([])
+    expect(mocks.loadPublishedTourFacts).not.toHaveBeenCalled()
   })
 
+  it('treats a configured weekly zero as zero even when the agent is on', async () => {
+    const r = await runImagePostStep(CLIENT, '2026-11-14', {
+      social_agent: { enabled: true, image_post_per_day: 1 },
+      social_week: { post_per_week: 0 },
+    }, null, { supabase: weekSupabase([]), callLLM: vi.fn(), week: WEEK })
+    expect(r).toMatchObject({ drafted: 0, skipped: 'post_per_week=0', requested: 0 })
+    expect(mocks.loadPublishedTourFacts).not.toHaveBeenCalled()
+  })
 })

@@ -177,4 +177,26 @@ describe('buildHeadline — 一句人话', () => {
     const h = buildHeadline([], [], 'partial', null)
     expect(h).toContain('只看不动')
   })
+
+  it('单次成本连续偏高 → 写进结论', () => {
+    const h = buildHeadline([], [], 'complete', null, {
+      status: 'ok',
+      staleReason: null,
+      flags: [{ adsetId: 'a', adsetName: '组 A', adAccountId: 'act', currency: 'NZD', rollingCpl: 11, targetCpl: 9, windowEnd: '2026-11-14' }],
+      summaryLines: [],
+    })
+    expect(h).toContain('单次成本连续偏高')
+  })
+
+  it('广告体检警报 → 写进结论', () => {
+    const h = buildHeadline([], [], 'complete', null, null, {
+      insightDate: '2026-11-13',
+      overallVerdict: 'alert',
+      headline: '有广告该动手',
+      prescriptionLine: null,
+      patrolLine: '有广告该动手',
+    })
+    expect(h).toContain('广告体检')
+    expect(h).toContain('有广告该动手')
+  })
 })

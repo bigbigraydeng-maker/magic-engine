@@ -132,6 +132,7 @@ describe('取料池排除 AI 海报', () => {
     const rows = [
       { id: 'photo', storage_url: 'a', original_filename: 'a.jpg', vision_metadata: { scene: 'x' }, source: 'fde_shot' },
       { id: 'poster', storage_url: 'b', original_filename: 'b.jpg', vision_metadata: posterMeta(), source: 'ai_generated' },
+      { id: 'still', storage_url: 's', original_filename: 's.jpg', vision_metadata: { kind: 'factory_still', factory_still: { role: 'post' } }, source: 'ai_generated' },
       { id: 'junk', storage_url: 'c', original_filename: 'c.jpg', vision_metadata: posterMeta({ source_asset_id: 'bad' }), source: 'unknown' },
     ]
     const fake = fakeAssetQuery(rows)

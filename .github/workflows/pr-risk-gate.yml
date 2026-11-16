@@ -39,6 +39,14 @@ name: PR risk gate
 #
 # It never merges directly, never pushes, never deploys. Its only writes are the
 # rating comment and the auto-merge toggle.
+#
+# A native stacked pull request cannot arm auto-merge: GitHub rejects
+# enablePullRequestAutoMerge. When every other gate condition has already
+# passed, that refusal is a pass. The check stays green, auto-merge stays off,
+# and the summary says someone with permission must merge from the bottom of
+# the stack. Any other failure to arm auto-merge stays red. Missing sign-off,
+# red required checks, open review threads, drafts, forks, and paths Ray merges
+# by hand never reach that step.
 
 on:
   pull_request_target:
@@ -138,20 +146,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
           HEAD_SHA: ${{ steps.pr.outputs.head }}
-        run: |
-          set -euo pipefail
-          live=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)
-          decision=$(LIVE_HEAD="$live" node tools/ops-review-loop/src/head-check.mjs --plan-auto-merge)
-          if [ "$decision" = "skip" ]; then
-            echo '- 自动合并：未开启（这次审的提交已经不是 PR 当前提交）' >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          if [ "$decision" != "enable" ]; then
-            echo '- 自动合并：未开启（无法确认当前提交）' >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
-          gh pr merge --auto --merge --match-head-commit "$HEAD_SHA" "$PR_NUMBER"
-          echo '- 自动合并：已开启（必过检查全绿后由 GitHub 合并）' >> "$GITHUB_STEP_SUMMARY"
+        run: node tools/ops-review-loop/src/enable-auto-merge.mjs
 
       - name: Disable auto-merge when the gate does not enable it
         if: always() && steps.gate.outputs.decision != 'enable'
