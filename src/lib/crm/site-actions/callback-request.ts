@@ -21,9 +21,10 @@
 
 import { TOKEN_RE } from '../email-templates/link-tracking/tag-links'
 import { cleanPath, uaClass, type TokenInfo } from '../email-templates/link-tracking/record-click'
-import { tzOffsetMs } from '../day-list'
+import { localWallToInstant } from '../callback-pick'
+import { SOURCE } from './source'
 
-export const SOURCE = 'site_callback_request'
+export { SOURCE }
 export type CallWindow = 'morning' | 'afternoon' | 'evening'
 const WINDOWS: readonly CallWindow[] = ['morning', 'afternoon', 'evening']
 /** The local hour each part of the day is put on the call-back calendar at. */
@@ -62,12 +63,15 @@ function isDay(value: unknown): value is string {
   return !Number.isNaN(t) && new Date(t).toISOString().slice(0, 10) === value
 }
 
-/** A tour page path (`/tours/...`), cleaned of everything but the path and a date; anything else is refused. */
+/**
+ * A page path on the client's site, cleaned to the bare path. No site's address scheme is assumed here: whether it is one
+ * of the client's published tours is decided later against the client's own tour address rule (unknown = dropped).
+ */
 function tourPathOf(value: unknown): string | null | undefined {
   if (value === null || value === undefined) return null
   if (typeof value !== 'string' || value.length > 300) return undefined
   const path = cleanPath(value)
-  return path !== null && path.startsWith('/tours/') ? path.split('?')[0] : undefined
+  return path !== null ? path.split('?')[0] : undefined
 }
 
 function parseQuiz(value: unknown): QuizAnswers | null | undefined {
@@ -102,11 +106,10 @@ function addDays(day: string, days: number): string {
   return new Date(Date.parse(`${day}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10)
 }
 
-/** The UTC instant of `hour`:00 on `day` on the wall clock of `timeZone` (offset taken at that local moment). */
+/** The UTC instant of `hour`:00 on `day` on the wall clock of `timeZone` (the callback picker's own conversion). */
 export function wallTimeToUtc(day: string, hour: number, timeZone: string): string {
-  const asUtc = Date.parse(`${day}T${String(hour).padStart(2, '0')}:00:00.000Z`)
-  const firstGuess = asUtc - tzOffsetMs(new Date(asUtc), timeZone)
-  return new Date(asUtc - tzOffsetMs(new Date(firstGuess), timeZone)).toISOString()
+  const [y, m, d] = day.split('-').map(Number)
+  return localWallToInstant(y, m, d, hour, 0, timeZone).toISOString()
 }
 
 /** Null when the request can be recorded, else why not. Days from today to MAX_DAYS_AHEAD ahead, a real browser only. */
@@ -147,13 +150,17 @@ export interface CallbackTouchRow {
   source_ref: string
 }
 
-/** The touch row. `names` maps tour paths to tour names (missing = show the path). */
+/**
+ * The touch row. `names` maps tour paths to tour names. A path that is not one of the client's published tours is
+ * dropped, never shown: staff-visible text and the AI's reading material only ever carry real tour names (魏征 P2-1).
+ */
 export function buildCallbackTouch(
   report: CallbackReport,
   info: TokenInfo,
   ctx: { now: Date; timeZone: string; names: ReadonlyMap<string, string> },
 ): CallbackTouchRow {
-  const tourName = report.tourPath === null ? null : (ctx.names.get(report.tourPath) ?? report.tourPath)
+  const tourName = report.tourPath === null ? null : (ctx.names.get(report.tourPath) ?? null)
+  const quiz = report.quiz === null ? null : { ...report.quiz, picks: report.quiz.picks.filter((p) => ctx.names.has(p)) }
   const when = `${dayLabel(report.date)} ${WINDOW_LABEL[report.window]}`
   return {
     client_id: info.clientId,
@@ -162,13 +169,13 @@ export function buildCallbackTouch(
     direction: 'inbound',
     occurred_at: ctx.now.toISOString(),
     summary: `官网手册：客人请我们打电话 · ${when}${tourName === null ? '' : ` · 想聊 ${tourName}`}`,
-    raw: report.quiz === null ? null : quizLine(report.quiz, ctx.names),
+    raw: quiz === null ? null : quizLine(quiz, ctx.names),
     metadata: {
       callback_at: wallTimeToUtc(report.date, WINDOW_HOUR[report.window], ctx.timeZone),
       callback_date: report.date,
       callback_window: report.window,
-      tour_path: report.tourPath,
-      quiz: report.quiz,
+      tour_path: tourName === null ? null : report.tourPath,
+      quiz,
       mail_request_id: info.requestId,
     },
     source: SOURCE,
@@ -190,18 +197,34 @@ export interface CallbackStore {
   insertTouch(row: CallbackTouchRow): Promise<'inserted' | 'duplicate'>
 }
 
-export type CallbackOutcome = 'recorded' | 'duplicate' | 'ignored'
+export type CallbackOutcome =
+  | { outcome: 'recorded' | 'duplicate'; clientId: string; requestId: string }
+  | { outcome: 'ignored'; reason: 'unknown_token' | 'mail_not_sent' | 'not_browser' | 'bad_day' | 'daily_cap'; clientId: string | null; requestId: string | null }
+  | { outcome: 'busy'; clientId: string; requestId: string }
 
-/** Records one request, or ignores it. Every "no" is silent: the caller learns nothing about the token. */
-export async function recordCallbackRequest(report: CallbackReport, store: CallbackStore, now: Date): Promise<CallbackOutcome> {
+/**
+ * Records one request, or says why not. Every "no" stays silent towards the caller (the route answers 204 either way);
+ * the reason is for ME's own log. `overCap` is the endpoint-wide allowance, spent only on requests whose token is real,
+ * so random tokens cannot use it up and lock real guests out (魏征 P1-2).
+ */
+export async function recordCallbackRequest(
+  report: CallbackReport,
+  store: CallbackStore,
+  now: Date,
+  overCap: (nowMs: number) => boolean = () => false,
+): Promise<CallbackOutcome> {
   const info = await store.findToken(report.token)
-  if (info === null || !(await store.mailWasSent(info))) return 'ignored'
+  if (info === null) return { outcome: 'ignored', reason: 'unknown_token', clientId: null, requestId: null }
+  const who = { clientId: info.clientId, requestId: info.requestId }
+  if (!(await store.mailWasSent(info))) return { outcome: 'ignored', reason: 'mail_not_sent', ...who }
+  if (overCap(now.getTime())) return { outcome: 'busy', ...who }
   const timeZone = await store.timeZone(info.clientId)
-  if (refusal(report, now, timeZone) !== null) return 'ignored'
+  const refused = refusal(report, now, timeZone)
+  if (refused !== null) return { outcome: 'ignored', reason: refused, ...who }
   const dayAgo = new Date(now.getTime() - 86_400_000).toISOString()
-  if ((await store.requestsSince(info.clientId, info.contactId, dayAgo)) >= MAX_REQUESTS_PER_DAY) return 'ignored'
+  if ((await store.requestsSince(info.clientId, info.contactId, dayAgo)) >= MAX_REQUESTS_PER_DAY) return { outcome: 'ignored', reason: 'daily_cap', ...who }
   const paths = [report.tourPath, ...(report.quiz?.picks ?? [])].filter((p): p is string => p !== null)
   const names = paths.length === 0 ? new Map<string, string>() : await store.tourNames(info.clientId, paths)
-  const outcome = await store.insertTouch(buildCallbackTouch(report, info, { now, timeZone, names }))
-  return outcome === 'inserted' ? 'recorded' : 'duplicate'
+  const written = await store.insertTouch(buildCallbackTouch(report, info, { now, timeZone, names }))
+  return { outcome: written === 'inserted' ? 'recorded' : 'duplicate', ...who }
 }

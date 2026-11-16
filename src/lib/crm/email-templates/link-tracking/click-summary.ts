@@ -6,9 +6,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { classifyTourLink, type TourLinkRef } from '../facts/published-tours'
 import type { RenderFacts } from '../facts/types'
-import { effectiveFromSettings } from '../effective-config'
-import { loadEmailSettings } from '../settings-store'
-import { loadPublishedTourFacts } from '@/lib/tour-catalog/store-publish'
+import { loadPageLabelFacts } from './page-label-facts-prod'
 import type { LinkKind } from './tag-links-prod'
 
 export interface ClickSummary {
@@ -144,19 +142,6 @@ export function timelineClicks(clicks: readonly ClickForTimeline[], tokens: read
   return out
 }
 
-export async function loadPageLabelFacts(db: SupabaseClient, clientId: string, now: Date): Promise<PageLabelFacts> {
-  const none: PageLabelFacts = { urlPattern: null, hosts: [], facts: null }
-  const settings = await loadEmailSettings(db, clientId)
-  if (settings.kind !== 'ok') return none
-  const config = effectiveFromSettings(settings.settings, settings.version)
-  const provider = config.providers.publishedTours ?? null
-  const read = await loadPublishedTourFacts(db, clientId, now.toISOString().slice(0, 10))
-  return {
-    urlPattern: provider?.urlPattern ?? null,
-    hosts: config.guardrails.allowedLinkHosts,
-    facts: { tours: read.published ? read.tours : [], picks: [], settings: provider, linkHosts: config.guardrails.allowedLinkHosts },
-  }
-}
 
 /** The guest's human clicks and later site page views, for the timeline. Empty when they cannot be read. */
 export async function humanClicksForContact(db: SupabaseClient, clientId: string, contactId: string): Promise<Array<{ at: string; label: string }>> {

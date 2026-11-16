@@ -34,6 +34,7 @@ import { detectReturningLead, returningReason, type ReturningLead } from './retu
 // 「别再联系」的判据全仓只有一份 —— 这里要的是「什么时候被人推翻过」。
 import { withoutClearedDnc, saidDoNotCall } from './dnc'
 import { isVoicemailOrSilentCall } from './customer-spoke'
+import { SOURCE as SITE_CALLBACK_SOURCE } from './site-actions/source'
 
 export type Temperature = 'hot' | 'warm' | 'cold' | 'off'
 
@@ -811,6 +812,16 @@ export function segmentContact(
   }
   if (doNotCall && reachKnown && contact.hasEmail !== true && contact.hasMessenger !== true) {
     return make('excluded', '只别打电话，又没有邮箱和 Messenger —— 补个联系方式才能继续跟', 'none')
+  }
+
+  // 2a) 客人在官网上自己约了回电时间（site-actions/callback-request）：排最前，理由和到点时间按他选的来。
+  //     否则名单当天写「客户来消息了」，员工今天就打，而客人约的是下周三晚上（子牙复审 2026-11-17 P1-1）；
+  //     也不要求我们先联系过——只收过系统自动发的目录的客人，约了回电同样该排最前（魏征复审 P1-3）。
+  if (lastInbound > lastOutbound) {
+    const asked = messages.find((t) => t.direction === 'inbound' && ts(t.occurredAt) === lastInbound && t.source === SITE_CALLBACK_SOURCE && t.callbackAt)
+    if (asked?.callbackAt) {
+      return { ...make('replied', '客人在官网自己约了回电时间，按他选的时间打', 'phone', asked.callbackAt), priority: 0.5 }
+    }
   }
 
   // 2) 客户回了话，还没人接。三个条件缺一不可：

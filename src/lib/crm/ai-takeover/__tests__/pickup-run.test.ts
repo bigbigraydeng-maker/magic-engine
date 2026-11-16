@@ -58,6 +58,27 @@ describe('runAiPickup', () => {
   })
 })
 
+describe('runAiPickup: a guest\'s "please call me" from the client site (魏征 P1-1)', () => {
+  const ask = (id: string, contact: string, occurred: string) =>
+    ({ id, client_id: CLIENT, contact_id: contact, channel: 'web_form', direction: 'inbound', occurred_at: occurred, summary: '官网手册：客人请我们打电话', raw: null, metadata: { callback_at: '2026-11-20T01:00:00.000Z' }, source: 'site_callback_request' })
+
+  it('after an enquiry it is "the guest came back": the guest stays with staff', async () => {
+    const w = world()
+    w.contact_touchpoints.push(ask('ka', 'a', '2026-11-14T00:00:00.000Z'))
+    const r = await runAiPickup(db(w, []), { clients: [CLIENT], dryRun: true, dailyMax: 30, now: NOW, store: fakeStore().deps })
+    expect(r.clients[0].picked.map((p) => p.contact_id)).not.toContain('a')
+  })
+
+  it('is not itself an enquiry: it does not make an old guest a candidate, nor restart the 7-day clock', async () => {
+    const w = world()
+    w.contacts.push({ ...w.contacts[2], id: 'e' })
+    w.contact_identities.push({ ...w.contact_identities[2], contact_id: 'e' })
+    w.contact_touchpoints.push(ask('ke', 'e', '2026-11-05T01:00:00.000Z'))
+    const r = await runAiPickup(db(w, []), { clients: [CLIENT], dryRun: true, dailyMax: 30, now: NOW, store: fakeStore().deps })
+    expect(r.clients[0].picked.map((p) => p.contact_id)).not.toContain('e')
+  })
+})
+
 describe('runAiPickup: 读不准就不判', () => {
   it('客户没设「哪些阶段算合格客人」→ 整个客户不判，回执里写原因', async () => {
     const tables = world()

@@ -9,7 +9,8 @@
  *    database read;
  *  - an unknown token, a mail that was not sent, a day out of range, a non-browser, too many requests, a repeat: all
  *    answer 204, so callers learn nothing about the token; only a failed read or write answers 503;
- *  - a whole-endpoint cap per minute, counted on well-formed requests only;
+ *  - two per-minute caps: a wide one on well-formed requests, and a tighter one spent only on real tokens;
+ *  - one log line per request with the outcome and why (never the token);
  *  - nothing here sends anything to anyone: it writes one row on the guest's record, which staff act on.
  */
 
@@ -25,7 +26,10 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const MAX_BODY_BYTES = 2048
-const overCap = createMinuteCap(60)
+// Two allowances (魏征 P1-2): a wide one on any well-formed request (bounds database reads from junk), and the real
+// one, spent only once the token is known — so made-up tokens cannot lock real guests out.
+const overReadCap = createMinuteCap(600)
+const overGuestCap = createMinuteCap(60)
 
 const noContent = (): NextResponse => new NextResponse(null, { status: 204 })
 
@@ -35,9 +39,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const value = body.value
   const parsed = parseCallbackReport(value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null)
   if (!parsed.ok) return new NextResponse(null, { status: 400 })
-  if (overCap(Date.now())) return new NextResponse(null, { status: 429 })
+  if (overReadCap(Date.now())) return new NextResponse(null, { status: 429 })
   try {
-    await recordCallbackRequest(parsed.report, createCallbackStore(supabaseAdmin, createMailNewStore()), new Date())
+    const result = await recordCallbackRequest(parsed.report, createCallbackStore(supabaseAdmin, createMailNewStore()), new Date(), overGuestCap)
+    // A receipt for every request, never the token (子牙 P1-2): a request the site showed "we'll call you" for but ME
+    // did not record must be findable.
+    console.info('[site-callback]', JSON.stringify(result))
+    if (result.outcome === 'busy') return new NextResponse(null, { status: 429 })
   } catch (err) {
     // Unlike a click, a lost call-back request is a guest waiting for a call that never comes: say so, so the site can
     // show its phone number instead of "we'll call you". A read or write failure says nothing about the token.

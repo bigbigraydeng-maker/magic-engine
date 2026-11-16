@@ -6,7 +6,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createClickStore, type PriorSendLookup } from '../email-templates/link-tracking/click-store-prod'
-import { loadPageLabelFacts } from '../email-templates/link-tracking/click-summary'
+import { loadPageLabelFacts } from '../email-templates/link-tracking/page-label-facts-prod'
 import { classifyTourLink } from '../email-templates/facts/published-tours'
 import { loadClientTimeZone } from '../email-templates/time-zone'
 import { SOURCE, type CallbackStore, type CallbackTouchRow } from './callback-request'

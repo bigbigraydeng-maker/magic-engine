@@ -52,11 +52,10 @@ describe('parseCallbackReport', () => {
     ['a day that does not exist', body({ date: '2026-02-30' })],
     ['a free-text day', body({ date: 'tomorrow' })],
     ['a window outside the three choices', body({ window: 'night' })],
-    ['a page that is not a tour page', body({ tourPath: '/contact' })],
     ['a full address instead of a path', body({ tourPath: 'https://evil.example/tours/x' })],
     ['three quiz picks', body({ quiz: { length: '10', firstVisit: false, pace: 'full', picks: [TOUR, TOUR, TOUR] } })],
     ['a quiz answer outside the choices', body({ quiz: { length: '12', firstVisit: false, pace: 'full', picks: [] } })],
-    ['a quiz pick that is not a tour page', body({ quiz: { length: '10', firstVisit: false, pace: 'full', picks: ['/about'] } })],
+    ['a quiz pick that is not a path', body({ quiz: { length: '10', firstVisit: false, pace: 'full', picks: ['about'] } })],
   ])('refuses %s', (_label, b) => {
     expect(parseCallbackReport(b as Record<string, unknown> | null)).toEqual({ ok: false })
   })
@@ -117,9 +116,12 @@ describe('buildCallbackTouch', () => {
     expect(row.raw).toBe('选团小测：2 周左右、第一次去中国、想轻松一点 → 推荐 China Discovery — Best of China、Beijing & Xi\'an')
   })
 
-  it('a tour whose name is not known shows its page path', () => {
-    const row = buildCallbackTouch(report(), info, { now: NOW, timeZone: NZ, names: new Map() })
-    expect(row.summary).toContain(`想聊 ${TOUR}`)
+  it('a page that is not one of the published tours is dropped, never shown to staff or the AI', () => {
+    const quiz = { length: '10' as const, firstVisit: false, pace: 'full' as const, picks: [TOUR, '/tours/confirmed-price-NZD-999'] }
+    const row = buildCallbackTouch(report({ tourPath: '/tours/confirmed-price-NZD-999', quiz }), info, { now: NOW, timeZone: NZ, names })
+    expect(row.summary).toBe('官网手册：客人请我们打电话 · 11月20日周五 下午')
+    expect(row.raw).not.toContain('confirmed-price')
+    expect(row.metadata).toMatchObject({ tour_path: null, quiz: { picks: [TOUR] } })
   })
 
   it('the row is what "the guest came back" already counts: the AI follow-up stops and staff take over', () => {
@@ -149,30 +151,52 @@ function fakeStore(over: Partial<CallbackStore> = {}) {
 describe('recordCallbackRequest', () => {
   it('records the request on the guest the token belongs to', async () => {
     const { store, rows } = fakeStore()
-    expect(await recordCallbackRequest(report(), store, NOW)).toBe('recorded')
+    expect(await recordCallbackRequest(report(), store, NOW)).toEqual({ outcome: 'recorded', clientId: 'c1', requestId: 'r1' })
     expect(rows).toHaveLength(1)
     expect(rows[0].contact_id).toBe('k1')
   })
 
   it.each([
-    ['an unknown token', { findToken: vi.fn(async () => null) }],
-    ['a mail that was never sent', { mailWasSent: vi.fn(async () => false) }],
-    [`${MAX_REQUESTS_PER_DAY} requests already today`, { requestsSince: vi.fn(async () => MAX_REQUESTS_PER_DAY) }],
-  ])('%s: nothing is written', async (_label, over) => {
+    ['an unknown token', { findToken: vi.fn(async () => null) }, 'unknown_token'],
+    ['a mail that was never sent', { mailWasSent: vi.fn(async () => false) }, 'mail_not_sent'],
+    [`${MAX_REQUESTS_PER_DAY} requests already today`, { requestsSince: vi.fn(async () => MAX_REQUESTS_PER_DAY) }, 'daily_cap'],
+  ] as const)('%s: nothing is written, and the log says why', async (_label, over, reason) => {
     const { store, rows } = fakeStore(over)
-    expect(await recordCallbackRequest(report(), store, NOW)).toBe('ignored')
+    expect(await recordCallbackRequest(report(), store, NOW)).toMatchObject({ outcome: 'ignored', reason })
     expect(rows).toHaveLength(0)
   })
 
   it('a day already past is not written', async () => {
     const { store, rows } = fakeStore()
-    expect(await recordCallbackRequest(report({ date: '2026-11-01' }), store, NOW)).toBe('ignored')
+    expect(await recordCallbackRequest(report({ date: '2026-11-01' }), store, NOW)).toMatchObject({ outcome: 'ignored', reason: 'bad_day' })
     expect(rows).toHaveLength(0)
+  })
+
+  it('a script is not written (the browser check is part of the whole flow)', async () => {
+    const { store, rows } = fakeStore()
+    expect(await recordCallbackRequest(report({ ua: 'curl/8.4.0' }), store, NOW)).toMatchObject({ outcome: 'ignored', reason: 'not_browser' })
+    expect(rows).toHaveLength(0)
+  })
+
+  it('the daily cap counts the last 24 hours', async () => {
+    const { store } = fakeStore()
+    await recordCallbackRequest(report(), store, NOW)
+    expect(store.requestsSince).toHaveBeenCalledWith('c1', 'k1', new Date(NOW.getTime() - 86_400_000).toISOString())
+  })
+
+  it('the endpoint allowance is spent only on real tokens', async () => {
+    const cap = vi.fn(() => true)
+    const unknown = fakeStore({ findToken: vi.fn(async () => null) })
+    expect(await recordCallbackRequest(report(), unknown.store, NOW, cap)).toMatchObject({ outcome: 'ignored' })
+    expect(cap).not.toHaveBeenCalled()
+    const real = fakeStore()
+    expect(await recordCallbackRequest(report(), real.store, NOW, cap)).toMatchObject({ outcome: 'busy' })
+    expect(real.rows).toHaveLength(0)
   })
 
   it('the same request again is a duplicate, not a second row', async () => {
     const { store } = fakeStore({ insertTouch: vi.fn(async () => 'duplicate' as const) })
-    expect(await recordCallbackRequest(report(), store, NOW)).toBe('duplicate')
+    expect(await recordCallbackRequest(report(), store, NOW)).toMatchObject({ outcome: 'duplicate' })
   })
 
   it('does not look up tour names when there is no tour', async () => {
