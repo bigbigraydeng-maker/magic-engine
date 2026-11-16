@@ -81,7 +81,7 @@ async function inChunks<T>(ids: string[], read: (part: string[]) => Promise<T[]>
   return (await Promise.all(chunks(ids).map(read))).flat()
 }
 
-async function latestEnquiries(sb: SupabaseClient, clientId: string, now: Date): Promise<Map<string, string>> {
+export async function latestEnquiries(sb: SupabaseClient, clientId: string, now: Date): Promise<Map<string, string>> {
   const since = new Date(now.getTime() - WINDOW_DAYS * 86_400_000).toISOString()
   const rows = await fetchAll<{ contact_id: string; occurred_at: string }>((from, to) =>
     sb.from('contact_touchpoints').select('contact_id, occurred_at').eq('client_id', clientId).eq('direction', 'inbound')
@@ -97,7 +97,7 @@ async function latestEnquiries(sb: SupabaseClient, clientId: string, now: Date):
 
 type ContactIdRow = { contact_id: string }
 
-async function loadInputs(sb: SupabaseClient, clientId: string, ids: string[]) {
+export async function loadInputs(sb: SupabaseClient, clientId: string, ids: string[]) {
   const contacts = await inChunks(ids, (part) => fetchAll<ContactRow>((from, to) =>
     sb.from('contacts').select('id, do_not_contact, stage, snooze_until, ai_takeover_since').eq('client_id', clientId)
       .in('id', part).order('id', { ascending: true }).range(from, to)))
@@ -137,14 +137,14 @@ async function clientFacts(sb: SupabaseClient, clientId: string): Promise<{ qual
   return { qualifiedKeys, callsTrackedSince: row?.occurred_at ?? null }
 }
 
-type Inputs = Awaited<ReturnType<typeof loadInputs>>
+export type PickupInputs = Awaited<ReturnType<typeof loadInputs>>
 
-function toStages(rows: Inputs['stages']): EligibilityStage[] {
+function toStages(rows: PickupInputs['stages']): EligibilityStage[] {
   return rows.map((s) => ({ stageKey: s.stage_key, marketingAction: s.marketing_action, isTerminal: s.is_terminal }))
 }
 
 /** Decide every guest with an enquiry in the window; oldest enquiry first. */
-function decideAll(inputs: Inputs, leads: Map<string, string>, now: Date, cfg: PickupConfig) {
+export function decideAll(inputs: PickupInputs, leads: Map<string, string>, now: Date, cfg: PickupConfig) {
   const ids = (rows: ContactIdRow[]) => new Set(rows.map((r) => r.contact_id))
   const withEvents = ids(inputs.events)
   const withEmail = ids(inputs.emails)
