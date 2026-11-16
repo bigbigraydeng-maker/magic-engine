@@ -16,10 +16,8 @@ export interface EntityEvalInput {
   level: 'adset' | 'campaign'
   metric: CostMetric
   today: EntityDayTotals
-  /** Up to 7 complete days before today; missing days are OK. */
   baselineDays: readonly EntityDayTotals[]
   minSpendMajor: number
-  /** NZ account day for idempotency (caller-managed). */
   accountDay: string
   priorAlertCprMajor: number | null
 }
@@ -47,7 +45,6 @@ export function costPerResultMajor(spendMajor: number, results: number): number 
   return round2(spendMajor / results)
 }
 
-/** Daily CPL samples: only days with spend>0 and results>0 count toward the average. */
 export function averageBaselineCpr(days: readonly EntityDayTotals[]): { avg: number | null; usedDays: number } {
   const cprs: number[] = []
   for (const day of days) {

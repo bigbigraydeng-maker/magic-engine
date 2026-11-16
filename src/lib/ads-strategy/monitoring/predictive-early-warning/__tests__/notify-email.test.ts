@@ -3,8 +3,8 @@ import { buildEarlyWarningSubject, buildEarlyWarningText, deliverEarlyWarningEma
 
 const FACTS = {
   clientName: '演示客户',
-  clientId: '00000000-0000-0000-0000-000000000001',
-  entityId: '1234567890',
+  clientId: '00000000-0000-0000-0000-0000000000aa',
+  entityId: 'as_1',
   level: 'adset' as const,
   metric: 'leads' as const,
   accountDay: '2026-11-15',
@@ -16,23 +16,13 @@ const FACTS = {
   kind: 'cpl_spike' as const,
 }
 
-describe('early warning email copy', () => {
-  it('mentions notify-only and no auto pause', () => {
-    const text = buildEarlyWarningText(FACTS)
-    expect(text).toContain('没有自动暂停')
+describe('early warning email', () => {
+  it('copy + deliver', async () => {
+    expect(buildEarlyWarningText(FACTS)).toContain('没有自动暂停')
     expect(buildEarlyWarningSubject(FACTS)).toContain('预警')
-  })
-})
-
-describe('deliverEarlyWarningEmail', () => {
-  it('returns no_recipients without sending', async () => {
     expect(await deliverEarlyWarningEmail([], FACTS)).toBe('no_recipients')
-  })
-
-  it('uses injected mailer in tests', async () => {
-    const sent = await deliverEarlyWarningEmail(['ops@example.test'], FACTS, {
-      send: async () => ({ ok: true }),
-    })
-    expect(sent).toBe('sent')
+    expect(await deliverEarlyWarningEmail(['ops@example.test'], FACTS, { send: async () => ({ ok: true }) })).toBe(
+      'sent',
+    )
   })
 })

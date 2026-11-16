@@ -1,5 +1,3 @@
-/** Switch + leads_config state blobs (no migration). */
-
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ManualItem } from '@/lib/pm-todo/manual-item-types'
 
@@ -14,7 +12,6 @@ export const DEFAULT_MIN_SPEND_MAJOR = 20
 export const OVER_AVG_NUM = 120
 export const OVER_AVG_DEN = 100
 
-/** Re-alert same entity only if cost-per-result worsens by at least this fraction vs last alert. */
 export const WORSEN_RE_ALERT_NUM = 110
 export const WORSEN_RE_ALERT_DEN = 100
 
