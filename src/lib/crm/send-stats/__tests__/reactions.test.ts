@@ -32,12 +32,13 @@ describe('firstReactions — what counts as the guest getting in touch', () => {
     expect(firstReactions([send], [touch({ raw: 'Please stop contacting me.' })], NOW).size).toBe(0)
   })
 
-  it('an answered inbound call counts; a missed or a few-seconds one does not', () => {
+  it('an inbound call counts, answered or not (PM 11-16: a guest who rings back has reacted); an automated one does not', () => {
     const call = (over: Partial<ContactTouchRow> = {}) =>
       touch({ channel: 'phone', source: 'twilio', summary: '来电', raw: null, metadata: { talk_seconds: 120 }, ...over })
     expect(firstReactions([send], [call()], NOW).get('s1')?.kind).toBe('inbound_call')
-    expect(firstReactions([send], [call({ metadata: { talk_seconds: 3 } })], NOW).size).toBe(0)
-    expect(firstReactions([send], [call({ metadata: { outcome: 'missed_inbound', talk_seconds: 0 } })], NOW).size).toBe(0)
+    expect(firstReactions([send], [call({ metadata: { talk_seconds: 3 } })], NOW).get('s1')?.kind).toBe('inbound_call')
+    expect(firstReactions([send], [call({ metadata: { outcome: 'missed_inbound', talk_seconds: 0 } })], NOW).get('s1')?.kind).toBe('inbound_call')
+    expect(firstReactions([send], [call({ metadata: { automated: true, talk_seconds: 0 } })], NOW).size).toBe(0)
   })
 
   it('a chat row with words counts; the real WhatsApp / Messenger rows have no text, so today they do not (known gap)', () => {

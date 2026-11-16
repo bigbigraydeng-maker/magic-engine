@@ -161,6 +161,9 @@ const CRON_REGISTRY_ENTRIES = [
   // 2026-11-16 Inngest 本月额度用完：电话进 CRM、线索进表格改由 dispatcher 进程内跑（开关 INNGEST_DIRECT_FALLBACK=off）。
   { service: 'telephony-direct-sweep', jobName: 'telephony-direct-sweep', schedule: '*/10 * * * *', logsRuns: true, addedAt: '2026-11-16' },
   { service: 'lead-sheet-direct-sync', jobName: 'lead-sheet-sync', schedule: '50 * * * *', logsRuns: true, addedAt: '2026-11-16' },
+  // CRM 跟进分工（PM 11-16）：先停线（客人回应 → 转人工），再 AI 接走（没接通 / 7 天没人打）。停线同名任务 Inngest 也跑，按证据去重。
+  { service: 'crm-followup-stopline-direct', jobName: 'crm-followup-stopline', schedule: '30 18 * * *', logsRuns: true, addedAt: '2026-11-16' },
+  { service: 'crm-ai-pickup', jobName: 'crm-ai-pickup', schedule: '45 18 * * *', logsRuns: true, addedAt: '2026-11-16' },
   // 🔴 已暂停(2026-09-08,PM「停抓图」):抓来的图无人消费(改图那步是死代码),白花 Apify 钱。
   //    恢复三件套:render.yaml 取消注释 + 本行加回来 + 先把 stock-transform 接进调用链。
   // { service: 'factory-stock-refill', jobName: 'factory-stock-refill', schedule: '0 19 * * 1', logsRuns: true },

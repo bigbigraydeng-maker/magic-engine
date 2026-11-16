@@ -1,7 +1,7 @@
 /**
  * "Did the guest get in touch after this mail?": the first thing the guest did after the mail went out, judged by the
  * SAME rule the AI-takeover "came back" check uses (`customerCameBack`): a real email reply (not a Mailchimp open /
- * click, not an auto-reply, not a STOP), an answered inbound call, or a form. (A WhatsApp / Messenger reply is not
+ * click, not an auto-reply, not a STOP), an inbound call (answered or not, PM 11-16), or a form. (A WhatsApp / Messenger reply is not
  * counted yet: those channels keep one row per conversation with no text, so there is nothing to date the first reply
  * by. Same gap as the AI-takeover check.) Within
  * `REACTION_WINDOW_DAYS` of the mail, so a call three months later is not credited to it. Read-only. A failed or

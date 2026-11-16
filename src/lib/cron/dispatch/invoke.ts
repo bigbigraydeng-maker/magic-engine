@@ -64,6 +64,8 @@ const LOADERS: Record<string, () => Promise<RouteModule>> = {
   'baseline-domains-monthly': () => import('@/app/api/cron/baseline-domains-monthly/route'),
   'telephony-direct-sweep': () => import('@/app/api/cron/telephony-direct-sweep/route'),
   'lead-sheet-direct-sync': () => import('@/app/api/cron/lead-sheet-direct-sync/route'),
+  'crm-followup-stopline': () => import('@/app/api/cron/crm-followup-stopline/route'),
+  'crm-ai-pickup': () => import('@/app/api/cron/crm-ai-pickup/route'),
 }
 
 export function dispatchLoaderRoutes(): string[] {

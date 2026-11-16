@@ -2,9 +2,9 @@
  * "The guest came back" while the AI was following them up. Pure.
  *
  * Same notion of "the customer reached out" as the do-not-contact re-engage check (dnc-reengage.ts `touchKind`):
- * a Facebook or website form, an answered inbound call (≥15 s), a real reply email (not Mailchimp, not an auto-reply,
- * not "stop"). Here an inbound Messenger / WhatsApp message also counts: showing the guest to staff again is the
- * cheap direction to get wrong, unlike lifting a do-not-contact.
+ * a Facebook or website form, an inbound call, a real reply email (not Mailchimp, not an auto-reply, not "stop").
+ * Here an inbound Messenger / WhatsApp message and a missed inbound call also count: showing the guest to staff again
+ * is the cheap direction to get wrong, unlike lifting a do-not-contact (which keeps "answered ≥15 s").
  *
  * Only touches strictly after the takeover-on time count. Mailchimp opens / clicks never count (outbound engagement).
  * Times more than FUTURE_TOLERANCE_MS after "now" are not trusted (a client-typed time can be set in the future).
@@ -13,6 +13,7 @@
 import { FUTURE_TOLERANCE_MS, touchKind, type ReengageKind, type ReengageTouch } from '@/lib/crm/dnc-reengage'
 import { isAutomatedTouch } from '@/lib/crm/automated-touch'
 import { takeoverState, type TakeoverEvent, type TakeoverState } from './state'
+import { isSystemCall } from './call-reach'
 
 export type CameBackKind = ReengageKind
 
@@ -52,6 +53,9 @@ export function toReengageTouchRow(r: CameBackRow): ReengageTouch {
 function kindOf(t: ReengageTouch): CameBackKind | null {
   const k = touchKind(t)
   if (k !== null) return k
+  // PM 11-16: a guest who rings back goes to staff, answered or not. A missed inbound call still means the guest
+  // tried to reach us (the do-not-contact lift keeps its stricter "answered ≥15 s" rule in touchKind).
+  if (t.channel === 'phone' && t.direction === 'inbound' && isSystemCall(t.source) && t.automated !== true) return 'inbound_call'
   const isChat = t.channel === 'messenger' || t.channel === 'whatsapp'
   if (isChat && t.direction === 'inbound' && t.automated !== true && (t.body ?? '').trim() !== '') return 'message'
   return null

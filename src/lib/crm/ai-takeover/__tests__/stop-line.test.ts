@@ -42,6 +42,17 @@ describe('decideStopLine', () => {
     expect(decideStopLine(input({ outboundPhone: [note('n3', after(120), 'no_answer'), note('n4', after(130), 'bad_number')] }))).toBeNull()
   })
 
+  it('a note written right after a call that did not reach the guest describes that call, not a talk (11-16)', () => {
+    const vm = call('c1', after(600), { customer_spoke: 'no', outcome: 'spoke', talk_seconds: 8 })
+    expect(decideStopLine(input({ outboundPhone: [vm, note('n1', after(601), 'spoke')] }))).toBeNull()
+    const missed = call('c2', after(600), { outcome: 'no_answer' })
+    expect(decideStopLine(input({ outboundPhone: [missed, note('n2', after(605), 'spoke')] }))).toBeNull()
+    // more than 10 minutes later, or after a call that did reach the guest, the note still counts
+    expect(decideStopLine(input({ outboundPhone: [vm, note('n3', after(620), 'spoke')] }))?.evidenceRef).toBe('touch:n3')
+    const talk = call('c3', after(600), { outcome: 'spoke' })
+    expect(decideStopLine(input({ outboundPhone: [talk, note('n4', after(601), 'spoke')] }))?.rule).toBe('talked')
+  })
+
   it('notes in the first hour after takeover-on describe the call that led to the catalogue and are ignored', () => {
     const justInside = after(NOTE_GRACE_MS / 60_000 - 1)
     expect(decideStopLine(input({ outboundPhone: [note('n1', justInside, 'spoke')] }))).toBeNull()
