@@ -40,7 +40,7 @@ async function loadTouchesSince(clientId: string, contactId: string, since: stri
   return ((data as CameBackRow[] | null) ?? []).map(toReengageTouchRow)
 }
 
-async function loadCatalogue(clientId: string): Promise<CatalogueInfo | null> {
+export async function loadCatalogue(clientId: string): Promise<CatalogueInfo | null> {
   const settings = await loadEmailSettings(supabaseAdmin, clientId)
   if (settings.kind !== 'ok') return null
   const c = effectiveFromSettings(settings.settings, settings.version).providers.catalogue

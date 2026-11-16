@@ -17,7 +17,7 @@ const note = (m: number, text = 'please follow up 2027 catalogue'): PickupTouch 
 function input(touches: PickupTouch[], extra: Partial<PickupInput> = {}): PickupInput {
   return {
     now: NOW, leadAt: LEAD, hasTakeoverHistory: false, eligible: true, hasActiveBooking: false, hasEmail: true,
-    qualified: false, newLeadStage: true, callsTrackedSince: '2026-10-12T00:00:00.000Z', reachedBefore: false,
+    qualified: false, newLeadStage: true, callsTrackedSince: '2026-10-12T00:00:00.000Z', reachedBefore: false, crmMailedSinceLead: false,
     inbound: [], touches, ...extra,
   }
 }
@@ -119,6 +119,7 @@ describe('留给员工的情况', () => {
     expect(decideAiPickup(input(tried, { hasActiveBooking: true }))).toBeNull()
     expect(decideAiPickup(input(tried, { hasEmail: false }))).toBeNull()
     expect(decideAiPickup(input(tried, { qualified: true }))).toBeNull()
+    expect(decideAiPickup(input(tried, { crmMailedSinceLead: true }))).toBeNull()
     expect(decideAiPickup(input(tried, { leadAt: null }))).toBeNull()
   })
   it('只有客人打进来、员工没打出去 → 不接', () => {

@@ -97,12 +97,12 @@ describe('writeSidebarCollapsed', () => {
 describe('buildCrmNavItems', () => {
   it('returns items in the expected order', () => {
     const keys = buildCrmNavItems(CLIENT).map((item) => item.key)
-    expect(keys).toEqual(['today', 'all', 'payments', 'sales', 'calendar', 'templates', 'sendstats', 'autosend', 'settings'])
+    expect(keys).toEqual(['today', 'all', 'aipickup', 'payments', 'sales', 'calendar', 'templates', 'sendstats', 'autosend', 'settings'])
   })
 
   it('uses the exact Chinese labels', () => {
     const labels = buildCrmNavItems(CLIENT).map((item) => item.label)
-    expect(labels).toEqual(['今天先联系', '全部客人', '付款总览', '销售进度', '到期日历', '邮件模板', '发信统计', '自动发信', '设置'])
+    expect(labels).toEqual(['今天先联系', '全部客人', '交给 AI', '付款总览', '销售进度', '到期日历', '邮件模板', '发信统计', '自动发信', '设置'])
   })
 
   it('has no placeholder item: every item is a real link', () => {
@@ -112,13 +112,19 @@ describe('buildCrmNavItems', () => {
   it('payments, sales and calendar need bookings access; templates, sendstats and autosend share the template gate', () => {
     const items = buildCrmNavItems(CLIENT)
     expect(items.filter((i) => i.gate === 'bookings').map((i) => i.key)).toEqual(['payments', 'sales', 'calendar'])
-    expect(items.filter((i) => i.gate === 'templates').map((i) => i.key)).toEqual(['templates', 'sendstats', 'autosend'])
+    expect(items.filter((i) => i.gate === 'templates').map((i) => i.key)).toEqual(['aipickup', 'templates', 'sendstats', 'autosend'])
   })
 
   it('templates, autosend and settings are right-aligned, the rest left-aligned', () => {
     const items = buildCrmNavItems(CLIENT)
     expect(items.filter((i) => i.align === 'right').map((i) => i.key)).toEqual(['templates', 'sendstats', 'autosend', 'settings'])
-    expect(items.filter((i) => i.align === 'left')).toHaveLength(5)
+    expect(items.filter((i) => i.align === 'left')).toHaveLength(6)
+  })
+
+  it('the AI pickup page has its own nav item, behind the template gate, and lights up on its own path', () => {
+    const item = buildCrmNavItems(CLIENT).find((i) => i.key === 'aipickup')
+    expect(item).toMatchObject({ label: '交给 AI', href: `/dashboard/clients/${CLIENT}/crm/ai-pickup`, gate: 'templates', align: 'left' })
+    expect(activeCrmNavKey(`/dashboard/clients/${CLIENT}/crm/ai-pickup`, '', CLIENT)).toBe('aipickup')
   })
 
   it('adding autosend leaves the sales item untouched (bookings gate, left group, own href)', () => {
