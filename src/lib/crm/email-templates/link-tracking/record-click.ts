@@ -34,6 +34,13 @@ export interface ClickReport {
   fetchSite: string | null
   fetchMode: string | null
   fetchDest: string | null
+  /**
+   * 'page_view': the client's website (its own server) reports that a page rendered in the visitor's browser for
+   * someone who came in through a mail link earlier on that device (a first-party cookie set on that first click).
+   * In-site navigation fetches page data in the background, so there is no document navigation to judge; the site
+   * vouches for the view and ME only checks the browser. Anything else = the first click on the mail link itself.
+   */
+  kind: 'link' | 'page_view'
 }
 
 export type ParsedReport = { ok: true; report: ClickReport } | { ok: false }
@@ -70,6 +77,7 @@ export function parseClickReport(body: Record<string, unknown> | null): ParsedRe
       fetchSite: shortString(body.fetchSite, 20),
       fetchMode: shortString(body.fetchMode, 20),
       fetchDest: shortString(body.fetchDest, 20),
+      kind: body.kind === 'page_view' ? 'page_view' : 'link',
     },
   }
 }
@@ -90,6 +98,12 @@ export interface ClickVerdict {
 /** §4.5: flag anything that does not look like a person opening the link; a person counts from 1 minute after sending. */
 export function judgeClick(report: ClickReport, ageMs: number): ClickVerdict {
   const cls = uaClass(report.ua)
+  if (report.kind === 'page_view') {
+    // A page the site says rendered in a browser for someone who already clicked through: only the browser and the
+    // age of the mail are checked (in-site navigation has no document request to inspect).
+    const suspectedScan = report.method !== 'GET' || cls !== 'browser' || ageMs < SCAN_WINDOW_MS
+    return { uaClass: cls, suspectedScan, countsAsHuman: !suspectedScan && ageMs >= HUMAN_AFTER_MS }
+  }
   const navigation = report.fetchMode === 'navigate' && report.fetchDest === 'document'
   const notUserNavigation = report.fetchMode !== null && report.fetchMode !== 'navigate'
   const suspectedScan = report.method === 'HEAD' || cls !== 'browser' || notUserNavigation || ageMs < SCAN_WINDOW_MS
@@ -121,8 +135,12 @@ export interface ClickStore {
   findToken(token: string): Promise<TokenInfo | null>
   /** True only when the mail this token was given to is recorded as sent (not failed, not still unknown). */
   mailWasSent(info: TokenInfo): Promise<boolean>
-  /** How many clicks the token has, and when the latest click that was NOT a suspected scan was recorded (ISO) or null. */
-  clickStats(token: string): Promise<{ count: number; lastAt: string | null; hasHuman: boolean }>
+  /**
+   * How many clicks the token has; when the latest click on THIS path that was NOT a suspected scan was recorded (ISO)
+   * or null; and whether the token has any human click. De-duping per path lets a guest who opens the mail link and then
+   * looks at three tour pages within five minutes be recorded on all four, while a refresh of one page stays one row.
+   */
+  clickStats(token: string, path: string | null): Promise<{ count: number; lastAt: string | null; hasHuman: boolean }>
   insertClick(row: ClickRow): Promise<void>
   emitFirstHumanClick(info: TokenInfo, clickedAt: string): Promise<void>
 }
@@ -132,7 +150,7 @@ export type RecordOutcome = 'recorded' | 'ignored'
 export async function recordClick(report: ClickReport, store: ClickStore, now: Date): Promise<RecordOutcome> {
   const info = await store.findToken(report.token)
   if (info === null || !(await store.mailWasSent(info))) return 'ignored'
-  const stats = await store.clickStats(report.token)
+  const stats = await store.clickStats(report.token, report.path)
   if (stats.count >= MAX_CLICKS_PER_TOKEN) return 'ignored'
   if (stats.lastAt !== null && now.getTime() - Date.parse(stats.lastAt) < DEDUPE_MS) return 'ignored'
   const verdict = judgeClick(report, now.getTime() - Date.parse(info.createdAt))
