@@ -1,6 +1,7 @@
 /**
  * The production dependencies of real sending. Built inside each step (SDK clients are created at call time, CLAUDE.md
- * §7), one lock store per step so a release only ever drops this step's own lock rows.
+ * §7), one lock store per step so a release only ever drops this step's own lock rows. Bound to one trigger: its
+ * authorization, its ledger, its idempotency keys and its "not sent" timeline line (the welcome letter by default).
  */
 
 import { randomUUID } from 'node:crypto'
@@ -12,10 +13,11 @@ import type { TemplateRead } from './authorization-core'
 import { revokeAsSystem } from './authorization-core'
 import { createAuthorizationDeps } from './authorization-deps-prod'
 import { loadOpenAuthorizations } from './authorization-store'
-import { cancelSendTouchpoint, WELCOME_NOT_SENT_TIMELINE_LINE, writeSendTouchpoint } from './send-touchpoint'
+import { cancelSendTouchpoint, writeSendTouchpoint } from './send-touchpoint'
 import { findContactIdsByAddresses, loadSendContact } from './send-contact'
 import { createSendLedger, createSendLocks, replayStoredReceipts } from './send-store'
 import type { SendDeps } from './send-types'
+import { EMAIL_CHANNEL, idempotencyKeyFor, notSentTimelineLine, WELCOME_TRIGGER, type TriggerKey } from './trigger-scope'
 import { createShadowGatePorts } from './shadow-ports-prod'
 import { checkRequiredMailboxes } from './shadow-reads-prod'
 
@@ -27,7 +29,7 @@ async function readTemplate(clientId: string, key: string): Promise<TemplateRead
   }
 }
 
-export function createProdSendDeps(): SendDeps {
+export function createProdSendDeps(trigger: TriggerKey = WELCOME_TRIGGER): SendDeps {
   const db = supabaseAdmin
   const env = (name: string): string | undefined => process.env[name]
   const store = createMailNewStore()
@@ -35,13 +37,13 @@ export function createProdSendDeps(): SendDeps {
     now: () => new Date(),
     env,
     async loadAuthorization(clientId) {
-      const read = await loadOpenAuthorizations(db, { clientId, triggerKey: 'welcome', channel: 'email' })
+      const read = await loadOpenAuthorizations(db, { clientId, triggerKey: trigger, channel: EMAIL_CHANNEL })
       return read.ok ? { ok: true, record: read.open.authorized } : { ok: false, error: `authorization read: ${read.code}` }
     },
     loadTemplate: readTemplate,
     async revokeAsSystem(record, code) {
       try {
-        return await revokeAsSystem(createAuthorizationDeps(db), record, code, `the sender found ${code} before a letter`)
+        return await revokeAsSystem(createAuthorizationDeps(db, trigger), record, code, `the sender found ${code} before a letter`)
       } catch {
         return 'failed'
       }
@@ -60,11 +62,11 @@ export function createProdSendDeps(): SendDeps {
         graphGetPage: (connectionId, pathOrUrl) => graphGetPage(connectionId, pathOrUrl, { markErrorOnFailure: false }),
       }).ports,
     createLocks: () => createSendLocks(createMailNewStore()),
-    ledger: createSendLedger(db),
+    ledger: createSendLedger(db, trigger),
     resend: createResendEmailPort(),
     writeTouchpoint: (input) => writeSendTouchpoint(db, input),
-    cancelTouchpoint: (clientId, sendId) => cancelSendTouchpoint(db, { clientId, triggeredSendId: sendId, triggerKey: 'welcome', summary: WELCOME_NOT_SENT_TIMELINE_LINE }),
+    cancelTouchpoint: (clientId, sendId) => cancelSendTouchpoint(db, { clientId, triggeredSendId: sendId, triggerKey: trigger, summary: notSentTimelineLine(trigger) }),
     replayReceipts: (messageId) => replayStoredReceipts(db, messageId, env, () => new Date()),
-    newIdempotencyKey: () => `triggered-send:welcome:${randomUUID()}`,
+    newIdempotencyKey: () => idempotencyKeyFor(trigger, randomUUID()),
   }
 }

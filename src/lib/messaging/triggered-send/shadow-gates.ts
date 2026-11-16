@@ -1,5 +1,5 @@
 import type { OutboundItem } from '@/lib/crm/email-templates/gates/types'
-import type { TriggeredSendRule } from './rule'
+import { gatesOf, type TriggeredSendRule } from './rule'
 import { localDay } from './candidates'
 import type {
   AddressHistoryRead,
@@ -141,11 +141,13 @@ async function readGates(contact: ShadowContact, ports: ShadowGatePorts): Promis
 /**
  * The two judgements on the e-mail evidence (§5.2 J): a person already wrote to the guest since the lead came in, or the
  * rule's cap is full. Real sending runs this again INSIDE the locks, on evidence read there, with the same code.
- * The old batch's campaigns are not among the items (taken out before counting), so every item counts.
+ * Every item counts toward the cap (the old batch's campaigns are only among them when the rule counts them,
+ * `gates.count_legacy_batch`). "A person wrote" is judged only when the rule's `gates.sales_email` says so; a person's
+ * e-mail is counted toward the cap either way (design 2026-11-17 §7.3, W4).
  */
 export function evidenceReason(contact: ShadowContact, rule: TriggeredSendRule, items: readonly OutboundItem[]): 'sales_email_exists' | 'frequency_full' | null {
   const createdAtMs = Date.parse(contact.createdAt)
-  if (items.some((item) => isSalesEmailItem(item, createdAtMs))) return 'sales_email_exists'
+  if (gatesOf(rule).sales_email && items.some((item) => isSalesEmailItem(item, createdAtMs))) return 'sales_email_exists'
   if (items.length >= rule.frequency_cap.max) return 'frequency_full'
   return null
 }
@@ -165,7 +167,7 @@ function firstSkipReason(contact: ShadowContact, rule: TriggeredSendRule, r: Gat
   if (r.history.hardBounced) return 'hard_bounced_address'
   if (r.member.state === 'suppressed') return 'mailchimp_suppressed'
   if (r.member.tags.some((tag) => excludedTags.has(tag.toLowerCase()))) return 'excluded_tag'
-  if (mode === 'send' && r.evidence.legacy.welcomed) return 'legacy_welcomed'
+  if (mode === 'send' && gatesOf(rule).legacy_welcomed && r.evidence.legacy.welcomed) return 'legacy_welcomed'
   if (!allowlisted && matchedBasisOf(rule, r) === null) return 'no_consent_basis'
   return evidenceReason(contact, rule, r.evidence.items)
 }

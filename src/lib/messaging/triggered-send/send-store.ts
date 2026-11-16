@@ -1,6 +1,7 @@
 /**
- * The database side of real sending: the live ledger rows (`triggered_sends`, `dedupe_scope='lifetime'`), the claim
- * function, the guest as a letter needs it, both locks, and the replay of receipts that arrived before the message id.
+ * The database side of real sending: the live ledger rows (`triggered_sends`: a one-letter trigger's lifetime scope,
+ * or one `letter:<key>` scope per letter of a list), their claim functions (`triggered_send_claim`,
+ * `triggered_send_claim_letter`), both locks, and the replay of receipts that arrived before the message id.
  *
  * 🔴 Every write that follows a read is a compare-and-set on `updated_at` (and the status it was read with): a receipt
  *    or another run that changed the row in between wins, and the caller reads again (design P2 §4.2, §16.10).
@@ -13,7 +14,22 @@ import { readResendReceipt } from '@/lib/messaging/provider-events/resend-receip
 import type { StoredProviderEvent } from '@/lib/messaging/provider-events/receipt-types'
 import { applyReceipt, identifyLetter } from './receipt-consumer'
 import { createReceiptStore } from './receipt-store-prod'
-import type { CasWrite, ClaimInput, ClaimOutcome, ClaimRead, DecisionWrite, EnvReader, LedgerWrite, LifetimeRow, SendLedger, SendLocks } from './send-types'
+import type {
+  CasWrite,
+  ClaimInput,
+  ClaimOutcome,
+  ClaimRead,
+  DecisionWrite,
+  EnvReader,
+  LedgerWrite,
+  LetterLedger,
+  LetterRow,
+  LetterRowsRead,
+  LifetimeRow,
+  SendLedger,
+  SendLocks,
+} from './send-types'
+import { EMAIL_CHANNEL, letterKeyOfScope, letterScope, LIFETIME_SCOPE, WELCOME_TRIGGER } from './trigger-scope'
 
 const TABLE = 'triggered_sends'
 const COLUMNS = 'id, contact_id, status, reason_code, authorization_id, idempotency_key, rendered_sha256, to_address_sha256, first_attempt_at, provider_message_id, attempts, updated_at'
@@ -25,6 +41,7 @@ const ROWS_CHUNK = 100
 const MAX_RECEIPTS_PER_MESSAGE = 20
 const CLAIM_OUTCOMES: ReadonlySet<string> = new Set([
   'claimed', 'takeover', 'in_flight', 'exists_terminal', 'expired_unknown', 'address_duplicate', 'cap_reached', 'auth_inactive', 'rule_invalid', 'template_mismatch',
+  'letter_not_authorized',
 ])
 
 function codeOf(error: { code?: unknown }): string {
@@ -84,13 +101,20 @@ async function casUpdate(db: SupabaseClient, row: LifetimeRow, fromStatus: strin
   return { ok: true, result: (data ?? []).length === 1 ? 'updated' : 'changed' }
 }
 
-async function insertDecision(db: SupabaseClient, d: DecisionWrite): Promise<LedgerWrite> {
+/** Which rows a ledger reads and writes: one trigger, one scope, and the claim function of that scope. */
+interface LedgerScope {
+  triggerKey: string
+  dedupeScope: string
+  claim(db: SupabaseClient, input: ClaimInput): Promise<ClaimRead>
+}
+
+async function insertDecision(db: SupabaseClient, scope: LedgerScope, d: DecisionWrite): Promise<LedgerWrite> {
   const { error } = await db.from(TABLE).insert({
     client_id: d.clientId,
-    trigger_key: 'welcome',
-    channel: 'email',
+    trigger_key: scope.triggerKey,
+    channel: EMAIL_CHANNEL,
     contact_id: d.contactId,
-    dedupe_scope: 'lifetime',
+    dedupe_scope: scope.dedupeScope,
     status: d.status,
     reason_code: d.reasonCode,
     authorization_id: d.authorizationId,
@@ -102,8 +126,8 @@ async function insertDecision(db: SupabaseClient, d: DecisionWrite): Promise<Led
   return error ? { ok: false, error: `ledger insert: ${codeOf(error)}` } : { ok: true }
 }
 
-async function claimRpc(db: SupabaseClient, input: ClaimInput): Promise<ClaimRead> {
-  const { data, error } = await db.rpc('triggered_send_claim', {
+function claimArgs(input: ClaimInput): Record<string, unknown> {
+  return {
     p_authorization_id: input.authorizationId,
     p_contact_id: input.contactId,
     p_to_address_sha256: input.toAddressSha256,
@@ -115,13 +139,36 @@ async function claimRpc(db: SupabaseClient, input: ClaimInput): Promise<ClaimRea
     p_source_ref: input.sourceRef,
     p_consent_basis: input.consentBasis,
     p_lease_minutes: CLAIM_LEASE_MINUTES,
-  })
+  }
+}
+
+async function claimRpc(db: SupabaseClient, input: ClaimInput): Promise<ClaimRead> {
+  const { data, error } = await db.rpc('triggered_send_claim', claimArgs(input))
   if (error) return { ok: false, error: `claim: ${codeOf(error)}` }
   return parseClaim(data)
 }
 
-export function createSendLedger(db: SupabaseClient): SendLedger {
-  const live = () => db.from(TABLE).select(COLUMNS).eq('trigger_key', 'welcome').eq('channel', 'email').eq('dedupe_scope', 'lifetime')
+/** The letter key goes second, as the function declares it (migration 20261117090000). */
+async function claimLetterRpc(db: SupabaseClient, letterKey: string, input: ClaimInput): Promise<ClaimRead> {
+  const { p_authorization_id: authorizationId, ...rest } = claimArgs(input)
+  const { data, error } = await db.rpc('triggered_send_claim_letter', { p_authorization_id: authorizationId, p_letter_key: letterKey, ...rest })
+  if (error) return { ok: false, error: `claim: ${codeOf(error)}` }
+  return parseClaim(data)
+}
+
+/** The ledger of a one-letter trigger (the welcome letter): its lifetime rows and `triggered_send_claim`. */
+export function createSendLedger(db: SupabaseClient, triggerKey: string = WELCOME_TRIGGER): SendLedger {
+  return scopedLedger(db, { triggerKey, dedupeScope: LIFETIME_SCOPE, claim: claimRpc })
+}
+
+/** The ledger of one letter of a letter list: its `letter:<key>` rows and `triggered_send_claim_letter`. */
+export function createLetterLedger(db: SupabaseClient, triggerKey: string, letterKey: string): LetterLedger {
+  const ledger = scopedLedger(db, { triggerKey, dedupeScope: letterScope(letterKey), claim: (d, input) => claimLetterRpc(d, letterKey, input) })
+  return { ...ledger, annotate: (row, annotations) => casUpdate(db, row, 'pending', { annotations }) }
+}
+
+function scopedLedger(db: SupabaseClient, scope: LedgerScope): SendLedger {
+  const live = () => db.from(TABLE).select(COLUMNS).eq('trigger_key', scope.triggerKey).eq('channel', EMAIL_CHANNEL).eq('dedupe_scope', scope.dedupeScope)
   return {
     async rowsFor(clientId, contactIds) {
       const rows: LifetimeRow[] = []
@@ -138,7 +185,7 @@ export function createSendLedger(db: SupabaseClient): SendLedger {
       return { ok: true, row: data === null ? null : toRow(data as DbRow) }
     },
     async recordDecision(d) {
-      if (d.existing === null) return insertDecision(db, d)
+      if (d.existing === null) return insertDecision(db, scope, d)
       if (d.existing.status !== 'blocked') return { ok: false, error: 'ledger: only a blocked row may be decided again' }
       const patch = { status: d.status, reason_code: d.reasonCode, authorization_id: d.authorizationId, annotations: d.annotations, to_address_sha256: d.toAddressSha256, consent_basis: d.consentBasis, source_ref: d.sourceRef }
       const written = await casUpdate(db, d.existing, 'blocked', patch)
@@ -152,11 +199,53 @@ export function createSendLedger(db: SupabaseClient): SendLedger {
       return { ok: true }
     },
     markUnknown: (row) => casUpdate(db, row, 'pending', { provider_impact: 'PROVIDER_UNKNOWN' }),
-    claim: (input) => claimRpc(db, input),
+    claim: (input) => scope.claim(db, input),
     markSent: (row, input) =>
       casUpdate(db, row, 'pending', { status: 'sent', provider_message_id: input.messageId, provider_account: input.account, sent_at: input.sentAt, provider_impact: 'PROVIDER_ACCEPTED' }),
     markFailed: (row, input) => casUpdate(db, row, 'pending', { status: 'failed', reason_code: input.reasonCode, provider_account: input.account }),
   }
+}
+
+const LETTER_COLUMNS = `${COLUMNS}, dedupe_scope, annotations, template_key, template_version, template_sha256, sent_at`
+/** A guest holds at most one row per letter, and a list has at most 8 letters: more is a read not to trust. */
+const MAX_LETTER_ROWS = 20
+
+interface LetterDbRow extends DbRow {
+  dedupe_scope: string
+  annotations: unknown
+  template_key: string | null
+  template_version: number | null
+  template_sha256: string | null
+  sent_at: string | null
+}
+
+function toLetterRow(r: LetterDbRow): LetterRow | null {
+  const letterKey = letterKeyOfScope(r.dedupe_scope)
+  if (letterKey === null) return null
+  const annotations = typeof r.annotations === 'object' && r.annotations !== null && !Array.isArray(r.annotations) ? (r.annotations as Record<string, unknown>) : {}
+  return { ...toRow(r), letterKey, annotations, templateKey: r.template_key, templateVersion: r.template_version, templateSha256: r.template_sha256, sentAt: r.sent_at }
+}
+
+/** Every letter row of one guest under one trigger (all its letters). A failed read is `ok:false`, never "none". */
+export async function readLetterRows(db: SupabaseClient, args: { clientId: string; triggerKey: string; contactId: string }): Promise<LetterRowsRead> {
+  const { data, error } = await db
+    .from(TABLE)
+    .select(LETTER_COLUMNS)
+    .eq('client_id', args.clientId)
+    .eq('trigger_key', args.triggerKey)
+    .eq('channel', EMAIL_CHANNEL)
+    .eq('contact_id', args.contactId)
+    .like('dedupe_scope', 'letter:%')
+    .limit(MAX_LETTER_ROWS + 1)
+  if (error) return { ok: false, error: `ledger read: ${codeOf(error)}` }
+  const raw = (data as LetterDbRow[] | null) ?? []
+  if (raw.length > MAX_LETTER_ROWS) return { ok: false, error: 'ledger read: more letter rows than one guest can have' }
+  const rows: LetterRow[] = []
+  for (const r of raw) {
+    const row = toLetterRow(r)
+    if (row !== null) rows.push(row)
+  }
+  return { ok: true, rows }
 }
 
 /** The holder label of ME's own lock rows (the sales side writes its mailbox there). */

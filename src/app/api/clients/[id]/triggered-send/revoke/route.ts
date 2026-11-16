@@ -4,6 +4,7 @@
  * The emergency brake: revokes one open proposal or authorization of this client, whatever its rule or template.
  * One database write; the event is best-effort and never undoes it. Takes effect from the next letter on (a letter
  * already handed to the provider is not recalled). Global administrator only (`authorization-http.ts`).
+ * Optional `trigger` in the body: which kind of letter (absent = the welcome letter; design 2026-11-17 §4.5).
  * Design: docs/specs/2026-11-02-me-send-gate-p2-design-v0.md §4.3 (plan: §17).
  */
 import type { NextRequest } from 'next/server'
@@ -27,7 +28,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   if (!parsed.success) return invalidCommand('INVALID_REVOKE_COMMAND', parsed.error.flatten())
   if (parsed.data.client_id !== params.id) return invalidCommand('CLIENT_ID_MISMATCH', null)
   try {
-    return respond(await revokeCommand(createAuthorizationDeps(supabaseAdmin), params.id, gate.actor, parsed.data))
+    return respond(await revokeCommand(createAuthorizationDeps(supabaseAdmin, parsed.data.trigger), params.id, gate.actor, parsed.data))
   } catch (error: unknown) {
     console.error('[triggered-send revoke] failed', error instanceof Error ? error.name : 'unknown')
     return internalError()

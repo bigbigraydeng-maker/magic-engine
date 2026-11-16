@@ -14,6 +14,7 @@
 import type { EmailUnsubscribeRecord, EmailUnsubscribeWrite } from '@/lib/crm/email-unsubscribe'
 import { visitorAddress } from '@/lib/tools-lab/visitor'
 import { verifyUnsubscribeToken, type EnvReader } from './unsubscribe-token'
+import { isLiveScope } from './trigger-scope'
 
 /** The columns of the send ledger row that an unsubscribe needs. */
 export interface UnsubscribeSendRow {
@@ -152,7 +153,7 @@ export async function handleUnsubscribePost(token: string, deps: UnsubscribeEntr
     row === null ||
     row.clientId !== clientId ||
     row.channel !== 'email' ||
-    row.dedupeScope !== 'lifetime' ||
+    !isLiveScope(row.dedupeScope) ||
     row.toAddressSha256 === null
   ) {
     deps.log('send_not_found', sendId)

@@ -14,10 +14,16 @@ import {
 import type { AuthorizationRecord, NewProposal, OpenAuthorizations, StoreError } from './authorization-store'
 import type { RehearsalRead } from './rehearsal-evidence'
 import type { TriggeredSendRule } from './rule'
+import { EMAIL_CHANNEL, isTriggerKey, TRIGGER_KEYS, WELCOME_TRIGGER, type TriggerKey } from './trigger-scope'
 import type { MailboxCheck } from './types'
 
 export const AUTHORIZATION_UUID_SCHEMA = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/, 'invalid id')
 export const AUTHORIZATION_SHA256_SCHEMA = z.string().regex(/^[0-9a-f]{64}$/, 'invalid fingerprint')
+/**
+ * Which kind of letter a command is about; absent = the welcome letter, so every older caller is unchanged. The route
+ * picks the deps by it (`createAuthorizationDeps(db, trigger)`); the commands read the deps' trigger, never this field.
+ */
+export const TriggerSchema = z.enum(TRIGGER_KEYS).optional()
 
 export interface AuthorizationStorePort {
   loadOpen(clientId: string): Promise<{ ok: true; open: OpenAuthorizations } | StoreError>
@@ -40,6 +46,8 @@ export type SalesCapRead = { kind: 'cap'; cap: { max: number; windowDays: number
 export type EnvReader = (name: string) => string | undefined
 
 export interface CommandDeps {
+  /** Which kind of letter these commands are about; absent = the welcome letter (every caller before the follow-ups). */
+  trigger?: TriggerKey
   store: AuthorizationStorePort
   loadTemplate(clientId: string, key: string): Promise<TemplateRead>
   loadSalesFrequencyCap(clientId: string): Promise<SalesCapRead>
@@ -100,12 +108,19 @@ export function recordView(r: AuthorizationRecord): Record<string, unknown> {
   }
 }
 
-/** The welcome letter's rows only: another trigger or channel is not this page's business (once the table allows more). */
-export function isWelcomeEmail(r: AuthorizationRecord): boolean {
-  return r.triggerKey === 'welcome' && r.channel === 'email'
+/** The kind of letter of these commands. */
+export function triggerOf(deps: Pick<CommandDeps, 'trigger'>): TriggerKey {
+  return deps.trigger ?? WELCOME_TRIGGER
+}
+
+/** This trigger's e-mail rows only: another trigger or channel is not these commands' business. */
+export function isTriggerEmail(r: AuthorizationRecord, trigger: TriggerKey): boolean {
+  return r.triggerKey === trigger && r.channel === EMAIL_CHANNEL
 }
 
 export interface ChangeFacts {
+  /** Absent = the welcome letter. */
+  triggerKey?: TriggerKey
   requestId: string
   id: string
   clientId: string
@@ -119,6 +134,7 @@ export interface ChangeFacts {
 
 export function factsOf(r: AuthorizationRecord): ChangeFacts {
   return {
+    ...(isTriggerKey(r.triggerKey) ? { triggerKey: r.triggerKey } : {}),
     requestId: r.requestId,
     id: r.id,
     clientId: r.clientId,
@@ -133,6 +149,7 @@ export function factsOf(r: AuthorizationRecord): ChangeFacts {
 
 export function changeEvent(deps: CommandDeps, facts: ChangeFacts, change: AuthorizationChange, actor: string): AuthorizationChangedEvent {
   return buildAuthorizationChangedEvent({
+    ...(facts.triggerKey === undefined ? {} : { trigger_key: facts.triggerKey }),
     request_id: facts.requestId,
     authorization_id: facts.id,
     client_id: facts.clientId,

@@ -14,6 +14,9 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import type { EMAIL_CHANNEL, TriggerKey } from './trigger-scope'
+
+type EMAIL = typeof EMAIL_CHANNEL
 
 const TABLE = 'triggered_send_authorizations'
 const COLUMNS =
@@ -108,7 +111,7 @@ export interface OpenAuthorizations {
 
 export async function loadOpenAuthorizations(
   db: SupabaseClient,
-  key: { clientId: string; triggerKey: 'welcome'; channel: 'email' },
+  key: { clientId: string; triggerKey: TriggerKey; channel: EMAIL },
 ): Promise<{ ok: true; open: OpenAuthorizations } | StoreError> {
   const { data, error } = await db
     .from(TABLE)
@@ -138,8 +141,8 @@ export async function loadAuthorization(db: SupabaseClient, id: string): Promise
 export interface NewProposal {
   requestId: string
   clientId: string
-  triggerKey: 'welcome'
-  channel: 'email'
+  triggerKey: TriggerKey
+  channel: EMAIL
   account: string
   rule: unknown
   ruleSha256: string
@@ -185,7 +188,7 @@ export async function insertProposal(db: SupabaseClient, p: NewProposal): Promis
  */
 export async function listAuthorizationRules(
   db: SupabaseClient,
-  key: { clientId: string; triggerKey: 'welcome'; channel: 'email' },
+  key: { clientId: string; triggerKey: TriggerKey; channel: EMAIL },
 ): Promise<{ ok: true; rows: Array<{ id: string; rule: unknown; proposedAt: string }> } | StoreError> {
   const { data, error } = await db
     .from(TABLE)
