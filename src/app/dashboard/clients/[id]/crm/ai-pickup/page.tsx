@@ -177,7 +177,12 @@ export default function CrmAiPickupPage({ params }: { params: { id: string } }) 
                   </div>
                 </div>
               )}
-              {sentCount > 0 && !busy && <button type="button" onClick={() => { setResults({}); requestIds.current.clear(); void reload() }} className="text-sm text-me-charcoal/70 underline">已发 {sentCount} 位 · 刷新名单</button>}
+              {sentCount > 0 && !busy && <button type="button" onClick={() => {
+                // Keep the id of an unknown / half-done send: a retry must be recognised as the same send.
+                for (const [id, r] of Object.entries(results)) if (r.kind === 'sent' || r.kind === 'refused') requestIds.current.delete(id)
+                setResults({})
+                void reload()
+              }} className="text-sm text-me-charcoal/70 underline">已发 {sentCount} 位 · 刷新名单</button>}
             </div>
           )}
           <Group title="今天已经联系过，明天再发" rows={data.rows.filter((r) => r.status === 'tomorrow')} clientId={clientId} />

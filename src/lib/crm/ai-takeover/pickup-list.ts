@@ -7,9 +7,10 @@
  *   tomorrow     — contacted today already (any outbound call / email / message today, client's time zone): one touch a
  *                  day is enough, the guest moves to tomorrow's list
  *   cannot_send  — the mail check says no (no usable email, mailbox not connected, …), with its message
- *   ready        — can go today; at most `dailyMax` of them (the client mailbox's daily room, and the guests leave the
- *                  staff list once sent)
- *   queued       — over today's room: on a later day's list
+ *   ready        — can go today; at most `dailyMax` minus the catalogues already sent today (the client mailbox's daily
+ *                  room, and the guests leave the staff list once sent) — so a refresh after a batch adds nobody
+ *   queued       — over today's room, or past the mail-check budget (2 × dailyMax checks per list, so a mailbox that
+ *                  refuses everyone cannot make the list time out): on a later day's list
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -43,6 +44,8 @@ export interface PickupListDeps {
   compose(contactId: string): Promise<ComposePreview>
   timeZone: string
   loadNames(ids: string[]): Promise<Map<string, string>>
+  /** Catalogues this client already sent (or may have sent) today, in the client's time zone. */
+  sentToday(today: string): Promise<number>
 }
 
 const NOTE_SOURCES: ReadonlySet<string> = new Set(['me_manual', 'sheet_followup', 'manual'])
@@ -68,8 +71,11 @@ export async function loadPickupList(
   const picks = decideAll(inputs, leads, now, opts.cfg ?? DEFAULT_PICKUP_CONFIG)
   const names = await deps.loadNames(picks.map((p) => p.contactId))
   const today = todayInZone(now, deps.timeZone)
+  const room = Math.max(0, opts.dailyMax - (await deps.sentToday(today)))
+  const checkBudget = opts.dailyMax * 2
   const rows: PickupListRow[] = []
   let ready = 0
+  let checks = 0
   for (const p of picks) {
     const f = facts(inputs, p.contactId, p.leadAt, today, deps.timeZone)
     const base = { contactId: p.contactId, name: names.get(p.contactId) ?? '（没名字）', rule: p.rule, why: p.why, leadAt: p.leadAt,
@@ -78,10 +84,11 @@ export async function loadPickupList(
       rows.push({ ...base, status: 'tomorrow', message: '今天已经联系过，明天再发。' })
       continue
     }
-    if (ready >= opts.dailyMax) {
+    if (ready >= room || checks >= checkBudget) {
       rows.push({ ...base, status: 'queued', message: '今天的名额满了，排到后面几天。' })
       continue
     }
+    checks++
     const c = await deps.compose(p.contactId)
     if (!c.canCompose) {
       rows.push({ ...base, status: 'cannot_send', message: c.message })

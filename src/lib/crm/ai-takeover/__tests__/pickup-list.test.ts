@@ -9,6 +9,7 @@ function deps(over: Partial<PickupListDeps> = {}, composed: string[] = []): Pick
   return {
     timeZone: 'Pacific/Auckland',
     loadNames: async (ids) => new Map(ids.map((id) => [id, `Guest ${id}`])),
+    sentToday: async () => 0,
     compose: async (id): Promise<ComposePreview> => {
       composed.push(id)
       return { canCompose: true, recipient: `${id}@x.co`, mailbox: 'info@client.co', sentToContactLast7Days: 1 }
@@ -42,6 +43,28 @@ describe('loadPickupList', () => {
     const rows = await loadPickupList(db(world(), []), CLIENT, deps({}, composed), { now: NOW, dailyMax: 1 })
     expect(rows.map((r) => [r.contactId, r.status])).toEqual([['c', 'ready'], ['a', 'queued']])
     expect(composed).toEqual(['c'])
+  })
+
+  it('catalogues already sent today use up the day\'s room, so a refresh after a batch adds nobody', async () => {
+    const rows = await loadPickupList(db(world(), []), CLIENT, deps({ sentToday: async () => 30 }), { now: NOW, dailyMax: 30 })
+    expect(rows.map((r) => r.status)).toEqual(['queued', 'queued'])
+  })
+
+  it('a mailbox that refuses everyone stops after 2 × dailyMax checks (no time-out)', async () => {
+    const composed: string[] = []
+    const rows = await loadPickupList(db(world(), []), CLIENT, deps({
+      compose: async (id) => { composed.push(id); return { canCompose: false, reason: 'no_mailbox', message: '邮箱没连上。' } },
+    }), { now: NOW, dailyMax: 1 })
+    expect(composed).toEqual(['c', 'a'])
+    expect(rows.map((r) => r.status)).toEqual(['cannot_send', 'cannot_send'])
+  })
+
+  it('a guest the CRM mailbox already mailed since the enquiry (a catalogue whose outcome is unknown) is never listed again', async () => {
+    const tables = world()
+    tables.conversations = [{ id: 'conv-a', client_id: CLIENT, contact_id: 'a', channel: 'email' }]
+    tables.conversation_outbound_log = [{ id: 'log1', client_id: CLIENT, conversation_id: 'conv-a', messaging_type: 'email', status: 'pending', created_at: '2026-11-16T18:00:00.000Z' }]
+    const rows = await loadPickupList(db(tables, []), CLIENT, deps(), { now: NOW, dailyMax: 30 })
+    expect(rows.map((r) => r.contactId)).toEqual(['c'])
   })
 
   it('a guest the mail check refuses is listed with the reason and does not use a place', async () => {

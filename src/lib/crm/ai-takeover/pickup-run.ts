@@ -119,7 +119,30 @@ export async function loadInputs(sb: SupabaseClient, clientId: string, ids: stri
         .eq('client_id', clientId).in('contact_id', part).order('occurred_at', { ascending: true }).order('id', { ascending: true })
         .range(from, to))),
   ])
-  return { contacts, stages, events, emails, bookings, touches, ...(await clientFacts(sb, clientId)) }
+  return { contacts, stages, events, emails, bookings, touches, crmMailed: await crmMailedAt(sb, clientId, ids), ...(await clientFacts(sb, clientId)) }
+}
+
+/**
+ * The latest email the CRM mailbox sent, or started to send, to each guest (conversation_outbound_log pending / sent).
+ * Read from the send log itself, not the timeline: a mail's timeline row only appears after the mailbox sync, and a
+ * send whose outcome is not yet known has none.
+ */
+async function crmMailedAt(sb: SupabaseClient, clientId: string, ids: string[]): Promise<Map<string, string>> {
+  const convos = await inChunks(ids, (part) => fetchAll<{ id: string; contact_id: string }>((from, to) =>
+    sb.from('conversations').select('id, contact_id').eq('client_id', clientId).eq('channel', 'email').in('contact_id', part)
+      .order('id', { ascending: true }).range(from, to)))
+  const contactOf = new Map(convos.map((c) => [c.id, c.contact_id]))
+  const logs = await inChunks([...contactOf.keys()], (part) => fetchAll<{ id: string; conversation_id: string; created_at: string }>((from, to) =>
+    sb.from('conversation_outbound_log').select('id, conversation_id, created_at').eq('client_id', clientId).eq('messaging_type', 'email')
+      .in('status', ['pending', 'sent']).in('conversation_id', part).order('id', { ascending: true }).range(from, to)))
+  const latest = new Map<string, string>()
+  for (const l of logs) {
+    const contact = contactOf.get(l.conversation_id)
+    if (contact === undefined) continue
+    const cur = latest.get(contact)
+    if (cur === undefined || Date.parse(l.created_at) > Date.parse(cur)) latest.set(contact, l.created_at)
+  }
+  return latest
 }
 
 /** The client's qualified stages (ad strategy config) and the first phone-system call. Unreadable = throw (fail closed). */
@@ -175,6 +198,7 @@ export function decideAll(inputs: PickupInputs, leads: Map<string, string>, now:
       newLeadStage: c.stage === null || c.stage === NEW_LEAD_STAGE,
       callsTrackedSince: inputs.callsTrackedSince,
       reachedBefore,
+      crmMailedSinceLead: (() => { const m = inputs.crmMailed.get(c.id); return m !== undefined && Date.parse(m) > Date.parse(leadAt) })(),
       inbound: after.filter((t) => t.direction === 'inbound').map(toReengageTouchRow),
       touches: after.map((t) => ({ channel: t.channel, direction: t.direction, source: t.source, occurredAt: t.occurred_at, metadata: t.metadata })),
     }, cfg)

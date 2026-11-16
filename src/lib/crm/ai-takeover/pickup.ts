@@ -21,7 +21,8 @@
  *   · got a personal email / WhatsApp / Messenger message from staff since the enquiry, or has a staff note saying the
  *     guest was reached (not one written right after a failed call), or a staff note without any phone-system call
  *     (staff may have rung from another phone; we cannot see it),
- *   · was reached on a call before this enquiry (came back with a new form after a real talk: high intent).
+ *   · was reached on a call before this enquiry (came back with a new form after a real talk: high intent),
+ *   · was mailed from the CRM mailbox since the enquiry (sent or not yet confirmed): never a second catalogue.
  * Getting it wrong in the "take" direction removes a guest from the staff list, so unknowns stay with staff.
  */
 
@@ -65,6 +66,8 @@ export interface PickupInput {
   callsTrackedSince: string | null
   /** A phone-system call before this enquiry reached the guest. */
   reachedBefore: boolean
+  /** An email went out (or may have gone out) from the CRM mailbox since the enquiry: a catalogue, a staff mail. */
+  crmMailedSinceLead: boolean
   /** Touches after leadAt, in the came-back shape (for "the guest reached out"). */
   inbound: readonly ReengageTouch[]
   /** All touches after leadAt. */
@@ -102,7 +105,7 @@ function decideCalls(calls: readonly PickupTouch[], input: PickupInput, cfg: Pic
 
 export function decideAiPickup(input: PickupInput, cfg: PickupConfig = DEFAULT_PICKUP_CONFIG): PickupDecision | null {
   if (input.leadAt === null || Number.isNaN(ms(input.leadAt))) return null
-  if (input.hasTakeoverHistory || !input.eligible || input.hasActiveBooking || !input.hasEmail || input.qualified || input.reachedBefore) return null
+  if (input.hasTakeoverHistory || !input.eligible || input.hasActiveBooking || !input.hasEmail || input.qualified || input.reachedBefore || input.crmMailedSinceLead) return null
   if (customerCameBack(input.inbound, input.leadAt, input.now) !== null) return null
   if (staffMessaged(input.touches)) return null
 
