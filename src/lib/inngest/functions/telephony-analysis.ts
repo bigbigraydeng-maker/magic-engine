@@ -1,8 +1,9 @@
 /**
  * 通话录音 → 转写 → 分析（待复核）的云端任务。
  *
- * 触发：只有每 10 分钟的补扫发事件 telephony.call.recording.ready（扫「有录音、没分析完、次数没超限」的通话）。
- *       所以录音完成后最长约 13 分钟才会处理——这是已知取舍，不是遗漏。
+ * 触发：每小时的补扫发事件 telephony.call.recording.ready（扫「有录音、没分析完、次数没超限」的通话）。
+ *       2026-11-16 起由每 10 分钟改成每小时（Inngest 额度不够）；平时 dispatcher 的 telephony-direct-sweep
+ *       每 10 分钟直接跑同一套分析，所以录音完成后通常 15 分钟内处理。那条兜底关掉时最长约 1 小时。
  * 受连接上的 analysis_enabled 开关控制，默认关。不发布、不外发、不改联系人。
  */
 
@@ -50,7 +51,7 @@ export async function planAnalysisSweep(deps: SweepDeps): Promise<SweepCandidate
   return out
 }
 
-const supabaseSweepDeps: SweepDeps = {
+export const supabaseSweepDeps: SweepDeps = {
   async listEnabledConnections() {
     const { data } = await supabaseAdmin.from('telephony_connections').select('id, analysis_enabled_at').eq('analysis_enabled', true).eq('active', true).eq('provider', 'twilio')
     return (data ?? []) as Array<{ id: string; analysis_enabled_at: string | null }>
@@ -75,14 +76,14 @@ const supabaseSweepDeps: SweepDeps = {
   },
 }
 
-/** 每 10 分钟：把「有录音、分析没做完、次数没超限」的通话重新发出去。 */
+/** 每小时：把「有录音、分析没做完、次数没超限」的通话重新发出去。 */
 export const telephonyCallAnalysisSweep = inngest.createFunction(
   { id: `${CLOUD_FN_PREFIX}telephony-call-analysis-sweep`, name: 'Telephony — analysis sweep', retries: 1, concurrency: { limit: 1 } },
-  { cron: '*/10 * * * *' },
+  { cron: '37 * * * *' },
   async ({ step }) =>
     step.run('sweep', async () => {
       const rows = await planAnalysisSweep(supabaseSweepDeps)
-      const bucket = Math.floor(Date.now() / 600_000)
+      const bucket = Math.floor(Date.now() / 3_600_000)
       for (const r of rows) {
         await inngest.send({ id: `analysis:${r.provider_call_id}:${bucket}`, name: TELEPHONY_RECORDING_READY, data: { client_id: r.client_id, provider: r.provider, call_id: r.provider_call_id } })
       }

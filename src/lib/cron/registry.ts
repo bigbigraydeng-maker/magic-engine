@@ -158,6 +158,9 @@ const CRON_REGISTRY_ENTRIES = [
   // 心跳超时收回。2026-10-26 从 GitHub Actions 的 schedule 改挂已有 dispatcher。
   // addedAt 盖住部署后第一次排班前的「从没跑过」。
   { service: 'factory-worker-sweeper', jobName: 'factory-worker-sweeper', schedule: '*/5 * * * *', logsRuns: true, addedAt: '2026-10-26' },
+  // 2026-11-16 Inngest 本月额度用完：电话进 CRM、线索进表格改由 dispatcher 进程内跑（开关 INNGEST_DIRECT_FALLBACK=off）。
+  { service: 'telephony-direct-sweep', jobName: 'telephony-direct-sweep', schedule: '*/10 * * * *', logsRuns: true, addedAt: '2026-11-16' },
+  { service: 'lead-sheet-direct-sync', jobName: 'lead-sheet-sync', schedule: '50 * * * *', logsRuns: true, addedAt: '2026-11-16' },
   // 🔴 已暂停(2026-09-08,PM「停抓图」):抓来的图无人消费(改图那步是死代码),白花 Apify 钱。
   //    恢复三件套:render.yaml 取消注释 + 本行加回来 + 先把 stock-transform 接进调用链。
   // { service: 'factory-stock-refill', jobName: 'factory-stock-refill', schedule: '0 19 * * 1', logsRuns: true },
@@ -415,7 +418,7 @@ const CRON_REGISTRY_ENTRIES = [
   // 总开关 WEEKLY_PACK_REEL_SCHEDULED_PUBLIC 关着也写一行 disabled 回执，所以每次醒来都有一行。
   // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/cloud-reel-scheduled-go-public.ts 的 REEL_SCHEDULED_CRON。
   // 🔴 新增函数，部署后必须去 Inngest 后台 Sync 一次，否则安静地不跑。
-  { service: 'inngest:cloud-reel-scheduled-go-public', jobName: 'reel-scheduled-go-public', schedule: '*/30 * * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-04' },
+  { service: 'inngest:cloud-reel-scheduled-go-public', jobName: 'reel-scheduled-go-public', schedule: '2 * * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-04' },
   // 经销商月结：每月 1 日新西兰 09:00 算上个月分润，存成「待批准」月结；只记账、不付钱、不外发。数据库表没上线时写 skipped 回执。
   // 🔴 schedule 唯一定义在 src/lib/inngest/functions/distributor-monthly-statement.ts 的 DISTRIBUTOR_STATEMENT_SCHEDULE。
   // 🔴 新增函数，部署后必须去 Inngest 后台 Sync 一次，否则安静地不跑。
@@ -468,7 +471,7 @@ const CRON_REGISTRY_ENTRIES = [
   // Story 轻量发布每 10 分钟扫一遍（新西兰时区；默认只演练，真发要 STORY_AUTO_PUBLISH_LIVE=true 且客户在名单里），
   // 每一轮都写一行运行记录。设计稿 docs/specs/2026-10-12-story-lite-design.md。2026-10-21 补登记，理由同上一条。
   // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/story-lite-publish.ts 的 STORY_LITE_PUBLISH_CRON（该函数的测试断言两边一致）。
-  { service: 'inngest:cloud-story-lite-publish', jobName: 'story-lite-publish', schedule: '*/10 * * * *', logsRuns: true, scheduler: 'inngest' },
+  { service: 'inngest:cloud-story-lite-publish', jobName: 'story-lite-publish', schedule: '*/20 * * * *', logsRuns: true, scheduler: 'inngest' },
 
   // Triggered-send (welcome e-mail) SHADOW run: records what ME WOULD send each morning; it never sends anything.
   // Runs at 09:00 New Zealand time (the Inngest cron carries TZ=Pacific/Auckland; after the old 08:01 batch, so Mailchimp's
@@ -484,7 +487,7 @@ const CRON_REGISTRY_ENTRIES = [
   // 「别再联系」的客人自己回来：填表 / 接通的来电 → 自动解除；私信 / 回信只列进运行记录请人看。每 15 分钟（Inngest cron 带 TZ=Pacific/Auckland），
   // 每一轮都写一行运行记录。默认只演练：CRM_DNC_REENGAGE_WRITE_CLIENTS 名单里的客户才真写。设计稿 docs/specs/2026-11-08-crm-ai-takeover-and-dnc-reengage-design-v0.md §3。
   // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/crm-dnc-reengage-sweep.ts 的 CRM_DNC_REENGAGE_CRON（去掉 TZ 前缀）。
-  { service: 'inngest:cloud-crm-dnc-reengage-sweep', jobName: 'crm-dnc-reengage-sweep', schedule: '*/15 * * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-08' },
+  { service: 'inngest:cloud-crm-dnc-reengage-sweep', jobName: 'crm-dnc-reengage-sweep', schedule: '5 * * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-08' },
 
   // Intraday spend samples for the close-of-day forecast. Every 10 minutes on the
   // existing frequent dispatcher. Read-only Meta insights. Does not change other schedules.
