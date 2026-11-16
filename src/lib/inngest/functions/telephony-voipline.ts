@@ -4,7 +4,8 @@
  * 两个函数：
  *   · process  —— 收到「原始事件已落库」事件，处理那一条（重折整通电话、通话结束后写 CRM）。
  *                 通话刚结束时有 2 分钟静默期（转接的前一段先到会误判），期满再处理一次。
- *   · sweep    —— 每 10 分钟补一轮：①落库了但没处理成的原始事件，**重发处理事件**（让所有处理
+ *   · sweep    —— 每小时补一轮（2026-11-16 起；原每 10 分钟。Inngest 额度不够，平时由 dispatcher 的
+ *                 telephony-direct-sweep 每 10 分钟兜底）：①落库了但没处理成的原始事件，**重发处理事件**（让所有处理
  *                 都走 process 的同一个并发闸，不在 sweep 里直接写）；②已结束却迟迟没写 CRM 的通话；
  *                 ③6 小时仍没收到结束事件的通话，标「待确认」。
  *
@@ -117,7 +118,7 @@ export const telephonyVoiplineSweep = inngest.createFunction(
     retries: 1,
     concurrency: { limit: 1 },
   },
-  { cron: '*/10 * * * *' },
+  { cron: '7 * * * *' },
   async ({ step }) =>
     step.run('sweep', () =>
       sweepStaleRawEvents(supabaseTelephonyStore, async (rawEventId, clientId, connectionId) => {

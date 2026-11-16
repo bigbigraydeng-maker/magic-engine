@@ -64,6 +64,10 @@ export const DISPATCH_CATALOG: readonly DispatchJob[] = [
   { service: 'mailchimp-suppression-sync-daily', route: 'mailchimp-suppression-sync', method: 'GET', auth: 'bearer', schedule: '20 5 * * *' },
   { service: 'market-intel-daily', route: 'market-intel-daily', method: 'GET', auth: 'bearer', schedule: '0 18 * * *' },
   { service: 'cron-run-logs-cleanup', route: 'cron-run-logs-cleanup', method: 'GET', auth: 'bearer', schedule: '50 16 * * *' },
+  // 2026-11-16: Inngest monthly quota ran out. These two keep phone calls → CRM and leads → sheets running in-process.
+  // Switch: env INNGEST_DIRECT_FALLBACK=off. Safe beside Inngest (both only pick unfinished work).
+  { service: 'telephony-direct-sweep', route: 'telephony-direct-sweep', method: 'GET', auth: 'bearer', schedule: '*/10 * * * *' },
+  { service: 'lead-sheet-direct-sync', route: 'lead-sheet-direct-sync', method: 'GET', auth: 'bearer', schedule: '50 * * * *' },
   { service: 'render-dashboard:baseline-domains-monthly', route: 'baseline-domains-monthly', method: 'GET', auth: 'bearer', schedule: '0 17 * * *', scheduleNote: 'Render service baseline-domains-weekly fires daily. The route throttles real collection to once every 7 days. Kept the daily knock.' },
 ]
 
