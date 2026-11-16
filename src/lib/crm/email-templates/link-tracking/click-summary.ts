@@ -88,8 +88,10 @@ export interface PageLabelFacts {
   facts: RenderFacts | null
 }
 
-/** "在官网看了 Best of China" for a tour page, "在官网看了全部团" for the list, else "在官网看了 /path". Pure. */
+/** "打开了在线手册" for the brochure page, "在官网看了 Best of China" for a tour page, "在官网看了全部团" for the list, else "在官网看了 /path". Pure. */
 export function pageViewLabel(path: string, page: PageLabelFacts): string {
+  // The client site's online brochure page (brochure design §2).
+  if (path.split('?')[0] === '/brochure') return '打开了在线手册'
   const host = page.hosts[0] ?? (page.urlPattern ? safeHost(page.urlPattern) : null)
   if (host !== null) {
     const hit = classifyTourLink(`https://${host}${path}`, page.facts)
@@ -142,7 +144,7 @@ export function timelineClicks(clicks: readonly ClickForTimeline[], tokens: read
   return out
 }
 
-async function loadPageLabelFacts(db: SupabaseClient, clientId: string, now: Date): Promise<PageLabelFacts> {
+export async function loadPageLabelFacts(db: SupabaseClient, clientId: string, now: Date): Promise<PageLabelFacts> {
   const none: PageLabelFacts = { urlPattern: null, hosts: [], facts: null }
   const settings = await loadEmailSettings(db, clientId)
   if (settings.kind !== 'ok') return none
