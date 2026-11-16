@@ -16,6 +16,8 @@ export interface AdSummary {
   ctr: number | null                      // fetched separately via insights
 }
 
+const MAX_AD_PAGES = 50
+
 interface RawAd {
   id: string
   name: string
@@ -35,13 +37,21 @@ export async function listAdsInAdSet(
   accessToken: string,
 ): Promise<AdSummary[]> {
   const fields = 'id,name,status,created_time,creative{effective_object_story_id,object_story_id}'
-  const url = `${GRAPH_BASE}/${adsetId}/ads?fields=${fields}&limit=100&access_token=${encodeURIComponent(accessToken)}`
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`listAdsInAdSet ${adsetId}: ${res.status}`)
-  const body = (await res.json()) as { data?: RawAd[]; error?: { message: string } }
-  if (body.error) throw new Error(`listAdsInAdSet ${adsetId}: ${body.error.message}`)
+  // Follow Graph's paging cursor: a post whose ad sits past the first page
+  // must still count as already promoted. Too many pages fails closed.
+  const raw: RawAd[] = []
+  let url: string | null = `${GRAPH_BASE}/${adsetId}/ads?fields=${fields}&limit=100&access_token=${encodeURIComponent(accessToken)}`
+  for (let page = 0; url; page++) {
+    if (page >= MAX_AD_PAGES) throw new Error(`listAdsInAdSet ${adsetId}: more than ${MAX_AD_PAGES * 100} ads`)
+    const res: Response = await fetch(url)
+    if (!res.ok) throw new Error(`listAdsInAdSet ${adsetId}: ${res.status}`)
+    const body = (await res.json()) as { data?: RawAd[]; paging?: { next?: string }; error?: { message: string } }
+    if (body.error) throw new Error(`listAdsInAdSet ${adsetId}: ${body.error.message}`)
+    raw.push(...(body.data ?? []))
+    url = body.paging?.next ?? null
+  }
 
-  return (body.data ?? []).map((a) => ({
+  return raw.map((a) => ({
     adId:  a.id,
     name:  a.name,
     status: (a.status as AdSummary['status']) ?? 'PAUSED',
