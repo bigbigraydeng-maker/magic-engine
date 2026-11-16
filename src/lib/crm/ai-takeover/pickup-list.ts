@@ -48,6 +48,9 @@ export interface PickupListDeps {
   sentToday(today: string): Promise<number>
 }
 
+/** How many mail checks run at once. */
+const PARALLEL_CHECKS = 8
+
 const NOTE_SOURCES: ReadonlySet<string> = new Set(['me_manual', 'sheet_followup', 'manual'])
 
 function facts(inputs: PickupInputs, contactId: string, leadAt: string, today: string, zone: string) {
@@ -73,29 +76,30 @@ export async function loadPickupList(
   const today = todayInZone(now, deps.timeZone)
   const room = Math.max(0, opts.dailyMax - (await deps.sentToday(today)))
   const checkBudget = opts.dailyMax * 2
-  const rows: PickupListRow[] = []
+  const rows: PickupListRow[] = picks.map((p) => {
+    const f = facts(inputs, p.contactId, p.leadAt, today, deps.timeZone)
+    return { contactId: p.contactId, name: names.get(p.contactId) ?? '（没名字）', rule: p.rule, why: p.why, leadAt: p.leadAt,
+      dials: f.dials, lastCallAt: f.lastCallAt, lastNote: f.lastNote, recipient: null, sentLast7Days: null, message: null,
+      status: f.contactedToday ? 'tomorrow' : 'queued' }
+  })
+  for (const r of rows) r.message = r.status === 'tomorrow' ? '今天已经联系过，明天再发。' : '今天的名额满了，排到后面几天。'
+  // Mail checks run a few at a time (each is a dozen reads; one by one took over a minute in production), in list
+  // order, never more at once than the room left, so the oldest enquiries still get the places.
+  const open = rows.filter((r) => r.status === 'queued')
   let ready = 0
   let checks = 0
-  for (const p of picks) {
-    const f = facts(inputs, p.contactId, p.leadAt, today, deps.timeZone)
-    const base = { contactId: p.contactId, name: names.get(p.contactId) ?? '（没名字）', rule: p.rule, why: p.why, leadAt: p.leadAt,
-      dials: f.dials, lastCallAt: f.lastCallAt, lastNote: f.lastNote, recipient: null, sentLast7Days: null, message: null }
-    if (f.contactedToday) {
-      rows.push({ ...base, status: 'tomorrow', message: '今天已经联系过，明天再发。' })
-      continue
-    }
-    if (ready >= room || checks >= checkBudget) {
-      rows.push({ ...base, status: 'queued', message: '今天的名额满了，排到后面几天。' })
-      continue
-    }
-    checks++
-    const c = await deps.compose(p.contactId)
-    if (!c.canCompose) {
-      rows.push({ ...base, status: 'cannot_send', message: c.message })
-      continue
-    }
-    ready++
-    rows.push({ ...base, status: 'ready', recipient: c.recipient, sentLast7Days: c.sentToContactLast7Days })
+  let i = 0
+  while (i < open.length && ready < room && checks < checkBudget) {
+    const batch = open.slice(i, i + Math.min(PARALLEL_CHECKS, room - ready, checkBudget - checks))
+    i += batch.length
+    checks += batch.length
+    const results = await Promise.all(batch.map((r) => deps.compose(r.contactId)))
+    batch.forEach((r, k) => {
+      const c = results[k]
+      if (!c.canCompose) Object.assign(r, { status: 'cannot_send', message: c.message })
+      else Object.assign(r, { status: 'ready', recipient: c.recipient, sentLast7Days: c.sentToContactLast7Days, message: null })
+      if (c.canCompose) ready++
+    })
   }
   return rows
 }
