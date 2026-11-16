@@ -17,7 +17,9 @@
  *                     · AI voice-agent calls, spreadsheet imports and automated / approximate-time rows never count
  *                     · a staff note whose parsed outcome says the guest was reached (anything but no answer /
  *                       bad number / a do-not-contact correction); notes in the first hour after takeover-on are
- *                       ignored — they describe the call that led to sending the catalogue
+ *                       ignored — they describe the call that led to sending the catalogue; and a note written
+ *                       within 10 minutes after a call that did not reach the guest describes that failed call
+ *                       (11-16: 45 of 69 "please follow up 2027 catalogue" notes sat after a call under 15 s)
  *
  * Getting this wrong in the "stop" direction only puts the guest back in front of staff (cheap, staff can resume);
  * so unknowns lean towards stopping, except a call with no analysis and no outcome, which proves nothing.
@@ -28,6 +30,7 @@ import type { ReengageTouch } from '@/lib/crm/dnc-reengage'
 import { FUTURE_TOLERANCE_MS } from '@/lib/crm/dnc-reengage'
 import { customerSpokeOf } from '@/lib/crm/customer-spoke'
 import { SYSTEM_CALL_SOURCES } from '@/lib/crm/email-templates/call-evidence'
+import { CALL_TALKED_OUTCOMES, NOTE_CALL_WINDOW_MS, noteDescribesUnreachedCall } from './call-reach'
 
 export type StopRule = 'booked' | 'dnc' | 'stage' | 'came_back' | 'talked'
 
@@ -68,7 +71,8 @@ export const NOTE_GRACE_MS = 60 * 60_000
 /** Parsed note / call outcomes that do NOT mean the guest was reached. */
 const NOT_REACHED = new Set(['no_answer', 'bad_number', 'dnc_cleared'])
 /** Call outcomes (recorded on the call itself) that mean the guest talked, used only without a call analysis. */
-const CALL_TALKED = new Set(['spoke', 'callback_set', 'not_interested', 'not_interested_now', 'do_not_call', 'do_not_contact'])
+const CALL_TALKED = CALL_TALKED_OUTCOMES
+export { NOTE_CALL_WINDOW_MS }
 
 const CAME_BACK_WORDS: Record<CameBack['kind'], string> = {
   form: '填了 Facebook 表单',
@@ -122,6 +126,7 @@ function firstStaffTalk(input: StopLineInput): { touch: StaffTouch; how: Reach }
     const how = reached(t)
     if (how === null) continue
     if (how === 'note' && at - from < NOTE_GRACE_MS) continue
+    if (how === 'note' && noteDescribesUnreachedCall(t, input.outboundPhone)) continue
     if (best === null || at < ms(best.touch.occurredAt)) best = { touch: t, how }
   }
   return best
