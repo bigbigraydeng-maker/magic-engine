@@ -25,6 +25,7 @@ import {
 import { readRecentSends } from './recent-sends'
 import { loadRehearsalEvidence } from './rehearsal-evidence'
 import { checkRequiredMailboxes } from './shadow-reads-prod'
+import { EMAIL_CHANNEL, WELCOME_TRIGGER, type TriggerKey } from './trigger-scope'
 
 async function readTemplate(db: SupabaseClient, clientId: string, key: string): Promise<TemplateRead> {
   try {
@@ -44,10 +45,12 @@ async function readSalesCap(db: SupabaseClient, clientId: string): Promise<Sales
   }
 }
 
-export function createAuthorizationDeps(db: SupabaseClient): CommandDeps {
-  const key = { triggerKey: 'welcome' as const, channel: 'email' as const }
+/** `trigger`: which kind of letter's authorizations these commands read and write (the welcome letter by default). */
+export function createAuthorizationDeps(db: SupabaseClient, trigger: TriggerKey = WELCOME_TRIGGER): CommandDeps {
+  const key = { triggerKey: trigger, channel: EMAIL_CHANNEL }
   const mailStore = createMailNewStore()
   return {
+    trigger,
     store: {
       loadOpen: (clientId) => loadOpenAuthorizations(db, { clientId, ...key }),
       load: (id) => loadAuthorization(db, id),
@@ -72,6 +75,10 @@ export function createAuthorizationDeps(db: SupabaseClient): CommandDeps {
 }
 
 /** The status: the command ports plus the page's 「最近发送」 (live ledger rows only). */
-export function createAuthorizationStatusDeps(db: SupabaseClient): StatusDeps {
-  return { ...createAuthorizationDeps(db), loadRecentSends: (clientId) => readRecentSends(db, clientId) }
+export function createAuthorizationStatusDeps(db: SupabaseClient, trigger: TriggerKey = WELCOME_TRIGGER): StatusDeps {
+  // 「最近发送」 lists the welcome letter's rows only; the follow-up letters' list comes with the second cut (design
+  // 2026-11-17 §7.4). Until then their page says it cannot read it, rather than showing another letter's rows.
+  const loadRecentSends: StatusDeps['loadRecentSends'] =
+    trigger === WELCOME_TRIGGER ? (clientId) => readRecentSends(db, clientId) : async () => ({ ok: false, error: 'not_available_for_trigger' })
+  return { ...createAuthorizationDeps(db, trigger), loadRecentSends }
 }

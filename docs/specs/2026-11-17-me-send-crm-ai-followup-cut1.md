@@ -118,11 +118,12 @@ sendNamedLetter({ clientId, contactId, letterKey, requestRef }): Promise<NamedLe
 | `sent` | 已交给 Resend | 按 `sent_at` 排下一封 |
 | `skipped` + 原因（dnc / email_unsubscribed / complained / hard_bounced_address / mailchimp_suppressed / excluded_tag / no_consent_basis / bad_email / system_address / address_duplicate） | 这封信对这位客人的最终结论 | 不再排这封；后面的信自己决定 |
 | `blocked` + 原因（frequency_full / catalogue_expired / render_failed / lock_busy / *_unverifiable / cap_reached） | 今天不发，行可再认领 | 下一个工作日再调 |
-| `stopped`（`stopRun=true`） | 授权不在、不在时段、不在试发名单、供应商出问题、没钥匙 | **当天对任何客人都别再调** |
+| `stopped`（`stopRun=true`） | 授权不在 / 失效、不在时段、供应商出问题、没钥匙 | **当天对任何客人都别再调** |
+| `stopped`（`stopRun=false`） | 只管这一次调用：不在试发名单、这封信不在 PM 批的清单里、`requestRef` 格式不对 | 不写任何行；这位客人这封信今天跳过，别的客人照常调 |
 | `already_done` + `rowStatus` | 这封信以前处理过，带真实状态 | 按 `rowStatus` 判，不当成「已发」 |
 | `in_flight` / `unknown_outcome` | 在途或结果不明 | 不重排、不跳过，等人核 |
 - `frequency_full` 改为 `blocked`（不再是终态 skipped）；**员工信照样计入 7 天 2 封，只是不判「员工已写过」**（W4）。
-- 不在试发名单 → `stopped:not_in_allowlist`，**不写行**（W2）：试发期间点到的真客人不会被永久标掉。
+- 不在试发名单 → `stopped:not_in_allowlist`（`stopRun=false`），**不写行**（W2）：试发期间点到的真客人不会被永久标掉。
 - 底座出只读 `letterStatuses(clientId, contactId)` → 每个代号的 `{status, sentAt, sendId}`，76 号不直接查表（Z8）。
 
 ### 7.4 在途与重发（Z3、Z4、W6、W11）
@@ -147,3 +148,5 @@ sendNamedLetter({ clientId, contactId, letterKey, requestRef }): Promise<NamedLe
 - 欢迎信与跟进信各有日上限，一天最多可发 = 两者之和；批准页面并排显示。
 - 清单里任一封模板变了 → 整份授权自撤（照 PM 原话「模板一改授权作废」），代价是当天其它信也停，等 PM 重批。
 - 跟进信没有影子演练，正式批准前的条件（试发 hello@ 收齐、第二刀上线）写进 §4.5，由 PM 批正式授权时看到。
+
+- 信清单规则必须写 `gates` 块（缺了拒，不回落欢迎信的关卡），批准时也查。

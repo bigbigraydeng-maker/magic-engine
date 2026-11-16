@@ -10,18 +10,19 @@
 import type { EmailTemplateVersion } from '@/lib/crm/email-templates/types'
 import { readResendAccountKey } from '@/lib/messaging/adapters/resend-email'
 import { isLiveFor, readLiveSwitches, TRIGGERED_SEND_SWITCHES } from '@/lib/platform/live-switch'
-import { assessProposal, type Assessment } from './authorization-assess'
-import { done, recordView, refuse, type CommandDeps, type CommandResult, type TemplateRead } from './authorization-core'
+import { assessProposal, type Assessment, type LetterTemplateRead } from './authorization-assess'
+import { done, recordView, refuse, triggerOf, type CommandDeps, type CommandResult, type TemplateRead } from './authorization-core'
 import type { AuthorizationRecord } from './authorization-store'
-import { GATE_CONTRACT_VERSION, parseRule } from './rule'
+import { GATE_CONTRACT_VERSION, parseRule, type LetterEntry } from './rule'
 import { describeRule } from './rule-summary'
-import { judgeStandingAuthorization } from './standing-authorization'
+import { isLettersBlock, LETTER_LIST_TEMPLATE_VERSION, lettersFingerprint } from './send-rule'
+import { judgeLetterAuthorization, judgeStandingAuthorization, type StandingAuthorizationVerdict } from './standing-authorization'
 import { readApprovers } from './approvers'
 import { RECENT_SENDS_LIMIT, type RecentSendsRead } from './recent-sends'
 import { publicOriginOf } from './send-letter'
 import { checkTrialRecipients, readTrialDomains } from './trial-recipients'
 import { UNSUBSCRIBE_SECRET_ENV, UNSUBSCRIBE_SECRET_MIN_LENGTH } from './unsubscribe-token'
-import { checkAutomatedTemplate, type AutomatedTemplateCheck } from './welcome-template'
+import { checkAutomatedTemplate, LETTER_PLACEHOLDERS, type AutomatedTemplateCheck } from './welcome-template'
 
 /** The command ports plus the page's 「最近发送」 (`recent-sends.ts`). */
 export interface StatusDeps extends CommandDeps {
@@ -58,8 +59,20 @@ function templateView(key: string, read: TemplateRead | null, check: AutomatedTe
   }
 }
 
+/** A letter of a list: its template as it is now, and the version it was pinned at. */
+function letterView(l: LetterTemplateRead): Record<string, unknown> {
+  return {
+    letter_key: l.letter.letter_key,
+    pinned_version: l.letter.template_version,
+    pinned_sha256: l.letter.template_sha256,
+    context: l.letter.context,
+    template: templateView(l.letter.template_key, l.read, l.check),
+  }
+}
+
 function proposalView(record: AuthorizationRecord, a: Assessment): Record<string, unknown> {
   const rule = a.rule
+  const single = rule?.send !== undefined && !isLettersBlock(rule.send) ? rule.send : undefined
   return {
     record: recordView(record),
     rule: record.rule,
@@ -69,7 +82,8 @@ function proposalView(record: AuthorizationRecord, a: Assessment): Record<string
     trial: rule !== null && rule.recipient_allowlist !== null,
     rehearsal: a.rehearsal !== null && a.rehearsal.ok ? a.rehearsal.evidence : null,
     rehearsal_problem: a.rehearsal !== null && !a.rehearsal.ok ? a.rehearsal.code : null,
-    template: rule?.send === undefined ? null : templateView(rule.send.template.key, a.templateRead, a.templateCheck),
+    template: single === undefined ? null : templateView(single.template.key, a.templateRead, a.templateCheck),
+    letters: a.letters === null ? null : a.letters.map(letterView),
     mailboxes_connected: a.mailboxes === null ? null : a.mailboxes.ok,
     warnings: a.warnings,
   }
@@ -84,26 +98,52 @@ async function readTemplate(deps: CommandDeps, clientId: string, key: string): P
 }
 
 /**
+ * A letter list's authorization: every letter's template is read now (the sender reads only the one it sends, but the
+ * page shows them all); any letter off its pinned template = the authorization is void, as the sender will find.
+ */
+async function letterListVerdict(deps: CommandDeps, record: AuthorizationRecord, letters: readonly LetterEntry[]): Promise<{ verdict: StandingAuthorizationVerdict<unknown>; unreadable: boolean; views: Record<string, unknown>[] }> {
+  const reads: LetterTemplateRead[] = await Promise.all(
+    letters.map(async (letter) => {
+      const read = await readTemplate(deps, record.clientId, letter.template_key)
+      return { letter, read, check: read.ok ? checkAutomatedTemplate(read.template, LETTER_PLACEHOLDERS) : null }
+    }),
+  )
+  const unreadable = reads.some((l) => !l.read.ok)
+  const allPinned = reads.every((l) => l.check !== null && l.check.ok && l.check.version === l.letter.template_version && l.check.sha256 === l.letter.template_sha256)
+  const verdict = judgeLetterAuthorization(
+    { ...record, ruleRaw: record.rule },
+    { now: deps.now(), gateContractVersion: GATE_CONTRACT_VERSION, templateVersion: allPinned ? LETTER_LIST_TEMPLATE_VERSION : -1, templateSha256: allPinned ? lettersFingerprint(letters) : '' },
+  )
+  return { verdict, unreadable, views: reads.map(letterView) }
+}
+
+/**
  * The state the sender would see (§4.1 order). Only a template that cannot be READ is named separately (that is
  * temporary); a template that was disabled or edited is a new version in 127, so the authorization itself is void
  * (`template_changed`: propose and authorize again), exactly as the sender will treat it.
  */
 async function authorizationView(deps: CommandDeps, record: AuthorizationRecord): Promise<Record<string, unknown>> {
   const parsed = parseRule(record.rule)
-  const key = parsed.ok && parsed.rule.send !== undefined ? parsed.rule.send.template.key : null
+  const send = parsed.ok ? parsed.rule.send : undefined
+  const listed = send !== undefined && isLettersBlock(send) ? await letterListVerdict(deps, record, send.letters) : null
+  const key = send !== undefined && !isLettersBlock(send) ? send.template.key : null
   const read = key === null ? null : await readTemplate(deps, record.clientId, key)
   const check = read !== null && read.ok ? checkAutomatedTemplate(read.template) : null
-  const verdict = judgeStandingAuthorization(
-    { ...record, ruleRaw: record.rule },
-    {
-      now: deps.now(),
-      gateContractVersion: GATE_CONTRACT_VERSION,
-      templateVersion: check !== null && check.ok ? check.version : -1,
-      templateSha256: check !== null && check.ok ? check.sha256 : '',
-    },
-  )
+  const verdict: StandingAuthorizationVerdict<unknown> =
+    listed !== null
+      ? listed.verdict
+      : judgeStandingAuthorization(
+          { ...record, ruleRaw: record.rule },
+          {
+            now: deps.now(),
+            gateContractVersion: GATE_CONTRACT_VERSION,
+            templateVersion: check !== null && check.ok ? check.version : -1,
+            templateSha256: check !== null && check.ok ? check.sha256 : '',
+          },
+        )
   let state = verdict.active ? 'active' : verdict.reason.toLowerCase()
-  if (state === 'template_changed' && (read === null || !read.ok)) state = 'template_unreadable'
+  const unreadable = listed !== null ? listed.unreadable : read === null || !read.ok
+  if (state === 'template_changed' && unreadable) state = 'template_unreadable'
   // This version sends trials only: an authorization for the real list is in force but sends nothing (`send-arming.ts`).
   if (state === 'active' && parsed.ok && parsed.rule.recipient_allowlist === null) state = 'formal_sending_not_enabled'
   // A trial in force whose addresses are no longer on the internal domains will not be sent (the sender checks again).
@@ -115,6 +155,7 @@ async function authorizationView(deps: CommandDeps, record: AuthorizationRecord)
     trial: parsed.ok && parsed.rule.recipient_allowlist !== null,
     state,
     template: key === null ? null : templateView(key, read, check),
+    letters: listed === null ? null : listed.views,
   }
 }
 
@@ -154,6 +195,7 @@ export async function statusQuery(deps: StatusDeps, clientId: string, viewer: { 
   const account = (proposal ?? authorized)?.account ?? null
   return done({
     ...(await recentSends(deps, clientId)),
+    trigger: triggerOf(deps),
     can_manage: true,
     can_authorize: viewer.canAuthorize,
     server_now: deps.now().toISOString(),
