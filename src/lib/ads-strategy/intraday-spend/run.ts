@@ -9,7 +9,10 @@ import {
   bucketMinute,
   draftsForAccount,
   localMinuteOfDay,
+  minorToMajor,
   retentionCutoff,
+  spendToMinor,
+  type InsightSpendRow,
   type SpendDraft,
 } from './sample'
 import { pacingFromSamples, sinceDay, type PacingPayload } from './view'
@@ -17,7 +20,19 @@ export interface AccountRead {
   complete: boolean
   rateLimited: boolean
   adsets: { id: string; campaignId: string | null; status: string | null }[]
-  insights: { adsetId: string; spend?: string; impressions?: string }[]
+  insights: InsightSpendRow[]
+}
+
+export interface IntradayAdsetSnap {
+  clientId: string
+  adAccountId: string
+  accountDay: string
+  adsetId: string
+  campaignId: string | null
+  spendMajor: number
+  leads: number
+  messaging: number
+  currency: string | null
 }
 export interface SampleDeps {
   listClients(): Promise<{ id: string }[]>
@@ -45,6 +60,7 @@ export interface SampleReceipt {
   failed: number
   rateLimited: boolean
   overCapClients: string[]
+  earlyWarningSnaps: IntradayAdsetSnap[]
 }
 export async function runIntradaySample(
   deps: SampleDeps,
@@ -54,6 +70,7 @@ export async function runIntradaySample(
   const clients = await deps.listClients()
   receipt.clients = clients.length
   const drafts: SpendDraft[] = []
+  const earlyWarningSnaps: IntradayAdsetSnap[] = []
   let reads = 0
   for (const client of clients) {
     const token = await deps.token(client.id)
@@ -69,6 +86,7 @@ export async function runIntradaySample(
         drafts.push(...outcome.rows)
         receipt.accountsSampled += 1
       }
+      if (outcome.snaps) earlyWarningSnaps.push(...outcome.snaps)
       if (outcome.stop) {
         receipt.rateLimited = true
         break
@@ -80,6 +98,7 @@ export async function runIntradaySample(
   receipt.rows = drafts.length
   receipt.purged = await deps.purge(retentionCutoff(opts.now))
   receipt.overCapClients = await overCapClients(deps, clients.map((c) => c.id), opts.now)
+  receipt.earlyWarningSnaps = earlyWarningSnaps
   return receipt
 }
 type SkipKey = 'skippedTimezone' | 'skippedHidden' | 'skippedShared' | 'skippedNoToken'
@@ -92,7 +111,7 @@ async function sampleAccount(
   token: string | null,
   shared: Set<string>,
   reads: number,
-): Promise<{ reads: number; skip?: SkipKey; failed?: boolean; noLive?: boolean; rows?: SpendDraft[]; stop?: boolean }> {
+): Promise<{ reads: number; skip?: SkipKey; failed?: boolean; noLive?: boolean; rows?: SpendDraft[]; snaps?: IntradayAdsetSnap[]; stop?: boolean }> {
   if (account.hidden) return { reads, skip: 'skippedHidden' }
   if (shared.has(bare(account.adAccountId))) return { reads, skip: 'skippedShared' }
   const ctx = await deps.accountContext(account.adAccountId)
@@ -121,7 +140,38 @@ async function sampleAccount(
   })
   if (rows === null) return { reads: nextReads, failed: true }
   if (rows.length === 0) return { reads: nextReads, noLive: true }
-  return { reads: nextReads, rows }
+  const snaps = adsetSnaps(clientId, account.adAccountId, day, ctx.currency, read.adsets, read.insights)
+  return { reads: nextReads, rows, snaps }
+}
+
+function adsetSnaps(
+  clientId: string,
+  adAccountId: string,
+  accountDay: string,
+  currency: string | null,
+  adsets: AccountRead['adsets'],
+  insights: InsightSpendRow[],
+): IntradayAdsetSnap[] {
+  const lookup = new Map(insights.filter((r) => r.adsetId).map((r) => [r.adsetId, r]))
+  const out: IntradayAdsetSnap[] = []
+  for (const adset of adsets) {
+    if (adset.status !== 'ACTIVE' || !adset.id) continue
+    const row = lookup.get(adset.id)
+    const spendMinor = spendToMinor(row?.spend, currency)
+    if (spendMinor === null) continue
+    out.push({
+      clientId,
+      adAccountId,
+      accountDay,
+      adsetId: adset.id,
+      campaignId: adset.campaignId,
+      spendMajor: minorToMajor(spendMinor, currency),
+      leads: row?.leads ?? 0,
+      messaging: row?.messaging ?? 0,
+      currency,
+    })
+  }
+  return out
 }
 async function pauseBefore(sleep: (ms: number) => Promise<void>, reads: number): Promise<void> {
   if (reads <= 0) return
@@ -158,6 +208,7 @@ function emptyReceipt(dryRun: boolean): SampleReceipt {
     failed: 0,
     rateLimited: false,
     overCapClients: [],
+    earlyWarningSnaps: [],
   }
 }
 
