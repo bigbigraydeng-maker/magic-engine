@@ -47,6 +47,8 @@ export type ClaimOutcome =
   | 'auth_inactive'
   | 'rule_invalid'
   | 'template_mismatch'
+  /** `triggered_send_claim_letter` only: the authorization's letter list does not name this letter. */
+  | 'letter_not_authorized'
 
 export interface ClaimInput {
   authorizationId: string
@@ -97,6 +99,28 @@ export interface SendLedger {
   markFailed(row: LifetimeRow, input: { reasonCode: string; account: string }): Promise<CasWrite>
 }
 
+/**
+ * A live row of one letter of a letter list (`dedupe_scope = 'letter:<key>'`), with what the named-letter entry needs
+ * besides the shared fields: which letter, its annotations (link tracking, the caller's reference), the pinned template
+ * it was claimed with (the 20-hour check hands them back to the claim function) and when it was sent.
+ */
+export interface LetterRow extends LifetimeRow {
+  letterKey: string
+  annotations: Record<string, unknown>
+  templateKey: string | null
+  templateVersion: number | null
+  templateSha256: string | null
+  sentAt: string | null
+}
+
+export type LetterRowsRead = { ok: true; rows: LetterRow[] } | { ok: false; error: string }
+
+/** The ledger of ONE letter of a list: the shared ledger, plus the annotations a named letter keeps on its row. */
+export interface LetterLedger extends SendLedger {
+  /** Merge-free write of the whole annotations object of a row that is still pending (compare-and-set). */
+  annotate(row: LifetimeRow, annotations: Record<string, unknown>): Promise<CasWrite>
+}
+
 export type LockTake = { ok: true; held: boolean } | { ok: false; error: string }
 
 /** The contact lock and the recipient lock of ONE send step (one instance per step: a release only drops our own). */
@@ -141,6 +165,8 @@ export type SendStopStatus =
   | 'authorization_inactive'
   | 'authorization_changed'
   | 'authorization_self_revoked'
+  /** A letter list's authorization does not list the letter asked for (design 2026-11-17 §7.3). */
+  | 'letter_not_authorized'
   | 'template_unreadable'
   | 'trial_domains_not_configured'
   | 'trial_recipient_not_internal'
@@ -214,3 +240,45 @@ export interface SendReceipt {
   error: string | null
   created_at: string
 }
+
+// ── a named letter of a letter list (design 2026-11-17 §2, §7.3) ──────────────────────────────────────────
+
+/** Link tracking of a named letter's body. Neither method throws; tracking never stops a letter (it goes untracked). */
+export interface LinkTrackingPort {
+  /** First attempt: token the tracked links and store the tokens under the ledger row id. */
+  tag(args: { clientId: string; contactId: string; requestId: string; body: string }): Promise<{ body: string; tagged: number; tokens: string[]; warning: string | null }>
+  /** A replay: put the SAME tokens back into the same body (nothing is stored). `ok:false` = it cannot be rebuilt. */
+  retag(args: { clientId: string; body: string; tokens: readonly string[] }): Promise<{ ok: true; body: string } | { ok: false }>
+}
+
+/** The send deps of a trigger with a letter list, plus what only a named letter needs. */
+export interface NamedLetterDeps extends SendDeps {
+  /** The ledger of one letter (its `letter:<key>` rows, `triggered_send_claim_letter`). */
+  letters(letterKey: string): LetterLedger
+  /** Every letter row of one guest under this trigger. */
+  letterRows(clientId: string, contactId: string): Promise<LetterRowsRead>
+  linkTracking: LinkTrackingPort
+}
+
+/** What 76 asks for: one letter of the authorized list, to one guest, now. */
+export interface NamedLetterRequest {
+  clientId: string
+  contactId: string
+  letterKey: string
+  /** The caller's own record id (≤120 characters, no personal data): kept on the ledger row to reconcile. */
+  requestRef: string
+}
+
+/** `SendOneResult`, plus the row's real status when the letter was already handled (`already_done`). */
+export interface NamedLetterResult extends SendOneResult {
+  rowStatus?: string
+}
+
+export interface LetterStatus {
+  letterKey: string
+  status: string
+  sentAt: string | null
+  sendId: string
+}
+
+export type LetterStatusesRead = { ok: true; letters: LetterStatus[] } | { ok: false; error: string }

@@ -18,6 +18,11 @@ import type { EmailTemplateVersion } from '@/lib/crm/email-templates/types'
 import { canonicalJson } from './rule'
 
 export const WELCOME_PLACEHOLDERS: ReadonlySet<string> = new Set(['first_name'])
+/**
+ * The AI follow-up letters (design 2026-11-17 §4.3): the first name and the catalogue link frozen in the authorization.
+ * Tour names, tour links and the like come when 76 writes those templates.
+ */
+export const LETTER_PLACEHOLDERS: ReadonlySet<string> = new Set(['first_name', 'catalogue_url'])
 
 export function templateContentSha256(t: EmailTemplateVersion): string {
   // The pick filter goes through JSON so an absent optional field never reaches the canonical encoder as `undefined`.
@@ -40,23 +45,26 @@ export type AutomatedTemplateCheck =
         | 'template_unreadable'
     }
 
-function placeholdersAllowed(text: string): boolean {
+function placeholdersAllowed(text: string, allowed: ReadonlySet<string>): boolean {
   const refs = scanPlaceholders(text)
-  if (refs.some((ref) => !WELCOME_PLACEHOLDERS.has(ref.name) || ref.count !== null)) return false
+  if (refs.some((ref) => !allowed.has(ref.name) || ref.count !== null)) return false
   // Braces left over after taking out the allowed placeholders = a malformed or unknown placeholder.
   let rest = text
   for (const ref of refs) rest = rest.replace(ref.raw, '')
   return !hasUnresolvedBraces(rest)
 }
 
-/** `current` = the template store's current version of the key (null when the key does not exist). */
-export function checkAutomatedTemplate(current: EmailTemplateVersion | null): AutomatedTemplateCheck {
+/**
+ * `current` = the template store's current version of the key (null when the key does not exist). `allowed` = the
+ * placeholders this kind of letter can fill (the welcome letter's by default).
+ */
+export function checkAutomatedTemplate(current: EmailTemplateVersion | null, allowed: ReadonlySet<string> = WELCOME_PLACEHOLDERS): AutomatedTemplateCheck {
   if (current === null) return { ok: false, reason: 'template_missing' }
   if (current.status !== 'active') return { ok: false, reason: 'template_disabled' }
   if (!isAutomatedTemplateKey(current.templateKey)) return { ok: false, reason: 'template_not_automated' }
   if (current.factSource !== 'none') return { ok: false, reason: 'template_uses_facts' }
   if (current.pickMode !== 'none') return { ok: false, reason: 'template_picks' }
-  if (!placeholdersAllowed(current.subject) || !placeholdersAllowed(current.body)) {
+  if (!placeholdersAllowed(current.subject, allowed) || !placeholdersAllowed(current.body, allowed)) {
     return { ok: false, reason: 'template_placeholder_not_allowed' }
   }
   try {

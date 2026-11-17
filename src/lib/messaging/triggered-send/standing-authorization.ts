@@ -10,7 +10,7 @@
  * Design: docs/specs/2026-11-02-me-send-gate-p2-design-v0.md §4.1 (plan: §17).
  */
 
-import { parseSendRule, ruleSha256, type SendableRule } from './rule'
+import { parseLetterRule, parseSendRule, ruleSha256, type LetterRule, type SendableRule } from './rule'
 
 export interface StandingAuthorizationRow {
   id: string
@@ -42,8 +42,8 @@ export type StandingAuthorizationReason =
   | 'GATE_CHANGED'
   | 'TEMPLATE_CHANGED'
 
-export type StandingAuthorizationVerdict =
-  | { active: true; rule: SendableRule }
+export type StandingAuthorizationVerdict<R = SendableRule> =
+  | { active: true; rule: R }
   | { active: false; reason: StandingAuthorizationReason }
 
 function expired(expiresAt: string | null, now: Date): boolean {
@@ -52,8 +52,10 @@ function expired(expiresAt: string | null, now: Date): boolean {
   return Number.isNaN(at) || at <= now.getTime()
 }
 
-function sendableRule(row: StandingAuthorizationRow): SendableRule | null {
-  const parsed = parseSendRule(row.ruleRaw)
+type RuleParse<R> = (raw: unknown) => { ok: true; rule: R } | { ok: false; error: string }
+
+function storedRule<R extends SendableRule | LetterRule>(row: StandingAuthorizationRow, parse: RuleParse<R>): R | null {
+  const parsed = parse(row.ruleRaw)
   if (!parsed.ok) return null
   return ruleSha256(parsed.rule) === row.ruleSha256 ? parsed.rule : null
 }
@@ -62,11 +64,30 @@ export function judgeStandingAuthorization(
   row: StandingAuthorizationRow,
   current: StandingAuthorizationNow,
 ): StandingAuthorizationVerdict {
+  return judgeWith(row, current, parseSendRule)
+}
+
+/**
+ * The same judgement for a rule with a letter list (design 2026-11-17 §3.6): `current.templateVersion/Sha256` are the
+ * list's (1 and `lettersFingerprint`), and the caller has already compared the one letter it sends with its template.
+ */
+export function judgeLetterAuthorization(
+  row: StandingAuthorizationRow,
+  current: StandingAuthorizationNow,
+): StandingAuthorizationVerdict<LetterRule> {
+  return judgeWith(row, current, parseLetterRule)
+}
+
+function judgeWith<R extends SendableRule | LetterRule>(
+  row: StandingAuthorizationRow,
+  current: StandingAuthorizationNow,
+  parse: RuleParse<R>,
+): StandingAuthorizationVerdict<R> {
   if (row.revokedAt !== null) return { active: false, reason: 'REVOKED' }
   if (row.authorizedAt === null) return { active: false, reason: 'NOT_AUTHORIZED' }
   if (row.activatedAt === null) return { active: false, reason: 'NOT_ACTIVATED' }
   if (expired(row.expiresAt, current.now)) return { active: false, reason: 'EXPIRED' }
-  const rule = sendableRule(row)
+  const rule = storedRule(row, parse)
   if (rule === null) return { active: false, reason: 'RULE_INVALID' }
   if (rule.gate_contract_version !== current.gateContractVersion) return { active: false, reason: 'GATE_CHANGED' }
   if (row.templateVersion !== current.templateVersion || row.templateSha256 !== current.templateSha256) {
