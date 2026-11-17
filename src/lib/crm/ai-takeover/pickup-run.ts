@@ -24,6 +24,7 @@ import { callReach, isSystemCall } from './call-reach'
 import { createTakeoverStore } from './prod'
 import { recordTakeover, type TakeoverStoreDeps } from './store'
 import { DEFAULT_PICKUP_CONFIG, decideAiPickup, type PickupConfig, type PickupRule } from './pickup'
+import { SOURCE as SITE_CALLBACK_SOURCE } from '../site-actions/source'
 
 export const PICKUP_JOB = 'crm-ai-pickup'
 export const PICKUP_ACTOR = 'system:ai-pickup'
@@ -83,12 +84,15 @@ async function inChunks<T>(ids: string[], read: (part: string[]) => Promise<T[]>
 
 export async function latestEnquiries(sb: SupabaseClient, clientId: string, now: Date): Promise<Map<string, string>> {
   const since = new Date(now.getTime() - WINDOW_DAYS * 86_400_000).toISOString()
-  const rows = await fetchAll<{ contact_id: string; occurred_at: string }>((from, to) =>
-    sb.from('contact_touchpoints').select('contact_id, occurred_at').eq('client_id', clientId).eq('direction', 'inbound')
+  const rows = await fetchAll<{ contact_id: string; occurred_at: string; source: string | null }>((from, to) =>
+    sb.from('contact_touchpoints').select('contact_id, occurred_at, source').eq('client_id', clientId).eq('direction', 'inbound')
       .in('channel', ENQUIRY_CHANNELS).gte('occurred_at', since).order('id', { ascending: true }).range(from, to),
   )
   const latest = new Map<string, string>()
   for (const r of rows) {
+    // A guest's "please call me" from the client's site is a website-form touch but not an enquiry: it must not restart
+    // the 7-day clock or make an old guest a candidate again. After the enquiry it is "the guest came back" (staff).
+    if (r.source === SITE_CALLBACK_SOURCE) continue
     const cur = latest.get(r.contact_id)
     if (cur === undefined || Date.parse(r.occurred_at) > Date.parse(cur)) latest.set(r.contact_id, r.occurred_at)
   }

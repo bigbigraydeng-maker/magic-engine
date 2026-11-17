@@ -38,6 +38,11 @@ describe('site page views on the timeline', () => {
     expect(pageViewLabel('/tours/china/discovery/essentials', { urlPattern: null, hosts: [], facts: null })).toBe('在官网看了 /tours/china/discovery/essentials')
   })
 
+  it('the online brochure page has its own words', () => {
+    expect(pageViewLabel('/brochure', page)).toBe('打开了在线手册')
+    expect(pageViewLabel('/brochure', { urlPattern: null, hosts: [], facts: null })).toBe('打开了在线手册')
+  })
+
   it('one line for the mail link, one per later page, each at its first visit', () => {
     const lines = timelineClicks(
       [
