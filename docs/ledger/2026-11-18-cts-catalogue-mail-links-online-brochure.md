@@ -1,7 +1,7 @@
 ---
 id: 2026-11-18-cts-catalogue-mail-links-online-brochure
 title: 在线手册第三刀：CTS 目录信和「要目录」自动回信的链接从 PDF 换成官网在线手册 /brochure（页面照 PDF 排版、可下载 PDF）
-status: done
+status: decided
 owner: agent
 decided_on: 2026-11-18
 source: session:96dc6edf
