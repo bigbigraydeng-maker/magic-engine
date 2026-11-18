@@ -121,6 +121,8 @@ describe('real CTS4270729 upload findings (2026-11-19)', () => {
     expect(preferTourCode('CTS4270429', 'confirmation.docx', text)).toEqual({ code: 'CTS4270429', note: null })
     expect(preferTourCode('CTS4270429', 'CTS9999999.docx', text)).toEqual({ code: 'CTS4270429', note: null })
     expect(preferTourCode('CTS4270729', 'CTS4270729.docx', text)).toEqual({ code: 'CTS4270729', note: null })
+    // a longer code that merely contains the file-name code does not count as printed
+    expect(preferTourCode('CTS42707290', 'CTS4270729.docx', 'Tour Code: CTS42707290')).toEqual({ code: 'CTS42707290', note: null })
   })
 
   it('a departure date without a year is flagged (model returned "29 Jul" for "29-Jul-2027")', () => {

@@ -145,7 +145,9 @@ export function preferTourCode(modelCode: string, filename: string, documentText
   const fromName = [...new Set(filename.toUpperCase().match(CODE_RE) ?? [])]
   if (fromName.length !== 1) return { code: modelCode, note: null }
   const named = fromName[0]
-  if (named === modelCode || !documentText.toUpperCase().includes(named)) return { code: modelCode, note: null }
+  // whole-code match only: CTS4270729 must not count as printed when the text only has CTS42707290
+  const printed = new Set(documentText.toUpperCase().match(CODE_RE) ?? [])
+  if (named === modelCode || !printed.has(named)) return { code: modelCode, note: null }
   return { code: named, note: `团号按文件名用了 ${named}（文件里还出现过 ${modelCode || '别的团号'}），请核对` }
 }
 
