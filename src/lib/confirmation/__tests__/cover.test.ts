@@ -81,6 +81,8 @@ describe('one-line title sizing', () => {
     // wide Latin glyphs are not under-counted (40 capital W's must not overflow)
     expect(titleUnits('W'.repeat(40))).toBeGreaterThanOrEqual(40)
     expect(titleUnits('WELCOME')).toBeGreaterThan(titleUnits('welcome'))
+    // emoji are a full em each (a surrogate pair is one character)
+    expect(titleUnits('🐼'.repeat(20))).toBeGreaterThanOrEqual(20)
     // the longest allowed title (40 full-width characters) still fits one line in Word
     const longest = '很'.repeat(40)
     expect(oneLineTitlePx(longest, 480, 32) * titleUnits(longest)).toBeLessThanOrEqual(480)

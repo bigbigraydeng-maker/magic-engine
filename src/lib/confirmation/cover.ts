@@ -67,7 +67,9 @@ function glyphEm(ch: string): number {
   if (/[0-9]/.test(ch)) return 0.62
   if (/[a-z]/.test(ch)) return /[iljft]/.test(ch) ? 0.35 : 0.58
   if (/[\s.,;:!'|]/.test(ch)) return 0.3
-  return 0.7
+  if (/[\x21-\x7E]/.test(ch)) return 0.7
+  // anything else (emoji, symbols, accented or other scripts): count as a full em
+  return 1.0
 }
 
 /**
