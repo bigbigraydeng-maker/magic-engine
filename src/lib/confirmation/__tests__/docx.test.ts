@@ -32,4 +32,18 @@ describe('buildConfirmationDocx', () => {
     expect(xml).toContain('13. Emergency Contacts')
     expect(xml).toContain('12. Power Bank Notice')
   })
+
+  it('photo cover embeds the picture and puts key facts on the cover page; banner style has no picture', async () => {
+    const { readFileSync } = await import('node:fs')
+    const hero = readFileSync('templates/tailor-made-itinerary/heroes/beijing.jpg')
+    const withPhoto = await JSZip.loadAsync(await buildConfirmationDocx(sampleConfirmation(), { hero }))
+    const images = (z: JSZip) => Object.keys(z.files).filter((f) => /^word\/media\/.+\.(jpe?g|png)$/.test(f)).length
+    const xml = await withPhoto.file('word/document.xml')!.async('string')
+    expect(xml).toContain('Beijing Highlights')
+    expect(xml).toContain('TOUR CODE')
+
+    const banner = { ...sampleConfirmation(), cover: { style: 'banner' as const, hero: 'auto', title: '' } }
+    const noPhoto = await JSZip.loadAsync(await buildConfirmationDocx(banner, { hero }))
+    expect(images(withPhoto)).toBe(images(noPhoto) + 1)
+  })
 })

@@ -47,3 +47,13 @@ export async function loadHeroDataUri(name: string): Promise<string | null> {
 export async function heroForTrip(trip: { title?: string; route?: string[] }): Promise<string | null> {
   return loadHeroDataUri(pickHeroName(trip))
 }
+
+/** 原始图片字节（Word 导出用）；名字不合法或读不到时返回 null。 */
+export async function loadHeroBuffer(name: string): Promise<Buffer | null> {
+  if (!/^[a-z0-9-]+$/.test(name)) return null
+  try {
+    return await readFile(path.join(HERO_DIR, `${name}.jpg`))
+  } catch {
+    return null
+  }
+}

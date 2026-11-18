@@ -19,10 +19,12 @@ import {
 import type { ConfirmationData } from './types'
 import { POWER_BANK_TIP_TITLE } from './defaults'
 import { splitLines } from './validate'
+import { coverRouteStops, coverTitle, jpegSize } from './cover'
 
 const RED = 'B61E2E'
 const NAVY = '1F2937'
 const GREY = '6B7280'
+const GOLD = 'D6A756'
 const LIGHT = 'FBEFF0'
 const FONT = { ascii: 'Calibri', eastAsia: 'Microsoft YaHei', hAnsi: 'Calibri' }
 
@@ -32,9 +34,10 @@ const run = (text: string, o: { bold?: boolean; color?: string; size?: number; i
 const para = (text: string, o: { bold?: boolean; color?: string; size?: number; after?: number; align?: (typeof AlignmentType)[keyof typeof AlignmentType] } = {}) =>
   new Paragraph({ children: [run(text, o)], spacing: { after: o.after ?? 80 }, alignment: o.align })
 
-const heading = (text: string) =>
+const heading = (text: string, pageBreakBefore = false) =>
   new Paragraph({
     children: [run(text, { bold: true, color: RED, size: 28 })],
+    pageBreakBefore,
     keepNext: true,
     spacing: { before: 280, after: 120 },
     border: { bottom: { style: BorderStyle.SINGLE, size: 8, color: RED, space: 4 } },
@@ -102,18 +105,74 @@ function powerBankImage(): Paragraph | null {
   }
 }
 
-/** Build the confirmation as an editable Word file (staff can tweak before sending). */
-export async function buildConfirmationDocx(d: ConfirmationData): Promise<Buffer> {
-  const children: (Paragraph | Table)[] = []
+const HERO_WIDTH_PX = 640
+/** Tallest picture that still leaves room for the title and facts on one A4 page. */
+const HERO_MAX_HEIGHT_PX = 420
 
-  children.push(
+/** Keep the picture's proportions but never taller than the page allows (portrait pictures are shrunk). */
+export function fitHero(size: { width: number; height: number }): { width: number; height: number } {
+  const height = Math.min(Math.round((HERO_WIDTH_PX * size.height) / size.width), HERO_MAX_HEIGHT_PX)
+  return { width: Math.round((height * size.width) / size.height), height }
+}
+
+/** Tailor-made style cover page: picture, title, route, key facts. Ends with the page break the next heading adds. */
+function coverPage(d: ConfirmationData, hero: Buffer | null): Paragraph[] {
+  const out: Paragraph[] = [
     new Paragraph({
-      children: [run('Welcome to China! 欢迎到中国！', { bold: true, color: RED, size: 40 })],
-      spacing: { after: 60 },
+      children: [run(`PRE-CONFIRMATION  ·  ${d.groundOperator}`, { color: GREY, size: 16 })],
+      spacing: { after: 120 },
     }),
-    para(`${d.tourCode}  ·  Pre-confirmation itinerary`, { bold: true, color: NAVY, size: 26, after: 160 }),
+  ]
+  const size = hero ? jpegSize(hero) : null
+  if (hero && size) {
+    out.push(
+      new Paragraph({
+        children: [
+          new ImageRun({
+            data: hero,
+            transformation: fitHero(size),
+            type: 'jpg',
+          }),
+        ],
+        spacing: { after: 240 },
+      }),
+    )
+  }
+  const meta = (label: string, value: string) =>
+    new Paragraph({
+      children: [run(`${label.toUpperCase()}   `, { bold: true, color: GOLD, size: 15 }), run(value, { bold: true, size: 22 })],
+      spacing: { after: 70 },
+    })
+  out.push(
+    new Paragraph({ children: [run(coverTitle(d), { bold: true, color: NAVY, size: 64 })], spacing: { after: 100 } }),
+    para(coverRouteStops(d).join('   ·   ').toUpperCase(), { bold: true, color: RED, size: 20, after: 200 }),
+    meta('Tour code', d.tourCode),
+    meta('Departure', d.departureDate),
+    meta('Travellers', `${d.paxCount} pax`),
   )
+  const names = splitLines(d.pickupCardNames)
+  if (names.length) out.push(meta('Prepared for', names.join('  /  ')))
+  return out
+}
 
+/** Build the confirmation as an editable Word file (staff can tweak before sending). */
+export async function buildConfirmationDocx(d: ConfirmationData, opts: { hero?: Buffer | null } = {}): Promise<Buffer> {
+  const children: (Paragraph | Table)[] = []
+  const photoCover = d.cover.style === 'photo'
+
+  if (photoCover) {
+    children.push(...coverPage(d, opts.hero ?? null))
+  } else {
+    children.push(
+      new Paragraph({
+        children: [run(coverTitle(d), { bold: true, color: RED, size: 40 })],
+        spacing: { after: 60 },
+      }),
+      para(`${d.tourCode}  ·  Pre-confirmation itinerary`, { bold: true, color: NAVY, size: 26, after: 160 }),
+    )
+  }
+
+  if (photoCover) children.push(heading(`${d.tourCode}  Trip details`, true))
   const emergency = d.emergencyContacts.filter((c) => c.name.trim()).map((c) => `${c.name}   MP: ${c.mobile}`)
   children.push(
     new Table({

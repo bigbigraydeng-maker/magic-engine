@@ -22,3 +22,16 @@ describe('print safety', () => {
     expect(renderToStaticMarkup(<ConfirmationDocument data={sampleConfirmation()} />)).not.toContain('<header')
   })
 })
+
+describe('cover styles', () => {
+  it('photo cover shows the title, route and facts and breaks to a new page; banner does not', () => {
+    const photo = renderToStaticMarkup(<ConfirmationDocument data={sampleConfirmation()} heroSrc="data:image/jpeg;base64,AAAA" />)
+    expect(photo).toContain('Beijing Highlights')
+    expect(photo).toContain('break-after-page')
+    expect(photo).toContain('data:image/jpeg;base64,AAAA')
+    const banner = renderToStaticMarkup(
+      <ConfirmationDocument data={{ ...sampleConfirmation(), cover: { style: 'banner', hero: 'auto', title: '' } }} />,
+    )
+    expect(banner).not.toContain('break-after-page')
+  })
+})

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { clientHasIndustryFeature } from '@/lib/clients/industry-guard'
 import { buildConfirmationDocx } from '@/lib/confirmation/docx'
+import { resolveHeroName } from '@/lib/confirmation/cover'
+import { loadHeroBuffer } from '@/lib/tailor-made/hero'
 import { parseConfirmation, validateConfirmation } from '@/lib/confirmation/validate'
 
 /**
@@ -33,7 +35,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const errors = validateConfirmation(data)
   if (errors.length) return NextResponse.json({ error: errors.join('；') }, { status: 400 })
 
-  const buffer = await buildConfirmationDocx(data)
+  const hero = data.cover.style === 'photo' ? await loadHeroBuffer(resolveHeroName(data)) : null
+  const buffer = await buildConfirmationDocx(data, { hero })
   const safeCode = data.tourCode.replace(/[^A-Za-z0-9-]/g, '')
   return new NextResponse(buffer as unknown as BodyInit, {
     headers: {
