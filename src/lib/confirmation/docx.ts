@@ -200,7 +200,7 @@ export async function buildConfirmationDocx(d: ConfirmationData, opts: { hero?: 
     children.push(heading('Accommodation'))
     for (const h of d.hotels) {
       children.push(
-        para(`${h.city} – ${h.name} ${h.stars}-star`, { bold: true, after: 20 }),
+        para(`${h.city} – ${h.name}${h.stars > 0 ? ` ${h.stars}-star` : ''}`, { bold: true, after: 20 }),
         para(`Address: ${h.address}`, { after: 20 }),
         para(`Phone: ${h.phone}`, { after: 40 }),
         ...splitLines(h.chinese).map((l) => para(l, { after: 20, color: GREY })),

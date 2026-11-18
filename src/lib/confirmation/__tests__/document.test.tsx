@@ -35,3 +35,11 @@ describe('cover styles', () => {
     expect(banner).not.toContain('break-after-page')
   })
 })
+
+describe('unknown hotel stars', () => {
+  it('shows no stars when the rating is unknown (0)', () => {
+    const d = sampleConfirmation()
+    d.hotels = [{ ...d.hotels[0], stars: 0 }]
+    expect(renderToStaticMarkup(<ConfirmationDocument data={d} />)).not.toContain('★')
+  })
+})
