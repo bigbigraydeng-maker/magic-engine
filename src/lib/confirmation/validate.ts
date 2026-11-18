@@ -1,5 +1,6 @@
 import { DEFAULT_COVER, NO_LOGOS, type ConfirmationData } from './types'
 import { isLogo } from './logo-rules'
+import { MAX_COVER_TITLE } from './cover'
 
 /** A tour code is one token of letters/digits/hyphens (e.g. CTS4270729), never with spaces. */
 const TOUR_CODE_RE = /^[A-Z0-9][A-Z0-9-]{3,31}$/
@@ -73,7 +74,8 @@ export function parseConfirmation(input: unknown): { ok: true; data: Confirmatio
   if (o.cover !== undefined) {
     const c = o.cover
     if (!isObj(c) || (c.style !== 'photo' && c.style !== 'banner') || !str(c.hero) || !str(c.title)) return bad('cover')
-    cover = { style: c.style, hero: c.hero, title: c.title }
+    // over-long titles (older drafts, direct API calls) are cut so the cover stays on one line
+    cover = { style: c.style, hero: c.hero, title: c.title.slice(0, MAX_COVER_TITLE) }
   }
   // logos are newer still: missing -> none; present -> two small PNG/JPEG data URIs (or '')
   let logos = NO_LOGOS

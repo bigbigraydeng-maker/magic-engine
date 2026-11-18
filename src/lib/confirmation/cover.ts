@@ -68,6 +68,9 @@ export function titleUnits(t: string): number {
 }
 
 /** Font size (px) for a one-line title in a box `width` px wide, never above `max`. */
-export function oneLineTitlePx(t: string, width: number, max: number, min = 16): number {
+/** Cover titles are capped so they always fit one line (the form stops typing at this length). */
+export const MAX_COVER_TITLE = 40
+
+export function oneLineTitlePx(t: string, width: number, max: number, min = 9): number {
   return Math.max(min, Math.min(max, Math.floor((width * 0.96) / titleUnits(t))))
 }

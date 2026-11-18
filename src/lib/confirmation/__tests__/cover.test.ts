@@ -78,6 +78,16 @@ describe('one-line title sizing', () => {
     const px = oneLineTitlePx(t, 480, 32)
     expect(px * titleUnits(t)).toBeLessThanOrEqual(480)
     expect(oneLineTitlePx('Beijing', 480, 32)).toBe(32)
-    expect(oneLineTitlePx('很长的标题'.repeat(20), 480, 32)).toBe(16)
+    // the longest allowed title (40 full-width characters) still fits one line in Word
+    const longest = '很'.repeat(40)
+    expect(oneLineTitlePx(longest, 480, 32) * titleUnits(longest)).toBeLessThanOrEqual(480)
+  })
+})
+
+describe('cover title length', () => {
+  it('an over-long title is cut to 40 characters when loaded, so it can always stay on one line', async () => {
+    const { parseConfirmation } = await import('@/lib/confirmation/validate')
+    const r = parseConfirmation({ ...sampleConfirmation(), cover: { style: 'photo', hero: 'auto', title: '长'.repeat(200) } })
+    expect(r.ok && r.data.cover.title.length).toBe(40)
   })
 })
