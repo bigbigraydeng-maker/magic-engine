@@ -150,7 +150,8 @@ export function preferTourCode(modelCode: string, filename: string, documentText
   // whole-code match only: CTS4270729 must not count as printed when the text only has CTS42707290
   const printed = new Set(codesIn(documentText))
   if (named === modelCode || !printed.has(named)) return { code: modelCode, note: null }
-  return { code: named, note: `团号按文件名用了 ${named}（文件里还出现过 ${modelCode || '别的团号'}），请核对` }
+  const note = modelCode ? `团号按文件名用了 ${named}（文件里还出现过 ${modelCode}），请核对` : `AI 没读出团号，按文件名填了 ${named}，请核对`
+  return { code: named, note }
 }
 
 export function mergeExtracted(raw: unknown, base: ConfirmationData = emptyConfirmation()): { data: ConfirmationData; notes: string[] } {

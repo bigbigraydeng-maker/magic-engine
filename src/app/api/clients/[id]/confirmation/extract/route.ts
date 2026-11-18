@@ -55,7 +55,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       const pick = preferTourCode(data.tourCode, filename, source.text)
       if (pick.note) {
         data.tourCode = pick.code
-        notes.unshift(pick.note)
+        // the code is filled now, so the "no tour code found" note would contradict it
+        const rest = notes.filter((n) => !n.includes('没找到团号'))
+        notes.length = 0
+        notes.push(pick.note, ...rest)
       }
     }
     return NextResponse.json({ data, notes })
