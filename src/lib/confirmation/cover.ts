@@ -57,13 +57,27 @@ export function jpegSize(buf: Uint8Array): { width: number; height: number } | n
 }
 
 /**
+ * Conservative width of one character in em for a serif display face. Errs wide on purpose:
+ * a title that comes out a bit small is fine, one that overflows its single line is not.
+ */
+function glyphEm(ch: string): number {
+  if (/[\u2E80-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFF00-\uFFEF\u3000-\u303F]/.test(ch)) return 1.0
+  if (/[MWmw@%]/.test(ch)) return 1.0
+  if (/[A-Z]/.test(ch)) return 0.78
+  if (/[0-9]/.test(ch)) return 0.62
+  if (/[a-z]/.test(ch)) return /[iljft]/.test(ch) ? 0.35 : 0.58
+  if (/[\s.,;:!'|]/.test(ch)) return 0.3
+  return 0.7
+}
+
+/**
  * Width of a title in "em-ish" units: CJK / full-width characters are about twice as wide
  * as Latin ones. Used to pick a font size that keeps the title on ONE line (PM 2026-11-19:
  * 「中文字必须要缩到一行」).
  */
 export function titleUnits(t: string): number {
   let u = 0
-  for (const ch of t) u += /[\u2E80-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFF00-\uFFEF\u3000-\u303F]/.test(ch) ? 1.0 : 0.56
+  for (const ch of t) u += glyphEm(ch)
   return Math.max(1, u)
 }
 

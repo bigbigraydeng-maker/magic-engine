@@ -78,6 +78,9 @@ describe('one-line title sizing', () => {
     const px = oneLineTitlePx(t, 480, 32)
     expect(px * titleUnits(t)).toBeLessThanOrEqual(480)
     expect(oneLineTitlePx('Beijing', 480, 32)).toBe(32)
+    // wide Latin glyphs are not under-counted (40 capital W's must not overflow)
+    expect(titleUnits('W'.repeat(40))).toBeGreaterThanOrEqual(40)
+    expect(titleUnits('WELCOME')).toBeGreaterThan(titleUnits('welcome'))
     // the longest allowed title (40 full-width characters) still fits one line in Word
     const longest = '很'.repeat(40)
     expect(oneLineTitlePx(longest, 480, 32) * titleUnits(longest)).toBeLessThanOrEqual(480)
