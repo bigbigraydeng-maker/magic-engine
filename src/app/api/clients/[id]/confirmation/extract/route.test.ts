@@ -64,4 +64,16 @@ describe('POST /api/clients/[id]/confirmation/extract', () => {
     expect(res.status).toBe(502)
     expect((await res.json()).error).not.toContain('secret')
   })
+
+  it('file-name tour code beats a different code the model picked from the header (real CTS4270729 case)', async () => {
+    const d = { ...sampleConfirmation(), tourCode: 'CTS4270729', itineraryNote: 'Header said CTS4270429' }
+    const docx = await buildConfirmationDocx(d)
+    model.mockResolvedValue({ tourCode: 'CTS4270429', departureDate: '29 Jul', days: [{ date: '29 Jul', route: 'Arrive', highlights: 'x', overnight: 'Beijing' }] })
+    const res = await upload(new File([new Uint8Array(docx)], 'CTS4270729 confirmation(1).docx', { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }))
+    const body = await res.json()
+    expect(body.data.tourCode).toBe('CTS4270729')
+    expect(body.notes[0]).toContain('CTS4270429')
+    expect(body.notes.join()).toContain('没有年份')
+    expect(model.mock.calls[0][0].filename).toBe('CTS4270729 confirmation(1).docx')
+  })
 })
