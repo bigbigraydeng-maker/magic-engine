@@ -18,6 +18,8 @@ export default function ConfirmationGenerator({ clientId }: { clientId: string }
   const [message, setMessage] = useState<string | null>(null)
   const [restored, setRestored] = useState(false)
   const [heroSrc, setHeroSrc] = useState<string | null>(null)
+  /** which picture heroSrc currently holds; printing waits until it matches the chosen one */
+  const [heroSrcName, setHeroSrcName] = useState<string | null>(null)
   const heroCache = useRef<Record<string, string>>({})
 
   // Per-browser convenience only: restore an unfinished draft.
@@ -48,6 +50,7 @@ export default function ConfirmationGenerator({ clientId }: { clientId: string }
     const cached = heroCache.current[heroName]
     if (cached) {
       setHeroSrc(cached)
+      setHeroSrcName(heroName)
       return
     }
     let live = true
@@ -57,6 +60,7 @@ export default function ConfirmationGenerator({ clientId }: { clientId: string }
         if (!live || !j?.dataUri) return
         heroCache.current[heroName] = j.dataUri
         setHeroSrc(j.dataUri)
+        setHeroSrcName(heroName)
       })
       .catch(() => undefined)
     return () => {
@@ -99,6 +103,7 @@ export default function ConfirmationGenerator({ clientId }: { clientId: string }
   function printPdf() {
     setMessage(null)
     if (errors.length) return setMessage(`还不能生成：${errors.join('；')}`)
+    if (photo && heroSrcName !== heroName) return setMessage('封面图还在加载，请等几秒再点「下载 PDF」')
     const prev = document.title
     document.title = `${d.tourCode}-confirmation` // becomes the default PDF file name
     window.print()
