@@ -80,7 +80,8 @@ const SUBMIT_TOOL = {
 
 export type ExtractSource = { kind: 'text'; text: string } | { kind: 'pdf'; base64: string }
 
-const MAX_TEXT = 60_000
+/** Longer files are refused rather than cut: a cut file would silently lose its last days/hotels. */
+export const MAX_TEXT = 60_000
 const TIMEOUT_MS = 90_000
 
 export class ExtractError extends Error {}
@@ -90,13 +91,16 @@ export async function callExtractModel(source: ExtractSource, fetchImpl: typeof 
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) throw new ExtractError('服务器没有配置 AI 密钥，请联系技术支持')
 
+  if (source.kind === 'text' && source.text.length > MAX_TEXT) {
+    throw new ExtractError('文件里的文字太多（超过 6 万字），系统一次读不完。请只上传这一个团的确认单，或分开上传')
+  }
   const content =
     source.kind === 'pdf'
       ? [
           { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: source.base64 } },
           { type: 'text', text: 'Copy this confirmation into the submit tool.' },
         ]
-      : [{ type: 'text', text: `Document text:\n\n${source.text.slice(0, MAX_TEXT)}` }]
+      : [{ type: 'text', text: `Document text:\n\n${source.text}` }]
 
   const res = await fetchImpl('https://api.anthropic.com/v1/messages', {
     method: 'POST',

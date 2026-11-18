@@ -82,6 +82,12 @@ describe('callExtractModel', () => {
     expect(body.system).toContain('DATA')
   })
 
+  it('refuses an over-long text instead of silently cutting off the last days', async () => {
+    const f = ok({})
+    await expect(callExtractModel({ kind: 'text', text: 'x'.repeat(60_001) }, f)).rejects.toThrow('太多')
+    expect(f).not.toHaveBeenCalled()
+  })
+
   it('sends a PDF as a document block', async () => {
     const f = ok({ stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'submit_confirmation', input: {} }] })
     await callExtractModel({ kind: 'pdf', base64: 'QUJD' }, f)
