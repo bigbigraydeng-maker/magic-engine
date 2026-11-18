@@ -121,6 +121,9 @@ describe('real CTS4270729 upload findings (2026-11-19)', () => {
     expect(preferTourCode('CTS4270429', 'confirmation.docx', text)).toEqual({ code: 'CTS4270429', note: null })
     expect(preferTourCode('CTS4270429', 'CTS9999999.docx', text)).toEqual({ code: 'CTS4270429', note: null })
     expect(preferTourCode('CTS4270729', 'CTS4270729.docx', text)).toEqual({ code: 'CTS4270729', note: null })
+    // hyphenated codes are recognised too, still as whole codes
+    expect(preferTourCode('CTS-2026-0099', 'CTS-2026-0062 confirmation.docx', 'Code CTS-2026-0099 / CTS-2026-0062').code).toBe('CTS-2026-0062')
+    expect(preferTourCode('CTS-2026-0099', 'CTS-2026-0062.docx', 'Code CTS-2026-0099 / CTS-2026-00621').code).toBe('CTS-2026-0099')
     // a longer code that merely contains the file-name code does not count as printed
     expect(preferTourCode('CTS42707290', 'CTS4270729.docx', 'Tour Code: CTS42707290')).toEqual({ code: 'CTS42707290', note: null })
   })

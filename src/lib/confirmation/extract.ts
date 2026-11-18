@@ -134,7 +134,9 @@ const obj = (v: unknown): Record<string, unknown> => (typeof v === 'object' && v
  * (tips, cover, default inclusions...). Empty fields in the answer never wipe a filled default.
  * Returns the merged data plus a list of human-readable things staff must double-check.
  */
-const CODE_RE = /\b[A-Z]{2,5}\d{5,}\b/g
+/** Tour codes like CTS4270729 or CTS-2026-0062: letters then digit groups, ≥5 digits, matched as a whole token. */
+const CODE_RE = /(?<![A-Z0-9-])[A-Z]{2,5}(?:-?\d+){1,4}(?![A-Z0-9-])/g
+const codesIn = (text: string): string[] => (text.toUpperCase().match(CODE_RE) ?? []).filter((c) => c.replace(/\D/g, '').length >= 5)
 
 /**
  * Code answers what code can: if the file name carries exactly one tour code and that code is also
@@ -142,11 +144,11 @@ const CODE_RE = /\b[A-Z]{2,5}\d{5,}\b/g
  * header said CTS4270429 — the model picked the header). Staff are told either way.
  */
 export function preferTourCode(modelCode: string, filename: string, documentText: string): { code: string; note: string | null } {
-  const fromName = [...new Set(filename.toUpperCase().match(CODE_RE) ?? [])]
+  const fromName = [...new Set(codesIn(filename.replace(/\.[a-z0-9]+$/i, '')))]
   if (fromName.length !== 1) return { code: modelCode, note: null }
   const named = fromName[0]
   // whole-code match only: CTS4270729 must not count as printed when the text only has CTS42707290
-  const printed = new Set(documentText.toUpperCase().match(CODE_RE) ?? [])
+  const printed = new Set(codesIn(documentText))
   if (named === modelCode || !printed.has(named)) return { code: modelCode, note: null }
   return { code: named, note: `团号按文件名用了 ${named}（文件里还出现过 ${modelCode || '别的团号'}），请核对` }
 }
