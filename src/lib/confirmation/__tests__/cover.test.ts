@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fitHero } from '@/lib/confirmation/docx'
+import { oneLineTitlePx, titleUnits } from '@/lib/confirmation/cover'
 import { resolveHeroName, coverRouteStops, coverTitle, jpegSize, heroLabel } from '@/lib/confirmation/cover'
 import { parseConfirmation } from '@/lib/confirmation/validate'
 import { sampleConfirmation, emptyConfirmation } from '@/lib/confirmation/defaults'
@@ -67,5 +68,31 @@ describe('Codex review fixes', () => {
     expect(portrait.height).toBeLessThanOrEqual(420)
     expect(Math.abs(portrait.width / portrait.height - 1000 / 1500)).toBeLessThan(0.01)
     expect(fitHero({ width: 1400, height: 933 })).toEqual({ width: 630, height: 420 })
+  })
+})
+
+describe('one-line title sizing', () => {
+  it('Chinese counts about twice as wide as Latin, and the size shrinks so the title fits one line', () => {
+    expect(titleUnits('欢迎')).toBeGreaterThan(titleUnits('ab') * 1.5)
+    const t = 'Welcome to China! 欢迎到中国！'
+    const px = oneLineTitlePx(t, 480, 32)
+    expect(px * titleUnits(t)).toBeLessThanOrEqual(480)
+    expect(oneLineTitlePx('Beijing', 480, 32)).toBe(32)
+    // wide Latin glyphs are not under-counted (40 capital W's must not overflow)
+    expect(titleUnits('W'.repeat(40))).toBeGreaterThanOrEqual(40)
+    expect(titleUnits('WELCOME')).toBeGreaterThan(titleUnits('welcome'))
+    // emoji are a full em each (a surrogate pair is one character)
+    expect(titleUnits('🐼'.repeat(20))).toBeGreaterThanOrEqual(20)
+    // the longest allowed title (40 full-width characters) still fits one line in Word
+    const longest = '很'.repeat(40)
+    expect(oneLineTitlePx(longest, 480, 32) * titleUnits(longest)).toBeLessThanOrEqual(480)
+  })
+})
+
+describe('cover title length', () => {
+  it('an over-long title is cut to 40 characters when loaded, so it can always stay on one line', async () => {
+    const { parseConfirmation } = await import('@/lib/confirmation/validate')
+    const r = parseConfirmation({ ...sampleConfirmation(), cover: { style: 'photo', hero: 'auto', title: '长'.repeat(200) } })
+    expect(r.ok && r.data.cover.title.length).toBe(40)
   })
 })

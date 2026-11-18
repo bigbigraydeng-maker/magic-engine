@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import ConfirmationDocument from './ConfirmationDocument'
 import { emptyConfirmation, sampleConfirmation } from '@/lib/confirmation/defaults'
 import { HERO_CHOICES } from '@/lib/tailor-made/hero-rules'
-import { heroLabel, resolveHeroName } from '@/lib/confirmation/cover'
+import { MAX_COVER_TITLE, heroLabel, resolveHeroName } from '@/lib/confirmation/cover'
 import { parseConfirmation, validateConfirmation } from '@/lib/confirmation/validate'
 import { EMPTY_DAY, EMPTY_HOTEL, type ConfirmationData } from '@/lib/confirmation/types'
 
@@ -237,8 +237,8 @@ export default function ConfirmationGenerator({ clientId }: { clientId: string }
               </select>
             </Field>
           )}
-          <Field label="封面大标题（留空 = Welcome to China! 欢迎到中国！）">
-            <input className={input} value={d.cover.title} onChange={(e) => set('cover', { ...d.cover, title: e.target.value })} placeholder="Beijing Highlights" />
+          <Field label="封面大标题（最多 40 个字，一行放下；留空 = Welcome to China! 欢迎到中国！）">
+            <input className={input} maxLength={MAX_COVER_TITLE} value={d.cover.title} onChange={(e) => set('cover', { ...d.cover, title: e.target.value.slice(0, MAX_COVER_TITLE) })} placeholder="Beijing Highlights" />
           </Field>
         </Box>
 

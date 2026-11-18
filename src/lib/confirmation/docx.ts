@@ -20,7 +20,7 @@ import {
 import type { ConfirmationData } from './types'
 import { POWER_BANK_TIP_TITLE } from './defaults'
 import { splitLines } from './validate'
-import { coverRouteStops, coverTitle, jpegSize } from './cover'
+import { coverRouteStops, coverTitle, jpegSize, oneLineTitlePx } from './cover'
 import { fitLogo, imageSize, logoBytes } from './logos'
 
 const RED = 'B61E2E'
@@ -146,7 +146,7 @@ function coverPage(d: ConfirmationData, hero: Buffer | null): Paragraph[] {
       spacing: { after: 70 },
     })
   out.push(
-    new Paragraph({ children: [run(coverTitle(d), { bold: true, color: NAVY, size: 64 })], spacing: { after: 100 } }),
+    new Paragraph({ children: [run(coverTitle(d), { bold: true, color: NAVY, size: 2 * oneLineTitlePx(coverTitle(d), 480, 32) })], spacing: { after: 100 } }),
     para(coverRouteStops(d).join('   ·   ').toUpperCase(), { bold: true, color: RED, size: 20, after: 200 }),
     meta('Tour code', d.tourCode),
     meta('Departure', d.departureDate),
@@ -157,29 +157,22 @@ function coverPage(d: ConfirmationData, hero: Buffer | null): Paragraph[] {
   return out
 }
 
-function logoCell(uri: string, align: (typeof AlignmentType)[keyof typeof AlignmentType]): TableCell {
+function logoRun(uri: string): ImageRun | null {
   const bytes = uri ? logoBytes(uri) : null
   const size = bytes ? imageSize(bytes.data) : null
-  const children = bytes && size ? [new ImageRun({ data: bytes.data, transformation: fitLogo(size), type: bytes.type })] : []
-  return new TableCell({
-    children: [new Paragraph({ children, alignment: align })],
-    width: { size: 4950, type: WidthType.DXA },
-    borders: { top: NONE, bottom: NONE, left: NONE, right: NONE },
-  })
+  return bytes && size ? new ImageRun({ data: bytes.data, transformation: fitLogo(size), type: bytes.type }) : null
 }
 
-/** Both logos on every page, left and right, like the original confirmation's header. */
+/** Both logos side by side on the left of every page header (PM 2026-11-19). */
 function logoHeader(d: ConfirmationData): Header | undefined {
-  if (!d.logos.left && !d.logos.right) return undefined
-  return new Header({
-    children: [
-      new Table({
-        width: { size: 9900, type: WidthType.DXA },
-        columnWidths: [4950, 4950],
-        rows: [new TableRow({ children: [logoCell(d.logos.left, AlignmentType.LEFT), logoCell(d.logos.right, AlignmentType.RIGHT)] })],
-      }),
-    ],
+  const runs = [logoRun(d.logos.left), logoRun(d.logos.right)].filter((r): r is ImageRun => r !== null)
+  if (!runs.length) return undefined
+  const children: (ImageRun | TextRun)[] = []
+  runs.forEach((r, i) => {
+    if (i > 0) children.push(new TextRun({ text: '      ' }))
+    children.push(r)
   })
+  return new Header({ children: [new Paragraph({ children, alignment: AlignmentType.LEFT })] })
 }
 
 /** Build the confirmation as an editable Word file (staff can tweak before sending). */
@@ -192,7 +185,7 @@ export async function buildConfirmationDocx(d: ConfirmationData, opts: { hero?: 
   } else {
     children.push(
       new Paragraph({
-        children: [run(coverTitle(d), { bold: true, color: RED, size: 40 })],
+        children: [run(coverTitle(d), { bold: true, color: RED, size: 2 * oneLineTitlePx(coverTitle(d), 480, 20) })],
         spacing: { after: 60 },
       }),
       para(`${d.tourCode}  ·  Pre-confirmation itinerary`, { bold: true, color: NAVY, size: 26, after: 160 }),

@@ -47,16 +47,30 @@ describe('unknown hotel stars', () => {
 describe('logos in the preview / PDF', () => {
   const L = 'data:image/png;base64,AAAA'
   const R = 'data:image/jpeg;base64,BBBB'
-  it('shows both logos on the cover and again where the trip details start', () => {
+  it('both logos sit together on the left in a table header, which browsers repeat on every printed page', () => {
     const html = renderToStaticMarkup(<ConfirmationDocument data={{ ...sampleConfirmation(), logos: { left: L, right: R } }} />)
-    expect(html.split(L).length - 1).toBe(2)
-    expect(html.split(R).length - 1).toBe(2)
+    const start = html.indexOf('<thead data-logo-header')
+    const thead = html.slice(start, html.indexOf('</thead>', start))
+    expect(start).toBeGreaterThan(-1)
+    expect(thead).toContain(L)
+    expect(thead).toContain(R)
+    expect(thead.indexOf(L)).toBeLessThan(thead.indexOf(R))
+    expect(html.split(L).length - 1).toBe(1)
+    expect(thead).not.toContain('justify-between')
   })
-  it('banner style shows them once above the red bar; no logos -> no empty images', () => {
-    const banner = renderToStaticMarkup(
-      <ConfirmationDocument data={{ ...sampleConfirmation(), cover: { style: 'banner', hero: 'auto', title: '' }, logos: { left: L, right: '' } }} />,
-    )
-    expect(banner.split(L).length - 1).toBe(1)
-    expect(renderToStaticMarkup(<ConfirmationDocument data={sampleConfirmation()} />)).not.toContain('alt="Logo"')
+  it('one logo still prints; no logos -> no header row at all', () => {
+    const one = renderToStaticMarkup(<ConfirmationDocument data={{ ...sampleConfirmation(), logos: { left: '', right: R } }} />)
+    expect(one).toContain('data-logo-header')
+    expect(renderToStaticMarkup(<ConfirmationDocument data={sampleConfirmation()} />)).not.toContain('data-logo-header')
+  })
+})
+
+describe('one-line cover title (PM 2026-11-19: 中文字必须要缩到一行)', () => {
+  it('never wraps and shrinks with length', () => {
+    const html = renderToStaticMarkup(<ConfirmationDocument data={{ ...sampleConfirmation(), cover: { style: 'photo', hero: 'auto', title: '' } }} />)
+    const h1 = html.slice(html.indexOf('<h1'), html.indexOf('</h1>'))
+    expect(h1).toContain('whitespace-nowrap')
+    expect(h1).toContain('Welcome to China! 欢迎到中国！')
+    expect(h1).toMatch(/font-size:min\(40px, ?calc\(96cqw/)
   })
 })
