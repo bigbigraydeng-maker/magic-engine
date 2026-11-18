@@ -1,7 +1,7 @@
 import type { ConfirmationData } from '@/lib/confirmation/types'
 import { POWER_BANK_TIP_TITLE } from '@/lib/confirmation/defaults'
 import { splitLines } from '@/lib/confirmation/validate'
-import { coverRouteStops, coverTitle } from '@/lib/confirmation/cover'
+import { coverRouteStops, coverTitle, titleUnits } from '@/lib/confirmation/cover'
 
 /** The branded, print-ready confirmation. Browser "Save as PDF" prints exactly this element. */
 export default function ConfirmationDocument({ data: d, heroSrc }: { data: ConfirmationData; heroSrc?: string | null }) {
@@ -10,6 +10,22 @@ export default function ConfirmationDocument({ data: d, heroSrc }: { data: Confi
 
   return (
     <article id="confirmation-doc" className="mx-auto max-w-[800px] bg-white text-[13px] leading-relaxed text-[#1F2937] shadow-sm print:shadow-none">
+      {/* The logo row is a table header: browsers repeat <thead> at the top of every printed page,
+          so both logos appear on every PDF page (PM 2026-11-19: 「每页都需要」). */}
+      <table className="w-full border-collapse">
+        {(d.logos.left || d.logos.right) && (
+          <thead data-logo-header="">
+            <tr>
+              <td className="bg-white px-8 pb-3 pt-4">
+                <LogoBar left={d.logos.left} right={d.logos.right} />
+              </td>
+            </tr>
+          </thead>
+        )}
+        <tbody>
+          <tr>
+            <td className="p-0 align-top">
+
       <div className="flex h-[6px]" aria-hidden>
         <i className="block w-[64%] bg-[#B61E2E]" />
         <i className="block w-[36%] bg-[#D6A756]" />
@@ -27,9 +43,8 @@ export default function ConfirmationDocument({ data: d, heroSrc }: { data: Confi
               Pre-confirmation · {d.groundOperator || 'Ground operator'}
             </p>
           </div>
-          <div className="bg-[#FBF7F0] px-8 pb-10 pt-4">
-            <LogoBar left={d.logos.left} right={d.logos.right} className="mb-6" />
-            <h1 className="font-serif text-[38px] font-semibold leading-[1.1] tracking-tight text-[#23201C]">{coverTitle(d)}</h1>
+          <div className="bg-[#FBF7F0] px-8 pb-10 pt-4" style={{ containerType: 'inline-size' }}>
+            <h1 className="whitespace-nowrap font-serif font-semibold leading-[1.15] tracking-tight text-[#23201C]" style={oneLine(coverTitle(d), 40)}>{coverTitle(d)}</h1>
             <p className="mt-3 text-[13px] font-semibold uppercase tracking-[0.15em] text-[#B61E2E]">{coverRouteStops(d).join('  ·  ')}</p>
             <div className="my-5 h-px bg-[#E4DCD0]" />
             <div className="flex flex-wrap gap-x-12 gap-y-4 text-[13px]">
@@ -50,17 +65,15 @@ export default function ConfirmationDocument({ data: d, heroSrc }: { data: Confi
         </section>
       ) : (
         <>
-        <LogoBar left={d.logos.left} right={d.logos.right} className="px-8 py-4" />
-        <div className="bg-[#B61E2E] px-8 py-7 text-white">
+        <div className="bg-[#B61E2E] px-8 py-7 text-white" style={{ containerType: 'inline-size' }}>
           <p className="text-[11px] uppercase tracking-[0.25em] opacity-80">{d.groundOperator || 'Ground operator'} · Pre-confirmation</p>
-          <h1 className="mt-1 font-serif text-3xl font-semibold">{coverTitle(d)}</h1>
+          <h1 className="mt-1 whitespace-nowrap font-serif font-semibold" style={oneLine(coverTitle(d), 30)}>{coverTitle(d)}</h1>
           <p className="mt-2 text-lg font-semibold tracking-wide">{d.tourCode || '——'}</p>
         </div>
         </>
       )}
 
       <div className="px-8 py-6">
-        {d.cover.style === 'photo' && <LogoBar left={d.logos.left} right={d.logos.right} className="mb-5 border-b border-[#E4DCD0] pb-4" />}
         <dl className="grid grid-cols-[170px_1fr] overflow-hidden rounded-lg border border-[#E5E7EB] text-[13px]">
           <Row label="Your Ground Operator">
             {d.groundOperator} <span className="text-[#6B7280]">· Tel: {d.operatorTel}</span>
@@ -90,7 +103,7 @@ export default function ConfirmationDocument({ data: d, heroSrc }: { data: Confi
           <Row label="Guide" last>{d.guideNote}</Row>
         </dl>
 
-        <h2 className="mb-3 mt-8 border-b-2 border-[#B61E2E] pb-1 font-serif text-xl font-semibold text-[#B61E2E]">
+        <h2 className="mb-3 mt-8 break-after-avoid border-b-2 border-[#B61E2E] pb-1 font-serif text-xl font-semibold text-[#B61E2E]">
           {d.tourCode} · Itinerary
         </h2>
         <table className="w-full border-collapse text-left">
@@ -176,21 +189,30 @@ export default function ConfirmationDocument({ data: d, heroSrc }: { data: Confi
 
         <p className="mt-8 text-center font-serif text-xl font-semibold text-[#B61E2E]">祝您旅途愉快！ Have a nice trip!</p>
       </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </article>
   )
 }
 
-/** Two logos, left and right, like the header of the original confirmation. Renders nothing without logos. */
-function LogoBar({ left, right, className = '' }: { left: string; right: string; className?: string }) {
+/** Both logos side by side on the left (PM 2026-11-19). Renders nothing without logos. */
+function LogoBar({ left, right }: { left: string; right: string }) {
   if (!left && !right) return null
   return (
-    <div className={`flex items-center justify-between gap-6 ${className}`}>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      {left ? <img src={left} alt="Logo" className="h-14 w-auto max-w-[200px] object-contain" /> : <span />}
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      {right ? <img src={right} alt="Logo" className="h-14 w-auto max-w-[200px] object-contain" /> : <span />}
+    <div className="flex items-center gap-5">
+      {[left, right].filter(Boolean).map((src, i) => (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img key={i} src={src} alt="Logo" className="h-12 w-auto max-w-[180px] object-contain" />
+      ))}
     </div>
   )
+}
+
+/** One-line title: font size shrinks with the box width (cqw) and the text length, capped at `maxPx`. */
+function oneLine(text: string, maxPx: number): React.CSSProperties {
+  return { fontSize: `min(${maxPx}px, calc(96cqw / ${titleUnits(text).toFixed(2)}))` }
 }
 
 function Meta({ label, children }: { label: string; children: React.ReactNode }) {
@@ -203,7 +225,7 @@ function Meta({ label, children }: { label: string; children: React.ReactNode })
 }
 
 function Heading({ children }: { children: React.ReactNode }) {
-  return <h2 className="mb-3 mt-8 border-b-2 border-[#B61E2E] pb-1 font-serif text-xl font-semibold text-[#B61E2E]">{children}</h2>
+  return <h2 className="mb-3 mt-8 break-after-avoid border-b-2 border-[#B61E2E] pb-1 font-serif text-xl font-semibold text-[#B61E2E]">{children}</h2>
 }
 
 function Row({ label, children, last }: { label: string; children: React.ReactNode; last?: boolean }) {

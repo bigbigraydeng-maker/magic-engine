@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fitHero } from '@/lib/confirmation/docx'
+import { oneLineTitlePx, titleUnits } from '@/lib/confirmation/cover'
 import { resolveHeroName, coverRouteStops, coverTitle, jpegSize, heroLabel } from '@/lib/confirmation/cover'
 import { parseConfirmation } from '@/lib/confirmation/validate'
 import { sampleConfirmation, emptyConfirmation } from '@/lib/confirmation/defaults'
@@ -67,5 +68,16 @@ describe('Codex review fixes', () => {
     expect(portrait.height).toBeLessThanOrEqual(420)
     expect(Math.abs(portrait.width / portrait.height - 1000 / 1500)).toBeLessThan(0.01)
     expect(fitHero({ width: 1400, height: 933 })).toEqual({ width: 630, height: 420 })
+  })
+})
+
+describe('one-line title sizing', () => {
+  it('Chinese counts about twice as wide as Latin, and the size shrinks so the title fits one line', () => {
+    expect(titleUnits('欢迎')).toBeGreaterThan(titleUnits('ab') * 1.5)
+    const t = 'Welcome to China! 欢迎到中国！'
+    const px = oneLineTitlePx(t, 480, 32)
+    expect(px * titleUnits(t)).toBeLessThanOrEqual(480)
+    expect(oneLineTitlePx('Beijing', 480, 32)).toBe(32)
+    expect(oneLineTitlePx('很长的标题'.repeat(20), 480, 32)).toBe(16)
   })
 })
