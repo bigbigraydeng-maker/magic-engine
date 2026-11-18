@@ -1,8 +1,10 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import ConfirmationDocument from './ConfirmationDocument'
 import { emptyConfirmation, sampleConfirmation } from '@/lib/confirmation/defaults'
+import { HERO_CHOICES } from '@/lib/tailor-made/hero-rules'
+import { heroLabel, resolveHeroName } from '@/lib/confirmation/cover'
 import { parseConfirmation, validateConfirmation } from '@/lib/confirmation/validate'
 import { EMPTY_DAY, EMPTY_HOTEL, type ConfirmationData } from '@/lib/confirmation/types'
 
@@ -15,6 +17,8 @@ export default function ConfirmationGenerator({ clientId }: { clientId: string }
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [restored, setRestored] = useState(false)
+  const [heroSrc, setHeroSrc] = useState<string | null>(null)
+  const heroCache = useRef<Record<string, string>>({})
 
   // Per-browser convenience only: restore an unfinished draft.
   useEffect(() => {
@@ -35,6 +39,30 @@ export default function ConfirmationGenerator({ clientId }: { clientId: string }
       /* ignore */
     }
   }, [d, restored, clientId])
+
+  // Cover picture for the preview: same pictures Tailor-made uses, fetched once per name.
+  const heroName = useMemo(() => resolveHeroName(d), [d])
+  const photo = d.cover.style === 'photo'
+  useEffect(() => {
+    if (!photo) return
+    const cached = heroCache.current[heroName]
+    if (cached) {
+      setHeroSrc(cached)
+      return
+    }
+    let live = true
+    fetch(`/api/clients/${clientId}/tailor-made/heroes?name=${encodeURIComponent(heroName)}`, { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { dataUri?: string } | null) => {
+        if (!live || !j?.dataUri) return
+        heroCache.current[heroName] = j.dataUri
+        setHeroSrc(j.dataUri)
+      })
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [heroName, photo, clientId])
 
   const errors = validateConfirmation(d)
   const set = <K extends keyof ConfirmationData>(k: K, v: ConfirmationData[K]) => setD((p) => ({ ...p, [k]: v }))
@@ -101,6 +129,28 @@ export default function ConfirmationGenerator({ clientId }: { clientId: string }
             {message ?? `还差：${errors.join('；')}`}
           </div>
         )}
+
+        <Box title="封面">
+          <Field label="封面样式">
+            <select className={input} value={d.cover.style} onChange={(e) => set('cover', { ...d.cover, style: e.target.value === 'banner' ? 'banner' : 'photo' })}>
+              <option value="photo">图片封面（和 Tailor-made 一样：大图 + 米色信息面板）</option>
+              <option value="banner">简洁红条（不带图片，不单独占一页）</option>
+            </select>
+          </Field>
+          {photo && (
+            <Field label={d.cover.hero === 'auto' ? `封面图片：自动，系统按行程选了「${heroLabel(heroName)}」` : '封面图片'}>
+              <select className={input} value={d.cover.hero} onChange={(e) => set('cover', { ...d.cover, hero: e.target.value })}>
+                <option value="auto">自动（按行程选）</option>
+                {HERO_CHOICES.map((c) => (
+                  <option key={c.name} value={c.name}>{c.label}</option>
+                ))}
+              </select>
+            </Field>
+          )}
+          <Field label="封面大标题（留空 = Welcome to China! 欢迎到中国！）">
+            <input className={input} value={d.cover.title} onChange={(e) => set('cover', { ...d.cover, title: e.target.value })} placeholder="Beijing Highlights" />
+          </Field>
+        </Box>
 
         <Box title="基本信息">
           <Field label="团号（只填一次，全文自动同步）">
@@ -193,7 +243,7 @@ export default function ConfirmationGenerator({ clientId }: { clientId: string }
 
       <section>
         <p className="mb-2 text-xs uppercase tracking-widest text-[#6B7280] print:hidden">预览（所见即所得，下载 PDF 就是这个样子）</p>
-        <ConfirmationDocument data={d} />
+        <ConfirmationDocument data={d} heroSrc={heroSrc} />
       </section>
     </div>
   )

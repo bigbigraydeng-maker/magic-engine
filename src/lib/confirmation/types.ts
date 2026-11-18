@@ -40,7 +40,21 @@ export interface ConfirmationTip {
   body: string
 }
 
+/** photo = Tailor-made style cover page (big picture + cream panel); banner = compact red title bar */
+export type CoverStyle = 'photo' | 'banner'
+
+export interface ConfirmationCover {
+  style: CoverStyle
+  /** 'auto' = pick from the itinerary; otherwise a name from HERO_CHOICES */
+  hero: string
+  /** Big title on the cover; empty = use the default */
+  title: string
+}
+
+export const DEFAULT_COVER: ConfirmationCover = { style: 'photo', hero: 'auto', title: '' }
+
 export interface ConfirmationData {
+  cover: ConfirmationCover
   tourCode: string
   groundOperator: string
   operatorTel: string
