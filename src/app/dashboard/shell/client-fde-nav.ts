@@ -25,6 +25,9 @@ export function buildClientFdeSections(
     ...(feat.tailor_made
       ? [{ key: 'tailor-made', label: '定制行程', mark: '程', href: at('/tailor-made') }]
       : []),
+    ...(feat.tailor_made
+      ? [{ key: 'confirmation', label: '确认单', mark: '确', href: at('/confirmation') }]
+      : []),
     ...(feat.agents ? [{ key: 'agents', label: '同行渠道', mark: '渠', href: at('/agents') }] : []),
     ...(feat.business_calculator && homeEntryVisible(facts, 'business-calculator')
       ? [{ key: 'business-calculator', label: '生意计算器', mark: '算', href: at('/business-calculator') }]
