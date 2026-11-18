@@ -1,4 +1,5 @@
-import { DEFAULT_COVER, type ConfirmationData } from './types'
+import { DEFAULT_COVER, NO_LOGOS, type ConfirmationData } from './types'
+import { isLogo } from './logo-rules'
 
 /** A tour code is one token of letters/digits/hyphens (e.g. CTS4270729), never with spaces. */
 const TOUR_CODE_RE = /^[A-Z0-9][A-Z0-9-]{3,31}$/
@@ -74,5 +75,12 @@ export function parseConfirmation(input: unknown): { ok: true; data: Confirmatio
     if (!isObj(c) || (c.style !== 'photo' && c.style !== 'banner') || !str(c.hero) || !str(c.title)) return bad('cover')
     cover = { style: c.style, hero: c.hero, title: c.title }
   }
-  return { ok: true, data: { ...(o as unknown as ConfirmationData), cover } }
+  // logos are newer still: missing -> none; present -> two small PNG/JPEG data URIs (or '')
+  let logos = NO_LOGOS
+  if (o.logos !== undefined) {
+    const l = o.logos
+    if (!isObj(l) || !isLogo(l.left) || !isLogo(l.right)) return bad('logos')
+    logos = { left: l.left, right: l.right }
+  }
+  return { ok: true, data: { ...(o as unknown as ConfirmationData), cover, logos } }
 }

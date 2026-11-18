@@ -85,4 +85,14 @@ describe('POST /api/clients/[id]/confirmation/extract', () => {
     expect(body.notes.join()).not.toContain('没找到团号')
     expect(body.notes[0]).toContain('CTS4270729')
   })
+
+  it('a Word confirmation brings its two header logos along, left/right in order', async () => {
+    const { readFileSync } = await import('node:fs')
+    const L = 'data:image/png;base64,' + readFileSync('public/confirmation/powerbank-3c.png').toString('base64')
+    const R = 'data:image/jpeg;base64,' + readFileSync('templates/tailor-made-itinerary/heroes/beijing.jpg').toString('base64')
+    const docx = await buildConfirmationDocx({ ...sampleConfirmation(), logos: { left: L, right: R } })
+    const body = await (await upload(new File([new Uint8Array(docx)], 'x.docx', { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }))).json()
+    expect(body.logos).toEqual([L, R])
+    expect(body.notes.join()).toContain('logo')
+  })
 })

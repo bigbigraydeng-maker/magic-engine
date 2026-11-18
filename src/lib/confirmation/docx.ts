@@ -5,6 +5,7 @@ import {
   BorderStyle,
   Document,
   Footer,
+  Header,
   ImageRun,
   PageNumber,
   Packer,
@@ -20,6 +21,7 @@ import type { ConfirmationData } from './types'
 import { POWER_BANK_TIP_TITLE } from './defaults'
 import { splitLines } from './validate'
 import { coverRouteStops, coverTitle, jpegSize } from './cover'
+import { fitLogo, imageSize, logoBytes } from './logos'
 
 const RED = 'B61E2E'
 const NAVY = '1F2937'
@@ -155,6 +157,31 @@ function coverPage(d: ConfirmationData, hero: Buffer | null): Paragraph[] {
   return out
 }
 
+function logoCell(uri: string, align: (typeof AlignmentType)[keyof typeof AlignmentType]): TableCell {
+  const bytes = uri ? logoBytes(uri) : null
+  const size = bytes ? imageSize(bytes.data) : null
+  const children = bytes && size ? [new ImageRun({ data: bytes.data, transformation: fitLogo(size), type: bytes.type })] : []
+  return new TableCell({
+    children: [new Paragraph({ children, alignment: align })],
+    width: { size: 4950, type: WidthType.DXA },
+    borders: { top: NONE, bottom: NONE, left: NONE, right: NONE },
+  })
+}
+
+/** Both logos on every page, left and right, like the original confirmation's header. */
+function logoHeader(d: ConfirmationData): Header | undefined {
+  if (!d.logos.left && !d.logos.right) return undefined
+  return new Header({
+    children: [
+      new Table({
+        width: { size: 9900, type: WidthType.DXA },
+        columnWidths: [4950, 4950],
+        rows: [new TableRow({ children: [logoCell(d.logos.left, AlignmentType.LEFT), logoCell(d.logos.right, AlignmentType.RIGHT)] })],
+      }),
+    ],
+  })
+}
+
 /** Build the confirmation as an editable Word file (staff can tweak before sending). */
 export async function buildConfirmationDocx(d: ConfirmationData, opts: { hero?: Buffer | null } = {}): Promise<Buffer> {
   const children: (Paragraph | Table)[] = []
@@ -227,7 +254,11 @@ export async function buildConfirmationDocx(d: ConfirmationData, opts: { hero?: 
     title: `${d.tourCode} confirmation`,
     sections: [
       {
-        properties: { page: { margin: { top: 900, bottom: 900, left: 1000, right: 1000 } } },
+        properties: {
+          // with logos the header needs its own room above the text (logo box is 60px ≈ 900 twips)
+          page: { margin: { top: d.logos.left || d.logos.right ? 1700 : 900, bottom: 900, left: 1000, right: 1000, header: 450 } },
+        },
+        headers: logoHeader(d) ? { default: logoHeader(d)! } : undefined,
         footers: {
           default: new Footer({
             children: [

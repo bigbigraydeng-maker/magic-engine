@@ -9,6 +9,29 @@ import { parseConfirmation, validateConfirmation } from '@/lib/confirmation/vali
 import { EMPTY_DAY, EMPTY_HOTEL, type ConfirmationData } from '@/lib/confirmation/types'
 
 const draftKey = (clientId: string) => `confirmation-draft-v1:${clientId}`
+/** Logos are remembered per client separately, so 「清空」 or a new upload does not lose them. */
+const logosKey = (clientId: string) => `confirmation-logos-v1:${clientId}`
+
+/** Shrink an uploaded logo in the browser (max 600×240) and return a PNG data URI. */
+async function shrinkLogo(file: File): Promise<string> {
+  const url = URL.createObjectURL(file)
+  try {
+    const img = await new Promise<HTMLImageElement>((ok, fail) => {
+      const i = new Image()
+      i.onload = () => ok(i)
+      i.onerror = () => fail(new Error('这张图打不开，请换 PNG 或 JPG'))
+      i.src = url
+    })
+    const k = Math.min(1, 600 / img.naturalWidth, 240 / img.naturalHeight)
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(img.naturalWidth * k))
+    canvas.height = Math.max(1, Math.round(img.naturalHeight * k))
+    canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height)
+    return canvas.toDataURL('image/png')
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
 const input = 'w-full rounded-md border border-[#D1D5DB] bg-white px-2.5 py-1.5 text-sm focus:border-[#B61E2E] focus:outline-none'
 const btn = 'rounded-md px-3 py-2 text-sm font-medium transition'
 
@@ -29,7 +52,10 @@ export default function ConfirmationGenerator({ clientId }: { clientId: string }
     try {
       const raw = localStorage.getItem(draftKey(clientId))
       const parsed = raw ? parseConfirmation(JSON.parse(raw)) : null
-      if (parsed?.ok) setD(parsed.data)
+      const savedLogos = parseConfirmation({ ...emptyConfirmation(), logos: JSON.parse(localStorage.getItem(logosKey(clientId)) || 'null') ?? undefined })
+      const logos = savedLogos.ok ? savedLogos.data.logos : emptyConfirmation().logos
+      if (parsed?.ok) setD(parsed.data.logos.left || parsed.data.logos.right ? parsed.data : { ...parsed.data, logos })
+      else setD((p) => ({ ...p, logos }))
     } catch {
       /* ignore */
     }
@@ -39,6 +65,7 @@ export default function ConfirmationGenerator({ clientId }: { clientId: string }
     if (!restored) return // never overwrite a saved draft with the blank template before it is read
     try {
       localStorage.setItem(draftKey(clientId), JSON.stringify(d))
+      localStorage.setItem(logosKey(clientId), JSON.stringify(d.logos))
     } catch {
       /* ignore */
     }
@@ -106,7 +133,7 @@ export default function ConfirmationGenerator({ clientId }: { clientId: string }
     setMessage(null)
     setNotes([])
     // anything the staff typed (other than tips/cover, which are kept) would be replaced
-    const strip = (x: ConfirmationData) => JSON.stringify({ ...x, tips: [], cover: null })
+    const strip = (x: ConfirmationData) => JSON.stringify({ ...x, tips: [], cover: null, logos: null })
     const hasContent = strip(d) !== strip(emptyConfirmation())
     if (hasContent && !confirm('上传后会用文件里读出来的内容覆盖现在已填的内容（封面和小贴士不动）。继续？')) return
     setReading(true)
@@ -114,12 +141,18 @@ export default function ConfirmationGenerator({ clientId }: { clientId: string }
       const form = new FormData()
       form.append('file', file)
       const res = await fetch(`/api/clients/${clientId}/confirmation/extract`, { method: 'POST', body: form, credentials: 'include' })
-      const j = (await res.json().catch(() => ({}))) as { error?: string; data?: unknown; notes?: string[] }
+      const j = (await res.json().catch(() => ({}))) as { error?: string; data?: unknown; notes?: string[]; logos?: string[] }
       if (!res.ok) throw new Error(j.error || `读取失败（${res.status}）`)
       const parsed = parseConfirmation(j.data)
       if (!parsed.ok) throw new Error('读出来的内容格式不对，请重试或手动填写')
       // keep what the file does not carry: the 14 tips and the cover choice
-      setD((prev) => ({ ...parsed.data, tips: prev.tips, cover: prev.cover }))
+      const fileLogos = (j.logos ?? []).filter((x) => typeof x === 'string')
+      setD((prev) => ({
+        ...parsed.data,
+        tips: prev.tips,
+        cover: prev.cover,
+        logos: fileLogos.length ? { left: fileLogos[0] ?? '', right: fileLogos[1] ?? '' } : prev.logos,
+      }))
       setNotes(['内容是 AI 从文件里读出来的，请逐项核对再生成。', ...(j.notes ?? [])])
     } catch (e) {
       setMessage(e instanceof Error ? e.message : '读取失败')
@@ -155,8 +188,8 @@ export default function ConfirmationGenerator({ clientId }: { clientId: string }
           <button type="button" disabled={busy} className={`${btn} bg-[#1F2937] text-white hover:opacity-90 disabled:opacity-50`} onClick={downloadWord}>
             {busy ? '生成中…' : '下载 Word（可再改）'}
           </button>
-          <button type="button" className={`${btn} border border-[#D1D5DB] bg-white`} onClick={() => setD(sampleConfirmation())}>载入示例</button>
-          <button type="button" className={`${btn} border border-[#D1D5DB] bg-white`} onClick={() => confirm('清空当前内容？') && setD(emptyConfirmation())}>清空</button>
+          <button type="button" className={`${btn} border border-[#D1D5DB] bg-white`} onClick={() => setD((p) => ({ ...sampleConfirmation(), logos: p.logos }))}>载入示例</button>
+          <button type="button" className={`${btn} border border-[#D1D5DB] bg-white`} onClick={() => confirm('清空当前内容？（logo 会保留）') && setD((p) => ({ ...emptyConfirmation(), logos: p.logos }))}>清空</button>
         </div>
         {(message || errors.length > 0) && (
           <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -207,6 +240,45 @@ export default function ConfirmationGenerator({ clientId }: { clientId: string }
           <Field label="封面大标题（留空 = Welcome to China! 欢迎到中国！）">
             <input className={input} value={d.cover.title} onChange={(e) => set('cover', { ...d.cover, title: e.target.value })} placeholder="Beijing Highlights" />
           </Field>
+        </Box>
+
+        <Box title="Logo（每页页眉，左右各一个；会记住，下次不用再传）">
+          {(['left', 'right'] as const).map((side) => (
+            <div key={side} className="flex items-center gap-3">
+              <span className="w-12 shrink-0 text-xs font-medium text-[#4B5563]">{side === 'left' ? '左边' : '右边'}</span>
+              {d.logos[side] ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={d.logos[side]} alt="" className="h-10 w-auto max-w-[140px] rounded border border-[#E5E7EB] bg-white object-contain p-1" />
+              ) : (
+                <span className="text-xs text-[#9CA3AF]">未上传</span>
+              )}
+              <label className="cursor-pointer text-sm text-[#B61E2E]">
+                {d.logos[side] ? '换一张' : '上传'}
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const f = e.target.files?.[0]
+                    e.target.value = ''
+                    if (!f) return
+                    try {
+                      const uri = await shrinkLogo(f)
+                      set('logos', { ...d.logos, [side]: uri })
+                    } catch (err) {
+                      setMessage(err instanceof Error ? err.message : '这张图用不了')
+                    }
+                  }}
+                />
+              </label>
+              {d.logos[side] && (
+                <button type="button" className="text-sm text-[#6B7280]" onClick={() => set('logos', { ...d.logos, [side]: '' })}>去掉</button>
+              )}
+            </div>
+          ))}
+          {d.logos.left || d.logos.right ? (
+            <button type="button" className="text-xs text-[#6B7280]" onClick={() => set('logos', { left: d.logos.right, right: d.logos.left })}>左右对调</button>
+          ) : null}
         </Box>
 
         <Box title="基本信息">

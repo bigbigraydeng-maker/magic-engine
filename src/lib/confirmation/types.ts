@@ -53,8 +53,17 @@ export interface ConfirmationCover {
 
 export const DEFAULT_COVER: ConfirmationCover = { style: 'photo', hero: 'auto', title: '' }
 
+/** Two logos printed on every page header, like the CTS4270729 original (agent logo left, operator logo right). data: URIs, '' = none. */
+export interface ConfirmationLogos {
+  left: string
+  right: string
+}
+
+export const NO_LOGOS: ConfirmationLogos = { left: '', right: '' }
+
 export interface ConfirmationData {
   cover: ConfirmationCover
+  logos: ConfirmationLogos
   tourCode: string
   groundOperator: string
   operatorTel: string
