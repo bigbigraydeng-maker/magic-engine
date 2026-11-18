@@ -26,7 +26,8 @@ export default async function ConfirmationPage({ params }: { params: { id: strin
           填好左边，右边就是客人收到的文件。可下载 PDF，或下载可再编辑的 Word。
         </p>
       </div>
-      <ConfirmationGenerator clientId={params.id} />
+      {/* key: switching client remounts, so one client's draft can never be saved under another */}
+      <ConfirmationGenerator key={params.id} clientId={params.id} />
     </div>
   )
 }

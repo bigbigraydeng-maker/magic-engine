@@ -6,7 +6,7 @@ import { emptyConfirmation, sampleConfirmation } from '@/lib/confirmation/defaul
 import { parseConfirmation, validateConfirmation } from '@/lib/confirmation/validate'
 import { EMPTY_DAY, EMPTY_HOTEL, type ConfirmationData } from '@/lib/confirmation/types'
 
-const DRAFT_KEY = 'cts-confirmation-draft-v1'
+const draftKey = (clientId: string) => `confirmation-draft-v1:${clientId}`
 const input = 'w-full rounded-md border border-[#D1D5DB] bg-white px-2.5 py-1.5 text-sm focus:border-[#B61E2E] focus:outline-none'
 const btn = 'rounded-md px-3 py-2 text-sm font-medium transition'
 
@@ -19,22 +19,22 @@ export default function ConfirmationGenerator({ clientId }: { clientId: string }
   // Per-browser convenience only: restore an unfinished draft.
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(DRAFT_KEY)
+      const raw = localStorage.getItem(draftKey(clientId))
       const parsed = raw ? parseConfirmation(JSON.parse(raw)) : null
       if (parsed?.ok) setD(parsed.data)
     } catch {
       /* ignore */
     }
     setRestored(true)
-  }, [])
+  }, [clientId])
   useEffect(() => {
     if (!restored) return // never overwrite a saved draft with the blank template before it is read
     try {
-      localStorage.setItem(DRAFT_KEY, JSON.stringify(d))
+      localStorage.setItem(draftKey(clientId), JSON.stringify(d))
     } catch {
       /* ignore */
     }
-  }, [d, restored])
+  }, [d, restored, clientId])
 
   const errors = validateConfirmation(d)
   const set = <K extends keyof ConfirmationData>(k: K, v: ConfirmationData[K]) => setD((p) => ({ ...p, [k]: v }))

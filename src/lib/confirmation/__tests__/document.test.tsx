@@ -16,3 +16,9 @@ describe('ConfirmationDocument (what the PDF prints)', () => {
     expect([...new Set(html.match(/DEMO\d{6}/g))]).toEqual(['DEMO123456'])
   })
 })
+
+describe('print safety', () => {
+  it('does not use a <header> element: the dashboard print CSS hides every <header>, which dropped the title block from the PDF', () => {
+    expect(renderToStaticMarkup(<ConfirmationDocument data={sampleConfirmation()} />)).not.toContain('<header')
+  })
+})
