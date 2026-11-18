@@ -21,6 +21,7 @@ export type Segment =
   | 'replied'          // 客户回了，还没人接话
   | 'callback_due'     // 约好的时间到了
   | 'new_untouched'    // 进线了，没人联系过
+  | 'reading_site'     // 近 7 天从我们邮件进官网，看了 2 个以上团页面或又回来看手册，之后没人跟
   | 'clicked_link'     // 点开了我们邮件里的某个链接，之后没人跟
   | 'handoff_sop'      // 联系不上超过 3 天，交给自动跟进
   | 'retry_channel'    // 打过一次没人接
@@ -73,6 +74,13 @@ export const SEGMENT_ACTION_META: Record<Segment, SegmentActionMeta> = {
   new_untouched: {
     label: '新客人，还没打过',
     howTo: '刚留下资料，人还热着。越早打通越容易成 —— 先打里面最新的。',
+    batch: 'call_one_by_one',
+  },
+  reading_site: {
+    // 开场白不提他看了哪个团（在线手册设计 §5：客人会觉得被盯着）。员工心里知道就行 ——
+    // 卡片下面那行原因写着他看了哪几个团。
+    label: '正在看手册',
+    howTo: '这几天他自己在官网翻我们的手册和团页面，之后没人联系过他。今天打给他，开口说「想跟您聊聊 2027 年的团，您有没有比较中意的？」—— 别说「看到您在看某某团」。',
     batch: 'call_one_by_one',
   },
   clicked_link: {
@@ -263,6 +271,34 @@ export interface ContactLike {
   hasPhone?: boolean
   hasEmail?: boolean
   hasMessenger?: boolean
+  /**
+   * 近 7 天他从我们邮件里的链接进了客户官网之后看了什么（真人点击，扫描器不算）。
+   * 读路径算好传进来（link-tracking/site-reading-prod）；不传 = 没有这个信息，规则 3.5 不触发。
+   */
+  siteReading?: SiteReading | null
+}
+
+/** 近 7 天在官网看了什么。`tours` 是看过的团名（去重），`brochureVisits` 是隔开半天以上算一次的手册访问次数。 */
+export interface SiteReading {
+  tours: string[]
+  brochureVisits: number
+  lastAt: string
+}
+
+/** 「正在看手册」的门槛：看了 2 个以上团页面，或者隔了半天以上又回来看手册。 */
+export function isReadingSite(r: SiteReading | null | undefined): r is SiteReading {
+  return !!r && (r.tours.length >= 2 || r.brochureVisits >= 2)
+}
+
+/** 卡片下面那行：只给员工看，说清他看了什么（团名最多列 3 个）。 */
+export function siteReadingReason(r: SiteReading): string {
+  const parts: string[] = []
+  if (r.tours.length > 0) {
+    const shown = r.tours.slice(0, 3).join('、')
+    parts.push(r.tours.length > 3 ? `看了 ${shown} 等 ${r.tours.length} 个团` : `看了 ${shown}`)
+  }
+  if (r.brochureVisits >= 2) parts.push(`${r.brochureVisits} 次回来翻手册`)
+  return `这几天在官网${parts.join('，')}，之后没人联系过他`
 }
 
 export interface SegmentResult {
@@ -335,6 +371,8 @@ export interface SegmentResult {
 export const SEGMENT_META: Record<Segment, { temperature: Temperature; priority: number }> = {
   replied:            { temperature: 'hot',  priority: 1 },
   callback_due:       { temperature: 'hot',  priority: 2 },
+  // 他这几天自己在翻手册 —— 比两周前点过一次链接强得多，排在「回话了 / 该回电」之后、新客人之前。
+  reading_site:       { temperature: 'hot',  priority: 3 },
   new_untouched:      { temperature: 'warm', priority: 4 },
   // 点过我们邮件里的链接 —— 比「打过没人接」强得多的再打理由:他自己刚看过。
   // 排在新客人之后:今天刚进线的人比两周前点过链接的更烫。
@@ -860,6 +898,13 @@ export function segmentContact(
     return make('callback_due', '之前约好这个时间回电', 'phone', dueCallback)
   }
 
+  // 3.5) 这几天他自己在官网翻我们的手册 / 团页面，之后没有真人联系过他。
+  //      排在「以后才走」之前：跟点链接一样，一句几周前说的话抵不过他现在正在看。
+  const reading = contact.siteReading
+  if (isReadingSite(reading) && lastOutbound < ts(reading.lastAt)) {
+    return make('reading_site', siteReadingReason(reading), 'phone')
+  }
+
   // 4) 客户说过「要等到什么时候再联系」（旅游剧本 = 出行时间）。
   //
   //    这条信号是不是存在、怎么判"到期了没"，全交给行业剧本（`playbook`）——
@@ -1069,7 +1114,7 @@ export function segmentCounts(
 ): Record<Segment, number> {
   const out: Record<Segment, number> = {
     replied: 0, callback_due: 0, new_untouched: 0, handoff_sop: 0,
-    clicked_link: 0, retry_channel: 0, stale_conversation: 0,
+    reading_site: 0, clicked_link: 0, retry_channel: 0, stale_conversation: 0,
     nurture_future: 0, excluded: 0, not_enquiry_suspect: 0,
   }
   for (const c of contacts) out[segmentContact(c, now, playbook).segment]++

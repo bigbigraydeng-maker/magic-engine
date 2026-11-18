@@ -19,8 +19,9 @@ import { contactCardTitle } from '@/lib/crm/display-name'
 import { buildIdentities, normalisePhone, resolveContact, AmbiguousIdentityError } from '@/lib/crm/identity'
 import { contactKindOf, isSystemAccountName, normaliseDomain, readDomainRules, SYSTEM_ACCOUNT_NAMES } from '@/lib/crm/contact-kind'
 import { EMPTY_ATTRIBUTION } from '@/lib/crm/attribution'
-import { segmentContact } from '@/lib/crm/segments'
+import { segmentContact, type SiteReading } from '@/lib/crm/segments'
 import { buildContactModel } from '@/lib/crm/contact-model'
+import { loadSiteReading } from '@/lib/crm/email-templates/link-tracking/site-reading-prod'
 import { enrichContacts, type SourceKey } from '@/lib/crm/contact-enrichment'
 import { loadAllEnrichmentConversations, loadEnrichmentInputs, type EnrichmentInputs } from '@/lib/crm/contact-enrichment-loader'
 import {
@@ -460,7 +461,7 @@ async function getByIds(
     ])
     timer.step('by_ids')
     const enriched = await enrichForDisplay(clientId, pageContacts, touches, true)
-    const { out, customPerContact } = assembleRows(enriched.contacts, enriched.touches, stageRows, briefs, enriched.sources)
+    const { out, customPerContact } = assembleRows(enriched.contacts, enriched.touches, stageRows, briefs, enriched.sources, await loadSiteReading(supabaseAdmin, clientId, new Date()))
     const res = NextResponse.json({
       total: out.length,
       page: 1,
@@ -744,7 +745,7 @@ async function getPaged(
   timer.step('touches_briefs')
   const enrichedPage = await enrichForDisplay(clientId, pageContacts, touches, true, enrichInputsEarly ?? undefined)
   timer.step('enrich')
-  const { out, customPerContact } = assembleRows(enrichedPage.contacts, enrichedPage.touches, stageRows, briefs, enrichedPage.sources)
+  const { out, customPerContact } = assembleRows(enrichedPage.contacts, enrichedPage.touches, stageRows, briefs, enrichedPage.sources, await loadSiteReading(supabaseAdmin, clientId, new Date()))
   timer.step('assemble')
 
   const res = NextResponse.json({
@@ -921,6 +922,7 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
   )
 
   const takeoverSince = await takeoverRead
+  const siteReading = await loadSiteReading(supabaseAdmin, clientId, nowPri)
   const customPerContact: Array<Record<CustomColumnKey, string | null>> = []
   const { sections, focus } = buildPriorityView(
     {
@@ -934,6 +936,7 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
       focusContactId: query.focusContactId,
       briefs,
       tradeIds,
+      siteReading,
       dayStartMs: localDayStartMs(nowPri, timeZone),
       touchedToday: contactsTouchedToday(touches, nowPri, timeZone),
       stageSuppressedTodayIds,
@@ -1073,7 +1076,7 @@ export async function GET(
   }
 
   const enrichedAll = await enrichForDisplay(clientId, contacts, touches, false)
-  const { out, customPerContact } = assembleRows(enrichedAll.contacts, enrichedAll.touches, stageRows, briefs, enrichedAll.sources)
+  const { out, customPerContact } = assembleRows(enrichedAll.contacts, enrichedAll.touches, stageRows, briefs, enrichedAll.sources, await loadSiteReading(supabaseAdmin, clientId, new Date()))
 
   return NextResponse.json({
     totalContacts: out.length,
@@ -1095,6 +1098,7 @@ function assembleRows(
   stageRows: StageRow[],
   briefs: BriefByContact,
   sources?: Map<string, SourceKey[]>,
+  siteReading?: ReadonlyMap<string, SiteReading>,
 ): {
   out: Array<Record<string, unknown>>
   customPerContact: Array<Record<CustomColumnKey, string | null>>
@@ -1117,7 +1121,7 @@ function assembleRows(
     const tps = byContact.get(c.id) ?? []
     // 装配形状收敛到共享 builder：全部客人 / 今天名单 / WP3 跟进表用同一个函数吃同一份数据，
     // 分段模块只有一份，喂它的形状也只能有一份。见 lib/crm/contact-model 头注。
-    const model = buildContactModel(c, tps, stageMeta)
+    const model = { ...buildContactModel(c, tps, stageMeta), siteReading: siteReading?.get(c.id) ?? null }
     const seg = segmentContact(model, now)
     // 响应行也只有一份 —— view=priority 与本路径共用 responseRowFor，
     // 否则两个入口会各自长出一套字段（2026-09-26 R5b：就是在这里发现它已经被抄了第二份）。
