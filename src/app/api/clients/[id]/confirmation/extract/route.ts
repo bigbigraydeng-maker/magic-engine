@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { clientHasIndustryFeature } from '@/lib/clients/industry-guard'
 import { detectKind, docxToText, plainToText } from '@/lib/tailor-made/read-source'
-import { callExtractModel, ExtractError, mergeExtracted, type ExtractSource } from '@/lib/confirmation/extract'
+import { callExtractModel, ExtractError, mergeExtracted, preferTourCode, type ExtractSource } from '@/lib/confirmation/extract'
 import { emptyConfirmation } from '@/lib/confirmation/defaults'
 
 /**
@@ -44,11 +44,23 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   try {
     const buf = await file.arrayBuffer()
     let source: ExtractSource
-    if (kind === 'pdf') source = { kind: 'pdf', base64: Buffer.from(buf).toString('base64') }
-    else source = { kind: 'text', text: kind === 'docx' ? await docxToText(buf) : await plainToText(buf) }
+    const filename = file.name.slice(0, 200)
+    if (kind === 'pdf') source = { kind: 'pdf', base64: Buffer.from(buf).toString('base64'), filename }
+    else source = { kind: 'text', text: kind === 'docx' ? await docxToText(buf) : await plainToText(buf), filename }
 
     const raw = await callExtractModel(source)
     const { data, notes } = mergeExtracted(raw, emptyConfirmation())
+    // PDFs are read by the AI only, so the "printed in the document" check needs the text: docx/text only
+    if (source.kind === 'text') {
+      const pick = preferTourCode(data.tourCode, filename, source.text)
+      if (pick.note) {
+        data.tourCode = pick.code
+        // the code is filled now, so the "no tour code found" note would contradict it
+        const rest = notes.filter((n) => !n.includes('没找到团号'))
+        notes.length = 0
+        notes.push(pick.note, ...rest)
+      }
+    }
     return NextResponse.json({ data, notes })
   } catch (err) {
     const message = err instanceof Error ? err.message : '读取失败'

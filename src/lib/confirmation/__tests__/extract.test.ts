@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { callExtractModel, mergeExtracted, ExtractError } from '@/lib/confirmation/extract'
+import { callExtractModel, mergeExtracted, preferTourCode, ExtractError } from '@/lib/confirmation/extract'
 import { emptyConfirmation, sampleConfirmation } from '@/lib/confirmation/defaults'
 
 const sample = sampleConfirmation()
@@ -105,5 +105,40 @@ describe('callExtractModel', () => {
     await expect(callExtractModel({ kind: 'text', text: 'x' }, vi.fn(async () => new Response('no', { status: 529 })) as unknown as typeof fetch)).rejects.toThrow('529')
     delete process.env.ANTHROPIC_API_KEY
     await expect(callExtractModel({ kind: 'text', text: 'x' }, ok({}))).rejects.toThrow('密钥')
+  })
+})
+
+describe('real CTS4270729 upload findings (2026-11-19)', () => {
+  const text = 'Your Tour Code: CTS4270429  Dept: 29-Jul-2027\nCTS4270729   pre-confirmation itinerary'
+
+  it('file name CTS4270729 wins over the header code the model picked, and staff are told', () => {
+    const r = preferTourCode('CTS4270429', 'CTS4270729 confirmation(1).docx', text)
+    expect(r.code).toBe('CTS4270729')
+    expect(r.note).toContain('CTS4270429')
+  })
+
+  it('keeps the model choice when the file name has no code, or a code not printed in the document', () => {
+    expect(preferTourCode('CTS4270429', 'confirmation.docx', text)).toEqual({ code: 'CTS4270429', note: null })
+    expect(preferTourCode('CTS4270429', 'CTS9999999.docx', text)).toEqual({ code: 'CTS4270429', note: null })
+    expect(preferTourCode('CTS4270729', 'CTS4270729.docx', text)).toEqual({ code: 'CTS4270729', note: null })
+    // hyphenated codes are recognised too, still as whole codes
+    expect(preferTourCode('CTS-2026-0099', 'CTS-2026-0062 confirmation.docx', 'Code CTS-2026-0099 / CTS-2026-0062').code).toBe('CTS-2026-0062')
+    expect(preferTourCode('CTS-2026-0099', 'CTS-2026-0062.docx', 'Code CTS-2026-0099 / CTS-2026-00621').code).toBe('CTS-2026-0099')
+    // a longer code that merely contains the file-name code does not count as printed
+    expect(preferTourCode('CTS42707290', 'CTS4270729.docx', 'Tour Code: CTS42707290')).toEqual({ code: 'CTS42707290', note: null })
+  })
+
+  it('a departure date without a year is flagged (model returned "29 Jul" for "29-Jul-2027")', () => {
+    expect(mergeExtracted({ tourCode: 'A1234567', departureDate: '29 Jul', days: [{ date: 'd', route: 'r' }] }).notes.join()).toContain('没有年份')
+    expect(mergeExtracted({ tourCode: 'A1234567', departureDate: '29-Jul-2027', days: [{ date: 'd', route: 'r' }] }).notes.join()).not.toContain('年份')
+  })
+
+  it('asks the model for the full dated departure and tells it the file name', async () => {
+    process.env.ANTHROPIC_API_KEY = 'k'
+    const f = vi.fn(async () => new Response(JSON.stringify({ stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'submit_confirmation', input: {} }] }), { status: 200 })) as unknown as typeof fetch
+    await callExtractModel({ kind: 'text', text: 'x', filename: 'CTS4270729.docx' }, f)
+    const body = JSON.parse((vi.mocked(f).mock.calls[0][1] as RequestInit).body as string)
+    expect(body.system).toContain('including the year')
+    expect(body.messages[0].content[0].text).toContain('CTS4270729.docx')
   })
 })
