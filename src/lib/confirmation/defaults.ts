@@ -82,6 +82,7 @@ export const POWER_BANK_TIP_TITLE = 'Power Bank Notice'
 export function emptyConfirmation(): ConfirmationData {
   return {
     cover: { style: 'photo', hero: 'auto', title: '' },
+    logos: { left: '', right: '' },
     tourCode: '',
     groundOperator: '',
     operatorTel: '',

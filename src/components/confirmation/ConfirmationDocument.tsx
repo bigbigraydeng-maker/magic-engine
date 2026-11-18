@@ -28,6 +28,7 @@ export default function ConfirmationDocument({ data: d, heroSrc }: { data: Confi
             </p>
           </div>
           <div className="bg-[#FBF7F0] px-8 pb-10 pt-4">
+            <LogoBar left={d.logos.left} right={d.logos.right} className="mb-6" />
             <h1 className="font-serif text-[38px] font-semibold leading-[1.1] tracking-tight text-[#23201C]">{coverTitle(d)}</h1>
             <p className="mt-3 text-[13px] font-semibold uppercase tracking-[0.15em] text-[#B61E2E]">{coverRouteStops(d).join('  ·  ')}</p>
             <div className="my-5 h-px bg-[#E4DCD0]" />
@@ -48,14 +49,18 @@ export default function ConfirmationDocument({ data: d, heroSrc }: { data: Confi
           </div>
         </section>
       ) : (
+        <>
+        <LogoBar left={d.logos.left} right={d.logos.right} className="px-8 py-4" />
         <div className="bg-[#B61E2E] px-8 py-7 text-white">
           <p className="text-[11px] uppercase tracking-[0.25em] opacity-80">{d.groundOperator || 'Ground operator'} · Pre-confirmation</p>
           <h1 className="mt-1 font-serif text-3xl font-semibold">{coverTitle(d)}</h1>
           <p className="mt-2 text-lg font-semibold tracking-wide">{d.tourCode || '——'}</p>
         </div>
+        </>
       )}
 
       <div className="px-8 py-6">
+        {d.cover.style === 'photo' && <LogoBar left={d.logos.left} right={d.logos.right} className="mb-5 border-b border-[#E4DCD0] pb-4" />}
         <dl className="grid grid-cols-[170px_1fr] overflow-hidden rounded-lg border border-[#E5E7EB] text-[13px]">
           <Row label="Your Ground Operator">
             {d.groundOperator} <span className="text-[#6B7280]">· Tel: {d.operatorTel}</span>
@@ -172,6 +177,19 @@ export default function ConfirmationDocument({ data: d, heroSrc }: { data: Confi
         <p className="mt-8 text-center font-serif text-xl font-semibold text-[#B61E2E]">祝您旅途愉快！ Have a nice trip!</p>
       </div>
     </article>
+  )
+}
+
+/** Two logos, left and right, like the header of the original confirmation. Renders nothing without logos. */
+function LogoBar({ left, right, className = '' }: { left: string; right: string; className?: string }) {
+  if (!left && !right) return null
+  return (
+    <div className={`flex items-center justify-between gap-6 ${className}`}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      {left ? <img src={left} alt="Logo" className="h-14 w-auto max-w-[200px] object-contain" /> : <span />}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      {right ? <img src={right} alt="Logo" className="h-14 w-auto max-w-[200px] object-contain" /> : <span />}
+    </div>
   )
 }
 

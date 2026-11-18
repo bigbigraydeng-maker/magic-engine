@@ -43,3 +43,20 @@ describe('unknown hotel stars', () => {
     expect(renderToStaticMarkup(<ConfirmationDocument data={d} />)).not.toContain('★')
   })
 })
+
+describe('logos in the preview / PDF', () => {
+  const L = 'data:image/png;base64,AAAA'
+  const R = 'data:image/jpeg;base64,BBBB'
+  it('shows both logos on the cover and again where the trip details start', () => {
+    const html = renderToStaticMarkup(<ConfirmationDocument data={{ ...sampleConfirmation(), logos: { left: L, right: R } }} />)
+    expect(html.split(L).length - 1).toBe(2)
+    expect(html.split(R).length - 1).toBe(2)
+  })
+  it('banner style shows them once above the red bar; no logos -> no empty images', () => {
+    const banner = renderToStaticMarkup(
+      <ConfirmationDocument data={{ ...sampleConfirmation(), cover: { style: 'banner', hero: 'auto', title: '' }, logos: { left: L, right: '' } }} />,
+    )
+    expect(banner.split(L).length - 1).toBe(1)
+    expect(renderToStaticMarkup(<ConfirmationDocument data={sampleConfirmation()} />)).not.toContain('alt="Logo"')
+  })
+})
