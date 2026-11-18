@@ -152,7 +152,7 @@ export default function ConfirmationGenerator({ clientId }: { clientId: string }
           <button type="button" disabled={busy} className={`${btn} bg-[#1F2937] text-white hover:opacity-90 disabled:opacity-50`} onClick={downloadWord}>
             {busy ? '生成中…' : '下载 Word（可再改）'}
           </button>
-          <button type="button" className={`${btn} border border-[#D1D5DB] bg-white`} onClick={() => setD(sampleConfirmation())}>载入示例 CTS4270729</button>
+          <button type="button" className={`${btn} border border-[#D1D5DB] bg-white`} onClick={() => setD(sampleConfirmation())}>载入示例</button>
           <button type="button" className={`${btn} border border-[#D1D5DB] bg-white`} onClick={() => confirm('清空当前内容？') && setD(emptyConfirmation())}>清空</button>
         </div>
         {(message || errors.length > 0) && (
