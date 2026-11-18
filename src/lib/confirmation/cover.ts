@@ -22,7 +22,7 @@ export function resolveHeroName(d: ConfirmationData): string {
   if (chosen !== 'auto' && HERO_CHOICES.some((c) => c.name === chosen)) return chosen
   // Ordered search list: overnight cities first (where the trip really is), then the route split
   // into single stops ("Beijing → Xi'an" -> Beijing, Xi'an), then the highlight lines.
-  const split = (t: string) => t.split(/\s*(?:→|->|=>|–|—|\/|,|&|;| to )\s*/i).map((x) => x.trim()).filter(Boolean)
+  const split = (t: string) => t.split(/\s+-\s+|\s*(?:→|->|=>|–|—|\/|,|&|;|\+| to )\s*/i).map((x) => x.trim()).filter(Boolean)
   const search = [
     ...d.days.map((day) => day.overnight),
     ...d.days.flatMap((day) => split(day.route)),

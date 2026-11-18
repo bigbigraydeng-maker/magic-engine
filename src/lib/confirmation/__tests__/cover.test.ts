@@ -56,8 +56,10 @@ describe('Codex review fixes', () => {
     const d = sampleConfirmation()
     d.days = [{ date: '1 May', route: "Beijing → Xi'an", highlights: '', overnight: 'Beijing' }]
     expect(resolveHeroName(d)).toBe('beijing')
-    d.days = [{ date: '1 May', route: "Beijing → Xi'an", highlights: '', overnight: '' }]
-    expect(resolveHeroName(d)).toBe('beijing')
+    for (const route of ["Beijing → Xi'an", "Beijing - Xi'an", "Beijing – Xi'an", "Beijing/Xi'an", "Beijing to Xi'an", "Beijing + Xi'an"]) {
+      d.days = [{ date: '1 May', route, highlights: '', overnight: '' }]
+      expect(resolveHeroName(d)).toBe('beijing')
+    }
   })
 
   it('portrait pictures are shrunk to fit one page, landscape ones keep their size', () => {
