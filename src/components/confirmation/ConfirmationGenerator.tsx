@@ -17,6 +17,8 @@ export default function ConfirmationGenerator({ clientId }: { clientId: string }
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [restored, setRestored] = useState(false)
+  const [reading, setReading] = useState(false)
+  const [notes, setNotes] = useState<string[]>([])
   const [heroSrc, setHeroSrc] = useState<string | null>(null)
   /** which picture heroSrc currently holds; printing waits until it matches the chosen one */
   const [heroSrcName, setHeroSrcName] = useState<string | null>(null)
@@ -100,6 +102,30 @@ export default function ConfirmationGenerator({ clientId }: { clientId: string }
     }
   }
 
+  async function uploadAndFill(file: File) {
+    setMessage(null)
+    setNotes([])
+    const hasContent = d.tourCode.trim() || d.days.some((x) => x.route.trim() || x.highlights.trim())
+    if (hasContent && !confirm('上传后会用文件里读出来的内容覆盖现在已填的内容（封面和小贴士不动）。继续？')) return
+    setReading(true)
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      const res = await fetch(`/api/clients/${clientId}/confirmation/extract`, { method: 'POST', body: form, credentials: 'include' })
+      const j = (await res.json().catch(() => ({}))) as { error?: string; data?: unknown; notes?: string[] }
+      if (!res.ok) throw new Error(j.error || `读取失败（${res.status}）`)
+      const parsed = parseConfirmation(j.data)
+      if (!parsed.ok) throw new Error('读出来的内容格式不对，请重试或手动填写')
+      // keep what the file does not carry: the 14 tips and the cover choice
+      setD({ ...parsed.data, tips: d.tips, cover: d.cover })
+      setNotes(['内容是 AI 从文件里读出来的，请逐项核对再生成。', ...(j.notes ?? [])])
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : '读取失败')
+    } finally {
+      setReading(false)
+    }
+  }
+
   function printPdf() {
     setMessage(null)
     if (errors.length) return setMessage(`还不能生成：${errors.join('；')}`)
@@ -134,6 +160,29 @@ export default function ConfirmationGenerator({ clientId }: { clientId: string }
             {message ?? `还差：${errors.join('；')}`}
           </div>
         )}
+
+        <Box title="上传文件，自动填表">
+          <p className="text-xs text-[#6B7280]">上传一份旧的确认单或行程（Word .docx / PDF / 文本），系统读出团号、航班、每天行程、酒店等，帮你填好；你核对后再生成。</p>
+          <input
+            type="file"
+            accept=".docx,.pdf,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+            disabled={reading}
+            className="block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-[#B61E2E] file:px-3 file:py-2 file:text-sm file:font-medium file:text-white disabled:opacity-50"
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              e.target.value = ''
+              if (f) void uploadAndFill(f)
+            }}
+          />
+          {reading && <p className="text-sm text-[#B61E2E]">正在读取文件，通常 20–60 秒，请别关页面…</p>}
+          {notes.length > 0 && (
+            <ul className="list-disc space-y-1 rounded-md border border-[#D6A756] bg-[#FBF7F0] py-2 pl-6 pr-3 text-sm text-[#23201C]">
+              {notes.map((n, i) => (
+                <li key={i}>{n}</li>
+              ))}
+            </ul>
+          )}
+        </Box>
 
         <Box title="封面">
           <Field label="封面样式">
