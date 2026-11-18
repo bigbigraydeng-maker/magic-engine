@@ -175,7 +175,7 @@ export async function buildConfirmationDocx(d: ConfirmationData): Promise<Buffer
               new Paragraph({
                 alignment: AlignmentType.CENTER,
                 children: [
-                  run(`${d.tourCode}  ·  China Travel Service  ·  Page `, { color: GREY, size: 16 }),
+                  run(`${d.tourCode}  ·  ${d.groundOperator}  ·  Page `, { color: GREY, size: 16 }),
                   new TextRun({ children: [PageNumber.CURRENT], font: FONT, color: GREY, size: 16 }),
                 ],
               }),

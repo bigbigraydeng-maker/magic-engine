@@ -14,16 +14,16 @@ describe('buildConfirmationDocx', () => {
     const buf = await buildConfirmationDocx(sampleConfirmation())
     expect(buf.subarray(0, 2).toString()).toBe('PK')
     const xml = await documentXml(buf)
-    expect(xml).toContain('CTS4270729')
-    for (const needle of ['29 Jul', '30 Jul', '31 Jul', 'Wanda Moments Beijing Dongba', 'Forbidden City', '北京东坝万达美华酒店']) {
+    expect(xml).toContain('DEMO123456')
+    for (const needle of ['29 Jul', '30 Jul', '31 Jul', 'Example Grand Hotel Beijing', 'Forbidden City', '北京示例大酒店']) {
       expect(xml).toContain(needle)
     }
   })
 
-  it('never prints a second, different tour code (source file had CTS4270429 vs CTS4270729)', async () => {
+  it('never prints a second, different tour code (source file had DEMO123465 vs DEMO123456)', async () => {
     const xml = await documentXml(await buildConfirmationDocx(sampleConfirmation()))
-    const codes = new Set(xml.match(/CTS\d{5,}/g))
-    expect([...codes]).toEqual(['CTS4270729'])
+    const codes = new Set(xml.match(/DEMO\d{6}/g))
+    expect([...codes]).toEqual(['DEMO123456'])
   })
 
   it('numbers tips automatically so editing the list never leaves duplicate numbers', async () => {

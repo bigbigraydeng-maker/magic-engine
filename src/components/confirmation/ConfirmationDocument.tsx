@@ -10,9 +10,9 @@ export default function ConfirmationDocument({ data: d }: { data: ConfirmationDa
   return (
     <article id="confirmation-doc" className="mx-auto max-w-[800px] bg-white text-[13px] leading-relaxed text-[#1F2937] shadow-sm print:shadow-none">
       <header className="bg-[#B61E2E] px-8 py-7 text-white">
-        <p className="text-[11px] uppercase tracking-[0.25em] opacity-80">China Travel Service · Pre-confirmation</p>
+        <p className="text-[11px] uppercase tracking-[0.25em] opacity-80">{d.groundOperator || 'Ground operator'} · Pre-confirmation</p>
         <h1 className="mt-1 font-serif text-3xl font-semibold">Welcome to China! 欢迎到中国！</h1>
-        <p className="mt-2 text-lg font-semibold tracking-wide">{d.tourCode || 'CTS——'}</p>
+        <p className="mt-2 text-lg font-semibold tracking-wide">{d.tourCode || '——'}</p>
       </header>
 
       <div className="px-8 py-6">

@@ -12,9 +12,9 @@ export const DEFAULT_TIPS: ConfirmationTip[] = [
       "Voltage: China's standard voltage is 220V, 50Hz, which differs from New Zealand's 230V, 50Hz. Most devices will work fine, but always check your device's voltage range to ensure compatibility.\nPlug Types: China primarily uses two types of plugs: Type A (two flat parallel pins) and Type I (three flat pins in a triangular pattern), which is similar to what is used in New Zealand. However, bringing a universal travel adapter is recommended to accommodate all outlets.",
   },
   {
-    title: 'Weather in Late July to Early August',
+    title: 'Weather',
     body:
-      'Season: It is the peak of the midsummer sauna weather.\nThe temperature ranges from 24℃ to 35℃, with sweltering heat and frequent rainfall.\nRecommended clothing: short-sleeved shirts, shorts, thin sun-protective long-sleeve tops, rain gear and sandals. Apply proper sun protection on sunny days and drink plenty of water to stay hydrated.',
+      'Please check the forecast for your travel dates before you pack. Bring sun protection and a light rain jacket in summer, and warm layers in winter, and drink plenty of water to stay hydrated.',
   },
   {
     title: 'Health and Safety',
@@ -42,7 +42,7 @@ export const DEFAULT_TIPS: ConfirmationTip[] = [
   {
     title: 'Entry Requirements',
     body:
-      'Visa: 30-day visa free for NZ & AU passport.\nChina currently offers 30-day visa-free entry for citizens of New Zealand, Australia, and a number of other eligible countries. This policy is currently valid until the end of 2026.\nIf you are travelling on a passport other than a New Zealand or Australian passport, please check whether you are eligible for visa-free entry to China before you travel.\nIf you require a Chinese visa, please contact us as early as possible so that we can assist you with your visa application. We will provide the necessary supporting travel documents, including your flight itinerary and travel itinerary, to help with your application.\nWe also recommend that your passport has at least six (6) months’ validity remaining from the date of your entry into China to avoid any travel or airline check-in issues.',
+      'Visa: 30-day visa free for NZ & AU passport.\nChina currently offers 30-day visa-free entry for citizens of New Zealand, Australia, and a number of other eligible countries. Please check the current policy before you travel, as visa-free arrangements are reviewed from time to time.\nIf you are travelling on a passport other than a New Zealand or Australian passport, please check whether you are eligible for visa-free entry to China before you travel.\nIf you require a Chinese visa, please contact us as early as possible so that we can assist you with your visa application. We will provide the necessary supporting travel documents, including your flight itinerary and travel itinerary, to help with your application.\nWe also recommend that your passport has at least six (6) months’ validity remaining from the date of your entry into China to avoid any travel or airline check-in issues.',
   },
   {
     title: 'Cultural Etiquette',
@@ -72,7 +72,7 @@ export const DEFAULT_TIPS: ConfirmationTip[] = [
   {
     title: 'Tipping',
     body:
-      'Tipping is not included for land tours. It is recommended to give tips in cash directly to your tour guide and drivers. Please give each city’s guide a tip of 10 NZD per person per day.',
+      'Tipping is not included for land tours. It is recommended to give tips in cash directly to your tour guide and drivers.',
   },
 ]
 
@@ -82,15 +82,12 @@ export const POWER_BANK_TIP_TITLE = 'Power Bank Notice'
 export function emptyConfirmation(): ConfirmationData {
   return {
     tourCode: '',
-    groundOperator: 'China Travel Service-Wuxi Branch',
-    operatorTel: '86-510-82302992',
+    groundOperator: '',
+    operatorTel: '',
     departureDate: '',
-    emergencyContacts: [
-      { name: '韩凌云 / Lucy Han', mobile: '008613812182300' },
-      { name: '高敏 / Summer Gao', mobile: '008613906197266' },
-    ],
+    emergencyContacts: [{ name: '', mobile: '' }],
     paxCount: 2,
-    rooms: 'Twin room per night',
+    rooms: '',
     flights: [{ text: '' }],
     pickupCardNames: '',
     guideNote: 'to be confirmed',
@@ -109,24 +106,28 @@ export function emptyConfirmation(): ConfirmationData {
       'China visa (if applicable at time of travel)',
       'Travel insurance',
       'Lunches, dinners and personal expenses unless otherwise stated',
-      'Tips 15 NZD per person per day for guide and driver',
+      'Tips for guide and driver',
     ],
     tips: DEFAULT_TIPS.map((t) => ({ ...t })),
   }
 }
 
-/** The real CTS4270729 file, for the "load example" button and tests. */
+/** Made-up example for the "load example" button and tests. No real customers, staff or phone numbers. */
 export function sampleConfirmation(): ConfirmationData {
   return {
     ...emptyConfirmation(),
-    tourCode: 'CTS4270729',
+    tourCode: 'DEMO123456',
+    groundOperator: 'Example Travel Service - Demo Branch',
+    operatorTel: '86-000-00000000',
+    emergencyContacts: [{ name: 'Staff A / Example', mobile: '0086-000-0000-0001' }],
+    rooms: 'Twin room per night',
     departureDate: '29-Jul-2027',
     paxCount: 2,
     flights: [
       { text: 'CA 852Z 28JUL LGWPEK HK2 1235 0545 29JUL' },
       { text: 'CA 783Z 01AUG 7 PEKAKL HK2 0005 1630' },
     ],
-    pickupCardNames: 'SAYWELL/MURRAY ALEXANDER\nSAYWELL/JULIE LYNN',
+    pickupCardNames: 'SMITH/JOHN EXAMPLE\nSMITH/JANE EXAMPLE',
     guideNote: 'Beijing English-speaking guide: to be confirmed',
     days: [
       {
@@ -150,11 +151,11 @@ export function sampleConfirmation(): ConfirmationData {
     hotels: [
       {
         city: 'Beijing',
-        name: 'Wanda Moments Beijing Dongba',
+        name: 'Example Grand Hotel Beijing',
         stars: 4,
-        address: 'Building 2, Yard 99, Hejing Road, Dongba Township, Chaoyang District, Beijing',
-        phone: '+86-10-89101888',
-        chinese: '北京东坝万达美华酒店\n地址：北京朝阳区东坝乡和敬路99号院2号楼\n电话：+86-10-89101888',
+        address: '1 Example Road, Chaoyang District, Beijing',
+        phone: '+86-10-00000000',
+        chinese: '北京示例大酒店\n地址：北京朝阳区示例路1号\n电话：+86-10-00000000',
       },
     ],
     inclusions: ['2 nights accommodation in 4 star hotel', ...emptyConfirmation().inclusions],

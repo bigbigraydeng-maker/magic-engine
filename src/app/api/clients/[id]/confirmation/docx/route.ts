@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { clientHasIndustryFeature } from '@/lib/clients/industry-guard'
 import { buildConfirmationDocx } from '@/lib/confirmation/docx'
-import { validateConfirmation } from '@/lib/confirmation/validate'
-import type { ConfirmationData } from '@/lib/confirmation/types'
+import { parseConfirmation, validateConfirmation } from '@/lib/confirmation/validate'
 
 /**
  * POST /api/clients/[id]/confirmation/docx
@@ -21,15 +20,15 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: '这个功能只给旅游业务用。' }, { status: 403 })
   }
 
-  let data: ConfirmationData
+  let body: unknown
   try {
-    data = (await req.json()) as ConfirmationData
+    body = await req.json()
   } catch {
     return NextResponse.json({ error: '请求格式不对。' }, { status: 400 })
   }
-  if (!data || !Array.isArray(data.days) || !Array.isArray(data.tips)) {
-    return NextResponse.json({ error: '缺少行程数据。' }, { status: 400 })
-  }
+  const parsed = parseConfirmation(body)
+  if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 })
+  const data = parsed.data
 
   const errors = validateConfirmation(data)
   if (errors.length) return NextResponse.json({ error: errors.join('；') }, { status: 400 })
