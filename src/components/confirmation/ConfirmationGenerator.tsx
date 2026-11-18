@@ -82,6 +82,7 @@ export default function ConfirmationGenerator({ clientId }: { clientId: string }
       <style>{`@media print {
         body * { visibility: hidden !important; }
         #confirmation-doc, #confirmation-doc * { visibility: visible !important; }
+        #confirmation-doc, #confirmation-doc * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         #confirmation-doc { position: absolute; left: 0; top: 0; width: 100%; max-width: none; }
         @page { margin: 12mm; }
       }`}</style>
