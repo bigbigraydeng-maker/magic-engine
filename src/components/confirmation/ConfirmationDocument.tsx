@@ -125,7 +125,7 @@ export default function ConfirmationDocument({ data: d, heroSrc }: { data: Confi
               {d.hotels.map((h, i) => (
                 <div key={i} className="break-inside-avoid rounded-lg border border-[#E5E7EB] px-4 py-3">
                   <p className="font-semibold">
-                    {h.city} – {h.name} <span className="text-[#B61E2E]">{'★'.repeat(Math.max(0, Math.min(5, h.stars)))}</span>
+                    {h.city} – {h.name} {h.stars > 0 && <span className="text-[#B61E2E]">{'★'.repeat(Math.min(5, h.stars))}</span>}
                   </p>
                   <p>Address: {h.address}</p>
                   <p>Phone: {h.phone}</p>

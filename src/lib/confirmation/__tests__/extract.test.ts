@@ -33,10 +33,15 @@ describe('mergeExtracted', () => {
     expect(notes.join()).toContain('Two different tour codes')
   })
 
-  it('keeps the standard tips and default inclusions: the file never wipes them', () => {
-    const { data } = mergeExtracted({ tourCode: 'ABC1234', days: [{ date: '1 May', route: 'X', highlights: 'y', overnight: '' }], inclusions: [] })
+  it('keeps the staff settings (tips, cover) but never fills file fields from the template', () => {
+    const { data, notes } = mergeExtracted({ tourCode: 'ABC1234', days: [{ date: '1 May', route: 'X', highlights: 'y', overnight: '' }], inclusions: [] })
     expect(data.tips).toHaveLength(emptyConfirmation().tips.length)
-    expect(data.inclusions).toEqual(emptyConfirmation().inclusions)
+    expect(data.cover).toEqual(emptyConfirmation().cover)
+    // not in the file -> blank and flagged, not "2 pax" / generic inclusions
+    expect(data.paxCount).toBe(0)
+    expect(data.inclusions).toEqual([])
+    expect(data.exclusions).toEqual([])
+    for (const word of ['人数', '「包含」', '「不包含」']) expect(notes.join()).toContain(word)
   })
 
   it('tells staff what was missing instead of silently leaving blanks', () => {
@@ -49,10 +54,11 @@ describe('mergeExtracted', () => {
     expect(() => mergeExtracted(raw)).not.toThrow()
   })
 
-  it('bounds the numbers: stars 1-5, pax >= 1', () => {
-    const { data } = mergeExtracted({ tourCode: 'ABC1234', paxCount: 0, hotels: [{ name: 'H', stars: 9 }], days: [{ date: 'd', route: 'r' }] })
-    expect(data.paxCount).toBe(emptyConfirmation().paxCount)
-    expect(data.hotels[0].stars).toBe(4)
+  it('an unread or invalid star rating stays unknown (0, not shown) and is flagged, never guessed as 4-star', () => {
+    const { data, notes } = mergeExtracted({ tourCode: 'ABC1234', paxCount: 0, hotels: [{ name: 'H', stars: 9 }, { name: 'G' }], days: [{ date: 'd', route: 'r' }] })
+    expect(data.paxCount).toBe(0)
+    expect(data.hotels.map((h) => h.stars)).toEqual([0, 0])
+    expect(notes.join()).toContain('星级')
   })
 })
 

@@ -132,7 +132,24 @@ const obj = (v: unknown): Record<string, unknown> => (typeof v === 'object' && v
 export function mergeExtracted(raw: unknown, base: ConfirmationData = emptyConfirmation()): { data: ConfirmationData; notes: string[] } {
   const r = obj(raw)
   const notes: string[] = []
-  const d: ConfirmationData = { ...base }
+  // Only the staff's own settings are inherited (tips, cover). Everything that should come from
+  // the file starts blank, so nothing the file did not say can slip into the document.
+  const d: ConfirmationData = {
+    ...base,
+    groundOperator: '',
+    operatorTel: '',
+    departureDate: '',
+    rooms: '',
+    guideNote: '',
+    itineraryNote: '',
+    pickupCardNames: '',
+    paxCount: 0,
+    emergencyContacts: [{ name: '', mobile: '' }],
+    flights: [{ text: '' }],
+    hotels: [],
+    inclusions: [],
+    exclusions: [],
+  }
 
   const code = s(r.tourCode, 64).toUpperCase().replace(/\s+/g, '')
   if (code) d.tourCode = code
@@ -145,6 +162,7 @@ export function mergeExtracted(raw: unknown, base: ConfirmationData = emptyConfi
   const pickup = s(r.pickupCardNames)
   if (pickup) d.pickupCardNames = pickup
   if (typeof r.paxCount === 'number' && Number.isFinite(r.paxCount) && r.paxCount >= 1 && r.paxCount <= 500) d.paxCount = Math.floor(r.paxCount)
+  else notes.push('文件里没读到人数，请手动填')
 
   const contacts = list(r.emergencyContacts, 10)
     .map((c) => ({ name: s(obj(c).name, 200), mobile: s(obj(c).mobile, 64) }))
@@ -166,16 +184,19 @@ export function mergeExtracted(raw: unknown, base: ConfirmationData = emptyConfi
   const hotels = list(r.hotels, 30)
     .map((x) => {
       const o = obj(x)
-      const stars = typeof o.stars === 'number' && o.stars >= 1 && o.stars <= 5 ? Math.round(o.stars) : 4
+      const stars = typeof o.stars === 'number' && o.stars >= 1 && o.stars <= 5 ? Math.round(o.stars) : 0
       return { city: s(o.city, 100), name: s(o.name, 300), stars, address: s(o.address, 500), phone: s(o.phone, 64), chinese: s(o.chinese) }
     })
     .filter((h) => h.name)
   if (hotels.length) d.hotels = hotels
+  if (hotels.some((h) => h.stars === 0)) notes.push('有酒店没读到星级，请手动填（不填就不显示星级）')
 
   const inc = list(r.inclusions, 60).map((x) => s(x, 500)).filter(Boolean)
   if (inc.length) d.inclusions = inc
+  else notes.push('文件里没读到「包含」项目，请手动填')
   const exc = list(r.exclusions, 60).map((x) => s(x, 500)).filter(Boolean)
   if (exc.length) d.exclusions = exc
+  else notes.push('文件里没读到「不包含」项目，请手动填')
 
   for (const w of list(r.warnings, 10)) {
     const t = s(w, 300)
