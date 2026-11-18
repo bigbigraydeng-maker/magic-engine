@@ -106,6 +106,14 @@ function powerBankImage(): Paragraph | null {
 }
 
 const HERO_WIDTH_PX = 640
+/** Tallest picture that still leaves room for the title and facts on one A4 page. */
+const HERO_MAX_HEIGHT_PX = 420
+
+/** Keep the picture's proportions but never taller than the page allows (portrait pictures are shrunk). */
+export function fitHero(size: { width: number; height: number }): { width: number; height: number } {
+  const height = Math.min(Math.round((HERO_WIDTH_PX * size.height) / size.width), HERO_MAX_HEIGHT_PX)
+  return { width: Math.round((height * size.width) / size.height), height }
+}
 
 /** Tailor-made style cover page: picture, title, route, key facts. Ends with the page break the next heading adds. */
 function coverPage(d: ConfirmationData, hero: Buffer | null): Paragraph[] {
@@ -122,7 +130,7 @@ function coverPage(d: ConfirmationData, hero: Buffer | null): Paragraph[] {
         children: [
           new ImageRun({
             data: hero,
-            transformation: { width: HERO_WIDTH_PX, height: Math.round((HERO_WIDTH_PX * size.height) / size.width) },
+            transformation: fitHero(size),
             type: 'jpg',
           }),
         ],

@@ -20,7 +20,14 @@ export function coverRouteStops(d: ConfirmationData): string[] {
 export function resolveHeroName(d: ConfirmationData): string {
   const chosen = d.cover.hero
   if (chosen !== 'auto' && HERO_CHOICES.some((c) => c.name === chosen)) return chosen
-  const search = d.days.flatMap((day) => [day.route, day.overnight, ...day.highlights.split(/\r?\n/)]).filter((x) => x.trim())
+  // Ordered search list: overnight cities first (where the trip really is), then the route split
+  // into single stops ("Beijing → Xi'an" -> Beijing, Xi'an), then the highlight lines.
+  const split = (t: string) => t.split(/\s*(?:→|->|=>|–|—|\/|,|&|;| to )\s*/i).map((x) => x.trim()).filter(Boolean)
+  const search = [
+    ...d.days.map((day) => day.overnight),
+    ...d.days.flatMap((day) => split(day.route)),
+    ...d.days.flatMap((day) => day.highlights.split(/\r?\n/)),
+  ].filter((x) => x.trim())
   return pickHeroName({ title: d.cover.title, route: search }) || FALLBACK
 }
 

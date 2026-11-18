@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
+import { fitHero } from '@/lib/confirmation/docx'
 import { resolveHeroName, coverRouteStops, coverTitle, jpegSize, heroLabel } from '@/lib/confirmation/cover'
 import { parseConfirmation } from '@/lib/confirmation/validate'
 import { sampleConfirmation, emptyConfirmation } from '@/lib/confirmation/defaults'
@@ -47,5 +48,22 @@ describe('cover in saved/incoming data', () => {
 
   it('rejects a malformed cover', () => {
     expect(parseConfirmation({ ...sampleConfirmation(), cover: { style: 'weird', hero: 'x', title: '' } }).ok).toBe(false)
+  })
+})
+
+describe('Codex review fixes', () => {
+  it("a day routed 'Beijing → Xi'an' that stays overnight in Beijing gets the Beijing picture, not Xi'an", () => {
+    const d = sampleConfirmation()
+    d.days = [{ date: '1 May', route: "Beijing → Xi'an", highlights: '', overnight: 'Beijing' }]
+    expect(resolveHeroName(d)).toBe('beijing')
+    d.days = [{ date: '1 May', route: "Beijing → Xi'an", highlights: '', overnight: '' }]
+    expect(resolveHeroName(d)).toBe('beijing')
+  })
+
+  it('portrait pictures are shrunk to fit one page, landscape ones keep their size', () => {
+    const portrait = fitHero({ width: 1000, height: 1500 })
+    expect(portrait.height).toBeLessThanOrEqual(420)
+    expect(Math.abs(portrait.width / portrait.height - 1000 / 1500)).toBeLessThan(0.01)
+    expect(fitHero({ width: 1400, height: 933 })).toEqual({ width: 630, height: 420 })
   })
 })
