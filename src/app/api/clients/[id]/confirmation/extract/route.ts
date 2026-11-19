@@ -64,7 +64,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     }
     // the header logos of a Word confirmation come along too (not read by the AI, copied as-is)
     const logos = kind === 'docx' ? await docxHeaderLogos(buf).catch(() => []) : []
-    if (logos.length) notes.push(`文件页眉里的 ${logos.length} 个 logo 也一起带过来了，请看一眼左右位置对不对`)
+    if (logos.length) notes.push(`文件页眉里的 ${logos.length} 个 logo 也一起带过来了，请看一眼前后顺序对不对`)
     return NextResponse.json({ data, notes, logos })
   } catch (err) {
     const message = err instanceof Error ? err.message : '读取失败'

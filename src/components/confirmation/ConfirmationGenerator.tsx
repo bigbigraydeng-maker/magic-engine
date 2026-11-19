@@ -242,10 +242,10 @@ export default function ConfirmationGenerator({ clientId }: { clientId: string }
           </Field>
         </Box>
 
-        <Box title="Logo（每页页眉，左右各一个；会记住，下次不用再传）">
+        <Box title="Logo（两个 logo 并排在每页左上角；会记住，下次不用再传）">
           {(['left', 'right'] as const).map((side) => (
             <div key={side} className="flex items-center gap-3">
-              <span className="w-12 shrink-0 text-xs font-medium text-[#4B5563]">{side === 'left' ? '左边' : '右边'}</span>
+              <span className="w-12 shrink-0 text-xs font-medium text-[#4B5563]">{side === 'left' ? '第一个' : '第二个'}</span>
               {d.logos[side] ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={d.logos[side]} alt="" className="h-10 w-auto max-w-[140px] rounded border border-[#E5E7EB] bg-white object-contain p-1" />
@@ -277,7 +277,7 @@ export default function ConfirmationGenerator({ clientId }: { clientId: string }
             </div>
           ))}
           {d.logos.left || d.logos.right ? (
-            <button type="button" className="text-xs text-[#6B7280]" onClick={() => set('logos', { left: d.logos.right, right: d.logos.left })}>左右对调</button>
+            <button type="button" className="text-xs text-[#6B7280]" onClick={() => set('logos', { left: d.logos.right, right: d.logos.left })}>前后对调</button>
           ) : null}
         </Box>
 
