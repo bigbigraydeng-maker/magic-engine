@@ -346,6 +346,6 @@ describe('AD_CREATION_PATHS', () => {
    * 「这条路径记不记素材 id」,而不是三个月后发现表又空了。
    */
   it('仓里每条建广告的路径都登记在案', () => {
-    expect(Object.keys(AD_CREATION_PATHS).sort()).toEqual(['boost_post_api', 'winner_reel_sync'])
+    expect(Object.keys(AD_CREATION_PATHS).sort()).toEqual(['boost_post_api', 'daily_plan_promote', 'winner_reel_sync'])
   })
 })

@@ -40,6 +40,7 @@ import { pushWeekPackItems } from './week-pack-items'
 import { pushWeekPlanApprovalItems } from './week-plan-items'
 import { pushEmailReplyItems } from './email-reply-items'
 import { pushLeadFollowupItems } from './lead-followup-items'
+import { pushCatalogueFollowupItems } from './catalogue-followup-items'
 import { pushBindingRequestItems } from './binding-request-items'
 import { pushPageBindingItems } from './page-binding-items'
 import { pushFacebookSyncFailingItems } from './facebook-sync-items'
@@ -52,6 +53,8 @@ import { pushDistributorApplicationItems } from './distributor-application-items
 import { pushToolsWideBudgetItems } from './tools-wide-budget-items'
 import { pushAdsAutonomySyncItems } from './ads-autonomy-items'
 import { pushAdsRuleFindingItems } from './ads-rule-finding-items'
+import { pushAdsHealthPatrolItems } from './ads-health-patrol-items'
+import { pushAdsPredictiveEarlyWarningItems } from './ads-predictive-early-warning-items'
 import { pushAdsCircuitItems } from './ads-circuit-items'
 import { pushAdsCircuitBreakerItems } from './ads-circuit-breaker-items'
 import { pushAdsServicePauseItems } from './ads-service-pause-items'
@@ -449,6 +452,12 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     (b) => pushAdsRuleFindingItems(supabase, b, now, nameOf).catch((e) =>
       console.warn('[manual-items] 广告级规则待办生成失败（不阻塞其他待办）:', e),
     ),
+    (b) => pushAdsHealthPatrolItems(supabase, b, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 广告体检警报待办生成失败（不阻塞其他待办）:', e),
+    ),
+    (b) => pushAdsPredictiveEarlyWarningItems(supabase, b, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 广告预警待办生成失败（不阻塞其他待办）:', e),
+    ),
     // 广告熔断中的账户 —— 判据是"现在还处在熔断中吗"，不是时间窗口（v2.5 §6.2 派生态）
     (b) => pushAdsCircuitItems(supabase, b, nameOf).catch((e) =>
       console.warn('[manual-items] 广告熔断待办生成失败（不阻塞其他待办）:', e),
@@ -545,6 +554,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 客人填了表超过 24 小时没人回 —— 汇总信的开关一直关着，没有任何人被指派（CTS 积压 170 条）。
     (b) => pushLeadFollowupItems(supabase, b, ids, now, nameOf).catch((e) =>
       console.warn('[manual-items] 线索没人回待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 发出目录之后挂着「AI 跟进中」却没人跟的客人 —— AI 的后续动作还没做成程序（跟进流程整套重排的第 0 刀）
+    (b) => pushCatalogueFollowupItems(supabase, b, ids, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 发目录之后没人跟待办生成失败（不阻塞其他待办）:', e),
     ),
     // 客户交了广告账户号等核实 —— 客户以为交上去了，不下发就没人知道（AD-SEC-3）
     (b) => pushBindingRequestItems(supabase, b, ids, now, nameOf).catch((e) =>

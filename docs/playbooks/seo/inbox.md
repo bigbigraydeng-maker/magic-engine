@@ -76,3 +76,10 @@
 - 证据：生产库 `cron_run_logs` `job_name like 'seo-meta-cycle-step%'`，W45、W46 共 12 行；`seo_meta_log` 总数 / `max(created_at)` / 近 7 天新增；`cron_run_logs` `job_name='seo-meta-rank-sampler'` 近 7 天 7 行、`rows_dispatched` 全为 0（2026-11-10 取数）；`docs/ledger/2026-10-29-cts-meta-cycle-generator-sees-original.md`（`status: decided`，`verify_by: 2026-11-03`）。
 - 建议的规则或检查：①台账卡过了 `verify_by` 还没达成验收，巡检要自动把它标成「到期未验证」并进今日待办，不能一直停在 decided；②印证 10-29 第 1 条的「产出体检」：连续 ≥2 周 `proposals>0 且 applied=0` 就开人工卡——这条到今天还没有任何机制在做。
 - 与现有手册关系：印证本候选区 10-29 第 1 条、11-03 第 1 条（新数字：第 6 周、W46 7/9 名额生成前失败、xian-city-wall 第 5 周）；新增「过期台账卡不会自己变 failed」。
+
+## 2026-11-17 · 自动化平台额度用完，SEO 这条线整条停了却一张回执都没有：W47 周循环没跑、谷歌搜索数据每天拉取和排名采样 11-14 后全停
+- 层级：通用·候选（共用的调度方式，所有客户的 SEO 任务都受影响；目前证据来自 CTS 一个客户的运行记录）
+- 发生了什么：Inngest 免费额度 2026-11-15 14:20（新西兰）用满（见台账卡）。之后 SEO 相关的 Inngest 定时任务全部没有新运行记录：`gsc-page-daily` / `gsc-page-daily-pull` 最后一次 11-14 18:30 UTC，`gsc-query-page-daily` / `-pull` 最后一次 11-14 19:00 UTC，`seo-meta-rank-sampler` 最后一次 11-14 20:20 UTC（之前每天一次）；标题周循环 6 步上一轮是 W46（11-09 05:30 UTC），本该 11-16 05:30 UTC 跑的 W47 一行都没有。同期全库还有 54 个任务在 11-16 之后照常写记录（`seo-patrol-daily`、`keyword-snapshots-weekly`、`seo-weekly-list`、`weekly-seo-report` 不走 Inngest，照常跑），所以不是整个系统停了，是挂在 Inngest 上的那一半停了。PR 3883 的应急改道只救了「电话进 CRM」和「新线索进表格」，SEO 任务不在里面；台账卡写额度预计 12-01 恢复（未核实），这意味着 W47、W48 两轮周循环和约 16 天的谷歌搜索每日数据会缺。之前几条候选讲的是「跑了、回执全绿、没产出」；这次是「根本没跑、连回执都没有」，靠读回执做的产出体检照样发现不了。
+- 证据：生产库 `cron_run_logs`，按 `job_name` 取近 10 天 `max(started_at)`（2026-11-17 取数）；全库「近 10 天至少 5 次、最后一次早于 11-15 06:00 UTC」的任务 20 个，「11-16 之后有记录」的 54 个；`docs/ledger/2026-11-16-inngest-quota-relief-direct-fallback.md`（「其余 Inngest 任务这两周仍停着」）；PR https://github.com/bigbigraydeng-maker/magic-engine/pull/3883（改道范围只有 telephony / lead-sheet；PR 正文另记 `gsc-page-daily.test.ts` 在干净主干 df3a00e5c 上有 2 条测试失败，本任务没有复跑）。
+- 建议的规则或检查：①产出体检除了看「回执里有没有产出」，还要看「该来的回执来没来」：按登记表的调度时间，每天核一次「上次运行时间 + 1 个周期 + 宽限」，超时就进今日待办，写明停的是哪条、影响哪个客户；②额度恢复那天（12-01 前后）要核谷歌搜索每日数据有没有补上 11-15 起的空档。谷歌搜索后台能查到过去 16 个月的数据，按理能补，但现在的拉取任务支不支持按日期补拉，没核实；③以后再做「额度不够先改道」，SEO 每天的数据拉取应该排进改道清单，排在周循环前面（周循环晚一周没事，数据断了以后算前后对比就缺基准）。
+- 与现有手册关系：新增。补充本候选区 10-29 第 1 条：那条只管「跑了没产出」，这条讲「没跑」也要能发现。

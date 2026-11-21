@@ -4,6 +4,7 @@
  * Writes (or, without `confirm: true`, only previews) a proposal for the welcome letter: the rule snapshot with its
  * send block, bound to the template's current version and fingerprint. A proposal authorizes nothing and sends
  * nothing; an open proposal is replaced. Global administrator only (`authorization-http.ts`).
+ * Optional `trigger` in the body: which kind of letter (absent = the welcome letter; design 2026-11-17 §4.5).
  * Design: docs/specs/2026-11-02-me-send-gate-p2-design-v0.md §4.3 (plan: §17).
  */
 import type { NextRequest } from 'next/server'
@@ -27,7 +28,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   if (!parsed.success) return invalidCommand('INVALID_PROPOSE_COMMAND', parsed.error.flatten())
   if (parsed.data.client_id !== params.id) return invalidCommand('CLIENT_ID_MISMATCH', null)
   try {
-    return respond(await proposeCommand(createAuthorizationDeps(supabaseAdmin), params.id, gate.actor, parsed.data))
+    return respond(await proposeCommand(createAuthorizationDeps(supabaseAdmin, parsed.data.trigger), params.id, gate.actor, parsed.data))
   } catch (error: unknown) {
     // The name only: a failed write's message can echo the row.
     console.error('[triggered-send propose] failed', error instanceof Error ? error.name : 'unknown')

@@ -9,6 +9,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { recordEmailUnsubscribe } from '@/lib/crm/email-unsubscribe'
 import { NOT_SENT_CONFIRMED, SENT_CONFIRMED, type ReceiptPatch, type ReceiptRow } from './receipt'
 import type { ReceiptStore, UpdateResult } from './receipt-consumer'
+import { SHADOW_SCOPE } from './trigger-scope'
 
 const LEDGER = 'triggered_sends'
 const COLUMNS =
@@ -62,7 +63,7 @@ export function createReceiptStore(db: SupabaseClient): ReceiptStore {
         .from(LEDGER)
         .select(COLUMNS)
         .eq('provider_message_id', messageId)
-        .eq('dedupe_scope', 'lifetime')
+        .neq('dedupe_scope', SHADOW_SCOPE)
         .limit(2)
       if (error) throw new Error(`ledger read: ${codeOf(error)}`)
       return rowsOf(data)
@@ -79,7 +80,7 @@ export function createReceiptStore(db: SupabaseClient): ReceiptStore {
         .from(LEDGER)
         .select(COLUMNS)
         .in('to_address_sha256', hashes)
-        .eq('dedupe_scope', 'lifetime')
+        .neq('dedupe_scope', SHADOW_SCOPE)
         .is('provider_message_id', null)
         .gte('first_attempt_at', sinceIso)
         // A person's answer on an unknown letter ("not sent" or "sent") leaves it without a message id: still reported.

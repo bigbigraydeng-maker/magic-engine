@@ -7,7 +7,7 @@ C = {
  'Wuwei':(37.9283,102.6380),'Zhangye':(38.9259,100.4498),'Jiayuguan':(39.7722,98.2894),
  'Dunhuang':(40.1421,94.6618),'Turpan':(42.9476,89.1841),'Urumqi':(43.8256,87.6168),
  'Chongqing':(29.5630,106.5516),'Chengdu':(30.5728,104.0668),'Dali':(25.6065,100.2676),
- 'Kunming':(24.8801,102.8329),'Guilin':(25.2736,110.2907),'Yangshuo':(24.7784,110.4903),
+ 'Kunming':(24.8801,102.8329),'Zhangjiajie':(29.1170,110.4790),'Guilin':(25.2736,110.2907),'Yangshuo':(24.7784,110.4903),
  'Guangzhou':(23.1291,113.2644),'Yangtze Cruise':(30.70,110.50),
 }
 def S(city,nights,acts,name=None):
@@ -118,6 +118,54 @@ TOURS['grand-tour'] = {
    {'dx':179,'dy':14,'w':155,'h':152,'title':'SHANGHAI AREA',
     'nodes':[('Shanghai','2 nights',0.2,0.68),('Suzhou','1 night',0.5,0.36),('Hangzhou','2 nights',0.8,0.68)],
     'segs':[(0,1,'coach',-22),(1,2,'coach',-22),(2,0,'coach',-22)],'finish':0},
+ ],
+}
+
+
+# China Panorama, October 2027 departure (route differs from the May departure: Chongqing and
+# Chengdu get their own nights, Zhangjiajie replaces Yunnan, and the east runs
+# Guilin -> Hangzhou -> Xinshi -> Suzhou -> Shanghai). Source: Baker's 3rd-draft itinerary
+# (email 2026-11-12). Nights count hotel/cruise nights; modes follow that itinerary, and legs
+# it does not name (Hangzhou -> Xinshi -> Suzhou -> Shanghai, Yangshuo -> Guilin) are drawn as coach.
+_gt_oct_cards = [
+   S('Beijing','3 nights',['Juyongguan Great Wall','Forbidden City']),
+   S("Xi'an",'3 nights',['Terracotta Warriors']),
+   S('Yangtze Cruise','4 nights',['Three Gorges 5-star cruise']),
+   S('Chongqing','1 night',['Liziba light rail & Hongya Cave']),
+   S('Chengdu','2 nights',['Giant panda breeding base']),
+   S('Zhangjiajie','3 nights',['National Forest Park','Tianmen Mountain']),
+   S('Guilin','2 nights',['Karst scenery']),
+   S('Yangshuo','1 night',['Li River cruise']),
+   S('Hangzhou','1 night',['West Lake cruise']),
+   S('Xinshi','1 night',['Ancient town & Hanfu dress-up']),
+   S('Suzhou','1 night',["Humble Administrator's Garden"]),
+   S('Shanghai','2 nights',['The Bund & Yuyuan Garden']),
+]
+TOURS['grand-tour-oct-2027'] = {
+ 'title':'CHINA PANORAMA','subtitle':'27 Days · 16 October 2027 departure · Fully inclusive',
+ 'origin':'Auckland','return_to':'Auckland','start_idx':0,'finish_idx':7,
+ 'cards':_gt_oct_cards,
+ 'stops':[
+   S('Beijing','3 nights',[]),
+   S("Xi'an",'3 nights',[]),
+   dict(S('Yangtze Cruise','4 nights',[]),lbl_off=(68,-14)),
+   dict(S('Chongqing','1 night',[]),lbl_off=(-12,38)),
+   dict(S('Chengdu','2 nights',[]),lbl_off=(-10,-30)),
+   S('Zhangjiajie','3 nights',[]),
+   dict(S('Guilin','3 nights',[],name='Guilin & Yangshuo'),lbl_off=(30,48)),
+   S('Shanghai','5 nights',[],name='Shanghai area'),
+ ],
+ 'segments':[{'a':0,'b':1,'mode':'train','off':40},{'a':1,'b':2,'mode':'train','off':-40},
+             {'a':2,'b':3,'mode':'cruise','off':-24},{'a':3,'b':4,'mode':'train','off':26},
+             {'a':4,'b':5,'mode':'train','off':-30},{'a':5,'b':6,'mode':'train','off':30},
+             {'a':6,'b':7,'mode':'train','off':50}],
+ 'insets':[
+   {'dx':12,'dy':14,'w':120,'h':152,'title':'GUILIN AREA',
+    'nodes':[('Guilin','2 nights',0.24,0.42),('Yangshuo','1 night',0.76,0.42)],
+    'segs':[(0,1,'cruise',-24),(1,0,'coach',-24)]},
+   {'dx':140,'dy':14,'w':200,'h':152,'title':'SHANGHAI AREA',
+    'nodes':[('Hangzhou','1 night',0.19,0.7),('Xinshi','1 night',0.34,0.34),('Suzhou','1 night',0.67,0.34),('Shanghai','2 nights',0.81,0.7)],
+    'segs':[(0,1,'coach',-18),(1,2,'coach',-18),(2,3,'coach',-18)],'finish':3},
  ],
 }
 

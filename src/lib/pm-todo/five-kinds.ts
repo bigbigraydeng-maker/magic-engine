@@ -70,6 +70,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   ads_account_closed_weekly: 'decide', // 账户已关闭：要不要从客户名下解绑，由 PM 定（每周一提醒）
   goal_rollover_missing: 'dev', // 月循环目标没自动续上：广告自治/日报失去目标口径，是系统没跑通，转开发
   ads_rule_finding: 'decide', // 改不改在投的广告
+  ads_health_patrol_alert: 'decide', // 广告体检亮了警报或给了处方
   ad_readback_blocker: 'decide', // 正在花钱的广告组撞上已知坑，要改设置
   outcome_rows_orphaned: 'decide', // 旧效果数据删还是留（删了撤不回）
   maliang_render_failed: 'decide', // 成片不过关：返工（花钱）还是放弃
@@ -85,6 +86,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   tools_wide_budget_warning: 'decide',
   // 推广计划每日检查：草稿等你批准 / 批准后内容被改 / 到期阶段检查没过 / 对账偏差——都是批准、花钱、改计划，要 PM 拍板
   promo_plan_watch: 'decide',
+  catalogue_followup_check_failed: 'dev', // 「发目录之后没人跟」这一栏没算出来：我们这边的欠账
   lead_followup_check_failed: 'dev', // 「填了表没人回」这一栏没算出来：我们这边的欠账
   promo_plan_watch_broken: 'dev', // 每日检查自己没跑成：我们这边的欠账，PM 那一栏会留一句「今天没查成」
   plan_draft_auto_failed: 'dev', // 同意前自动起草连续失败：系统没写成，不占批准决定
@@ -141,6 +143,8 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   // ── 3 · 要转给客户那边的 ─────────────────────────────────────────────
   email_reply_due: 'client_side', // 客人来信没回
   lead_followup_due: 'client_side', // 客人填了表超过 24 小时没人回，转给客户的销售
+  catalogue_followup_clicked: 'client_side', // 看了目录的客人挂着 AI 跟进却没人跟：转给客户的销售打电话
+  catalogue_followup_quiet: 'client_side', // 发目录满 7 天没动静：转给客户的销售换个方式联系
   email_first_contact: 'client_side', // 陌生地址第一次来信：扫一眼主题，真询价就回
   lead_sheet_lead_skipped: 'client_side', // 线索没联系方式，去 Meta 后台查原始提交再补进客户的表
   // 线索写不进客户的表（不是授权问题）：先确认客户那张表还在、账号能编辑 —— 新线索没到销售手上

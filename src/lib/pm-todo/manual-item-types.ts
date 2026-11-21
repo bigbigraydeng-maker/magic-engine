@@ -38,8 +38,10 @@ import type { TourPublishRequestItemKind } from './tour-catalog-publish-request-
 import type { PlatformConnectionItemKind } from './platform-connection-items'
 import type { FacebookSyncItemKind } from './facebook-sync-items'
 import type { LeadFollowupItemKind } from './lead-followup-items'
+import type { CatalogueFollowupItemKind } from './catalogue-followup-items'
 import type { AdsAutonomyItemKind } from './ads-autonomy-items'
 import type { AdsRuleFindingItemKind } from './ads-rule-finding-items'
+import type { AdsHealthPatrolItemKind } from './ads-health-patrol-items'
 import type { AdsCircuitItemKind } from './ads-circuit-items'
 import type { AdsServicePauseItemKind } from './ads-service-pause-items'
 import type { AdsAccountStatusItemKind } from './ads-account-status-items'
@@ -49,6 +51,7 @@ import type {
   AdsDailySpendOverCapNoticeItemKind,
   AdsPlanDailyCapMissingItemKind,
 } from './ads-agent-stale-items'
+import type { AdsPredictiveEarlyWarningItemKind } from './ads-predictive-early-warning-items'
 import type { AdsPlanDeliveryStageMissingItemKind } from './ads-plan-delivery-stage-items'
 import type { AdsCircuitBreakerAlertKind, AdsCircuitBreakerPauseKind } from './ads-circuit-breaker-items'
 import type { GoalRolloverItemKind } from './goal-rollover-items'
@@ -344,6 +347,7 @@ export type ManualItemKind =
   | AdsAutonomyItemKind
   /** 每日广告巡检的广告级规则（D2 素材疲劳 / D10 点进去之后差了）：要人拍板改不改，系统不会自动改 */
   | AdsRuleFindingItemKind
+  | AdsHealthPatrolItemKind
   | AdsCircuitItemKind
   /** 服务把一条在投的广告系列暂停了 —— 要不要恢复由人点确认卡 */
   | AdsServicePauseItemKind
@@ -352,6 +356,7 @@ export type ManualItemKind =
   | AdsAgentSyncStaleItemKind
   | AdsAgentDailyPullGapItemKind
   | AdsDailySpendOverCapNoticeItemKind
+  | AdsPredictiveEarlyWarningItemKind
   | AdsPlanDailyCapMissingItemKind
   | AdsPlanDeliveryStageMissingItemKind
   | AdsCircuitBreakerPauseKind
@@ -423,6 +428,8 @@ export type ManualItemKind =
   | FacebookSyncItemKind
   /** 客人填了表超过 24 小时没人回 / 这一栏没算出来 */
   | LeadFollowupItemKind
+  /** 发出目录之后没人跟的客人（挂着「AI 跟进中」但没有后续动作）/ 这一栏没算出来 */
+  | CatalogueFollowupItemKind
   /** Magic Bridge 全平台免费额度用到 80% 以上 —— 要不要加额度由 PM 定 */
   | 'magic_bridge_quota'
   /** Tools Lab 全站每月合计花费/次数上限用到 80% 以上（网站诊断+广告体检共用）—— 要不要加名额由 PM 定 */

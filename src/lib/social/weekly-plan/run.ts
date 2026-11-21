@@ -8,10 +8,17 @@ import { targetWeek } from '@/lib/social/week-pack/cadence'
 
 import { buildWeeklySocialPlan } from './build'
 import { loadPlanInput, saveWeeklyPlan } from './db'
+import { applyProducedDrafts, type ProducedDrafts } from './produced'
 
-export async function buildAndSaveWeeklyPlan(db: SupabaseClient, clientId: string, now: Date) {
+export async function buildAndSaveWeeklyPlan(
+  db: SupabaseClient,
+  clientId: string,
+  now: Date,
+  produced: ProducedDrafts | null = null,
+) {
   const week = targetWeek(now)
   const loaded = await loadPlanInput(db, clientId, week, now)
-  const plan = buildWeeklySocialPlan(loaded.input)
+  const built = buildWeeklySocialPlan(loaded.input)
+  const plan = produced ? applyProducedDrafts(built, produced) : built
   return saveWeeklyPlan(db, clientId, { ...plan, gaps: [...loaded.gaps, ...plan.gaps] })
 }

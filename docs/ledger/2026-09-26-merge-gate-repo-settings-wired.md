@@ -9,7 +9,7 @@ verify_by: 2026-10-03
 verify_how: ①下一个 C 级 PR 走 pr-risk-gate 判 C 后 gh 开 auto-merge，且 GitHub 在必过 5 道全绿后自动合入 main（无人点击）；②下一个 A 级 PR 的 Risk gate 检查因 ME_SIGNOFF_TRUSTED_LOGINS 空而恒红，合并按钮按不动（PM 需用 gh pr merge --admin 才能合，且 Protect main 五道仍全绿）
 done_on: 2026-09-26
 done_ref: pr:2023
-last_checked: 2026-10-09
-check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
+last_checked: 2026-11-15
+check_note: 11-15 gh pr list：条件①成立，近期C级/文档PR如3862、3858、3857、3855均由github-actions自动合入无人点击；条件②旧口径(A级Risk gate因ME_SIGNOFF_TRUSTED_LOGINS为空恒红)已被10-26合并规则改成Claude Code签字，本晚无新A级PR可观察，②判不了
 ---
 PM 2026-09-26 拍板方案 X 后执行。Protect main 只加 `ops-review-loop-tests`（bypass_actors 保持空、谁都绕不过五道台账/测试检查）；新建独立规则集 `Risk gate`（id 23998653，bypass_actors = RepositoryRole 5 Admin，只含 `Risk gate` 一道），实现"Protect main 五道任何人都绕不过 + Risk gate 一道 PM 用 --admin 能绕"。变量 `ME_SIGNOFF_TRUSTED_LOGINS` 不设 = 谁都不信 = A 级 Risk gate 恒红，等 B3 独立签字身份建成再指过去。旧环境 `merge-authorization` 保留（可选删这次不动）。改前/改后证据存于 scratchpad settings-change/before.txt 与 after.txt。

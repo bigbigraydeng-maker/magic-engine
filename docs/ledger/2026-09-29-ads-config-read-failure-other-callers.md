@@ -1,7 +1,7 @@
 ---
 id: 2026-09-29-ads-config-read-failure-other-callers
 title: 读不出广告设置时，自动暂停、只读诊断、目标进度三处也要如实记下「没读到」，不再冒充成「没开自动化 / 没问题」
-status: done
+status: verified
 owner: agent
 decided_on: 2026-09-29
 source: session:46775ea1
@@ -9,6 +9,9 @@ verify_by: 2026-10-14
 verify_how: 合并部署后第一次 17:00 UTC 回拉起看三件事——①当天各客户的自动暂停运行结果没有 config_read_failed（有就查那天设置表是不是真读不出）②当天 ads_growth_states 每个有广告的客户都有行、日报目标进度一行正常③回拉运行记录的 ad_diagnostics 没有 ad_strategy_configs read failed。读失败分支只在真实故障时可见，没发生时记为「报警链路未经真实故障验证」而不是已验证；模拟读失败要改生产配置，需 PM 另行授权
 done_on: 2026-10-12
 done_ref: pr:2192
+last_checked: 2026-11-21
+check_note: 近 7 天零条读设置失败记录；近 4 天每天 5~6 个客户有广告状态行、目标进度正常；报警链路未经真实故障验证
+verified_ref: doc:docs/ledger/evidence/2026-09-29-ads-config-read-failure-other-callers--2026-11-21.md
 ---
 接 PR 2116（它只修了每日回拉）；架构复审点出的另外三个读设置的地方仍在读失败时静默拿默认值往下走。
 本卡跟踪那三处的修复：自动暂停单独报「读设置失败」且绝不提交暂停、诊断加载直接报错、目标进度不再在缺预算上限时报「按节奏走」。

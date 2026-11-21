@@ -11,6 +11,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { TuneSuggestionInline } from './TuneSuggestionInline'
+import { PromotePostButton } from './PromotePostButton'
 import type { TuneRecommendation } from '@/lib/flywheel/tune/types'
 
 interface Props {
@@ -284,6 +285,7 @@ export function CampaignDailyPublishPanel({
                 suggestion={tuneSuggestions[post.idempotency_key] ?? null}
                 fetchFailed={tuneFetchFailed}
               />
+              <PromotePostButton clientId={clientId} planId={planId} date={post.date} />
             </div>
           ))}
         </div>

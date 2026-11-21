@@ -35,8 +35,8 @@ import {
 
 export const CRM_DNC_REENGAGE_FUNCTION_ID = `${CLOUD_FN_PREFIX}crm-dnc-reengage-sweep`
 export const CRM_DNC_REENGAGE_JOB = 'crm-dnc-reengage-sweep'
-/** Every 15 minutes. The registry entry copies this without the TZ prefix. */
-export const CRM_DNC_REENGAGE_CRON = 'TZ=Pacific/Auckland */15 * * * *'
+/** Hourly at :05 (was every 15 min; 2026-11-16 Inngest quota). The registry entry copies this without the TZ prefix. */
+export const CRM_DNC_REENGAGE_CRON = 'TZ=Pacific/Auckland 5 * * * *'
 export const CRM_DNC_REENGAGE_CLEARED_EVENT = 'crm.dnc.reengage_cleared'
 export const CRM_DNC_REENGAGE_WRITE_ENV = 'CRM_DNC_REENGAGE_WRITE_CLIENTS'
 
