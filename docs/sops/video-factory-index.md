@@ -35,6 +35,7 @@
 
 | 文件 | 一句话用途 | 状态 | 最后核实 | 格式 |
 |---|---|---|---|---|
+| [视频模板画廊目录 v1.0](2026-10-27-video-template-catalog-v1.0.md) | 五个出片模板各适合什么、能调什么、这次预览里哪里好看哪里别扭 | 已核实（对照代码；画面结论来自纯色占位，见该文末章） | 2026-10-27 | ✅ |
 | [视频模板优化手册 v1.0](2026-10-27-video-factory-template-playbook-v1.0.md) | 入库闸、渠道分流、数据回流、模板问题与改进清单 | 已核实（3 处核不了，见该文末章） | 2026-10-27 | ✅ |
 | [视频工厂交接给 97 号](2026-10-15-video-factory-handoff-to-97.md) | 视频工厂/社媒交接边界 | 未逐份核实 | | 待补 |
 | [讲座视频制作](lecture-video-production.md) | 讲座类视频的制作步骤 | 未逐份核实 | | 待补 |
@@ -47,7 +48,7 @@
 | [明信片 Story 变体设计](../specs/2026-10-15-postcard-story-variant-design.md) | postcard 的故事版变体 | 未逐份核实 | | 待补 |
 | [Codex 视频管线并入工厂设计](../specs/2026-10-16-codex-video-pipeline-into-factory-design.md) | 文字短片等管线并入工厂 | 文件头写「调研 + 设计稿」 | 2026-10-27（仅头部） | 待补 |
 | [出片机 CI 设计](../specs/2026-10-18-factory-worker-ci-design.md) | factory-worker 测试进 CI | 未逐份核实（对应台账 `2026-10-18-factory-worker-tests-in-ci`） | | 待补 |
-| [Remotion 模板目录与选择器](../specs/2026-10-06-remotion-template-catalog-and-selector.md) | 模板目录与两步选择 | 未逐份核实 | | 待补 |
+| [Remotion 模板目录与选择器](../specs/2026-10-06-remotion-template-catalog-and-selector.md) | 模板目录与两步选择 | 草案；名单和现在的五个模板对不上（见画廊目录 §4） | 2026-10-27 | 待补 |
 | [视频工厂入口收口 v0.1](../specs/2026-10-25-video-factory-consolidation-v0.1.md) | 工厂入口合并 | 未逐份核实 | | 待补 |
 | [Remotion 引擎开发计划](../specs/2026-10-05-remotion-engine-dev-plan.md) | Remotion 引入工厂的计划 | 未逐份核实 | | 待补 |
 
