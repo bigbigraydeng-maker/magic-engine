@@ -30,6 +30,7 @@ function fixture(reviewOn: boolean, basis: string, options?: FixtureOptions) {
           status: 'approved',
           version: 2,
           goal_id: GOAL,
+          approved_at: '2026-11-08T00:00:00.000Z',
           content: {
             pause_ad_set: {
               ad_account_id: 'acct-a',
@@ -48,7 +49,11 @@ function fixture(reviewOn: boolean, basis: string, options?: FixtureOptions) {
           id: PLAN,
           client_id: CLIENT_A,
           status: 'approved',
-          generation_meta: { from_prescription: { prescription_id: RX, version: 2 } },
+          plan_data: {},
+          generation_meta: {
+            from_prescription: { prescription_id: RX, version: 2 },
+            blank_draft: { goal_id: GOAL },
+          },
         }],
       },
     },
