@@ -7,10 +7,12 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { agreedPlanDailyTotalCap } from '@/lib/approval-source/plan-cap'
 import { accountDayKey } from '@/lib/ads-strategy/account-timezone'
 import { DELIVERING_STATUSES } from '@/lib/ads-strategy/portfolio/diagnostics/context'
-import { hoursIntoLocalDay, previousDay, type BreakerFacts, type CaptureStamp, type InsightStamp, type PolicyAd, type PrimaryResultKind, type SpendRow } from './rules'
+import { nzToday } from '@/lib/ads-strategy/promo-window'
+import { completeDaysBefore, hoursIntoLocalDay, previousDay, type AdSetSpendRow, type BreakerFacts, type CaptureStamp, type InsightStamp, type PolicyAd, type PrimaryResultKind, type SpendRow } from './rules'
 import { readBreakerSettings } from './settings'
 
 const SPEND_LIMIT = 200
+const ADSET_SPEND_LIMIT = 600
 const SNAP_PAGE = 1000
 const SNAP_MAX_PAGES = 20
 const SNAP_LEVELS = new Set(['account', 'campaign', 'adset', 'ad'])
@@ -33,8 +35,10 @@ interface Snap {
 
 interface SpendRaw {
   ad_account_id: string
+  level?: string
   entity_id: string
   entity_name: string | null
+  parent_id?: string | null
   insight_date: string
   spend: number | string | null
   leads: number | null
@@ -58,22 +62,33 @@ export async function loadBreakerFacts(
   const snaps = await readSnaps(sb, clientId, captured.rows)
   if (!snaps) return 'unreadable'
   const localDate = timezoneOf(snaps.rows) ? accountDayKey(timezoneOf(snaps.rows), now) : null
+  const nzDate = nzToday(now.getTime())
   const spend = await readSpend(sb, clientId, localDate)
   if (!spend) return 'unreadable'
+  const adsets = await readAdsetSpend(sb, clientId, nzDate)
+  if (!adsets) return 'unreadable'
   const captures = { rows: stalenessStamps(captured.rows), error: captured.error }
   const settings = readBreakerSettings(client.leads, plans.rows, strategy.row)
-  const delivering = deliveringAccountIds(latestSnaps(snaps.rows), spend.rows, captures.rows, now, settings.staleHours)
+  const delivering = deliveringAccountIds(
+    latestSnaps(snaps.rows),
+    [...spend.rows, ...recentAdsetSpend(adsets.rows, nzDate)],
+    captures.rows,
+    now,
+    settings.staleHours,
+  )
   const accounts = accountIds(client.primary, snaps.rows, delivering)
-  return assemble(now, localDate, client.leads, plans, snaps, spend, captures, accounts, strategy.row, delivering)
+  return assemble(now, localDate, nzDate, client.leads, plans, snaps, spend, adsets, captures, accounts, strategy.row, delivering)
 }
 
 function assemble(
   now: Date,
   localDate: string | null,
+  nzDate: string,
   leads: unknown,
   plans: { rows: { plan_data?: unknown }[]; error: boolean },
   snaps: { rows: Snap[]; truncated: boolean },
   spend: { rows: SpendRaw[]; truncated: boolean },
+  adsets: { rows: SpendRaw[]; truncated: boolean },
   captures: { rows: CaptureStamp[]; error: boolean },
   accounts: string[],
   strategy: { target_cost_per_primary?: unknown; primary_result?: unknown } | null,
@@ -82,11 +97,14 @@ function assemble(
   const cap = plans.error ? null : agreedPlanDailyTotalCap(plans.rows)
   const latest = latestSnaps(snaps.rows)
   const live = liveCampaigns(latest)
+  const liveSets = liveAdSets(latest)
+  const names = campaignNames(latest)
   const currency = currencyOf(latest)
   const primaryResult = primaryResultOf(strategy?.primary_result)
   return {
     now,
     localDate,
+    nzDate,
     yesterday: localDate ? previousDay(localDate) : null,
     hoursElapsed: hoursIntoLocalDay(timezoneOf(snaps.rows), now),
     capCents: cap?.state === 'set' ? cap.cents : null,
@@ -94,10 +112,12 @@ function assemble(
     settings: readBreakerSettings(leads, plans.rows, strategy),
     spend: spend.rows.flatMap((row) => mapSpend(row, live, currency, primaryResult)),
     spendReadable: !spend.truncated,
+    adsetSpend: adsets.rows.flatMap((row) => mapAdset(row, liveSets, names, currency, primaryResult)),
+    adsetSpendReadable: !adsets.truncated,
     policyAds: policyAds(latest, live),
     policyReadable: !snaps.truncated,
     captures: captures.rows,
-    insights: insightStamps(spend.rows),
+    insights: insightStamps([...spend.rows, ...adsets.rows]),
     accounts,
     freshReadable: !captures.error && !spend.truncated,
     deliveringAccounts: delivering,
@@ -204,6 +224,33 @@ async function readSpend(
   return { rows, truncated: rows.length >= SPEND_LIMIT }
 }
 
+async function readAdsetSpend(
+  sb: SupabaseClient,
+  clientId: string,
+  nzDate: string,
+): Promise<{ rows: SpendRaw[]; truncated: boolean } | null> {
+  const days = completeDaysBefore(nzDate)
+  if (!days || days.length === 0) return { rows: [], truncated: false }
+  const newest = days[0]
+  const oldest = days[days.length - 1]
+  const { data, error } = await sb.from('ad_daily_insights')
+    .select('ad_account_id, entity_id, entity_name, parent_id, insight_date, spend, leads, messaging_conversations, updated_at')
+    .eq('client_id', clientId)
+    .eq('level', 'adset')
+    .gte('insight_date', oldest)
+    .lte('insight_date', newest)
+    .limit(ADSET_SPEND_LIMIT)
+  if (error) return null
+  const rows = (data ?? []) as SpendRaw[]
+  return { rows: rows.map((row) => ({ ...row, level: 'adset' })), truncated: rows.length >= ADSET_SPEND_LIMIT }
+}
+
+function recentAdsetSpend(rows: readonly SpendRaw[], nzDate: string | null): SpendRaw[] {
+  const yesterday = nzDate ? previousDay(nzDate) : null
+  if (!yesterday) return []
+  return rows.filter((row) => String(row.insight_date).slice(0, 10) === yesterday)
+}
+
 async function readCaptureRows(sb: SupabaseClient, clientId: string): Promise<{ rows: CaptureRow[]; error: boolean } | null> {
   const { data, error } = await sb.from('ad_snapshot_captures')
     .select('ad_account_id, level, captured_at, complete, skipped_shared')
@@ -301,6 +348,22 @@ function latestSnaps(rows: readonly Snap[]): Snap[] {
   return [...newest.values()]
 }
 
+function liveAdSets(rows: readonly Snap[]): Set<string> {
+  const live = new Set<string>()
+  for (const row of rows) {
+    if (row.level === 'adset' && row.effective_status && DELIVERING_STATUSES.has(row.effective_status)) live.add(row.entity_id)
+  }
+  return live
+}
+
+function campaignNames(rows: readonly Snap[]): Map<string, string> {
+  const names = new Map<string, string>()
+  for (const row of rows) {
+    if (row.level === 'campaign' && row.entity_name?.trim()) names.set(row.entity_id, row.entity_name.trim())
+  }
+  return names
+}
+
 function liveCampaigns(rows: readonly Snap[]): Set<string> {
   const live = new Set<string>()
   for (const row of rows) {
@@ -327,6 +390,7 @@ function mapSpend(
   currency: string | null,
   primary: PrimaryResultKind | null,
 ): SpendRow[] {
+  if (row.level === 'adset') return []
   const spend = typeof row.spend === 'number' ? row.spend : Number(row.spend)
   if (!row.entity_id || !Number.isFinite(spend)) return []
   return [{
@@ -338,6 +402,31 @@ function mapSpend(
     primaryCount: countedPrimary(primary, row),
     currency,
     campaignLive: live.has(row.entity_id),
+  }]
+}
+
+function mapAdset(
+  row: SpendRaw,
+  live: Set<string>,
+  names: ReadonlyMap<string, string>,
+  currency: string | null,
+  primary: PrimaryResultKind | null,
+): AdSetSpendRow[] {
+  if (row.level !== 'adset') return []
+  const spend = typeof row.spend === 'number' ? row.spend : Number(row.spend)
+  const campaignId = row.parent_id ?? ''
+  if (!row.entity_id || !campaignId || !Number.isFinite(spend)) return []
+  return [{
+    accountId: row.ad_account_id,
+    campaignId,
+    campaignName: names.get(campaignId) || '在投的广告系列',
+    adsetId: row.entity_id,
+    adsetName: row.entity_name?.trim() || '在投的广告组',
+    day: String(row.insight_date).slice(0, 10),
+    spendCents: Math.round(spend * 100),
+    primaryCount: countedPrimary(primary, row),
+    currency,
+    adsetLive: live.has(row.entity_id),
   }]
 }
 

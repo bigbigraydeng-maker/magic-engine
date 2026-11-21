@@ -1,8 +1,9 @@
 /**
  * Anomaly rules. Pure. Never pauses and never calls Meta.
- * Confirmed by Ray 2026-11-10: a confirm card when cost per primary result
- * is over twice the client's own target. Data stale for 12 hours or more
- * is a reminder only, never a pause card.
+ * Confirmed by Ray 2026-11-16: a pause-ad-set confirm card when an ad set's
+ * cost per primary result over the last three complete New Zealand days
+ * is over twice the client's own target. The old single-day campaign rule
+ * is not also run. Data stale for 12 hours or more is a reminder only.
  * Staleness is judged only for accounts that are actually delivering.
  * An idle account cannot cancel cards for the client's other accounts.
  * A delivering account that is stale blocks only cards that use its numbers.
@@ -13,6 +14,7 @@ import { DEFAULT_STALE_HOURS } from './settings'
 import type { BreakerSettings } from './settings'
 
 export const POLICY_ERROR_STATUSES = ['DISAPPROVED', 'WITH_ISSUES'] as const
+export const CPL_WINDOW_DAYS = 3
 const MIN_FORECAST_HOURS = 1
 
 export type PrimaryResultKind = 'lead' | 'messaging_started'
@@ -27,6 +29,20 @@ export interface SpendRow {
   readonly primaryCount: number | null
   readonly currency: string | null
   readonly campaignLive: boolean
+}
+
+export interface AdSetSpendRow {
+  readonly accountId: string
+  readonly campaignId: string
+  readonly campaignName: string
+  readonly adsetId: string
+  readonly adsetName: string
+  readonly day: string
+  readonly spendCents: number
+  /** Count of the client's primary result. null = cannot judge, never zero. */
+  readonly primaryCount: number | null
+  readonly currency: string | null
+  readonly adsetLive: boolean
 }
 
 export interface PolicyAd {
@@ -60,6 +76,12 @@ export interface BreakerFacts {
   readonly settings: BreakerSettings
   readonly spend: readonly SpendRow[]
   readonly spendReadable: boolean
+  /** Ad-set rows for the cost rule. Empty when that read did not happen. */
+  readonly adsetSpend?: readonly AdSetSpendRow[]
+  /** false = the ad-set window was cut short. Missing means the same. */
+  readonly adsetSpendReadable?: boolean
+  /** New Zealand calendar day. The cost window is the three complete days before it. */
+  readonly nzDate?: string | null
   readonly policyAds: readonly PolicyAd[]
   readonly policyReadable: boolean
   readonly captures: readonly CaptureStamp[]
@@ -85,6 +107,8 @@ export interface PauseProposal {
   readonly campaignId: string
   readonly campaignName: string
   readonly adsetId: string | null
+  readonly adsetName: string | null
+  readonly unit: 'campaign' | 'adset'
   readonly summary: string
 }
 
@@ -131,6 +155,18 @@ export function previousDay(day: string): string {
   return date.toISOString().slice(0, 10)
 }
 
+/** Complete calendar days before `day`, newest first. `day` itself is not included. */
+export function completeDaysBefore(day: string | null, count = CPL_WINDOW_DAYS): readonly string[] | null {
+  if (!day || count < 1) return null
+  const days: string[] = []
+  let cursor = day
+  for (let index = 0; index < count; index += 1) {
+    cursor = previousDay(cursor)
+    days.push(cursor)
+  }
+  return days
+}
+
 export function judgeBreaker(facts: BreakerFacts): BreakerJudgement {
   if (!facts.settings.enabled) return { pauses: [], alerts: [] }
   const alerts = collectAlerts(facts)
@@ -165,42 +201,45 @@ function spendAlert(facts: BreakerFacts): AlertFinding | null {
   return null
 }
 
-const LEAD_CPL_SUMMARY = '最近这一天有花费，但没有线索，花费已经高于约定的目标线索成本倍数。系统没有暂停。请在确认卡上点确认，才会暂停。'
-const CHAT_CPL_SUMMARY = '最近这一天有花费，但没有开聊，花费已经高于约定的目标开聊成本倍数。系统没有暂停。请在确认卡上点确认，才会暂停。'
-const LEAD_OVER_SUMMARY = '最近这一天的单次线索成本已经高于约定的目标倍数。系统没有暂停。请在确认卡上点确认，才会暂停。'
-const CHAT_OVER_SUMMARY = '最近这一天的单次开聊成本已经高于约定的目标倍数。系统没有暂停。请在确认卡上点确认，才会暂停。'
+const LEAD_CPL_SUMMARY = '最近三个完整日有花费，但没有线索，花费已经高于约定的目标线索成本倍数。系统没有暂停。请在确认卡上点确认，才会暂停这个广告组。'
+const CHAT_CPL_SUMMARY = '最近三个完整日有花费，但没有开聊，花费已经高于约定的目标开聊成本倍数。系统没有暂停。请在确认卡上点确认，才会暂停这个广告组。'
+const LEAD_OVER_SUMMARY = '最近三个完整日的单次线索成本已经高于约定的目标倍数。系统没有暂停。请在确认卡上点确认，才会暂停这个广告组。'
+const CHAT_OVER_SUMMARY = '最近三个完整日的单次开聊成本已经高于约定的目标倍数。系统没有暂停。请在确认卡上点确认，才会暂停这个广告组。'
 
-function cplWindow(facts: BreakerFacts): { rows: SpendRow[]; line: number } | null {
+function cplReady(facts: BreakerFacts): { groups: AdSetSpendRow[]; line: number } | null {
   const target = facts.settings.targetCplCents
-  const window = cplRows(facts)
-  if (!facts.spendReadable || target === null || window === null || currenciesClash(window)) return null
-  return { rows: groupCampaigns(window), line: target * facts.settings.cplMultiple }
+  const days = completeDaysBefore(facts.nzDate ?? null)
+  if (facts.adsetSpendReadable !== true || target === null || !days) return null
+  const wanted = new Set(days)
+  const window = (facts.adsetSpend ?? []).filter((row) => wanted.has(row.day))
+  const groups = groupAdSets(window).filter((row) => !adsetCurrenciesClash(window, row))
+  return { groups, line: target * facts.settings.cplMultiple }
 }
 
 function cplPauses(facts: BreakerFacts): PauseProposal[] {
-  const window = cplWindow(facts)
-  if (!window) return []
-  return window.rows
-    .filter((row) => row.campaignLive && overPrimaryCost(row, window.line))
-    .map((hit) => pauseOf(hit.primaryCount === 0 ? 'cpl_zero_leads' : 'cpl_over_target', hit, costSummary(facts, hit)))
+  const ready = cplReady(facts)
+  if (!ready) return []
+  return ready.groups
+    .filter((row) => row.adsetLive && overPrimaryCost(row, ready.line))
+    .map((hit) => pauseAdSet(hit.primaryCount === 0 ? 'cpl_zero_leads' : 'cpl_over_target', hit, costSummary(facts, hit)))
 }
 
-function overPrimaryCost(row: SpendRow, line: number): boolean {
+function overPrimaryCost(row: { primaryCount: number | null; spendCents: number }, line: number): boolean {
   if (row.primaryCount === null) return false
   if (row.primaryCount <= 0) return row.spendCents > line
   return row.spendCents > line * row.primaryCount
 }
 
-function costSummary(facts: BreakerFacts, row: SpendRow): string {
+function costSummary(facts: BreakerFacts, row: { primaryCount: number | null }): string {
   const chat = facts.primaryResult === 'messaging_started'
   if ((row.primaryCount ?? 0) <= 0) return chat ? CHAT_CPL_SUMMARY : LEAD_CPL_SUMMARY
   return chat ? CHAT_OVER_SUMMARY : LEAD_OVER_SUMMARY
 }
 
 function cplAlert(facts: BreakerFacts): AlertFinding | null {
-  const window = cplWindow(facts)
-  if (!window) return null
-  const blind = window.rows.some((row) => row.primaryCount === null && row.spendCents > window.line && row.campaignLive)
+  const ready = cplReady(facts)
+  if (!ready) return null
+  const blind = ready.groups.some((row) => row.primaryCount === null && row.spendCents > ready.line && row.adsetLive)
   if (!blind) return null
   return alert('primary_unreadable', '', '主结果数读不出来，没有出暂停卡。')
 }
@@ -222,6 +261,8 @@ function policyOf(ads: readonly PolicyAd[]): PauseProposal {
     campaignId: first.campaignId,
     campaignName: nameOf(first.campaignName),
     adsetId: adsetIds.size === 1 ? [...adsetIds][0] : null,
+    adsetName: null,
+    unit: 'campaign',
     summary: '有一条还在投的广告被平台判了投放或政策问题。系统没有暂停。请在确认卡上点确认，才会暂停这个广告系列。',
   }
 }
@@ -282,14 +323,6 @@ function accountIsStale(facts: BreakerFacts, accountId: string, limit: number): 
   return snapAge === null || snapAge >= limit || insightAge === null || insightAge >= limit
 }
 
-function cplRows(facts: BreakerFacts): readonly SpendRow[] | null {
-  const today = dayRows(facts, facts.localDate)
-  if (today === null) return null
-  if (today.some((row) => row.spendCents > 0)) return today
-  if (facts.hoursElapsed !== null && facts.hoursElapsed < 12) return dayRows(facts, facts.yesterday)
-  return null
-}
-
 function dayRows(facts: BreakerFacts, day: string | null): readonly SpendRow[] | null {
   if (!day) return null
   return facts.spend.filter((row) => row.day === day)
@@ -308,29 +341,18 @@ function forecastOver(facts: BreakerFacts, total: number): boolean {
   return Math.round(total * 24 / hours) > facts.capCents
 }
 
-function groupCampaigns(rows: readonly SpendRow[]): SpendRow[] {
-  const map = new Map<string, SpendRow>()
-  for (const row of rows) {
-    const prior = map.get(row.campaignId)
-    if (!prior) {
-      map.set(row.campaignId, row)
-      continue
-    }
-    const primaryCount = prior.primaryCount === null || row.primaryCount === null ? null : prior.primaryCount + row.primaryCount
-    map.set(row.campaignId, { ...prior, spendCents: prior.spendCents + row.spendCents, primaryCount, campaignLive: prior.campaignLive || row.campaignLive })
-  }
-  return [...map.values()]
-}
-
 function mergePauses(items: readonly PauseProposal[]): PauseProposal[] {
   const map = new Map<string, PauseProposal>()
   for (const item of items) {
-    const prior = map.get(item.campaignId)
+    const key = item.unit === 'adset' && item.adsetId
+      ? `adset:${item.accountId}:${item.adsetId}`
+      : `campaign:${item.accountId}:${item.campaignId}`
+    const prior = map.get(key)
     if (!prior) {
-      map.set(item.campaignId, item)
+      map.set(key, item)
       continue
     }
-    map.set(item.campaignId, {
+    map.set(key, {
       ...prior,
       rules: [...prior.rules, ...item.rules],
       adsetId: prior.adsetId ?? item.adsetId,
@@ -348,8 +370,51 @@ function pauseOf(rule: PauseRule, row: SpendRow, summary: string): PauseProposal
     campaignId: row.campaignId,
     campaignName: nameOf(row.campaignName),
     adsetId: null,
+    adsetName: null,
+    unit: 'campaign',
     summary,
   }
+}
+
+function pauseAdSet(rule: PauseRule, row: AdSetSpendRow, summary: string): PauseProposal {
+  return {
+    kind: 'pause',
+    rules: [rule],
+    accountId: row.accountId,
+    campaignId: row.campaignId,
+    campaignName: nameOf(row.campaignName),
+    adsetId: row.adsetId,
+    adsetName: nameOf(row.adsetName, '在投的广告组'),
+    unit: 'adset',
+    summary,
+  }
+}
+
+function groupAdSets(rows: readonly AdSetSpendRow[]): AdSetSpendRow[] {
+  const map = new Map<string, AdSetSpendRow>()
+  for (const row of rows) {
+    const key = `${row.accountId}:${row.adsetId}`
+    const prior = map.get(key)
+    if (!prior) {
+      map.set(key, row)
+      continue
+    }
+    const primaryCount = prior.primaryCount === null || row.primaryCount === null
+      ? null
+      : prior.primaryCount + row.primaryCount
+    map.set(key, {
+      ...prior,
+      spendCents: prior.spendCents + row.spendCents,
+      primaryCount,
+      adsetLive: prior.adsetLive && row.adsetLive,
+    })
+  }
+  return [...map.values()]
+}
+
+function adsetCurrenciesClash(window: readonly AdSetSpendRow[], group: AdSetSpendRow): boolean {
+  const rows = window.filter((row) => row.accountId === group.accountId && row.adsetId === group.adsetId)
+  return currenciesClash(rows)
 }
 
 function alert(code: AlertFinding['code'], accountId: string, summary: string): AlertFinding {
@@ -360,7 +425,7 @@ function sumSpend(rows: readonly SpendRow[]): number {
   return rows.reduce((sum, row) => sum + (row.spendCents > 0 ? row.spendCents : 0), 0)
 }
 
-function currenciesClash(rows: readonly SpendRow[]): boolean {
+function currenciesClash(rows: readonly { spendCents: number; currency: string | null }[]): boolean {
   const names = new Set(rows.filter((row) => row.spendCents > 0).map((row) => row.currency))
   return names.size > 1 || names.has(null)
 }
@@ -376,7 +441,7 @@ function ageHours(iso: string | null, now: Date): number | null {
   return (now.getTime() - time) / 3_600_000
 }
 
-function nameOf(name: string): string {
+function nameOf(name: string, fallback = '在投的广告系列'): string {
   const cleaned = name.replace(/[{}[\]`]/g, '').trim()
-  return cleaned.slice(0, 80) || '在投的广告系列'
+  return cleaned.slice(0, 80) || fallback
 }

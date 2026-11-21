@@ -33,11 +33,15 @@ describe('loadBreakerFacts', () => {
       ad_entity_snapshots: [
         { ad_account_id: 'act-demo', level: 'account', entity_id: 'act-demo', entity_name: '账户', campaign_id: null, adset_id: null, status: 'ACTIVE', effective_status: 'ACTIVE', captured_at: NOW.toISOString(), timezone_name: 'Pacific/Auckland', currency: 'NZD' },
         { ad_account_id: 'act-demo', level: 'campaign', entity_id: 'camp-a', entity_name: '春季系列', campaign_id: 'camp-a', adset_id: null, status: 'ACTIVE', effective_status: 'ACTIVE', captured_at: NOW.toISOString(), timezone_name: null, currency: null },
+        { ad_account_id: 'act-demo', level: 'adset', entity_id: 'set-a', entity_name: '春季组', campaign_id: 'camp-a', adset_id: 'set-a', status: 'ACTIVE', effective_status: 'ACTIVE', captured_at: NOW.toISOString(), timezone_name: null, currency: null },
       ],
-      ad_daily_insights: [{
-        ad_account_id: 'act-demo', entity_id: 'camp-a', entity_name: '春季系列',
-        insight_date: '2026-11-09', spend: 15.5, leads: 0, messaging_conversations: 4, updated_at: NOW.toISOString(),
-      }],
+      ad_daily_insights: [
+        {
+          ad_account_id: 'act-demo', level: 'campaign', entity_id: 'camp-a', entity_name: '春季系列',
+          insight_date: '2026-11-09', spend: 15.5, leads: 0, messaging_conversations: 4, updated_at: NOW.toISOString(),
+        },
+        ...adsetDays('act-demo', 'camp-a', 'set-a', NOW.toISOString(), 1, 0, 0),
+      ],
       ad_snapshot_captures: [{ ad_account_id: 'act-demo', level: 'campaign', captured_at: NOW.toISOString(), complete: true, skipped_shared: false }],
     }), 'client-a', NOW)
     expect(facts).not.toBe('unreadable')
@@ -45,8 +49,11 @@ describe('loadBreakerFacts', () => {
     expect(facts.spend[0]?.spendCents).toBe(1550)
     expect(facts.capCents).toBe(1000)
     expect(facts.settings.targetCplCents).toBe(100)
+    expect(facts.nzDate).toBe('2026-11-09')
     const judged = judgeBreaker(facts)
-    expect(judged.pauses[0]?.rules).toEqual(expect.arrayContaining(['spend_over_cap', 'cpl_zero_leads']))
+    const rules = judged.pauses.flatMap((item) => item.rules)
+    expect(rules).toEqual(expect.arrayContaining(['spend_over_cap', 'cpl_zero_leads']))
+    expect(judged.pauses.find((item) => item.rules.includes('cpl_zero_leads'))?.unit).toBe('adset')
     expect(judged.pauses.every((item) => item.kind === 'pause')).toBe(true)
     expect(facts.primaryResult).toBe('lead')
     expect(facts.spend[0]?.primaryCount).toBe(0)
@@ -89,6 +96,7 @@ describe('account staleness does not swallow other accounts', () => {
         campaignSnap('act-idle', 'camp-idle', 'ACTIVE', old),
         adSnap('act-idle', 'camp-idle', 'ad-idle', 'ACTIVE', 'DISAPPROVED', old),
         campaignSnap('act-live', 'camp-live', 'ACTIVE', NOW.toISOString()),
+        adsetSnap('act-live', 'camp-live', 'set-live', 'ACTIVE', NOW.toISOString()),
         adSnap('act-live', 'camp-live', 'ad-live', 'ACTIVE', 'ACTIVE', NOW.toISOString()),
       ],
       captures: [
@@ -98,12 +106,15 @@ describe('account staleness does not swallow other accounts', () => {
         capture('act-live', 'campaign', NOW.toISOString()),
         capture('act-live', 'ad', NOW.toISOString()),
       ],
-      insights: [insight('act-live', 'camp-live', NOW.toISOString(), 2.5, 1)],
+      insights: [
+        insight('act-live', 'camp-live', NOW.toISOString(), 2.5, 1),
+        ...adsetDays('act-live', 'camp-live', 'set-live', NOW.toISOString(), 2.5, 1, 0),
+      ],
     })), 'client-a', NOW)
     if (facts === 'unreadable') throw new Error('fixture unreadable')
     expect(facts.deliveringAccounts).toEqual(['act-live'])
     const judged = judgeBreaker(facts)
-    expect(judged.pauses.map((item) => item.campaignId)).toEqual(['camp-live'])
+    expect(judged.pauses.map((item) => item.adsetId)).toEqual(['set-live'])
     expect(judged.pauses[0]?.rules).toEqual(['cpl_over_target'])
     expect(judged.alerts.map((item) => item.code)).not.toContain('stale')
   })
@@ -116,6 +127,8 @@ describe('account staleness does not swallow other accounts', () => {
         campaignSnap('act-stale', 'camp-stale', 'ACTIVE', staleAt),
         adSnap('act-stale', 'camp-stale', 'ad-stale', 'ACTIVE', 'ACTIVE', staleAt),
         campaignSnap('act-fresh', 'camp-fresh', 'ACTIVE', NOW.toISOString()),
+        adsetSnap('act-stale', 'camp-stale', 'set-stale', 'ACTIVE', staleAt),
+        adsetSnap('act-fresh', 'camp-fresh', 'set-fresh', 'ACTIVE', NOW.toISOString()),
         adSnap('act-fresh', 'camp-fresh', 'ad-fresh', 'ACTIVE', 'ACTIVE', NOW.toISOString()),
       ],
       captures: [
@@ -128,12 +141,14 @@ describe('account staleness does not swallow other accounts', () => {
       insights: [
         insight('act-stale', 'camp-stale', staleAt, 2.5, 1),
         insight('act-fresh', 'camp-fresh', NOW.toISOString(), 2.5, 1),
+        ...adsetDays('act-stale', 'camp-stale', 'set-stale', staleAt, 2.5, 1, 0),
+        ...adsetDays('act-fresh', 'camp-fresh', 'set-fresh', NOW.toISOString(), 2.5, 1, 0),
       ],
     })), 'client-a', NOW)
     if (facts === 'unreadable') throw new Error('fixture unreadable')
     expect(facts.deliveringAccounts).toEqual(expect.arrayContaining(['act-stale', 'act-fresh']))
     const judged = judgeBreaker(facts)
-    expect(judged.pauses.map((item) => item.campaignId)).toEqual(['camp-fresh'])
+    expect(judged.pauses.map((item) => item.adsetId)).toEqual(['set-fresh'])
     expect(judged.alerts).toEqual([expect.objectContaining({ code: 'stale', accountId: 'act-stale' })])
   })
 })
@@ -236,12 +251,44 @@ function campaignSnap(accountId: string, campaignId: string, status: string, cap
   }
 }
 
+function adsetSnap(accountId: string, campaignId: string, adsetId: string, status: string, capturedAt: string) {
+  return {
+    client_id: 'client-a', ad_account_id: accountId, level: 'adset', entity_id: adsetId, entity_name: adsetId,
+    campaign_id: campaignId, adset_id: adsetId, status, effective_status: status, captured_at: capturedAt,
+    timezone_name: null, currency: null,
+  }
+}
+
 function adSnap(accountId: string, campaignId: string, adId: string, status: string, effective: string, capturedAt: string) {
   return {
     client_id: 'client-a', ad_account_id: accountId, level: 'ad', entity_id: adId, entity_name: adId,
     campaign_id: campaignId, adset_id: 'set-a', status, effective_status: effective, captured_at: capturedAt,
     timezone_name: null, currency: null,
   }
+}
+
+function adsetDays(
+  accountId: string,
+  campaignId: string,
+  adsetId: string,
+  updatedAt: string,
+  spend: number,
+  leads: number | null,
+  messaging: number | null,
+) {
+  return ['2026-11-08', '2026-11-07', '2026-11-06'].map((insight_date) => ({
+    client_id: 'client-a',
+    ad_account_id: accountId,
+    level: 'adset',
+    entity_id: adsetId,
+    entity_name: adsetId,
+    parent_id: campaignId,
+    insight_date,
+    spend,
+    leads,
+    messaging_conversations: messaging,
+    updated_at: updatedAt,
+  }))
 }
 
 function insight(accountId: string, campaignId: string, updatedAt: string, spend: number, leads: number) {
@@ -293,11 +340,9 @@ async function judgeLoaded(input: { primary: unknown; leads: number | null; mess
     ad_entity_snapshots: [
       { ad_account_id: 'act-demo', level: 'account', entity_id: 'act-demo', entity_name: '账户', campaign_id: null, adset_id: null, status: 'ACTIVE', effective_status: 'ACTIVE', captured_at: NOW.toISOString(), timezone_name: 'Pacific/Auckland', currency: 'NZD' },
       { ad_account_id: 'act-demo', level: 'campaign', entity_id: 'camp-a', entity_name: '春季系列', campaign_id: 'camp-a', adset_id: null, status: 'ACTIVE', effective_status: 'ACTIVE', captured_at: NOW.toISOString(), timezone_name: null, currency: null },
+      { ad_account_id: 'act-demo', level: 'adset', entity_id: 'set-a', entity_name: '春季组', campaign_id: 'camp-a', adset_id: 'set-a', status: 'ACTIVE', effective_status: 'ACTIVE', captured_at: NOW.toISOString(), timezone_name: null, currency: null },
     ],
-    ad_daily_insights: [{
-      ad_account_id: 'act-demo', entity_id: 'camp-a', entity_name: '春季系列',
-      insight_date: '2026-11-09', spend: input.spend, leads: input.leads, messaging_conversations: input.messaging, updated_at: NOW.toISOString(),
-    }],
+    ad_daily_insights: adsetDays('act-demo', 'camp-a', 'set-a', NOW.toISOString(), input.spend, input.leads, input.messaging),
     ad_snapshot_captures: [{ ad_account_id: 'act-demo', level: 'campaign', captured_at: NOW.toISOString(), complete: true, skipped_shared: false }],
   }), 'client-a', NOW)
   if (facts === 'unreadable') throw new Error('fixture unreadable')
