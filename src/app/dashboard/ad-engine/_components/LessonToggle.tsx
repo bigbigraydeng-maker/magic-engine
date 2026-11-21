@@ -12,9 +12,12 @@ import { useRouter } from 'next/navigation'
 export default function LessonToggle({
   lessonKey,
   isActive,
+  purpose = 'toggle',
 }: {
   lessonKey: string
   isActive: boolean
+  /** adopt always turns the lesson on. toggle is the existing stop / restore switch. */
+  purpose?: 'adopt' | 'toggle'
 }) {
   const router = useRouter()
   const [busy, setBusy] = useState(false)
@@ -27,7 +30,7 @@ export default function LessonToggle({
       const res = await fetch(`/api/ad-engine/lessons/${encodeURIComponent(lessonKey)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ is_active: !isActive }),
+        body: JSON.stringify({ is_active: purpose === 'adopt' ? true : !isActive }),
       })
       const json = await res.json()
       if (!res.ok || !json.success) throw new Error(json.error ?? `HTTP ${res.status}`)
@@ -50,7 +53,7 @@ export default function LessonToggle({
             : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 ring-1 ring-emerald-200'
         }`}
       >
-        {busy ? '…' : isActive ? '停用' : '恢复'}
+        {busy ? '…' : purpose === 'adopt' ? '采纳' : isActive ? '停用' : '恢复'}
       </button>
       {error && <span className="text-[11px] text-red-600">{error}</span>}
     </div>
