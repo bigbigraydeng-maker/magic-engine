@@ -71,8 +71,9 @@ describe('evaluateCodexHeadReview', () => {
     const result = reviewOf({ head: HEAD })
     expect(result.clear).toBe(false)
     expect(result.reviewed).toBe(false)
+    // Codex 的结论不再挡 B/C（2026-10-26 起就不是输入；Ray 2026-11-16 起 p0 也不挡）。
     expect(decideMerge({ risk: 'B', draft: false, fork: false, codexReview: result }).decision).toBe(
-      MERGE_DECISION.DISABLE_AUTO_MERGE,
+      MERGE_DECISION.ENABLE_AUTO_MERGE,
     )
   })
 
@@ -106,7 +107,7 @@ describe('evaluateCodexHeadReview', () => {
     expect(result.clear).toBe(true)
   })
 
-  it('does not clear when the review is bound to an older head, and the decision disables auto-merge', () => {
+  it('does not clear when the review is bound to an older head, and that does not block B', () => {
     const result = reviewOf({
       head: HEAD,
       comments: [{ author: CODEX, body: stateComment(OLD) }],
@@ -116,8 +117,8 @@ describe('evaluateCodexHeadReview', () => {
     expect(result.reviewed).toBe(false)
     expect(result.reason).toContain('更早的提交')
     const decision = decideMerge({ risk: 'B', draft: false, fork: false, codexReview: result })
-    expect(decision.decision).toBe(MERGE_DECISION.DISABLE_AUTO_MERGE)
-    expect(decision.pass).toBe(false)
+    expect(decision.decision).toBe(MERGE_DECISION.ENABLE_AUTO_MERGE)
+    expect(decision.pass).toBe(true)
   })
 
   it('clears an unresolved P2 and blocks an unresolved P1 on the current head', () => {
@@ -137,7 +138,7 @@ describe('evaluateCodexHeadReview', () => {
     expect(p1.clear).toBe(false)
     expect(p1.blocking).toBe(1)
     expect(decideMerge({ risk: 'B', draft: false, fork: false, codexReview: p1 }).decision).toBe(
-      MERGE_DECISION.DISABLE_AUTO_MERGE,
+      MERGE_DECISION.ENABLE_AUTO_MERGE,
     )
   })
 

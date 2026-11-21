@@ -446,8 +446,10 @@ async function readRequiredChecks() {
 /**
  * Codex review, Claude sign-off, required checks, and open threads.
  *
- * A review-query failure closes both sign-offs. A checks-list failure only
- * leaves the required checks red, so a B/C review can still arm auto-merge.
+ * Sign-off is recorded for the automatic review and is not a merge input
+ * (Ray 2026-11-16). A review-query failure still leaves the conversations
+ * unresolved, so A stays closed. A checks-list failure only leaves the
+ * required checks red.
  *
  * @param {{sources: unknown, markers: unknown, codexLogin: unknown, claudeLogin: unknown}} input
  */
@@ -553,21 +555,17 @@ async function readHeadFiles(paths) {
 /**
  * Build the human summary text for the step summary and the posted comment.
  *
- * @param {{rating: any, decision: any, signoff: any, ignoredMarkers: number, filesError: string|null, trialRun: any, spotSample: {reason: string}|null, spotChecks: {present: string[]}|null, trustReady: boolean, codexReview: {reason?: string}, claudeSignoff: {reason?: string}, requiredChecksGreen: boolean, conversationsResolved: boolean, rayHold: {hold: boolean, reason: string}}} input
+ * @param {{rating: any, decision: any, ignoredMarkers: number, filesError: string|null, trialRun: any, spotSample: {reason: string}|null, spotChecks: {present: string[]}|null, requiredChecksGreen: boolean, conversationsResolved: boolean, rayHold: {hold: boolean, reason: string}}} input
  * @returns {string}
  */
 function buildSummaryText({
   rating,
   decision,
-  signoff,
   ignoredMarkers,
   filesError,
   trialRun,
   spotSample,
   spotChecks,
-  trustReady,
-  codexReview,
-  claudeSignoff,
   requiredChecksGreen,
   conversationsResolved,
   rayHold,
@@ -581,14 +579,12 @@ function buildSummaryText({
     }),
   ]
   if (rating.risk === 'A') {
-    lines.push(`- Codex：${codexReview?.reason ?? '读不到'}`)
-    lines.push(`- Claude Code：${claudeSignoff?.reason ?? '读不到'}`)
     lines.push(requiredChecksGreen ? '- 必过检查：已全绿（不含本闸自己）' : '- 必过检查：还没全绿')
     lines.push(conversationsResolved ? '- 审查对话：都已解决' : '- 审查对话：还有没解决的')
-    lines.push(`- 旧签字标记：已有 ${signoff.present.join('/') || '无'}，缺 ${signoff.missing.join('/') || '无'}`)
-    if (!trustReady) {
-      lines.push('- 可信身份还没按角色配好：仓库变量要写成 codex-astra=登录名,claude-code=另一个登录名')
-    }
+    lines.push('- 自动审查：照常跑，不挡合并')
+  }
+  if (prIsP0 === 'true') {
+    lines.push('- 标了 p0：建议人看一眼，不挡合并')
   }
   if (rayHold?.hold) {
     lines.push(`- 留给 Ray 亲手合：${rayHold.reason}`)
@@ -654,10 +650,6 @@ try {
   const ignoredSignoff = review.ignoredMarkers
   const spotSample = shouldRequestLegacySpotCheck({ risk: rating.risk, pr, sha: headSha })
   const bound = review.trust.byRole
-  const trustReady =
-    typeof bound['codex-astra'] === 'string' &&
-    typeof bound['claude-code'] === 'string' &&
-    bound['codex-astra'] !== bound['claude-code']
 
   // 当场试跑 can only make the decision stricter — it never yields `enable`.
   const trialRun = await evaluateTrialRunSafely({
@@ -710,9 +702,6 @@ try {
     trialRun,
     spotSample,
     spotChecks: review.spotChecks,
-    trustReady,
-    codexReview: verdict.codexReview,
-    claudeSignoff: verdict.claudeSignoff,
     requiredChecksGreen: verdict.requiredChecksGreen,
     conversationsResolved: verdict.conversationsResolved,
     rayHold,
