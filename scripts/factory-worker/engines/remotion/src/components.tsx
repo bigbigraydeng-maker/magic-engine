@@ -55,18 +55,21 @@ export const Footage: React.FC<{ src: string; zoomTo?: number; startFrom?: numbe
   )
 }
 
-/** Cut transition: quick flash + settle-in, placed at the start of a scene. */
-export const CutFlash: React.FC = () => {
+/** Cut transition: quick flash + settle-in, placed at the start of a scene. Default peak matches the original flash. */
+export const CutFlash: React.FC<{ peak?: number; fadeAt?: number }> = ({ peak, fadeAt }) => {
   const frame = useCurrentFrame()
-  const o = interpolate(frame, [0, 3, 9], [0.55, 0.3, 0], { extrapolateRight: 'clamp' })
+  const o = peak === undefined
+    ? interpolate(frame, [0, 3, 9], [0.55, 0.3, 0], { extrapolateRight: 'clamp' })
+    : interpolate(frame, [0, 3, fadeAt ?? 9], [peak, peak * 0.55, 0], { extrapolateRight: 'clamp' })
   return <AbsoluteFill style={{ background: '#fff', opacity: o }} />
 }
 
-/** Masked slide-up text. delay in frames. */
-export const Reveal: React.FC<{ children: React.ReactNode; delay?: number; style?: React.CSSProperties }> = ({ children, delay = 0, style }) => {
+/** Masked slide-up text. delay in frames. Without motion, the spring matches the original. */
+export const Reveal: React.FC<{ children: React.ReactNode; delay?: number; style?: React.CSSProperties; motion?: { damping: number; stiffness: number; mass: number } }> = ({ children, delay = 0, style, motion }) => {
   const frame = useCurrentFrame()
   const { fps } = useVideoConfig()
-  const p = spring({ frame: frame - delay, fps, config: { damping: 14, stiffness: 140, mass: 0.7 } })
+  const config = motion ?? { damping: 14, stiffness: 140, mass: 0.7 }
+  const p = spring({ frame: frame - delay, fps, config })
   return (
     <div style={{ overflow: 'hidden', paddingBottom: '0.24em', marginBottom: '-0.24em', ...style }}>
       <div style={{ transform: `translateY(${(1 - p) * 110}%)`, opacity: Math.min(1, p * 1.6) }}>{children}</div>
