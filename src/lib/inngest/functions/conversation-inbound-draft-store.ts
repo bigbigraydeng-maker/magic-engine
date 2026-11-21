@@ -7,7 +7,8 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { getActiveBrief } from '@/lib/content/brief-injector'
-import { getClientKnowledge, type KnowledgeReadResult } from '@/lib/knowledge'
+import type { KnowledgeReadResult } from '@/lib/knowledge'
+import { getClientKnowledgeWithCatalog } from '@/lib/messenger-agent/catalog-knowledge'
 import type { ConversationHistoryTurn } from '@/lib/messenger-agent/prompt'
 import type { MasterBrief } from '@/types/magic-engine'
 
@@ -58,7 +59,7 @@ export async function loadDraftContext(clientId: string, conversationId: string)
 
   const [brief, knowledge, clientRow, historyRows] = await Promise.all([
     getActiveBrief(clientId),
-    getClientKnowledge(clientId, { purpose: 'customer_reply' }),
+    getClientKnowledgeWithCatalog(clientId, { purpose: 'customer_reply' }),
     supabaseAdmin.from('clients').select('brand_redline_phrases').eq('id', clientId).maybeSingle(),
     supabaseAdmin
       .from('conversation_messages')
