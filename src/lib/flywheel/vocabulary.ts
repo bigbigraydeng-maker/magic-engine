@@ -248,6 +248,9 @@ export const ADS_ACTION_TYPE = {
 
   /** Creative test/scale/retire suggestion. The row is a card, not a Meta write. */
   CREATIVE_STATE_PROPOSAL: 'ads.creative_state_proposal',
+
+  /** Human/agent decision log entry (no Meta write). Payload carries ads_decision_v1. */
+  DECISION_LOG: 'ads.decision_log',
 } as const
 
 export type AdsActionType = (typeof ADS_ACTION_TYPE)[keyof typeof ADS_ACTION_TYPE]
