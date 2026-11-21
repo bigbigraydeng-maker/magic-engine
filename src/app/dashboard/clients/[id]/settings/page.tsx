@@ -152,6 +152,15 @@ function TabBody({
               <PauseAdSetCardSwitchPanel clientId={clientId} />
               <div className="mt-3">
                 <AddCreativeCardSwitchPanel clientId={clientId} />
+                <div className="mt-3">
+                  <AddCreativeCardSwitchPanel
+                    clientId={clientId}
+                    path="tune-cards"
+                    title="广告调方确认卡"
+                    detail="默认关。打开后，每天巡查发现问题时才会出确认卡。关掉则不出卡，也不会改广告。"
+                    label="开关广告调方确认卡"
+                  />
+                </div>
               </div>
             </div>
             <div className="mt-3"><AdOutcomePanel clientId={clientId} /></div>
