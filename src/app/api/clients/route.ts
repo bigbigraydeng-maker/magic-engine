@@ -3,6 +3,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { getUserPermissions } from '@/lib/auth/whitelist'
 import { guardGlobalAdmin } from '@/lib/auth/require-admin'
+import { clientPortalMembershipsForUser } from '@/lib/auth/client-portal-membership'
 
 /**
  * P0-J fix (魏征 CRITICAL #1): this endpoint previously returned ALL clients
@@ -19,10 +20,10 @@ export async function GET() {
     // ── 1. Session gate ───────────────────────────────────────────────────
     const supabase = createServerSupabaseClient()
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user?.email) {
+    if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
-    const email = user.email.toLowerCase()
+    const email = user.email?.toLowerCase() ?? ''
 
     // ── 2. Admin shortcut — return everything ─────────────────────────────
     const adminPerms = getUserPermissions(email)
@@ -41,11 +42,9 @@ export async function GET() {
     // ── 3. Non-admin: filter to client_portal_users.email matches only ────
     let allowedIds: string[] | null = null
     if (!isAdmin) {
-      const { data: accessRows } = await supabaseAdmin
-        .from('client_portal_users')
-        .select('client_id')
-        .eq('email', email)
-      allowedIds = (accessRows ?? []).map(r => r.client_id as string)
+      const { rows: accessRows, error: accessError } = await clientPortalMembershipsForUser(user)
+      if (accessError) return NextResponse.json({ error: 'Authorization check failed' }, { status: 500 })
+      allowedIds = accessRows.map(r => r.client_id)
       if (allowedIds.length === 0) {
         return NextResponse.json({ clients: [] })
       }

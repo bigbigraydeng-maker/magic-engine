@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   requirePaidClientAccess: vi.fn(),
   isBriefComplete: vi.fn(),
   from: vi.fn(),
+  memberships: vi.fn(),
 }))
 
 vi.mock('@/lib/auth/client-access', () => ({
@@ -21,6 +22,9 @@ vi.mock('@/lib/supabase', () => ({
     from: mocks.from,
   },
 }))
+vi.mock('@/lib/auth/client-portal-membership', () => ({
+  clientPortalMembershipsForUser: mocks.memberships,
+}))
 
 import { GET } from '../route'
 
@@ -30,22 +34,12 @@ function params(id = CLIENT_ID) {
   return { params: { id } }
 }
 
-function portalLookup(result: {
-  data: { access_type: string } | null
-  error: { message: string } | null
-}) {
-  return {
-    select: vi.fn().mockReturnThis(),
-    eq: vi.fn().mockReturnThis(),
-    maybeSingle: vi.fn().mockResolvedValue(result),
-  }
-}
-
 describe('/api/clients/[id]/brief-status', () => {
   beforeEach(() => {
     mocks.requireDashboardClientAccess.mockReset()
     mocks.isBriefComplete.mockReset()
     mocks.from.mockReset()
+    mocks.memberships.mockReset().mockResolvedValue({ rows: [], error: null })
   })
 
   it('returns an auth error when dashboard client access fails', async () => {
@@ -85,10 +79,7 @@ describe('/api/clients/[id]/brief-status', () => {
       user: { email: 'fde@example.com' },
       allowedClientId: CLIENT_ID,
     })
-    mocks.from.mockReturnValueOnce(portalLookup({
-      data: { access_type: 'dashboard' },
-      error: null,
-    }))
+    mocks.memberships.mockResolvedValue({ rows: [{ client_id: CLIENT_ID, access_type: 'dashboard' }], error: null })
 
     const res = await GET({} as never, params())
     const body = await res.json() as { complete: boolean; gated: boolean; reason: string }
@@ -104,10 +95,7 @@ describe('/api/clients/[id]/brief-status', () => {
       user: { email: 'self@example.com' },
       allowedClientId: CLIENT_ID,
     })
-    mocks.from.mockReturnValueOnce(portalLookup({
-      data: { access_type: 'self_serve' },
-      error: null,
-    }))
+    mocks.memberships.mockResolvedValue({ rows: [{ client_id: CLIENT_ID, access_type: 'self_serve' }], error: null })
     mocks.isBriefComplete.mockResolvedValue(false)
 
     const res = await GET({} as never, params())
@@ -128,10 +116,7 @@ describe('/api/clients/[id]/brief-status', () => {
       user: { email: 'self@example.com' },
       allowedClientId: CLIENT_ID,
     })
-    mocks.from.mockReturnValueOnce(portalLookup({
-      data: { access_type: 'self_serve' },
-      error: null,
-    }))
+    mocks.memberships.mockResolvedValue({ rows: [{ client_id: CLIENT_ID, access_type: 'self_serve' }], error: null })
     mocks.isBriefComplete.mockResolvedValue(true)
 
     const res = await GET({} as never, params())
@@ -139,5 +124,21 @@ describe('/api/clients/[id]/brief-status', () => {
 
     expect(body.complete).toBe(true)
     expect(body.gated).toBe(false)
+  })
+
+  it('recognizes a phone-only self-serve member by Auth ID', async () => {
+    mocks.requireDashboardClientAccess.mockResolvedValue({
+      ok: true,
+      role: 'client-viewer',
+      user: { id: 'phone-user-1', phone: '+8613800001380', email: null },
+      allowedClientId: CLIENT_ID,
+    })
+    mocks.memberships.mockResolvedValue({ rows: [{ client_id: CLIENT_ID, access_type: 'self_serve', email: null }], error: null })
+    mocks.isBriefComplete.mockResolvedValue(false)
+
+    const res = await GET({} as never, params())
+
+    expect(await res.json()).toMatchObject({ complete: false, gated: true })
+    expect(mocks.isBriefComplete).toHaveBeenCalledWith(CLIENT_ID)
   })
 })

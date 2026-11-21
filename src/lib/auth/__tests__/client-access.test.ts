@@ -34,7 +34,7 @@ function mockUser(email: string) {
  * to keep legacy tests (that pre-date tier support) passing unchanged.
  */
 function mockPortalRows(
-  rows: Array<{ client_id: string; access_type?: AccessType; scoped_admin?: boolean }>,
+  rows: Array<{ client_id: string; access_type?: AccessType; scoped_admin?: boolean; auth_user_id?: string | null; email?: string | null }>,
   error: unknown = null,
 ) {
   const enriched = rows.map(r => ({
@@ -44,7 +44,7 @@ function mockPortalRows(
   }))
   const chain = {
     select: vi.fn().mockReturnThis(),
-    eq: vi.fn().mockReturnThis(),
+    eq: vi.fn().mockResolvedValue({ data: enriched, error }),
     in: vi.fn().mockResolvedValue({ data: enriched, error }),
   }
   mockFrom.mockReturnValue(chain as unknown as ReturnType<typeof supabaseAdmin.from>)
@@ -222,6 +222,19 @@ describe('requireDashboardClientAccess', () => {
   it('maps access_type=self_serve to tier=self_serve', async () => {
     mockUser('free@example.com')
     mockPortalRows([{ client_id: CLIENT_ID, access_type: 'self_serve' }])
+
+    const result = await requireDashboardClientAccess(CLIENT_ID)
+
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.tier).toBe('self_serve')
+  })
+
+  it('authorizes a phone-only user by stable Auth user ID without an email', async () => {
+    mockRequireSession.mockResolvedValue({
+      ok: true,
+      user: { id: 'phone-user-1', phone: '+8613800001380', email: null },
+    } as unknown as Awaited<ReturnType<typeof requireSession>>)
+    mockPortalRows([{ client_id: CLIENT_ID, access_type: 'self_serve', auth_user_id: 'phone-user-1', email: null }])
 
     const result = await requireDashboardClientAccess(CLIENT_ID)
 

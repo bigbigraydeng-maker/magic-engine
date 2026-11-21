@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import LoginForm from './login-form'
+import { isChinaPhoneOtpEnabled } from '@/lib/auth/china-phone-otp'
 
 interface Props {
   searchParams: { next?: string; error?: string }
@@ -39,7 +40,13 @@ function LogoMark({ size = 28 }: { size?: number }) {
 export default function LoginPage({ searchParams }: Props) {
   const next = searchParams.next ?? '/dashboard'
   const hasError = searchParams.error === 'auth_failed'
+  const phoneEnabled = isChinaPhoneOtpEnabled()
+  const registerHref = `/portal/register?next=${encodeURIComponent(next)}`
   const isMetaAdsAi = next.startsWith('/meta-ads-ai/')
+  const phoneFirst = phoneEnabled || isMetaAdsAi
+    || next === '/prospect'
+    || next.startsWith('/portal/')
+    || next.startsWith('/dashboard/clients')
   const loops = isMetaAdsAi ? [
     {
       icon: '🔒',
@@ -57,7 +64,6 @@ export default function LoginPage({ searchParams }: Props) {
       body: '点击一次按钮，直接查看最近 7 天的广告分析和核查重点。',
     },
   ] : portalLoops
-
   return (
     <main className="flex min-h-screen">
       {/* ── Left dark panel ── */}
@@ -148,17 +154,35 @@ export default function LoginPage({ searchParams }: Props) {
                 letterSpacing: '-.02em',
               }}
             >
-              {isMetaAdsAi ? '欢迎回来' : 'Welcome back.'}
+              {phoneFirst ? '登录 Magic Engine' : 'Welcome back.'}
             </h2>
             <p className="mt-2 text-sm leading-6" style={{ color: 'rgba(22,24,29,.60)' }}>
-              {isMetaAdsAi ? '登录后继续连接 Meta 广告账户。' : 'Sign in to your Magic Engine portal.'}
+              {phoneFirst
+                ? !phoneEnabled
+                  ? '手机号验证码登录暂未开放。请先用邮箱或 Google 登录；已有账号也可用原邮箱验证码进入绑定。'
+                  : isMetaAdsAi ? '使用手机验证码或其他方式继续连接 Meta 广告账户。' : '使用中国大陆手机号接收验证码登录工作区。'
+                : 'Sign in to your Magic Engine portal.'}
             </p>
           </div>
 
-          <LoginForm next={next} authFailed={hasError} locale={isMetaAdsAi ? 'zh-CN' : 'en'} />
+          <LoginForm next={next} authFailed={hasError} locale={phoneFirst ? 'zh-CN' : 'en'} phoneFirst={phoneFirst} phoneEnabled={phoneEnabled} />
+
+          {phoneFirst && (
+            <p className="mt-4 text-center text-xs leading-5" style={{ color: 'rgba(22,24,29,.45)' }}>
+              已有账号首次绑定手机？
+              <Link href="/portal/login?next=%2Faccount%2Fphone&emailCode=1" className="ml-1 font-semibold no-underline" style={{ color: '#9A6F1E' }}>
+                用原邮箱验证码进入并绑定
+              </Link>
+            </p>
+          )}
 
           <p className="mt-7 text-center text-xs" style={{ color: 'rgba(22,24,29,.45)' }}>
-            {isMetaAdsAi ? '尚未获得邀请？请联系 Magic Engine。' : <>
+            {isMetaAdsAi ? '尚未获得邀请？请联系 Magic Engine。' : phoneFirst ? <>
+              还没有账号？{' '}
+              <Link href={registerHref} className="font-semibold no-underline" style={{ color: '#9A6F1E' }}>
+                注册新账号 →
+              </Link>
+            </> : <>
               No account?{' '}
               <Link
                 href="https://magicengine.com.au/discover"

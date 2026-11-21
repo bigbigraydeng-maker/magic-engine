@@ -703,6 +703,7 @@ export default function ClientDetailPage() {
                     { label: '图文帖子', href: `/dashboard/clients/${clientId}/daily-plan?tab=post` },
                   ]}
                 />
+                <ToolCard href={`/dashboard/clients/${clientId}/social-growth-onboarding`} title="社媒与广告起号" desc="新客户 Facebook 起号 · 日常内容 · ThruPlay / 互动 / 消息获客方案" badge="in_house" />
                 <ToolCard href={`/dashboard/clients/${clientId}/blog`}           title="博客"           desc="双信号博客生产与管理"            badge="in_house" />
                 {showEntry('story') && (
                   <ToolCard href={`/dashboard/clients/${clientId}/story`}          title="Story 自动发布" desc="看这一周要发的 Story · 一键授权 / 随时停（仅管理员）" badge="in_house" />

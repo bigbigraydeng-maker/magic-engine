@@ -130,6 +130,18 @@ describe('dashboard auth middleware', () => {
     )
   })
 
+  it('authorizes a phone-only workspace by Supabase Auth user ID', async () => {
+    getUserMock.mockResolvedValue({ data: { user: { id: 'phone-user-1', phone: '+8613800001380', email: null } } })
+    mockSupabaseIn.mockResolvedValue({ data: [{ client_id: 'phone-client', access_type: 'self_serve', scoped_admin: false }], error: null })
+
+    const res = await middleware(buildRequest('/dashboard/clients/phone-client'))
+
+    expect(res.status).toBe(200)
+    expect(res.headers.get('location')).toBeNull()
+    expect(res.headers.get('x-middleware-request-x-user-tier')).toBe('self_serve')
+    expect(res.headers.get('x-middleware-request-x-allowed-client-id')).toBe('phone-client')
+  })
+
   it('lets unauthenticated users view the portal login page', async () => {
     getUserMock.mockResolvedValue({ data: { user: null } })
 

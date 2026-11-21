@@ -15,6 +15,7 @@ import { requireSession } from '@/lib/auth/require-session'
 import { guardAdmin } from '@/lib/auth/require-admin'
 import { ACCESS_TYPES_DASHBOARD } from '@/lib/auth/access-types'
 import { supabaseAdmin } from '@/lib/supabase'
+import { clientPortalMembershipsForUser } from '@/lib/auth/client-portal-membership'
 
 export const dynamic = 'force-dynamic'
 
@@ -53,21 +54,16 @@ export async function GET(request: NextRequest) {
 
   // ── Try portal user access first ──────────────────────────────────────────
 
-  const email = (session.user.email ?? '').toLowerCase()
-
-  const { data: portalRows, error: portalErr } = await supabaseAdmin
-    .from('client_portal_users')
-    .select('client_id')
-    .eq('email', email)
-    .eq('client_id', clientId)
-    .in('access_type', ACCESS_TYPES_DASHBOARD as readonly string[] as string[])
+  const { rows: memberships, error: portalErr } = await clientPortalMembershipsForUser(session.user)
 
   if (portalErr) {
     console.error('[mtc/ledger] portal user lookup failed:', portalErr)
     return NextResponse.json({ error: 'Authorization check failed' }, { status: 500 })
   }
 
-  const isPortalUser = Array.isArray(portalRows) && portalRows.length > 0
+  const isPortalUser = memberships.some(row =>
+    row.client_id === clientId && (ACCESS_TYPES_DASHBOARD as readonly string[]).includes(row.access_type)
+  )
 
   // ── Fall back to admin check ───────────────────────────────────────────────
 
