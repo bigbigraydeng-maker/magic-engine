@@ -181,6 +181,10 @@ async function record(
 ): Promise<BudgetSubmitResult> {
   const payload = payloadFrom(row.payload, email, result)
   await saveHold(args.kernel.supabase, args.clientId, row, payload)
+  if (payload.status === 'executed' && payload.wroteMeta) {
+    const { attachBudgetCardDecisionLog } = await import('@/lib/ads/decision-log/card-side-effect')
+    attachBudgetCardDecisionLog(args.kernel.supabase, args.clientId, row, payload)
+  }
   const status = payload.status === 'executed' || payload.status === 'awaiting' || payload.status === 'failed'
     ? payload.status
     : 'failed'
