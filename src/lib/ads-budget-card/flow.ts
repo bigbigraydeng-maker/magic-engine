@@ -142,7 +142,25 @@ async function recheck(args: Parameters<typeof submitBudgetCard>[0], row: HoldRo
   const live = await withPlanCap(
     args.kernel.supabase, args.clientId, locked.lock.planId, await args.runtime.read(row.payload.order),
   )
-  return guardBudget(row.payload.order, live, row.payload.beforeCents).block
+  const guardBlock = guardBudget(row.payload.order, live, row.payload.beforeCents).block
+  if (guardBlock) return guardBlock
+  return tuesdayStillHolds(args, row, live)
+}
+
+async function tuesdayStillHolds(
+  args: Parameters<typeof submitBudgetCard>[0],
+  row: HoldRow,
+  live: BudgetSnapshot,
+): Promise<string | null> {
+  if (!row.payload.subjectKey.startsWith('tuesday-budget:')) return null
+  try {
+    const { tuesdayConfirmRefusal } = await import('@/lib/diagnostic/tuesday-budget-execute')
+    return await tuesdayConfirmRefusal(
+      args.kernel.supabase, args.clientId, row.payload, live, args.now ?? args.kernel.now(),
+    )
+  } catch {
+    return '这周的加减预算条件读不到，没有改。'
+  }
 }
 
 async function withPlanCap(
@@ -238,10 +256,16 @@ async function confirmDecision(
     const card = await decideConfirmationCard(args.kernel, decisionArgs(args))
     return { ok: card.status === 'confirmed', card }
   } catch (error) {
-    if (!(error instanceof ConfirmationCardError) || error.code !== 'not_waiting') throw error
+    if (!closedConfirm(error)) throw error
     const run = await args.kernel.requireRun(args.runId)
     return { ok: run.status === 'authorized' || run.status === 'succeeded', card: null }
   }
+}
+
+function closedConfirm(error: unknown): boolean {
+  if (!(error instanceof ConfirmationCardError)) return false
+  if (error.code === 'not_waiting') return true
+  return error.code === 'stale' && error.humanReason.includes('not_pending:')
 }
 
 async function lostRace(args: Parameters<typeof submitBudgetCard>[0]): Promise<BudgetSubmitResult> {
