@@ -35,6 +35,7 @@ import { getSeasonalCalendar } from './seasonal-calendar'
 import { getIndustryInterestTrend } from '@/lib/gtrends/client'
 import { coerceWeaknesses } from './weakness-utils'
 import { applyLlmAdPlays, dedupeAdPlayStepKeys } from '@/lib/ads-strategy/plan-seed/ad-plays'
+import { finalizePrescriptionActionList } from '@/lib/ads/prescription-action-list'
 import { retrieveSimilarCases } from '@/lib/case-library/retriever'
 import { audOnlyAmount } from '@/lib/ads/budget-currency'
 import { fetchOutcomeConfidenceMap } from '@/lib/case-library/outcome-confidence'
@@ -232,6 +233,7 @@ export async function runHuatuo(
   totalOutputTokens += pass1.usage.output
 
   let content = pass1.content
+  let actionListDroppedReason = pass1.action_list_dropped_reason ?? null
   let selfGrade: SelfGrade | null = null
 
   // ── Step 3: Self-grade ───────────────────────────────────────────────────
@@ -283,6 +285,7 @@ export async function runHuatuo(
         totalInputTokens += pass2.usage.input
         totalOutputTokens += pass2.usage.output
         content = pass2.content
+        actionListDroppedReason = pass2.action_list_dropped_reason ?? actionListDroppedReason
 
         // Re-grade pass 2
         const grade2 = await withHardTimeout(
@@ -324,6 +327,7 @@ export async function runHuatuo(
       cost_usd: Number(costUsd.toFixed(4)),
       duration_ms: Date.now() - startedAt,
       industry_category_used: industryCategory,
+      ...(actionListDroppedReason ? { action_list_dropped_reason: actionListDroppedReason } : {}),
     },
   }
 }
@@ -445,6 +449,7 @@ export async function refineHuatuoPrescription(
     (totalInputTokens / 1_000_000) * PRICE_INPUT_PER_M +
     (totalOutputTokens / 1_000_000) * PRICE_OUTPUT_PER_M
 
+  const dropped = refinePass.action_list_dropped_reason
   return {
     content: refinePass.content,
     self_grade: selfGrade,
@@ -458,6 +463,7 @@ export async function refineHuatuoPrescription(
       cost_usd: Number(costUsd.toFixed(4)),
       duration_ms: Date.now() - startedAt,
       industry_category_used: industryCategory,
+      ...(dropped ? { action_list_dropped_reason: dropped } : {}),
     },
   }
 }
@@ -467,6 +473,7 @@ export async function refineHuatuoPrescription(
 interface ClaudeCallResult<T> {
   content: T
   usage: { input: number; output: number }
+  action_list_dropped_reason?: string | null
 }
 
 async function generatePrescription(
@@ -494,9 +501,11 @@ async function generatePrescription(
 
   const rawText = extractText(message.content)
   const parsed = parseJsonResponse<Partial<PrescriptionContent>>(rawText)
+  const normalized = normalizePrescriptionContentWithMeta(parsed)
   return {
-    content: normalizePrescriptionContent(parsed),
+    content: normalized.content,
     usage: { input: message.usage.input_tokens, output: message.usage.output_tokens },
+    action_list_dropped_reason: normalized.action_list_dropped_reason,
   }
 }
 
@@ -573,27 +582,40 @@ function normalizeInitiativeSeed(seed: unknown, phaseNumber: number): import('@/
 }
 
 export function normalizePrescriptionContent(p: Partial<PrescriptionContent>): PrescriptionContent {
-  const normalized: PrescriptionContent = {
-    summary: typeof p.summary === 'string' ? p.summary : '',
-    // DAPE W3 — narrative 是新加的可选字段，旧 prompt 无此输出 → 空串兜底
-    narrative: typeof p.narrative === 'string' ? p.narrative : '',
-    phases: Array.isArray(p.phases)
-      ? p.phases.map(ph => {
-          const phaseNumber = typeof ph.phase_number === 'number' ? ph.phase_number : 0
-          return {
-            phase_number:    phaseNumber,
-            name:            typeof ph.name === 'string' ? ph.name : '',
-            duration_weeks:  typeof ph.duration_weeks === 'number' ? ph.duration_weeks : 0,
-            actions:         Array.isArray(ph.actions) ? ph.actions.map(attachExecutionTarget) : [],
-            initiative_seed: normalizeInitiativeSeed((ph as { initiative_seed?: unknown }).initiative_seed, phaseNumber),
-          }
-        })
-      : [],
-    kpi_targets: Array.isArray(p.kpi_targets) ? p.kpi_targets : [],
-    budget_allocation: Array.isArray(p.budget_allocation) ? p.budget_allocation : [],
-  }
-  dedupeAdPlayStepKeys(normalized.phases)
-  return normalized
+  return normalizePrescriptionContentWithMeta(p).content
+}
+
+export function normalizePrescriptionContentWithMeta(p: Partial<PrescriptionContent>): {
+  content: PrescriptionContent
+  action_list_dropped_reason: string | null
+} {
+  const content = (() => {
+    const normalized: PrescriptionContent = {
+      summary: typeof p.summary === 'string' ? p.summary : '',
+      narrative: typeof p.narrative === 'string' ? p.narrative : '',
+      phases: Array.isArray(p.phases)
+        ? p.phases.map(ph => {
+            const phaseNumber = typeof ph.phase_number === 'number' ? ph.phase_number : 0
+            return {
+              phase_number:    phaseNumber,
+              name:            typeof ph.name === 'string' ? ph.name : '',
+              duration_weeks:  typeof ph.duration_weeks === 'number' ? ph.duration_weeks : 0,
+              actions:         Array.isArray(ph.actions) ? ph.actions.map(attachExecutionTarget) : [],
+              initiative_seed: normalizeInitiativeSeed((ph as { initiative_seed?: unknown }).initiative_seed, phaseNumber),
+            }
+          })
+        : [],
+      kpi_targets: Array.isArray(p.kpi_targets) ? p.kpi_targets : [],
+      budget_allocation: Array.isArray(p.budget_allocation) ? p.budget_allocation : [],
+    }
+    dedupeAdPlayStepKeys(normalized.phases)
+    if (Array.isArray((p as { action_list?: unknown }).action_list)) {
+      normalized.action_list = (p as PrescriptionContent).action_list
+    }
+    return normalized
+  })()
+  const finalized = finalizePrescriptionActionList(content)
+  return { content: finalized.content, action_list_dropped_reason: finalized.action_list_dropped_reason }
 }
 
 /** 喂给 LLM 的上一版处方副本：去掉顶层 plan_seed（含真实账户号与日预算，不能让 LLM 看到）。不改入参。 */
@@ -672,9 +694,11 @@ ${JSON.stringify(withoutPlanSeed(feedback.previousContent), null, 2)}
   assertNotTruncated(message, 'refine')
   const rawText = extractText(message.content)
   const parsed = parseJsonResponse<Partial<PrescriptionContent>>(rawText)
+  const normalized = normalizePrescriptionContentWithMeta(parsed)
   return {
-    content: normalizePrescriptionContent(parsed),
+    content: normalized.content,
     usage: { input: message.usage.input_tokens, output: message.usage.output_tokens },
+    action_list_dropped_reason: normalized.action_list_dropped_reason,
   }
 }
 
