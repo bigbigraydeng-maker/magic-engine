@@ -56,9 +56,11 @@
 |---|---|---|---|---|
 | 11/9 周一 18:00 | Reel | Tale Terracotta detail r1 | 「No two are the same」兵马俑发型、表情、盔甲各不相同；A Tale of Two Cities | 北京西安探索指南（beijing-xian-discovery-guide） |
 | 11/11 周三 18:00 | Reel | Legacy of China postcard（CTS Nov lead-g） | 故宫、天坛、兵马俑、黄浦江夜游：China's imperial treasures；让客人说哪个团、什么时候、预算多少 | Explore Legacy of China（imperial-heritage 团页） |
-| 11/13 周五 18:00 | Reel | China four-scene collection（CTS Nov lead） | 长城、兵马俑、西湖、张家界砂岩峰：奥克兰出发小团的四个中国场景 | Find your China tour（/tours/china） |
+| 11/13 周五 18:00 | Reel | China four-scene collection（CTS Nov lead） | 长城、兵马俑、西湖、张家界砂岩峰：奥克兰出发的四个中国场景（周卡原文里的 small-group 是红线词，见下） | Find your China tour（/tours/china） |
 | 图文 ×3 | 图文 | 尚未接入周卡（方向，未排） | 实用信息为主：3 月穿什么带什么、新西兰护照签证、Best of China 15 天看什么 | 评论区放链接 |
 | Story ×18 | Story | 11/5–11/10 已授权 | 周卡提示其中 12 条日期不在下周，授权整包一起 | — |
+
+**周卡里有一处红线词待处理**：11/13 那条视频的英文正文含 “small-group tours”。CTS 红线（见 2026-10-14-cts-promo-rules.md 第 5 条、2026-10-12 事实库）禁止写 small group（内部配额，官网数字互相矛盾）。批准前应改掉这个词，或确认红线已放开。
 
 **这周的缺口**：三条 Reel 全是团介绍/风光，没有客人故事（配比里客人故事应占 20%）；客人 Guilin 出镜片字幕改好后，替换其中一条。
 
