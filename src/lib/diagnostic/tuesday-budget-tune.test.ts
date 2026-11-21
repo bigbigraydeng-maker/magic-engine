@@ -1,204 +1,413 @@
 /**
- * Tuesday budget tune only issues a confirmation card.
- * A click records who pressed it and does not run a budget change.
+ * Confirming a Tuesday budget card runs the existing budget-card path.
+ * Issuing the card does not. Guards and the second nod for a raise stay.
  */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { createCapabilities } from '@/lib/capabilities'
-import { decideConfirmationCard } from '@/lib/confirmation-card'
+import { listConfirmationCards } from '@/lib/confirmation-card'
+import { pausedDraftClickUrl } from '@/lib/ads-strategy/paused-draft-copy'
+import { submitBudgetCard } from '@/lib/ads-budget-card/flow'
 import { ACTION_REGISTRY } from '@/lib/kernel/registry'
-import { CONFIRMATION_ACTION_KEY } from '@/lib/kernel/registry-confirmation'
-import { CLIENT_A, makeFixture } from '@/lib/kernel/__tests__/fixtures'
-import type { CardClicker } from '@/lib/confirmation-card'
-import {
-  issueTuesdayBudgetTunes,
-  planTuesdayBudgetTunes,
-  runTuesdayBudgetTune,
-  type TuesdayBudgetProposal,
-} from './tuesday-budget-tune'
-import type { WeeklyCheckSummary } from './prescription-weekly-check'
+import { CLIENT_A, GOAL_A, makeFixture } from '@/lib/kernel/__tests__/fixtures'
+import type { CardClicker } from '@/lib/confirmation-card/actor'
+import type { BudgetExecuteCall, BudgetExecuteResult, BudgetPath } from '@/lib/ads-budget-card/path'
+import type { PrescriptionLock, VersionLockSource } from '@/lib/ads-budget-card/prescription-lock'
+import type { BudgetOrder, BudgetRuntime, BudgetSnapshot } from '@/lib/ads-budget-card/types'
+import { issueTuesdayBudgetTunes, type TuesdayPorts } from './tuesday-budget-execute'
+import { planTuesdayBudgetTunes, runTuesdayBudgetTune } from './tuesday-budget-tune'
+import type { WeeklyBudgetSuggestion, WeeklyCheckSummary } from './prescription-weekly-check'
 
-const KEY = CONFIRMATION_ACTION_KEY
 const OPC: CardClicker = { kind: 'opc', email: 'opc@example.com' }
 const AGENT: CardClicker = { kind: 'agent', email: null }
-const SUBJECT = 'a1b2c3d4-0000-4000-8000-000000000001'
+const PRESCRIPTION = 'a1110000-0000-4000-8000-000000000001'
 
-const READY: TuesdayBudgetProposal = {
-  clientId: CLIENT_A,
-  subjectKey: SUBJECT,
-  direction: 'increase',
-  accountLabel: '主广告账户',
-  beforeCents: 3000,
-  afterCents: 3600,
-  currencyLabel: '元',
-  why: '近三天点击高于账户中位，现预算低于账户平均。',
-  dateLabel: '这周二',
-  scopeLabel: '只改这一次日预算',
+const lock: PrescriptionLock = {
+  prescriptionId: PRESCRIPTION,
+  version: 2,
+  goalId: GOAL_A,
+  planId: 'plan-1',
+  planHash: 'hash-1',
+  approvedOn: '2026-11-02',
 }
 
-function fixture() {
-  const calls = vi.fn()
-  const f = makeFixture({
+function proposal(over: Partial<WeeklyBudgetSuggestion> = {}): WeeklyBudgetSuggestion {
+  return {
+    clientId: CLIENT_A,
+    subjectKey: 'wkignored',
+    direction: 'increase',
+    accountLabel: '在投日预算',
+    beforeCents: 3000,
+    afterCents: 3600,
+    currencyLabel: '纽元',
+    why: '连续多天点击好于账户中位，预算却偏低。',
+    dateLabel: '这周二',
+    scopeLabel: '只改这一次日预算',
+    adsetId: '111',
+    adAccountId: 'act_111111',
+    prescriptionId: PRESCRIPTION,
+    name: '春季组',
+    ...over,
+  }
+}
+
+function live(over: Partial<BudgetSnapshot> = {}): BudgetSnapshot {
+  return {
+    registeredAccountIds: ['act_111111'],
+    accountId: '111111',
+    adsetId: '111',
+    status: 'ACTIVE',
+    currentCents: 3000,
+    name: '春季组',
+    accountCapCents: 20000,
+    accountLiveCents: 3000,
+    countedInLive: true,
+    otherAccountsLiveCents: 0,
+    clientCapCents: 50000,
+    lifetimeBlocks: false,
+    stepRatio: 0.2,
+    ...over,
+  }
+}
+
+function planRow(cents: number | null) {
+  const promo: Record<string, unknown> = {
+    schema: 'promo_v1',
+    goal_id: GOAL_A,
+    phases: [{ id: 'p1', name: '阶段', start_date: '2026-11-01', end_date: '2026-11-30', steps: [] }],
+    checks: [],
+  }
+  if (cents !== null) promo.daily_total_cap_cents = cents
+  return { id: 'plan-1', client_id: CLIENT_A, status: 'approved', plan_data: { promo } }
+}
+
+function patrol(direction: 'increase' | 'decrease') {
+  const dates = direction === 'increase'
+    ? ['2026-11-02', '2026-11-01', '2026-10-31']
+    : ['2026-11-02', '2026-11-01']
+  const finding = {
+    code: direction === 'increase' ? 'O1' : 'D3',
+    status: 'hit',
+    title: '',
+    units: [{ level: 'adset', id: '111', name: null }],
+  }
+  return dates.map((date) => ({
+    client_id: CLIENT_A,
+    date,
+    data_completeness: 'complete',
+    payload: direction === 'increase'
+      ? { opportunities: [finding], problems: [] }
+      : { problems: [finding], opportunities: [] },
+  }))
+}
+
+function fixture(planCap: number | null = 50000, direction: 'increase' | 'decrease' = 'increase') {
+  return makeFixture({
     registry: ACTION_REGISTRY,
-    startAt: '2026-10-27T00:00:00.000Z',
-    capabilities: (sb) => {
-      const impl = createCapabilities(sb)[KEY]
-      return {
-        [KEY]: {
-          ...impl,
-          steps: {
-            hold: async (step) => {
-              calls()
-              return impl.steps.hold(step)
-            },
-          },
-        },
-      }
+    capabilities: (sb) => createCapabilities(sb),
+    startAt: '2026-11-02T00:00:00.000Z',
+    options: {
+      extraTables: {
+        marketing_plans: [planRow(planCap)],
+        ads_growth_states: patrol(direction),
+      },
     },
   })
-  return { f, calls }
 }
 
-function emptySummary(): WeeklyCheckSummary {
-  return { considered: 1, checked: 1, outcomes: [] }
+function ports(box: { current: BudgetSnapshot }): TuesdayPorts & { calls: BudgetExecuteCall[]; path: BudgetPath } {
+  const calls: BudgetExecuteCall[] = []
+  const locks: VersionLockSource = { read: async () => ({ ok: true, lock }) }
+  const path: BudgetPath = {
+    execute: async (call) => {
+      calls.push(call)
+      const awaiting = call.raising
+      const result: BudgetExecuteResult = awaiting
+        ? { kind: 'awaiting', wrote: false, readbackCents: null, actionRunId: 'run-1', reason: '加预算还要花钱的人再点一次。' }
+        : { kind: 'executed', wrote: true, readbackCents: call.afterCents, actionRunId: 'run-1', reason: '已改好，回读的日预算和要改的一致。' }
+      return result
+    },
+  }
+  return {
+    locks,
+    calls,
+    path,
+    readLive: async () => box.current,
+  }
 }
 
-describe('周二加减预算只出确认卡', () => {
-  it('加预算出卡，点了也不跑改预算', async () => {
-    const { f, calls } = fixture()
-    const [row] = await issueTuesdayBudgetTunes(f.kernel, [READY])
+function runtime(box: { current: BudgetSnapshot }): BudgetRuntime {
+  return { read: async (_order: BudgetOrder) => box.current }
+}
+
+describe('周二加减预算确认后走原来的改预算卡', () => {
+  it('出卡不改预算，人确认之后减预算才执行一次', async () => {
+    const box = { current: live({ name: '春季组' }) }
+    const wired = ports(box)
+    const f = fixture(50000, 'decrease')
+    const cut = proposal({ direction: 'decrease', afterCents: 2400, why: '巡检连续看到花钱没有对上结果。' })
+    const [row] = await issueTuesdayBudgetTunes(f.kernel, [cut], wired)
     expect(row.issued).toBe(true)
     expect(row.executed).toBe(false)
-    expect(row.runId).toBeTruthy()
-    const card = await decideConfirmationCard(f.kernel, {
+    expect(wired.calls).toEqual([])
+    const shown = await shownCard(f, row.runId ?? '')
+    expect(shown.what.startsWith('把广告组 ')).toBe(true)
+    expect(shown.confirmEnabled).toBe(true)
+    expect(pausedDraftClickUrl(CLIENT_A, shown.runId, shown.what)).toContain('/meta-ads/budget-cards/')
+    const done = await submitBudgetCard({
+      kernel: f.kernel,
       clientId: CLIENT_A,
-      runId: row.runId ?? '',
+      runId: shown.runId,
       clicker: OPC,
       resolution: 'confirm',
-      expectedDecisionId: expectDecision(f),
-      fingerprint: row.fingerprint ?? '',
+      expectedDecisionId: shown.expectedDecisionId,
+      fingerprint: shown.fingerprint,
+      runtime: runtime(box),
+      locks: wired.locks,
+      path: wired.path,
     })
-    expect(card.confirmEnabled).toBe(false)
-    expect(card.status).toBe('confirmed')
-    expect(card.amount).toContain('30.00')
-    expect(card.amount).toContain('36.00')
-    expect(card.what).toContain('加上去')
-    expect(card.what).toContain('不会自动改预算')
-    expect(calls).not.toHaveBeenCalled()
-    expect(actionKeys(f)).toEqual([KEY])
+    expect(done.status).toBe('executed')
+    expect(wired.calls).toHaveLength(1)
+    expect(wired.calls[0]?.raising).toBe(false)
+    expect(wired.calls[0]?.afterCents).toBe(2400)
   })
 
-  it('减预算同样只出卡', async () => {
-    const { f, calls } = fixture()
-    const [row] = await issueTuesdayBudgetTunes(f.kernel, [{
-      ...READY,
-      subjectKey: 'b1b2c3d4-0000-4000-8000-000000000002',
-      direction: 'decrease',
-      afterCents: 2400,
-      why: '花费高出计划，结果没有跟上。',
-    }])
+  it('加预算的第一次确认不写，仍要第二次点头', async () => {
+    const box = { current: live() }
+    const wired = ports(box)
+    const f = fixture()
+    const [row] = await issueTuesdayBudgetTunes(f.kernel, [proposal()], wired)
     expect(row.issued).toBe(true)
     expect(row.executed).toBe(false)
-    const card = await decideConfirmationCard(f.kernel, {
+    const shown = await shownCard(f, row.runId ?? '')
+    const done = await submitBudgetCard({
+      kernel: f.kernel,
       clientId: CLIENT_A,
-      runId: row.runId ?? '',
+      runId: shown.runId,
       clicker: OPC,
       resolution: 'confirm',
-      expectedDecisionId: expectDecision(f),
-      fingerprint: row.fingerprint ?? '',
+      expectedDecisionId: shown.expectedDecisionId,
+      fingerprint: shown.fingerprint,
+      runtime: runtime(box),
+      locks: wired.locks,
+      path: wired.path,
     })
-    expect(card.what).toContain('减下来')
-    expect(card.amount).toContain('24.00')
-    expect(calls).not.toHaveBeenCalled()
-    expect(actionKeys(f)).toEqual([KEY])
+    expect(done.status).toBe('awaiting')
+    expect(done.wroteMeta).toBe(false)
+    expect(wired.calls).toHaveLength(1)
+    expect(wired.calls[0]?.raising).toBe(true)
+    expect(wired.calls[0]?.afterCents).toBe(3600)
   })
 
-  it('代理人能出卡，不能点', async () => {
-    const { f } = fixture()
-    const [row] = await issueTuesdayBudgetTunes(f.kernel, [READY])
-    await expect(decideConfirmationCard(f.kernel, {
+  it('代理人能出卡，不能确认', async () => {
+    const box = { current: live() }
+    const wired = ports(box)
+    const f = fixture()
+    const [row] = await issueTuesdayBudgetTunes(f.kernel, [proposal()], wired)
+    await expect(submitBudgetCard({
+      kernel: f.kernel,
       clientId: CLIENT_A,
       runId: row.runId ?? '',
       clicker: AGENT,
       resolution: 'confirm',
-      expectedDecisionId: expectDecision(f),
+      expectedDecisionId: 'x',
       fingerprint: row.fingerprint ?? '',
+      runtime: runtime(box),
+      locks: wired.locks,
+      path: wired.path,
     })).rejects.toThrow(/不能点/)
-    expect(actionKeys(f)).toEqual([KEY])
+    expect(wired.calls).toEqual([])
   })
 
-  it('金额读不到时不填 0，确认按钮是灰的', async () => {
-    const { f } = fixture()
-    const [row] = await issueTuesdayBudgetTunes(f.kernel, [{ ...READY, beforeCents: null }])
+  it('巡检条件不再成立时确认不改', async () => {
+    const box = { current: live() }
+    const wired = ports(box)
+    const f = fixture()
+    const [row] = await issueTuesdayBudgetTunes(f.kernel, [proposal()], wired)
+    const shown = await shownCard(f, row.runId ?? '')
+    f.tables.ads_growth_states.splice(0, f.tables.ads_growth_states.length)
+    const done = await submitBudgetCard(submitOf(f, shown, box, wired))
+    expect(done.status).toBe('blocked')
+    expect(done.reason).toContain('不成立')
+    expect(wired.calls).toEqual([])
+  })
+
+  it('确认时现预算变了就不改', async () => {
+    const box = { current: live() }
+    const wired = ports(box)
+    const f = fixture()
+    const [row] = await issueTuesdayBudgetTunes(f.kernel, [proposal()], wired)
+    const shown = await shownCard(f, row.runId ?? '')
+    box.current = live({ currentCents: 2800 })
+    const done = await submitBudgetCard(submitOf(f, shown, box, wired))
+    expect(done.status).toBe('blocked')
+    expect(done.reason).toContain('现预算')
+    expect(wired.calls).toEqual([])
+  })
+
+  it('计划里没有每天上限时，加预算确认不改', async () => {
+    const box = { current: live() }
+    const wired = ports(box)
+    const f = fixture(50000, 'increase')
+    const [row] = await issueTuesdayBudgetTunes(f.kernel, [proposal()], wired)
+    const shown = await shownCard(f, row.runId ?? '')
+    const plan = f.tables.marketing_plans[0]
+    plan.plan_data = { promo: { schema: 'promo_v1', goal_id: GOAL_A, phases: [], checks: [] } }
+    const done = await submitBudgetCard(submitOf(f, shown, box, wired))
+    expect(done.status).toBe('blocked')
+    expect(done.reason).toContain('每天广告总上限')
+    expect(wired.calls).toEqual([])
+  })
+
+  it('没有每天上限时减预算仍可确认执行', async () => {
+    const box = { current: live() }
+    const wired = ports(box)
+    const f = fixture(null, 'decrease')
+    const cut = proposal({ direction: 'decrease', afterCents: 2400 })
+    const [row] = await issueTuesdayBudgetTunes(f.kernel, [cut], wired)
     expect(row.issued).toBe(true)
-    expect(row.executed).toBe(false)
-    const stored = cardText(f)
-    expect(stored).toContain('现预算读不到')
-    expect(stored).toContain('没有把现预算填成 0')
-    expect(stored).not.toContain('现预算是 0')
-    const card = await shownCard(f, row.runId ?? '')
-    expect(card.amount.startsWith('现预算读不到')).toBe(true)
-    expect(card.confirmEnabled).toBe(false)
+    const shown = await shownCard(f, row.runId ?? '')
+    const done = await submitBudgetCard(submitOf(f, shown, box, wired))
+    expect(done.status).toBe('executed')
+    expect(wired.calls).toHaveLength(1)
+    expect(wired.calls[0]?.raising).toBe(false)
   })
 
-  it('账户号不写进卡里', async () => {
-    const { f } = fixture()
-    const secret = '123456789012345'
-    await issueTuesdayBudgetTunes(f.kernel, [{ ...READY, accountLabel: secret }])
-    expect(cardText(f)).not.toContain(secret)
-    expect(cardText(f)).toContain('广告账户')
-  })
-
-  it('方向和金额对不上就不出卡，也不改预算', async () => {
-    const { f } = fixture()
-    const [row] = await issueTuesdayBudgetTunes(f.kernel, [{ ...READY, afterCents: 1000 }])
-    expect(row.issued).toBe(false)
-    expect(row.executed).toBe(false)
-    expect(row.reason).toContain('没有出卡')
+  it('方向对不上、组号不是数字、或不止一处，都不出卡', async () => {
+    const box = { current: live() }
+    const wired = ports(box)
+    const f = fixture()
+    const clash = await issueTuesdayBudgetTunes(f.kernel, [
+      proposal(),
+      proposal({ direction: 'decrease', afterCents: 2400, adsetId: '222' }),
+    ], wired)
+    expect(clash.every((row) => row.issued === false && row.executed === false)).toBe(true)
+    const [badDirection] = await issueTuesdayBudgetTunes(f.kernel, [proposal({ afterCents: 1000 })], wired)
+    expect(badDirection.issued).toBe(false)
+    const [badId] = await issueTuesdayBudgetTunes(f.kernel, [proposal({ adsetId: 'adset-a' })], wired)
+    expect(badId.issued).toBe(false)
+    expect(badId.reason).toContain('哪一组')
+    expect(wired.calls).toEqual([])
     expect(f.tables.action_runs).toHaveLength(0)
   })
 
-  it('这周复查没有现成的加减金额时，不出卡，也不去准备执行', async () => {
-    const open = vi.fn()
-    const rows = await runTuesdayBudgetTune(open, emptySummary())
-    expect(planTuesdayBudgetTunes(emptySummary())).toEqual([])
-    expect(rows).toEqual([])
-    expect(open).not.toHaveBeenCalled()
+  it('卡面上没有账户号，过期到当天新西兰 23:59', async () => {
+    const secret = '123456789012345'
+    const box = { current: live({ name: secret }) }
+    const wired = ports(box)
+    const f = fixture()
+    const [row] = await issueTuesdayBudgetTunes(f.kernel, [proposal({ name: secret })], wired)
+    const shown = await shownCard(f, row.runId ?? '')
+    const face = `${shown.what} ${shown.account} ${shown.amount} ${shown.scope}`
+    expect(face).not.toContain(secret)
+    expect(face).not.toContain('act_')
+    expect(face.startsWith('把广告组 ')).toBe(true)
+    expect(shown.expiresLabel).toContain('23:59')
+    expect(cardLifetime(f, row.runId ?? '')).toBe('nz_day')
   })
 
-  it('周二任务和这张卡的代码里没有改预算的入口', () => {
+  it('过了 30 分钟、当天 23:59 之前确认仍会执行', async () => {
+    const box = { current: live() }
+    const wired = ports(box)
+    const f = fixture(50000, 'decrease')
+    const cut = proposal({ direction: 'decrease', afterCents: 2400 })
+    const [row] = await issueTuesdayBudgetTunes(f.kernel, [cut], wired)
+    const shown = await shownCard(f, row.runId ?? '')
+    const done = await submitBudgetCard({
+      ...submitOf(f, shown, box, wired),
+      now: new Date('2026-11-02T00:31:00.000Z'),
+    })
+    expect(done.status).toBe('executed')
+    expect(wired.calls).toHaveLength(1)
+  })
+
+  it('过了当天新西兰 23:59 再确认，不改预算', async () => {
+    const box = { current: live() }
+    const wired = ports(box)
+    const f = fixture(50000, 'decrease')
+    const cut = proposal({ direction: 'decrease', afterCents: 2400 })
+    const [row] = await issueTuesdayBudgetTunes(f.kernel, [cut], wired)
+    const shown = await shownCard(f, row.runId ?? '')
+    const done = await submitBudgetCard({
+      ...submitOf(f, shown, box, wired),
+      now: new Date('2026-11-02T11:00:00.000Z'),
+    })
+    expect(done.wroteMeta).toBe(false)
+    expect(done.status).toBe('blocked')
+    expect(wired.calls).toEqual([])
+    const later = await listConfirmationCards(f.kernel, CLIENT_A, OPC, new Date('2026-11-02T11:00:00.000Z'))
+    expect(later.find((card) => card.runId === shown.runId)?.status).toBe('expired')
+  })
+
+  it('这周没有现成金额时不出卡，也不去准备执行', async () => {
+    const open = () => {
+      throw new Error('不该打开执行')
+    }
+    const summary: WeeklyCheckSummary = { considered: 1, checked: 1, outcomes: [] }
+    const rows = await runTuesdayBudgetTune(open, summary)
+    expect(planTuesdayBudgetTunes(summary)).toEqual([])
+    expect(rows).toEqual([])
+  })
+
+  it('出卡代码和定时入口里没有另一条改预算的入口', () => {
     const root = join(__dirname, '../../..')
-    const tune = readFileSync(join(root, 'src/lib/diagnostic/tuesday-budget-tune.ts'), 'utf8')
-    const route = readFileSync(join(root, 'src/app/api/cron/prescription-weekly/route.ts'), 'utf8')
-    for (const src of [tune, route]) {
+    const files = [
+      'src/lib/diagnostic/tuesday-budget-tune.ts',
+      'src/lib/diagnostic/tuesday-budget-execute.ts',
+      'src/lib/diagnostic/tuesday-budget-live.ts',
+      'src/app/api/cron/prescription-weekly/route.ts',
+    ]
+    for (const file of files) {
+      const src = readFileSync(join(root, file), 'utf8')
       expect(src).not.toContain('scale_unit_budget')
       expect(src).not.toContain('cut_unit_budget')
       expect(src).not.toContain('cut_campaign_budget')
       expect(src).not.toContain('getMetaToken')
+      expect(src).not.toContain('setAdSetDailyBudget')
+      expect(src).not.toContain('setCampaignDailyBudget')
       expect(src).not.toContain('ME_SERVICE_PAUSE')
       expect(src).not.toContain("@/lib/meta")
     }
-    expect(tune).toContain('issueConfirmationCard')
-    expect(route).toContain('runTuesdayBudgetTune')
+    const writer = readFileSync(join(root, 'src/lib/action-submission/ads-budget-card.ts'), 'utf8')
+    expect(writer).toContain('requireHumanApproval: true')
+    expect(writer).toContain('call.raising')
+    const issue = readFileSync(join(root, 'src/lib/confirmation-card/issue.ts'), 'utf8')
+    expect(issue).toContain("args.lifetime ?? 'urgent_30m'")
+    const budgetFlow = readFileSync(join(root, 'src/lib/ads-budget-card/flow.ts'), 'utf8')
+    expect(budgetFlow).not.toContain("lifetime: 'nz_day'")
+    const tuesday = readFileSync(join(root, 'src/lib/diagnostic/tuesday-budget-execute.ts'), 'utf8')
+    expect(tuesday).toContain("lifetime: 'nz_day'")
   })
 })
 
-function expectDecision(f: ReturnType<typeof fixture>['f']): string {
-  const run = f.tables.action_runs[0] as { authorization_decision_id?: string }
-  return run.authorization_decision_id ?? ''
+function submitOf(
+  f: ReturnType<typeof fixture>,
+  shown: { runId: string; expectedDecisionId: string; fingerprint: string },
+  box: { current: BudgetSnapshot },
+  wired: TuesdayPorts & { path: BudgetPath },
+) {
+  return {
+    kernel: f.kernel,
+    clientId: CLIENT_A,
+    runId: shown.runId,
+    clicker: OPC,
+    resolution: 'confirm' as const,
+    expectedDecisionId: shown.expectedDecisionId,
+    fingerprint: shown.fingerprint,
+    runtime: runtime(box),
+    locks: wired.locks,
+    path: wired.path,
+  }
 }
 
-function actionKeys(f: ReturnType<typeof fixture>['f']): string[] {
-  return (f.tables.action_runs as Array<{ action_key?: string }>).map((row) => row.action_key ?? '')
+function cardLifetime(f: ReturnType<typeof fixture>, runId: string): string | null {
+  const run = (f.tables.action_runs as Array<{ id?: string; input?: { lifetime?: string } }>)
+    .find((row) => row.id === runId)
+  return run?.input?.lifetime ?? null
 }
 
-function cardText(f: ReturnType<typeof fixture>['f']): string {
-  return JSON.stringify(f.tables.action_runs)
-}
-
-async function shownCard(f: ReturnType<typeof fixture>['f'], runId: string) {
-  const { listConfirmationCards } = await import('@/lib/confirmation-card')
+async function shownCard(f: ReturnType<typeof fixture>, runId: string) {
   const cards = await listConfirmationCards(f.kernel, CLIENT_A, OPC)
   const card = cards.find((row) => row.runId === runId)
   if (!card) throw new Error('确认卡没有列出来')
