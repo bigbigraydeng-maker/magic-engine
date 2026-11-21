@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchLatestOutcomesByAction } from '@/lib/flywheel/execution-outcomes'
-import { ADS_ACTION_TYPE } from '@/lib/flywheel/vocabulary'
+import { EXECUTED_REVIEW_ACTION_TYPES } from '@/lib/flywheel/attribution/executed-review'
 import {
   buildAdsExecutionReviewPanel,
   EXECUTION_REVIEW_DEFAULT_LIMIT,
@@ -9,10 +9,7 @@ import {
 } from './ads-execution-review-panel'
 import { rulesFromLeadsConfig } from '@/lib/flywheel/attribution/review-verdict-rules'
 
-const ACTION_TYPES = [
-  ADS_ACTION_TYPE.ADJUST_ADSET_DAILY_BUDGET,
-  ADS_ACTION_TYPE.PAUSE_AD_SET,
-] as const
+const ACTION_TYPES = [...EXECUTED_REVIEW_ACTION_TYPES]
 
 function record(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)

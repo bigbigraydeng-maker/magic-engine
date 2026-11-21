@@ -2,11 +2,12 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_REVIEW_VERDICT_RULES,
   observationWindowForAction,
+  observationWindowForKind,
   rulesFromLeadsConfig,
   scoreReviewVerdict,
   tierLabelZh,
 } from '../review-verdict-rules'
-import { PAUSE_CARD_ACTION } from '../executed-review'
+import { CAMPAIGN_PAUSE_WINDOW_UNSET, PAUSE_CARD_ACTION } from '../executed-review'
 import { BUDGET_CARD_ACTION } from '../executed-review'
 
 describe('review verdict rules', () => {
@@ -15,6 +16,9 @@ describe('review verdict rules', () => {
       ads_execution_review: {
         budget_window_days: 10,
         pause_window_days: 4,
+        money_budget_window_days: 5,
+        money_pause_window_days: 6,
+        campaign_pause_window_days: 8,
         margin_pct: 20,
         min_primary_outcomes: 8,
       },
@@ -22,6 +26,9 @@ describe('review verdict rules', () => {
     expect(rules).toEqual({
       budgetWindowDays: 10,
       pauseWindowDays: 4,
+      moneyBudgetWindowDays: 5,
+      moneyPauseWindowDays: 6,
+      campaignPauseWindowDays: 8,
       marginPct: 20,
       minPrimaryOutcomes: 8,
     })
@@ -74,6 +81,24 @@ describe('review verdict rules', () => {
     expect(observationWindowForAction(PAUSE_CARD_ACTION, rules, 7)).toBe(7)
     expect(observationWindowForAction(PAUSE_CARD_ACTION, rules, 0)).toBe(3)
     expect(observationWindowForAction(PAUSE_CARD_ACTION, rules, 29)).toBe(3)
+  })
+
+  it('picks per-kind windows including money and campaign cards', () => {
+    const rules = DEFAULT_REVIEW_VERDICT_RULES
+    expect(observationWindowForKind('money_budget', rules, 99)).toBe(7)
+    expect(observationWindowForKind('money_pause', rules, 5)).toBe(5)
+    expect(observationWindowForKind('money_pause', rules, 0)).toBe(7)
+    expect(observationWindowForKind('campaign_pause', rules, 4)).toBe(4)
+    expect(observationWindowForKind('campaign_pause', rules, 40)).toBe(7)
+  })
+
+  it('uses 7 days when a campaign pause card omits its window, the card when written, and the config when set', () => {
+    const rules = DEFAULT_REVIEW_VERDICT_RULES
+    expect(observationWindowForKind('campaign_pause', rules, CAMPAIGN_PAUSE_WINDOW_UNSET)).toBe(7)
+    expect(observationWindowForKind('campaign_pause', rules, 4)).toBe(4)
+    const overridden = { ...rules, campaignPauseWindowDays: 9 }
+    expect(observationWindowForKind('campaign_pause', overridden, CAMPAIGN_PAUSE_WINDOW_UNSET)).toBe(9)
+    expect(observationWindowForKind('campaign_pause', overridden, 4)).toBe(4)
   })
 
   it('maps tier labels for UI', () => {

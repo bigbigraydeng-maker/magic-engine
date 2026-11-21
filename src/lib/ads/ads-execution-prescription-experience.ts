@@ -21,8 +21,28 @@ export function emptyExperienceByType(): ExecutionExperienceByType {
   return { budget: { ...EMPTY_COUNTS }, pause: { ...EMPTY_COUNTS } }
 }
 
-const KIND_PREFIX = /^(调日预算|暂停广告组)执行回顾：/
+const BUDGET_KIND_LABELS = new Set([
+  '调日预算',
+  '成绩单减预算',
+  '止损减预算',
+  '机会减预算',
+  '日内上限减预算',
+  '金额确认卡减预算',
+])
+const PAUSE_KIND_LABELS = new Set([
+  '暂停广告组',
+  '自动暂停广告组',
+  '暂停广告系列',
+  '日内上限暂停系列',
+])
+const KIND_PREFIX = /^(.+?)执行回顾：/
 const TIER_IN_CONTENT = /结论「(有用|没用|看不出)」/
+
+function bucketForKindLabel(label: string): AdsExecutionItemType | null {
+  if (BUDGET_KIND_LABELS.has(label)) return 'budget'
+  if (PAUSE_KIND_LABELS.has(label)) return 'pause'
+  return null
+}
 
 export function parseExecutionReviewPreference(content: string): {
   kind: AdsExecutionItemType | null
@@ -31,7 +51,8 @@ export function parseExecutionReviewPreference(content: string): {
   const trimmed = content.trim()
   const kindMatch = trimmed.match(KIND_PREFIX)
   if (!kindMatch) return { kind: null, tier: null }
-  const kind: AdsExecutionItemType = kindMatch[1] === '调日预算' ? 'budget' : 'pause'
+  const kind = bucketForKindLabel(kindMatch[1] ?? '')
+  if (!kind) return { kind: null, tier: null }
   const tierMatch = trimmed.match(TIER_IN_CONTENT)
   if (!tierMatch) return { kind, tier: null }
   const raw = tierMatch[1]
