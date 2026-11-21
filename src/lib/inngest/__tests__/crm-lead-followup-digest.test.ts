@@ -37,19 +37,8 @@ import { cloudFunctions } from '../functions'
 import { CLOUD_FN_PREFIX } from '../client'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { LeadDueResult } from '@/lib/crm/lead-followup-due'
-import { CLIENT_FOLLOWUP_SHEETS, type SheetFollowupSyncSummary } from '@/lib/crm/sheet-followup-sync'
 
-/** 真实配了跟进表格的客户 id —— 用它才走得到同步那一步。 */
-const SHEET_CLIENT = Object.keys(CLIENT_FOLLOWUP_SHEETS)[0]
-
-function syncSummary(over: Partial<SheetFollowupSyncSummary> = {}): SheetFollowupSyncSummary {
-  return {
-    sheetRows: 707, withNote: 593, inserted: 311,
-    skippedExisting: 0, skippedAlreadyImported: 282,
-    skippedNoIdentity: 0, skippedContactNotFound: 0,
-    failed: 0, dryRun: false, errors: [], ...over,
-  }
-}
+const CLIENT = 'client-a'
 
 const NOW = new Date('2026-09-24T00:00:00Z')
 
@@ -93,7 +82,7 @@ function fakeSupabase(rows: Array<{ id: string; name: string }> | null, error?: 
 
 function due(over: Partial<LeadDueResult> = {}): LeadDueResult {
   return {
-    items: [{ clientId: SHEET_CLIENT, contactId: 'p1', displayName: '王女士', interest: 'Best of China', leadAt: '2026-09-22T00:00:00Z' }],
+    items: [{ clientId: CLIENT, contactId: 'p1', displayName: '王女士', interest: 'Best of China', leadAt: '2026-09-22T00:00:00Z' }],
     dropped: 0,
     orphans: 0,
     ...over,
@@ -102,11 +91,10 @@ function due(over: Partial<LeadDueResult> = {}): LeadDueResult {
 
 function deps(over: Partial<LeadFollowupDigestDeps> = {}): LeadFollowupDigestDeps {
   return {
-    supabase: fakeSupabase([{ id: SHEET_CLIENT, name: 'CTS Tours NZ' }]),
+    supabase: fakeSupabase([{ id: CLIENT, name: '示例客户' }]),
     findDue: vi.fn(async () => due()),
     countBacklog: vi.fn(async () => ({ backlog: 277, lookbackDays: 180 })),
     sendDigest: vi.fn(async () => ({ sent: true, recipients: [DIGEST_RECIPIENT], messageId: 'msg_1' })),
-    syncSheetNotes: vi.fn(async () => syncSummary()),
     env: { LEAD_FOLLOWUP_DIGEST_ENABLED: 'true' },
     ...over,
   }
@@ -175,7 +163,7 @@ describe('编排', () => {
     const d = deps()
     await runLeadFollowupDigest(fakeStep().step, d, NOW)
     expect(d.sendDigest).toHaveBeenCalledWith(
-      'CTS Tours NZ',
+      '示例客户',
       expect.any(Array),
       expect.objectContaining({ recipients: [DIGEST_RECIPIENT] }),
     )
@@ -198,7 +186,7 @@ describe('编排', () => {
     const r = await runLeadFollowupDigest(fakeStep().step, d, NOW)
     expect(r.results[0].backlog).toBeNull()
     expect(r.results[0].sent).toBe(true)
-    expect(d.sendDigest).toHaveBeenCalledWith('CTS Tours NZ', expect.any(Array), expect.objectContaining({ backlog: null }))
+    expect(d.sendDigest).toHaveBeenCalledWith('示例客户', expect.any(Array), expect.objectContaining({ backlog: null }))
   })
 
   it('🔴 窗口内没人、但积压里还有 277 个 —— 不发信，可是回执不许说「没有待跟进的线索」就完了', async () => {
@@ -212,31 +200,6 @@ describe('编排', () => {
   it('查不到人的条数留在回执里，不静默吞掉', async () => {
     const d = deps({ findDue: vi.fn(async () => due({ orphans: 3 })) })
     expect((await runLeadFollowupDigest(fakeStep().step, d, NOW)).results[0].orphans).toBe(3)
-  })
-
-  it('🔴 表格跟进记录必须在挑名单**之前**同步 —— 顺序反了名单里一半是已经打过电话的人', async () => {
-    const { ids, step } = fakeStep()
-    await runLeadFollowupDigest(step, deps(), NOW)
-    expect(ids.indexOf(`sheet-notes-${SHEET_CLIENT}`)).toBeLessThan(ids.indexOf(`scan-${SHEET_CLIENT}`))
-  })
-
-  it('同步结果进回执 —— 「今天从表格接进来几条」要能事后查', async () => {
-    const r = await runLeadFollowupDigest(fakeStep().step, deps(), NOW)
-    expect(r.results[0].sheet_notes?.inserted).toBe(311)
-  })
-
-  it('没配表格的客户跳过这一步，不报错', async () => {
-    const d = deps({ supabase: fakeSupabase([{ id: 'no-sheet-client', name: '没表格的客户' }]) })
-    const r = await runLeadFollowupDigest(fakeStep().step, d, NOW)
-    expect(d.syncSheetNotes).not.toHaveBeenCalled()
-    expect(r.results[0].sheet_notes).toBeNull()
-  })
-
-  it('🔴 表格读不出来时名单照挑 —— 宁可多列几个已经打过的，也不要今天整个哑掉', async () => {
-    const d = deps({ syncSheetNotes: vi.fn(async () => syncSummary({ inserted: 0, errors: ['读表格失败: 令牌过期'] })) })
-    const r = await runLeadFollowupDigest(fakeStep().step, d, NOW)
-    expect(r.results[0].sheet_notes?.errors).toEqual(['读表格失败: 令牌过期'])
-    expect(r.results[0].sent).toBe(true)
   })
 
   it('🔴 一个客户挑名单炸了，不牵连别的客户，而且原因要留在回执里', async () => {
@@ -271,7 +234,7 @@ describe('编排', () => {
     await runLeadFollowupDigest(step, deps(), NOW)
     expect(ids).toEqual([
       'log-start', 'load-clients',
-      `sheet-notes-${SHEET_CLIENT}`, `scan-${SHEET_CLIENT}`, `backlog-${SHEET_CLIENT}`, `send-${SHEET_CLIENT}`,
+      `scan-${CLIENT}`, `backlog-${CLIENT}`, `send-${CLIENT}`,
       'log-finish',
     ])
   })
