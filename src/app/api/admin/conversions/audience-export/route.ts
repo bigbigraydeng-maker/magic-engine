@@ -15,6 +15,7 @@
  */
 
 import { NextResponse } from 'next/server'
+import { extractUuid } from '@/lib/conversions/client-id'
 import { supabaseAdmin } from '@/lib/supabase'
 import { rejectAgentAdsBearer } from '@/lib/auth/agent-ads-guard'
 import { guardAdmin } from '@/lib/auth/require-admin'
@@ -30,8 +31,6 @@ import {
 } from '@/lib/conversions/audience-export'
 
 export const dynamic = 'force-dynamic'
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 type ContactRow = {
   id: string
@@ -65,7 +64,7 @@ export async function GET(request: Request) {
 
 async function handleGet(request: Request) {
   const { searchParams } = new URL(request.url)
-  const clientId = searchParams.get('client_id') ?? ''
+  const clientId = extractUuid(searchParams.get('client_id')) ?? ''
   const agentDenied = await rejectAgentAdsBearer(request, { clientId, action: 'upload_audience' })
   if (agentDenied) return agentDenied
 
@@ -77,7 +76,7 @@ async function handleGet(request: Request) {
 
   const format = searchParams.get('format') ?? 'stats'
 
-  if (!clientId || !UUID_RE.test(clientId)) {
+  if (!clientId) {
     return NextResponse.json({ error: 'client_id 必填且必须是 uuid' }, { status: 400 })
   }
   const denied = assertClientScope(admin.user.email ?? null, clientId)

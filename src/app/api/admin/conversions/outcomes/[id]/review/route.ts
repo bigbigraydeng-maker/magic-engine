@@ -15,15 +15,18 @@ import { guardAdmin, requireAdmin } from '@/lib/auth/require-admin'
 import { assertClientScope } from '@/lib/conversions/route-guard'
 import { sendApprovedOutcome } from '@/lib/conversions/writeback-service'
 import { metaCapiWriter } from '@/lib/meta/capi/writer'
+import {
+  CONVERSION_REJECT_REASONS,
+  isConversionRejectReason,
+  type ConversionRejectReason,
+} from '@/lib/conversions/reject-reasons'
 
 export const dynamic = 'force-dynamic'
-
-const REJECT_REASONS = ['customer_opted_out', 'not_real_sale', 'duplicate', 'other'] as const
 
 type Body = {
   decision: 'approve' | 'reject'
   confirm?: boolean
-  rejectReason?: (typeof REJECT_REASONS)[number]
+  rejectReason?: ConversionRejectReason
   rejectNote?: string
 }
 
@@ -85,10 +88,10 @@ export async function POST(request: Request, { params }: { params: { id: string 
 
   // ── 拒绝 ────────────────────────────────────────────────────────────
   if (body.decision === 'reject') {
-    if (!body.rejectReason || !REJECT_REASONS.includes(body.rejectReason)) {
+    if (!body.rejectReason || !isConversionRejectReason(body.rejectReason)) {
       // 原因必填：将来客人问「我的数据去哪了」、或复盘为什么没回写，靠这一列。
       return NextResponse.json(
-        { error: '拒绝时必须选一个原因', allowed: REJECT_REASONS },
+        { error: '拒绝时必须选一个原因', allowed: CONVERSION_REJECT_REASONS.map((r) => r.value) },
         { status: 400 },
       )
     }
