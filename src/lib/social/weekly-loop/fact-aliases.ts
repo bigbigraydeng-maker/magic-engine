@@ -99,6 +99,8 @@ export type SocialFactSource =
       catalogVersion: number
       tours: PublishedTourFact[]
       aliasesByTourId: Record<string, string[]>
+      /** The client's banned phrases (clients.brand_redline_phrases + the active brief's avoid_words and excluded_topics). */
+      bannedPhrases?: string[]
     }
   | { ok: false; reason: string }
 
@@ -108,6 +110,21 @@ async function readSnapshots(
 ): Promise<TourNameSnapshot[] | null> {
   const read = await loadPublishedNameHistory(db, clientId, SNAPSHOT_LIMIT)
   return read.ok ? read.versions : null
+}
+
+/** Same sources as the ads line: a null return means the read failed (callers must not treat that as "no banned phrases"). */
+async function readBannedPhrases(db: SupabaseClient, clientId: string): Promise<string[] | null> {
+  const [client, brief] = await Promise.all([
+    db.from('clients').select('brand_redline_phrases').eq('id', clientId).maybeSingle(),
+    db.from('master_briefs').select('avoid_words, excluded_topics').eq('client_id', clientId).eq('is_active', true).maybeSingle(),
+  ])
+  if (client.error || brief.error) return null
+  const fromClient = (client.data as { brand_redline_phrases?: unknown } | null)?.brand_redline_phrases
+  const fromBrief = brief.data as { avoid_words?: unknown; excluded_topics?: unknown } | null
+  const all = [fromClient, fromBrief?.avoid_words, fromBrief?.excluded_topics]
+    .flatMap((list) => (Array.isArray(list) ? list : []))
+    .filter((p): p is string => typeof p === 'string' && p.trim().length > 0)
+  return [...new Set(all.map((p) => p.trim()))]
 }
 
 export async function loadSocialFactSource(
@@ -133,6 +150,11 @@ export async function loadSocialFactSource(
       return { ok: false, reason: 'snapshot_read_failed' }
     }
 
+    const bannedPhrases = await readBannedPhrases(db, clientId)
+    if (bannedPhrases === null) {
+      return { ok: false, reason: 'redline_read_failed' }
+    }
+
     const currentTours: NamedTour[] = published.tours.map((t) => ({
       id: t.id,
       name: t.name,
@@ -145,6 +167,7 @@ export async function loadSocialFactSource(
       catalogVersion: published.version,
       tours: published.tours,
       aliasesByTourId,
+      bannedPhrases,
     }
   } catch {
     return { ok: false, reason: 'load_failed' }

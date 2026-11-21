@@ -481,3 +481,64 @@ describe('checkFacts', () => {
     expect(res.verdict).toBe('fail')
   })
 })
+
+describe('checkFacts banned phrases (client brand red lines)', () => {
+  const base = (over: Partial<FactCheckInput>): FactCheckInput => ({
+    texts: { overlay: null, caption: '', firstComment: null },
+    linkUrl: null,
+    tours: [LOOP],
+    aliasesByTourId: {},
+    catalogVersion: 1,
+    today: '2026-11-05',
+    ...over,
+  })
+  const bannedItems = (r: FactCheckResult) => r.items.filter((i) => i.kind === 'banned_phrase')
+
+  it('fails when the caption holds a banned phrase written with a hyphen', () => {
+    const r = checkFacts(
+      base({
+        texts: { overlay: null, caption: 'Four sides of China on small-group tours from Auckland', firstComment: null },
+        bannedPhrases: ['small group'],
+      }),
+    )
+    expect(r.verdict).toBe('fail')
+    expect(bannedItems(r)).toEqual([
+      { kind: 'banned_phrase', claim: 'small group', source: 'caption', outcome: 'FAIL', expected: null },
+    ])
+  })
+
+  it('matches case-insensitively and reports which text it was in', () => {
+    const r = checkFacts(
+      base({
+        texts: { overlay: 'LIMITED AVAILABILITY', caption: '', firstComment: 'Find your tour. Early Bird price' },
+        bannedPhrases: ['limited availability', 'early bird'],
+      }),
+    )
+    expect(bannedItems(r).map((i) => [i.source, i.claim])).toEqual([
+      ['overlay', 'limited availability'],
+      ['first_comment', 'early bird'],
+    ])
+  })
+
+  it('passes clean text, an empty list, and no list', () => {
+    const texts = { overlay: null, caption: 'Cruise the Li River', firstComment: null }
+    expect(bannedItems(checkFacts(base({ texts, bannedPhrases: ['small group'] })))).toEqual([])
+    expect(bannedItems(checkFacts(base({ texts, bannedPhrases: [] })))).toEqual([])
+    expect(bannedItems(checkFacts(base({ texts })))).toEqual([])
+  })
+
+  it('ignores blank entries in the list', () => {
+    const r = checkFacts(base({ texts: { overlay: null, caption: 'anything', firstComment: null }, bannedPhrases: ['', '  '] }))
+    expect(bannedItems(r)).toEqual([])
+  })
+
+  it('reports a phrase once per text even when it repeats', () => {
+    const r = checkFacts(
+      base({
+        texts: { overlay: null, caption: 'small group, small-group, SMALL GROUP', firstComment: null },
+        bannedPhrases: ['small group', 'Small-Group'],
+      }),
+    )
+    expect(bannedItems(r)).toHaveLength(1)
+  })
+})
