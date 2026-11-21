@@ -16,12 +16,16 @@ import {
   LAUNCH_SUM_UNREAD,
   type LaunchBind,
 } from '@/lib/ads-launch/plan-gate'
-import type { CopiedStory } from './order'
+import type { CopiedStory, CtaType } from './order'
 
 export interface LiveFacts {
   readonly accountKnown: boolean | null
   readonly adSetStatus: string | null
   readonly copy: CopiedStory | null
+  /** Words already on a live ad. Absent when the read did not ask for them. */
+  readonly primaryText?: string | null
+  readonly headline?: string | null
+  readonly ctaType?: CtaType | null
 }
 
 export interface Inspect {

@@ -11,6 +11,8 @@ import { parseDecisionBody, publicError } from '@/lib/confirmation-card/http'
 import { confirmCreativeCard } from '@/lib/ads-creative-card/flow'
 import { addCreativeListExtrasForRun } from '@/lib/ads-creative-card/hold-display'
 import { makeCreativeDeps } from '@/lib/ads-creative-card/runtime'
+import { blockTuneOnConfirm, tuneAwareDeps } from '@/lib/ads-tune/run'
+import { readTuneSwitch } from '@/lib/ads-tune/switch'
 import { creativeCardGate } from '../access'
 
 export async function POST(req: Request, { params }: { params: { id: string; runId: string } }) {
@@ -25,12 +27,20 @@ export async function POST(req: Request, { params }: { params: { id: string; run
   }
   try {
     const body = parseDecisionBody(raw)
+    const kernel = createKernel(supabaseAdmin)
+    const tune = await blockTuneOnConfirm(kernel, params.id, params.runId, body.resolution)
+    if (tune.block) return NextResponse.json({ error: tune.block }, { status: 409 })
+    const deps = tuneAwareDeps(
+      makeCreativeDeps(supabaseAdmin, params.id),
+      tune.tune,
+      () => readTuneSwitch(supabaseAdmin, params.id),
+    )
     const result = await confirmCreativeCard({
-      kernel: createKernel(supabaseAdmin),
+      kernel,
       clientId: params.id,
       runId: params.runId,
       clicker: gate.clicker,
-      deps: makeCreativeDeps(supabaseAdmin, params.id),
+      deps,
       ...body,
     })
     if (!result.card) return NextResponse.json({ error: result.reason }, { status: 409 })
