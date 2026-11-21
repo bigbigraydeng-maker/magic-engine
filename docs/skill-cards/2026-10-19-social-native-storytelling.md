@@ -27,9 +27,9 @@
 候选规则并入内容质量闸讨论；不建独立趋势服务。
 
 ## 效果回写
-尚无。
+2026-10-19 首轮只读验证：判 cannot_check。21 条已发工厂 Reel 的 brief 里无任何趋势标记（含 trend 字样 0/21）；单条表现数据缺失同上。
 
 ## 机器索引
 ```json
-{"pillar":"social","points":[{"key":"trend_as_input","text":"平台趋势仅作选题线索，须相关且素材真实；效果不由趋势报告保证。","state":"learning","note":"不得将合成内容描述为真实现场。"}]}
+{"pillar":"social","points":[{"key":"trend_as_input","text":"平台趋势仅作选题线索，须相关且素材真实；效果不由趋势报告保证。","state":"cannot_check","note":"已发内容没有「借用趋势/非借用」标签（0/21），且无单条表现数据，无法对比。"}]}
 ```
