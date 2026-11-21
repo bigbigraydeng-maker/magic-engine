@@ -71,7 +71,6 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   goal_rollover_missing: 'dev', // 月循环目标没自动续上：广告自治/日报失去目标口径，是系统没跑通，转开发
   ads_rule_finding: 'decide', // 改不改在投的广告
   ads_health_patrol_alert: 'decide', // 广告体检亮了警报或给了处方
-  ads_trend_check_alert: 'decide', // 日趋势 Check 命中（素材疲劳 / 成本走强）
   ad_readback_blocker: 'decide', // 正在花钱的广告组撞上已知坑，要改设置
   outcome_rows_orphaned: 'decide', // 旧效果数据删还是留（删了撤不回）
   maliang_render_failed: 'decide', // 成片不过关：返工（花钱）还是放弃

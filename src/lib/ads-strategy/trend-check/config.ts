@@ -4,13 +4,6 @@
 
 export const ADS_TREND_CHECK_CONFIG_KEY = 'ads_trend_check'
 
-/** 默认关；`ads_trend_check: true` 或 `{ enabled: true, …阈值 }` 才跑日趋势 Check。 */
-export function trendCheckPatrolEnabled(leadsConfig: unknown): boolean {
-  const v = objectOf(leadsConfig)?.[ADS_TREND_CHECK_CONFIG_KEY]
-  if (v === true) return true
-  return objectOf(v)?.enabled === true
-}
-
 export interface TrendCheckRules {
   readonly ctrBaselineDays: number
   readonly ctrDropPct: number
@@ -62,9 +55,7 @@ function bool(value: unknown): boolean | null {
 export function rulesFromLeadsConfig(leadsConfig: unknown): TrendCheckRules {
   const base = DEFAULT_TREND_CHECK_RULES
   const root = objectOf(leadsConfig)
-  const raw = root?.[ADS_TREND_CHECK_CONFIG_KEY]
-  if (raw === true) return base
-  const block = objectOf(raw)
+  const block = objectOf(root?.[ADS_TREND_CHECK_CONFIG_KEY])
   if (!block) return base
   return {
     ctrBaselineDays: whole(block.ctr_baseline_days, 3, 21) ?? base.ctrBaselineDays,

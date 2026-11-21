@@ -58,7 +58,6 @@ export interface GrowthStateView {
     goal?: { title: string; label: string; target: number; dayIndex: number; totalDays: number; primaryMetricKey?: string } | null
     /** 每日广告成绩单（2026-11-03 起写入；老行没有） */
     scorecard?: AdsScorecard | { error: string }
-    trendCheck?: { patrolLine?: string; lines?: string[] } | null
   } | null
 }
 
@@ -309,18 +308,6 @@ export default function GrowthPanel({
             </ul>
           )}
         </div>
-      )}
-
-      {state.payload?.trendCheck?.lines && state.payload.trendCheck.lines.length > 0 && (
-        <section className="rounded-xl border border-violet-200 bg-violet-50 p-4">
-          <h3 className="text-sm font-semibold text-violet-900">趋势检查（日表规则）</h3>
-          <p className="mt-1 text-xs text-violet-800">{state.payload.trendCheck.patrolLine ?? state.payload.trendCheck.lines.join('；')}</p>
-          <ul className="mt-2 list-disc pl-5 text-xs text-violet-900">
-            {state.payload.trendCheck.lines.map((line, i) => (
-              <li key={i}>{line}</li>
-            ))}
-          </ul>
-        </section>
       )}
 
       <div className="grid gap-4 md:grid-cols-2">

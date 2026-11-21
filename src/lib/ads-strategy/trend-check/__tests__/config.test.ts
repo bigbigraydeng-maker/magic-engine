@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_TREND_CHECK_RULES, rulesFromLeadsConfig, trendCheckPatrolEnabled } from '../config'
+import { DEFAULT_TREND_CHECK_RULES, rulesFromLeadsConfig } from '../config'
 
 describe('ads_trend_check config', () => {
   it('defaults match设计稿 §3.3', () => {
@@ -27,11 +27,5 @@ describe('ads_trend_check config', () => {
     const rules = rulesFromLeadsConfig({ ads_trend_check: { ctr_drop_pct: -1, min_impressions_for_ctr: 10 } })
     expect(rules.ctrDropPct).toBe(30)
     expect(rules.minImpressionsForCtr).toBe(400)
-  })
-
-  it('开关默认关', () => {
-    expect(trendCheckPatrolEnabled({ ads_trend_check: true })).toBe(true)
-    expect(trendCheckPatrolEnabled({ ads_trend_check: { enabled: true } })).toBe(true)
-    expect(trendCheckPatrolEnabled({ ads_trend_check: { ctr_drop_pct: 25 } })).toBe(false)
   })
 })

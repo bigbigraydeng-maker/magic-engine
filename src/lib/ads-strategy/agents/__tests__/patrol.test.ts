@@ -199,22 +199,4 @@ describe('buildHeadline — 一句人话', () => {
     expect(h).toContain('广告体检')
     expect(h).toContain('有广告该动手')
   })
-
-  it('日趋势 Check → 写进结论', () => {
-    const h = buildHeadline([], [], 'complete', null, null, null, null, {
-      insightDate: '2026-11-05',
-      patrolLine: '趋势检查：Fixture group A：素材疲劳/走弱',
-      lines: ['Fixture group A：素材疲劳/走弱'],
-      tuneFindings: [],
-      receipt: {
-        kind: 'ads_daily_trend_check',
-        client_slug: 'x',
-        evaluation_date: '2026-11-05',
-        findings_count: 1,
-        diagnosis_codes: ['creative_fatigue'],
-        rule_ids: ['ctr_vs_self_7d'],
-      },
-    })
-    expect(h).toContain('趋势检查')
-  })
 })

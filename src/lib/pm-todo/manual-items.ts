@@ -54,7 +54,6 @@ import { pushToolsWideBudgetItems } from './tools-wide-budget-items'
 import { pushAdsAutonomySyncItems } from './ads-autonomy-items'
 import { pushAdsRuleFindingItems } from './ads-rule-finding-items'
 import { pushAdsHealthPatrolItems } from './ads-health-patrol-items'
-import { pushAdsTrendCheckItems } from './ads-trend-check-items'
 import { pushAdsPredictiveEarlyWarningItems } from './ads-predictive-early-warning-items'
 import { pushAdsCircuitItems } from './ads-circuit-items'
 import { pushAdsCircuitBreakerItems } from './ads-circuit-breaker-items'
@@ -455,9 +454,6 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     ),
     (b) => pushAdsHealthPatrolItems(supabase, b, now, nameOf).catch((e) =>
       console.warn('[manual-items] 广告体检警报待办生成失败（不阻塞其他待办）:', e),
-    ),
-    (b) => pushAdsTrendCheckItems(supabase, b, now, nameOf).catch((e) =>
-      console.warn('[manual-items] 广告趋势检查待办生成失败（不阻塞其他待办）:', e),
     ),
     (b) => pushAdsPredictiveEarlyWarningItems(supabase, b, now, nameOf).catch((e) =>
       console.warn('[manual-items] 广告预警待办生成失败（不阻塞其他待办）:', e),
