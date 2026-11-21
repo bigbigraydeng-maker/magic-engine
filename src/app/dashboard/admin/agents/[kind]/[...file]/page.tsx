@@ -15,16 +15,23 @@ function safeDecode(s: string): string {
   try { return decodeURIComponent(s) } catch { return s }
 }
 
-export default async function AgentDocPage({ params }: { params: Promise<{ kind: string; file: string }> }) {
+function fileFromParam(file: string | string[]): string | null {
+  const parts = (Array.isArray(file) ? file : [file]).map(safeDecode)
+  if (parts.some((part) => part === '' || part === '.' || part === '..' || part.includes('/') || part.includes('\\'))) return null
+  return parts.join('/')
+}
+
+export default async function AgentDocPage({ params }: { params: Promise<{ kind: string; file: string | string[] }> }) {
   const h = await headers()
   if (!isGlobalAdmin(h)) redirect('/unauthorized')
   const p = await params
   const kind = safeDecode(p.kind)
-  const file = safeDecode(p.file)
+  const file = fileFromParam(p.file)
+  if (file === null) notFound()
   const catalog = buildCatalog()
   const doc = readAllowedDoc(catalog, kind, file)
   if (!doc.ok && doc.reason === 'not_allowed') notFound()
-  const owners = catalog.rows.filter((r) => [r.profile, ...r.playbooks].some((d) => d?.kind === kind && d.file === file))
+  const owners = catalog.rows.filter((r) => [r.profile, ...r.playbooks, ...r.rules.map((rule) => rule.doc)].some((d) => d?.kind === kind && d.file === file))
   return (
     <div className="mx-auto max-w-4xl space-y-4 p-6">
       <Link href={AGENTS_BASE} className="text-sm text-blue-700 underline">← 回到 Agent 与手册</Link>
@@ -38,7 +45,7 @@ export default async function AgentDocPage({ params }: { params: Promise<{ kind:
               return <div key={f} className="flex gap-2"><dt className="w-20 shrink-0 font-semibold">{f}</dt><dd className={value === '待补' ? 'text-amber-700' : ''}>{value}</dd></div>
             })}
           </dl>
-          <DocMarkdown text={doc.text} from={kind as DocKind} allowed={catalog.allowed} />
+          <DocMarkdown text={doc.text} from={kind as DocKind} fromFile={file} allowed={catalog.allowed} />
         </>
       ) : (
         <p className="rounded border border-amber-300 bg-amber-50 p-4 text-sm">这份文档现在读不到（可能还没合并进仓库），请稍后再试，或直接去 GitHub 查看。</p>

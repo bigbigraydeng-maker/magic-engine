@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { resolveDocLink } from '@/lib/agent-docs/links'
 import type { DocKind } from '@/lib/agent-docs/types'
 
-interface Ctx { from: DocKind; allowed: Set<string> }
+interface Ctx { from: DocKind; allowed: Set<string>; fromFile: string }
 
 const INLINE_RE = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\[[^\]]+\]\([^)\s]+\))/g
 const splitCells = (line: string): string[] => line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim())
@@ -26,7 +26,7 @@ function renderInline(text: string, ctx: Ctx, keyBase: string): ReactNode[] {
     else if (m[2]) out.push(<strong key={key}>{tok.slice(2, -2)}</strong>)
     else {
       const lm = /^\[([^\]]+)\]\(([^)\s]+)\)$/.exec(tok)
-      const link = resolveDocLink(lm?.[2] ?? '', ctx.from, ctx.allowed)
+      const link = resolveDocLink(lm?.[2] ?? '', ctx.from, ctx.allowed, ctx.fromFile)
       out.push(<a key={key} href={link.href} className="text-blue-700 underline" {...(link.external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>{lm?.[1]}</a>)
     }
     last = idx + tok.length
@@ -74,8 +74,8 @@ function takeWhile(lines: string[], start: number, pred: (l: string) => boolean)
   return out
 }
 
-export function DocMarkdown({ text, from, allowed }: { text: string; from: DocKind; allowed: Set<string> }) {
-  const ctx: Ctx = { from, allowed }
+export function DocMarkdown({ text, from, allowed, fromFile = '' }: { text: string; from: DocKind; allowed: Set<string>; fromFile?: string }) {
+  const ctx: Ctx = { from, allowed, fromFile }
   const lines = text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '').split(/\r?\n/)
   const blocks: ReactNode[] = []
   let i = 0
