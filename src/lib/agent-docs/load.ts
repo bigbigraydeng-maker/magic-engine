@@ -42,6 +42,11 @@ function readTextOrNull(root: string, kind: DocKind, file: string): string | nul
   try { return readFileSync(join(root, 'docs', kind, file), 'utf8') } catch { return null }
 }
 
+function summaryFromProfile(lines: string[]): string {
+  const m = lines.slice(0, 15).map((l) => /^>\s*定位[：:]\s*(.+)$/.exec(l)).find((x) => x !== null)
+  return m ? m[1].replace(/[*`]/g, '').trim() : ''
+}
+
 function rowFromProfile(root: string, file: string, exists: Exists, notes: string[]): AgentRow {
   const m = PROFILE_FILE_RE.exec(file)
   const text = readTextOrNull(root, 'agents', file)
@@ -58,7 +63,7 @@ function rowFromProfile(root: string, file: string, exists: Exists, notes: strin
     section = (end >= 0 ? rest.slice(0, end) : rest).join('\n')
   }
   const row: AgentRow = {
-    key: m ? m[2] : file, nameZh, code: m ? m[2] : '', group: '待补', status,
+    key: m ? m[2] : file, nameZh, code: m ? m[2] : '', group: '待补', status, summary: summaryFromProfile(lines),
     profile: { kind: 'agents', file }, playbooks: dedupe(refsFromCell(section, exists, notes)), warnings: [],
   }
   if (text === null) row.warnings.push('档案文件读不到')
@@ -81,7 +86,7 @@ function rowFromReadme(r: ReadmeAgentRow, parse: ReadmeParse, exists: Exists, no
   if (!profile) warnings.push('对照表没写档案文件')
   if (r.group === '') warnings.push('分组待补')
   return {
-    key: r.code || r.nameZh, nameZh: r.nameZh, code: r.code, group: r.group || '待补', status: r.status,
+    key: r.code || r.nameZh, nameZh: r.nameZh, code: r.code, group: r.group || '待补', status: r.status, summary: r.summary,
     profile, playbooks, warnings,
   }
 }
