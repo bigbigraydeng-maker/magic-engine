@@ -1,7 +1,7 @@
 ---
 id: 2026-10-15-documentary-series-winter-workspace
 title: 系列视频与Winter选题接入内容工厂，数据连接待上线验证
-status: done
+status: verified
 owner: agent
 decided_on: 2026-10-15
 source: doc:docs/tasks/2026-10-15-documentary-series.txt
@@ -9,6 +9,9 @@ done_on: 2026-10-15
 done_ref: pr:2694
 verify_by: 2026-10-16
 verify_how: 上线后核对有权客户的系列与已关联视频真实计数，其他客户不得显示该配置，过期编辑拒绝覆盖。
+last_checked: 2026-11-23
+check_note: 只有 CTS 有系列链接，4 集 YouTube 播放数今晚实读成功，隔离与防覆盖测试 11 条全过
+verified_ref: doc:docs/ledger/evidence/2026-10-15-documentary-series-winter-workspace--2026-11-23.md
 ---
 系列与 Winter 规划已通过 PR #2680 上线，认证后台可见 12 个选题与封面；不是 12 部成片。
 复用既有内容工厂、客户配置、平台链接与公开播放计数；上海、杭州已关联并成功读取真实计数。
