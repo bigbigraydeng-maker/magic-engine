@@ -5,8 +5,11 @@
  * `me/maliang.render.ready` event sent at admit time is accepted but never runs.
  * This sweep picks admitted external uploads still in review with no verdict and runs
  * the same read → check → write steps in-process. Orders that already carry a
- * verdict are never picked, so running beside Inngest after the quota resets does
- * not review twice. Bounded per run: each review costs one model call.
+ * verdict are never picked by this sweep. (If Inngest later replays a backlog event,
+ * that path does not check for an existing verdict and may review once more.)
+ * Bounded per run: each review costs one model call. Unlike the Inngest path it
+ * does not send material-only orders on to the dual review; a person clicks
+ * 收入素材库, which runs that review inline.
  *
  * Switch: env INNGEST_DIRECT_FALLBACK = 'off' turns this off (shared with the other fallbacks).
  */
@@ -14,7 +17,8 @@
 import type { WorkOrderReady } from './work-order-review'
 
 export const MALIANG_DIRECT_JOB = 'maliang-direct-sweep'
-export const MALIANG_DIRECT_BATCH = 3
+// One review per run: a review may take up to 180 s and must finish before the next 20-minute knock.
+export const MALIANG_DIRECT_BATCH = 1
 
 export type DirectReviewOutcome =
   | { kind: 'checked'; status: string; reasons: string[] }
@@ -23,6 +27,8 @@ export type DirectReviewOutcome =
 export interface MaliangSweepDeps {
   listPending(limit: number): Promise<WorkOrderReady[]>
   review(order: WorkOrderReady): Promise<DirectReviewOutcome>
+  /** Reviews per run; defaults to MALIANG_DIRECT_BATCH. */
+  batch?: number
 }
 
 export interface MaliangSweepReceipt {
@@ -44,7 +50,8 @@ export async function runMaliangDirectSweep(deps: MaliangSweepDeps): Promise<Mal
   try {
     let pending: WorkOrderReady[]
     try {
-      pending = (await deps.listPending(MALIANG_DIRECT_BATCH)).slice(0, MALIANG_DIRECT_BATCH)
+      const batch = deps.batch ?? MALIANG_DIRECT_BATCH
+      pending = (await deps.listPending(batch)).slice(0, batch)
     } catch (err) {
       return { status: 'list_failed', picked: 0, results: [], error: errText(err) }
     }

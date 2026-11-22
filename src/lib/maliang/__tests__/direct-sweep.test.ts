@@ -7,7 +7,7 @@ describe('runMaliangDirectSweep', () => {
   it('reviews pending orders one by one and reports each outcome', async () => {
     const review = vi.fn(async (o: ReturnType<typeof order>) =>
       o.work_order_id === 'wo-2' ? { kind: 'unread' as const, reason: 'video_url_mismatch' } : { kind: 'checked' as const, status: 'pass', reasons: [] })
-    const receipt = await runMaliangDirectSweep({ listPending: async () => [order(1), order(2)], review })
+    const receipt = await runMaliangDirectSweep({ listPending: async () => [order(1), order(2)], review, batch: 2 })
     expect(receipt.status).toBe('done')
     expect(receipt.results.map((r) => r.outcome.kind)).toEqual(['checked', 'unread'])
     expect(review).toHaveBeenCalledTimes(2)
@@ -27,7 +27,7 @@ describe('runMaliangDirectSweep', () => {
       if (o.work_order_id === 'wo-1') throw new Error('model down')
       return { kind: 'checked' as const, status: 'pass', reasons: [] }
     })
-    const receipt = await runMaliangDirectSweep({ listPending: async () => [order(1), order(2)], review })
+    const receipt = await runMaliangDirectSweep({ listPending: async () => [order(1), order(2)], review, batch: 2 })
     expect(receipt.results[0].outcome).toEqual({ kind: 'unread', reason: 'model down' })
     expect(receipt.results[1].outcome.kind).toBe('checked')
 

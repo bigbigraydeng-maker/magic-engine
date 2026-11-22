@@ -12,7 +12,7 @@ import { runNineGridCheck } from '@/lib/maliang/render-check'
 import { runReviewCheckV2 } from '@/lib/maliang/render-check-v2'
 import { REMOTION_REVIEW_TIMEOUT_MS, runCheckWithTimeout } from '@/lib/maliang/review-disposition'
 import { readWorkOrderContext, writeWorkOrderVerdict, type WorkOrderReady } from '@/lib/maliang/work-order-review'
-import { isExternalUpload } from '@/lib/factory/talent-consent'
+import { EXTERNAL_UPLOAD_ENGINE, isExternalUpload } from '@/lib/factory/talent-consent'
 import { workOrderCheck } from '@/lib/inngest/functions/maliang-render-check'
 import {
   contentFactoryPublicUrl,
@@ -36,6 +36,7 @@ async function listPending(limit: number): Promise<WorkOrderReady[]> {
     .from('content_work_orders')
     .select('id, client_id, brief, output')
     .eq('status', 'in_review')
+    .eq('brief->>engine', EXTERNAL_UPLOAD_ENGINE)
     .gte('created_at', since)
     .not('output->video_path', 'is', null)
     .is('output->maliang_check', null)
@@ -66,7 +67,8 @@ async function review(order: WorkOrderReady): Promise<DirectReviewOutcome> {
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  if (req.headers.get('authorization') !== `Bearer ${process.env.CRON_SECRET}`) {
+  const secret = process.env.CRON_SECRET
+  if (!secret || req.headers.get('authorization') !== `Bearer ${secret}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
   if (!directFallbackEnabled(process.env)) return NextResponse.json({ status: 'off' })

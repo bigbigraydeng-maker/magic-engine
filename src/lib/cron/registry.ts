@@ -161,7 +161,7 @@ const CRON_REGISTRY_ENTRIES = [
   // 2026-11-16 Inngest 本月额度用完：电话进 CRM、线索进表格改由 dispatcher 进程内跑（开关 INNGEST_DIRECT_FALLBACK=off）。
   { service: 'telephony-direct-sweep', jobName: 'telephony-direct-sweep', schedule: '*/10 * * * *', logsRuns: true, addedAt: '2026-11-16' },
   { service: 'lead-sheet-direct-sync', jobName: 'lead-sheet-sync', schedule: '50 * * * *', logsRuns: true, addedAt: '2026-11-16' },
-  // 2026-11-23 同一额度缺口：已收进来的成片没有马良结论，dispatcher 每 20 分钟补审，每轮最多 3 条。
+  // 2026-11-23 同一额度缺口：已收进来的成片没有马良结论，dispatcher 每 20 分钟补审，每轮 1 条。
   { service: 'maliang-direct-sweep', jobName: 'maliang-direct-sweep', schedule: '*/20 * * * *', logsRuns: true, addedAt: '2026-11-23' },
   // CRM 跟进分工（PM 11-16）：先停线（客人回应 → 转人工），再 AI 接走（没接通 / 7 天没人打）。停线同名任务 Inngest 也跑，按证据去重。
   { service: 'crm-followup-stopline-direct', jobName: 'crm-followup-stopline', schedule: '30 18 * * *', logsRuns: true, addedAt: '2026-11-16' },

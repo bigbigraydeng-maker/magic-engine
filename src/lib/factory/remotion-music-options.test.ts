@@ -130,3 +130,13 @@ describe('external finished-video music clearance', () => {
     expect(remotionMusicClearance(brief).track_id).not.toBe('guzheng-guitar-a')
   })
 })
+
+describe('external clearance uses the measured length', () => {
+  const external = (music: Record<string, unknown>) => ({ deliverable: 'asset_only', external_music: music })
+  it('fails a short self-declared length when the uploaded video is longer than the clean window', () => {
+    expect(remotionMusicClearance(external({ track_id: 'jade-river-journey', duration_sec: 15 }), 40).verdict).toBe('fail')
+  })
+  it('accepts the measured length when none is declared', () => {
+    expect(remotionMusicClearance(external({ track_id: 'jade-river-journey' }), 15).verdict).toBe('pass')
+  })
+})
