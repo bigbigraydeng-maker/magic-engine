@@ -237,3 +237,10 @@ describe('assertLegacyBgmVocalGate (legacy assemble rule)', () => {
     expect(assertLegacyBgmVocalGate({ bgm: null, musicMood: null, registryPath: '/r.json' })).toBeNull()
   })
 })
+
+describe('checked-in registry', () => {
+  it('the real catalog/music-vocals.json passes the gate parser (a bad entry would block every render)', () => {
+    const path = join(import.meta.dirname, 'engines', 'remotion', 'catalog', 'music-vocals.json')
+    expect(() => loadMusicVocalRegistry(path)).not.toThrow()
+  })
+})

@@ -106,7 +106,7 @@
     "sha256": "86a9fa42466ed853b47c2c94caa233460b330e4bac85627fb6fdc0f54758dc0e",
     "name": "music/dizi-playful-a.mp3",
     "verdict": "none",
-    "signedBy": "PM试听@2026-11-23",
+    "signedBy": "human:Ray Deng",
     "signedAt": "2026-11-23T00:00:00.000Z",
     "evidence": "Suno via Muapi suno-create-music, instrumental=true, prompt forbids vocals/humming/choir; PM listened 2026-11-23 and said 收录; whisper small: no speech; large-v3-turbo not run"
   },
@@ -114,7 +114,7 @@
     "sha256": "934848ed4f68dfc54391c47f3c2820e8935988867c1b325f6d69a8ae50cb1f8a",
     "name": "music/dizi-playful-b.mp3",
     "verdict": "none",
-    "signedBy": "PM试听@2026-11-23",
+    "signedBy": "human:Ray Deng",
     "signedAt": "2026-11-23T00:00:00.000Z",
     "evidence": "Suno via Muapi suno-create-music, instrumental=true, prompt forbids vocals/humming/choir; PM listened 2026-11-23 and said 收录; whisper small: no speech; large-v3-turbo not run"
   },
@@ -122,7 +122,7 @@
     "sha256": "fe86c049e233ce9a4357ddfed371a2005824a9840777629fce02d51ccd17e026",
     "name": "music/erhu-strings-a.mp3",
     "verdict": "none",
-    "signedBy": "PM试听@2026-11-23",
+    "signedBy": "human:Ray Deng",
     "signedAt": "2026-11-23T00:00:00.000Z",
     "evidence": "Suno via Muapi suno-create-music, instrumental=true, prompt forbids vocals/humming/choir; PM listened 2026-11-23 and said 收录; whisper small: no speech; large-v3-turbo not run"
   },
@@ -130,7 +130,7 @@
     "sha256": "c82df986c4a3d860ab9e92e22a7470091ceb5d8ce530ca01172fc4824736eba4",
     "name": "music/erhu-strings-b.mp3",
     "verdict": "none",
-    "signedBy": "PM试听@2026-11-23",
+    "signedBy": "human:Ray Deng",
     "signedAt": "2026-11-23T00:00:00.000Z",
     "evidence": "Suno via Muapi suno-create-music, instrumental=true, prompt forbids vocals/humming/choir; PM listened 2026-11-23 and said 收录; whisper small: only the usual music hallucination text 'ДИНАМИЧНАЯ МУЗЫКА'; large-v3-turbo not run"
   },
@@ -138,7 +138,7 @@
     "sha256": "744d8b3367db4e843b1e188268a81b423d762ee815559b3d2cb00b313e2dfaab",
     "name": "music/guzheng-guitar-a.mp3",
     "verdict": "none",
-    "signedBy": "PM试听@2026-11-23",
+    "signedBy": "human:Ray Deng",
     "signedAt": "2026-11-23T00:00:00.000Z",
     "evidence": "Suno via Muapi suno-create-music, instrumental=true, prompt forbids vocals/humming/choir; PM listened 2026-11-23 and said 收录; whisper small: no speech; large-v3-turbo not run"
   },
@@ -146,7 +146,7 @@
     "sha256": "042f8d28c4444cf74cf5816199e49ec029df14a73b27123a336604b7d7d30e57",
     "name": "music/guzheng-guitar-b.mp3",
     "verdict": "none",
-    "signedBy": "PM试听@2026-11-23",
+    "signedBy": "human:Ray Deng",
     "signedAt": "2026-11-23T00:00:00.000Z",
     "evidence": "Suno via Muapi suno-create-music, instrumental=true, prompt forbids vocals/humming/choir; PM listened 2026-11-23 and said 收录; whisper small: no speech; large-v3-turbo not run"
   },
@@ -154,7 +154,7 @@
     "sha256": "1a3a22ce96006ca8b808ee1bd65dbb49ab6db68803de4016ffd9345a25713832",
     "name": "music/pipa-drums-a.mp3",
     "verdict": "none",
-    "signedBy": "PM试听@2026-11-23",
+    "signedBy": "human:Ray Deng",
     "signedAt": "2026-11-23T00:00:00.000Z",
     "evidence": "Suno via Muapi suno-create-music, instrumental=true, prompt forbids vocals/humming/choir; PM listened 2026-11-23 and said 收录; whisper small: only the usual music hallucination text 'МУЗЫКАЛЬНАЯ ЗАСТАВКА'; large-v3-turbo not run"
   },
@@ -162,7 +162,7 @@
     "sha256": "07cc7475a67db6d5d01f85326bbb5571d99a4ceec4a1d48d4de4d38df067a5f1",
     "name": "music/pipa-drums-b.mp3",
     "verdict": "none",
-    "signedBy": "PM试听@2026-11-23",
+    "signedBy": "human:Ray Deng",
     "signedAt": "2026-11-23T00:00:00.000Z",
     "evidence": "Suno via Muapi suno-create-music, instrumental=true, prompt forbids vocals/humming/choir; PM listened 2026-11-23 and said 收录; whisper small: only the usual music hallucination text 'Жckeлleg'; large-v3-turbo not run"
   }
