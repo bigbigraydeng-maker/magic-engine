@@ -109,11 +109,56 @@ function trackForMusicFile(musicFile) {
   }) ?? null
 }
 
+// Human-cleared windows for a track. A `none` entry without cleanUntilSec clears
+// any length, matching the worker gate (music-vocal-gate.mjs).
+function vocalClearWindow(track) {
+  const acceptedNames = new Set([track.file, track.id].map(musicNameKey))
+  try { acceptedNames.add(musicNameKey(stagedFileName(track))) } catch { /* file-only match */ }
+  const entries = vocalRegistry.filter((record) =>
+    typeof record.name === 'string' &&
+    acceptedNames.has(musicNameKey(record.name)) &&
+    record.verdict === 'none' &&
+    humanApproval(record.signedBy),
+  )
+  if (entries.length === 0) return null
+  if (entries.some((entry) => entry.cleanUntilSec === undefined)) return { unlimited: true, untilSec: null }
+  const limits = entries.map((entry) => entry.cleanUntilSec).filter((value) => typeof value === 'number' && Number.isFinite(value))
+  return limits.length > 0 ? { unlimited: false, untilSec: Math.max(...limits) } : null
+}
+
+const positiveNumber = (value) => typeof value === 'number' && Number.isFinite(value) && value > 0
+const nonNegativeNumber = (value) => typeof value === 'number' && Number.isFinite(value) && value >= 0
+
+/**
+ * Clearance for a finished video made outside the factory. The brief must name
+ * the catalog track it used (`external_music.track_id`); the same human vocal
+ * registry decides. A limited clean window also needs the declared length.
+ */
+function externalMusicClearance(brief, unread) {
+  const declared = propsRecord(brief.external_music)
+  if (!declared || typeof declared.track_id !== 'string' || !declared.track_id.trim()) return unread
+  const track = musicCatalog.tracks.find((item) => item.id === declared.track_id.trim()) ?? null
+  if (!track) return { verdict: 'fail', reason: '配乐不在曲库', track_id: null, clean_until_sec: null }
+  const window = vocalClearWindow(track)
+  if (!window) return { verdict: 'fail', reason: '配乐没有人声核验', track_id: track.id, clean_until_sec: null }
+  if (window.unlimited) return { verdict: 'pass', reason: '配乐已核无人声（全曲）', track_id: track.id, clean_until_sec: null }
+  const startSec = declared.start_sec === undefined ? 0 : declared.start_sec
+  if (!nonNegativeNumber(startSec) || !positiveNumber(declared.duration_sec)) {
+    return { verdict: 'unreadable', reason: '读不到片长或配乐起点', track_id: track.id, clean_until_sec: window.untilSec }
+  }
+  if (window.untilSec < startSec + declared.duration_sec + 1) {
+    return { verdict: 'fail', reason: '配乐的无人声时长盖不住这条片子', track_id: track.id, clean_until_sec: window.untilSec }
+  }
+  return { verdict: 'pass', reason: '配乐已核无人声', track_id: track.id, clean_until_sec: window.untilSec }
+}
+
 /** Vocal clearance for the track already on this brief. Does not swap music. */
 export function remotionMusicClearance(rawBriefRemotion) {
   const unread = { verdict: 'unreadable', reason: '读不到', track_id: null, clean_until_sec: null }
   const brief = propsRecord(rawBriefRemotion)
-  if (!brief || !isTemplateId(brief.template)) return unread
+  if (!brief) return unread
+  if (brief.template === undefined && brief.external_music !== undefined) return externalMusicClearance(brief, unread)
+  if (!isTemplateId(brief.template)) return unread
   const props = propsRecord(brief.props)
   if (!props || typeof props.musicFile !== 'string' || !props.musicFile.trim()) return unread
   const track = trackForMusicFile(props.musicFile)

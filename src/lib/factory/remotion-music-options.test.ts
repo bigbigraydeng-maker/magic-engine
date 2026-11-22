@@ -94,3 +94,39 @@ describe('Remotion music swap and musicGain', () => {
   })
 })
 
+
+describe('external finished-video music clearance', () => {
+  const external = (music: Record<string, unknown>) => ({ deliverable: 'asset_only', external_music: music })
+
+  it('passes a catalog track a human cleared for its whole length, without needing the video length', () => {
+    expect(remotionMusicClearance(external({ track_id: 'guzheng-guitar-a' }))).toEqual({
+      verdict: 'pass', reason: '配乐已核无人声（全曲）', track_id: 'guzheng-guitar-a', clean_until_sec: null,
+    })
+  })
+
+  it('checks a limited clean window against the declared start and length', () => {
+    expect(remotionMusicClearance(external({ track_id: 'jade-river-journey', duration_sec: 15 })).verdict).toBe('pass')
+    expect(remotionMusicClearance(external({ track_id: 'jade-river-journey', start_sec: 5, duration_sec: 15 }))).toMatchObject({
+      verdict: 'fail', reason: '配乐的无人声时长盖不住这条片子', clean_until_sec: 20,
+    })
+  })
+
+  it('fails closed when a limited window has no declared length', () => {
+    expect(remotionMusicClearance(external({ track_id: 'jade-river-journey' }))).toMatchObject({
+      verdict: 'unreadable', track_id: 'jade-river-journey',
+    })
+    expect(remotionMusicClearance(external({ track_id: 'jade-river-journey', duration_sec: -1 })).verdict).toBe('unreadable')
+  })
+
+  it('fails tracks outside the catalog or without a human vocal check', () => {
+    expect(remotionMusicClearance(external({ track_id: 'not-a-track' }))).toMatchObject({ verdict: 'fail', reason: '配乐不在曲库' })
+    expect(remotionMusicClearance(external({ track_id: 'pipa-trap' }))).toMatchObject({ verdict: 'fail', reason: '配乐没有人声核验' })
+  })
+
+  it('stays unreadable when no track is declared, and never applies to factory template briefs', () => {
+    expect(remotionMusicClearance({ deliverable: 'asset_only' }).verdict).toBe('unreadable')
+    expect(remotionMusicClearance(external({ track_id: '  ' })).verdict).toBe('unreadable')
+    const brief = { ...postcardBrief(), external_music: { track_id: 'guzheng-guitar-a' } }
+    expect(remotionMusicClearance(brief).track_id).not.toBe('guzheng-guitar-a')
+  })
+})
