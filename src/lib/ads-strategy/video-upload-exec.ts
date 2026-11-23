@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { ACCOUNT_UPLOAD_SOURCE, accountIsRegistered, factoryPublicVideoUrl } from '@/lib/ads-strategy/admit-finished-asset'
+import { ACCOUNT_UPLOAD_SOURCE, accountIsRegistered, externalUploadPath, factoryPublicVideoUrl } from '@/lib/ads-strategy/admit-finished-asset'
+import { isExternalUpload } from '@/lib/factory/talent-consent'
 import type { VideoUploadExec } from '@/lib/ads-strategy/video-upload-card'
 import { validateRenderPath } from '@/lib/factory/worker-guard'
 import { readVideoInAdAccount, uploadVideoToMeta } from '@/lib/meta/asset-upload'
@@ -17,13 +18,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 async function currentFileUrl(sb: SupabaseClient, clientId: string, workOrderId: string): Promise<string | null> {
   const { data, error } = await sb.from('content_work_orders')
-    .select('output')
+    .select('output, brief')
     .eq('id', workOrderId)
     .eq('client_id', clientId)
     .maybeSingle()
   if (error || !isRecord(data) || !isRecord(data.output)) return null
   const raw = typeof data.output.video_path === 'string' ? data.output.video_path : null
-  const path = raw ? validateRenderPath(raw, clientId, workOrderId) : null
+  const path = raw
+    ? validateRenderPath(raw, clientId, workOrderId) ?? (isExternalUpload(data.brief) ? externalUploadPath(raw, clientId) : null)
+    : null
   return factoryPublicVideoUrl(path, publicBase())
 }
 
