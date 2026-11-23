@@ -18,8 +18,9 @@
  * round number rather than either silently stalling or skipping ahead.
  */
 import { readFileSync } from 'node:fs'
-import { createIssueComment, getPullRequest } from './github.mjs'
+import { compareCommits, createIssueComment, getPullRequest, listPullRequestFiles } from './github.mjs'
 import { buildMarker } from './markers.mjs'
+import { classifyRisk, readDeclaredRisk } from './risk.mjs'
 
 const token = process.env.GITHUB_TOKEN
 const [owner, repo] = process.env.GITHUB_REPOSITORY.split('/')
@@ -52,6 +53,10 @@ const outcome = process.env.OUTCOME
 // so this comparison brackets exactly this round. If it is missing — the step
 // was skipped, or a future edit dropped it — fall back to reporting no push
 // rather than guessing: over-reporting is the failure this file exists to stop.
+const findingsSummary = process.env.FINDINGS_SUMMARY ?? ''
+const reviewId = process.env.REVIEW_ID ?? ''
+const riskGrade = process.env.RISK_GRADE ?? ''
+
 const headBefore = process.env.HEAD_BEFORE
 const headNow = (await getPullRequest(token, owner, repo, pr))?.head?.sha
 const pushedSomething =
@@ -71,18 +76,67 @@ const pushedSomething =
 //
 // Branch on the push, then describe the outcome — rather than branching on the
 // outcome and assuming the push.
+// Post-push risk re-check: the bot's own changes might have made the PR A-level
+// (e.g. touching .github/ or src/lib/kernel/). fix-scope-guard is not a
+// guaranteed blocker, so re-classify after the push and warn visibly.
+let postPushRiskWarning = ''
+if (pushedSomething) {
+  try {
+    const prDataForRisk = await getPullRequest(token, owner, repo, pr)
+    const prBody = typeof prDataForRisk?.body === 'string' ? prDataForRisk.body : ''
+    const declared = readDeclaredRisk(prBody)
+    const allFiles = await listPullRequestFiles(token, owner, repo, pr)
+    const rating = classifyRisk({
+      files: allFiles.map((f) => ({
+        filename: f.filename,
+        status: f.status,
+        previous_filename: f.previous_filename,
+      })),
+      declaredRisk: declared.risk,
+      declaredUnreadable: declared.unreadable,
+    })
+    if (rating.risk === 'A') {
+      postPushRiskWarning = '\n\n⚠️ **本轮自动修复后，此 PR 已变成 A 级，需要子牙审。**'
+    }
+  } catch { /* best effort — failing here must not hide the push record */ }
+}
+
 if (pushedSomething) {
   const marker = buildMarker({ stage: 'fix-dispatched', pr, sha, round })
   const note =
     outcome === 'success'
       ? `Codex will review the new head next.`
       : `⚠️ The action then reported \`${outcome}\`, so the fix may be incomplete — but the commit is real, so this round **is** counted. Codex will review the new head next.`
+
+  // Build the detail block: which files were changed by this push, and which
+  // Codex finding it addresses. Fetched via the compare API so the list
+  // reflects exactly what this round pushed, not the entire PR diff.
+  let detailBlock = ''
+  try {
+    const compare = await compareCommits(token, owner, repo, headBefore, headNow)
+    const changedFiles = (compare?.files ?? []).map((f) => `- \`${f.filename}\` (${f.status})`).join('\n')
+    if (changedFiles) {
+      detailBlock += `\n\n**本轮改动文件：**\n${changedFiles}`
+    }
+  } catch {
+    detailBlock += '\n\n**本轮改动文件：** 读取失败'
+  }
+  if (findingsSummary) {
+    const reviewLink = reviewId
+      ? `https://github.com/${owner}/${repo}/pull/${pr}#pullrequestreview-${reviewId}`
+      : ''
+    detailBlock += `\n\n**处理的审查意见：** ${findingsSummary}${reviewLink ? ` ([查看审查](${reviewLink}))` : ''}`
+  }
+  if (riskGrade) {
+    detailBlock += `\n\n**风险级别：** ${riskGrade}`
+  }
+
   await createIssueComment(
     token,
     owner,
     repo,
     pr,
-    `Completed automated fix round ${round} for Codex findings and pushed \`${headNow.slice(0, 10)}\`. ${note}\n\n${marker}`
+    `Completed automated fix round ${round} for Codex findings and pushed \`${headNow.slice(0, 10)}\`. ${note}${postPushRiskWarning}${detailBlock}\n\n${marker}`
   )
 } else if (outcome === 'success') {
   // Green step, unchanged head. Deliberately writes NO fix-dispatched marker:
