@@ -63,7 +63,7 @@ async function loadImages(sb: SupabaseClient, clientId: string): Promise<Array<{
   ))
 }
 async function usedPaths(sb: SupabaseClient, clientId: string): Promise<Set<string>> {
-  const { data, error } = await sb.from('flywheel_actions').select('payload').eq('client_id', clientId).eq('action_type', ADS_ACTION_TYPE.ADD_AD_CREATIVE).limit(80)
+  const { data, error } = await sb.from('flywheel_actions').select('payload').eq('client_id', clientId).eq('action_type', ADS_ACTION_TYPE.ADD_AD_CREATIVE)
   const used = new Set<string>()
   if (error) return used
   for (const row of (data ?? []) as Array<{ payload?: unknown }>) {
