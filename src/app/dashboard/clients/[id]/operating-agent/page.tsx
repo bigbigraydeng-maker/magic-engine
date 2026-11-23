@@ -3,10 +3,11 @@
 import { useEffect, useState } from 'react'
 import type { OperatingBrief } from '@/lib/web-intelligence/operating-brief'
 import { formatTourLandscapeChatReply, type TourLandscape } from '@/lib/web-intelligence/tour-landscape'
+import { FieldAgentAdsPanel } from './FieldAgentAdsPanel'
 
 type TrafficDirection = { domain: string; is_client?: boolean; source_url: string; observed_at: string; valid_until: string | null; excerpt: string; observation_count: number; previous_observed_at: string | null; estimated_visits: number | null; previous_estimated_visits: number | null; snapshot_change_pct: number | null; visits_change_pct: number | null; top_country: string | null }
 type ExternalSignal = { source_type: 'industry_news' | 'industry_media' | 'jobs'; source_name: string; source_url: string; title: string; excerpt: string; observed_at: string; valid_until: string | null }
-type Payload = { operating: OperatingBrief; client: { domain: string | null }; can_run: boolean; client_product_source?: { kind: 'master_brief' | 'first_party_feed' | 'web_snapshot' | 'none'; count: number }; traffic_direction?: TrafficDirection[]; external_signals?: ExternalSignal[]; runs?: Array<{ id: string; status: string; provider_status: string | null }> }
+type Payload = { operating: OperatingBrief; client: { domain: string | null }; can_run: boolean; can_edit?: boolean; client_product_source?: { kind: 'master_brief' | 'first_party_feed' | 'web_snapshot' | 'none'; count: number }; traffic_direction?: TrafficDirection[]; external_signals?: ExternalSignal[]; runs?: Array<{ id: string; status: string; provider_status: string | null }> }
 type ComparisonResult = { summary: string; client_strengths: string[]; competitor_strengths: string[]; differences: string[]; recommendations: string[]; unknowns: string[]; confidence: number; evidence_urls: string[] }
 type LandscapeChatMessage = { role: 'user' | 'assistant'; content: string }
 type CapturePhase = 'idle' | 'queued' | 'capturing' | 'analysing' | 'complete' | 'failed'
@@ -28,6 +29,7 @@ export default function OperatingAgentPage({ params }: { params: { id: string } 
   const [trafficBusy, setTrafficBusy] = useState(false)
   const [trafficMessage, setTrafficMessage] = useState('')
   const [canRun, setCanRun] = useState(false)
+  const [canEdit, setCanEdit] = useState(false)
   const [refresh, setRefresh] = useState(0)
   const [captureRequestId, setCaptureRequestId] = useState<string | null>(null)
   const [capturePhase, setCapturePhase] = useState<CapturePhase>('idle')
@@ -40,7 +42,7 @@ export default function OperatingAgentPage({ params }: { params: { id: string } 
         return response.json() as Promise<Payload>
       })
       .then(value => {
-        setData(value.operating); setClientProductSource(value.client_product_source); setTrafficDirection(value.traffic_direction ?? []); setExternalSignals(value.external_signals ?? []); setClientDomain(value.client.domain); setCanRun(value.can_run)
+        setData(value.operating); setClientProductSource(value.client_product_source); setTrafficDirection(value.traffic_direction ?? []); setExternalSignals(value.external_signals ?? []); setClientDomain(value.client.domain); setCanRun(value.can_run); setCanEdit(value.can_edit === true)
         if (captureRequestId) {
           const run = value.runs?.find(item => item.id === captureRequestId)
           if (run?.status === 'complete') setCapturePhase('complete')
@@ -139,6 +141,7 @@ export default function OperatingAgentPage({ params }: { params: { id: string } 
       finally { setTrafficBusy(false) }
     }} />
     <ExternalSignalsSection signals={externalSignals} busy={externalBusy} message={externalMessage} onCollect={collectExternal} />
+    <FieldAgentAdsPanel clientId={params.id} canEdit={canEdit} />
 
     <section className="rounded-2xl border border-me-ochre/30 bg-me-ochre/10 p-5">
       <p className="text-xs font-bold uppercase tracking-[0.14em] text-me-ochre">本轮经营问题</p>
