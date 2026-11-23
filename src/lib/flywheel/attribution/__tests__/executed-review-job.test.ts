@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { BUDGET_CARD_ACTION, PAUSE_CARD_ACTION, type ReviewSource } from '../executed-review'
+import { BUDGET_CARD_ACTION, CAMPAIGN_PAUSE_ACTION, PAUSE_CARD_ACTION, type ReviewSource } from '../executed-review'
 
 const hoisted = vi.hoisted(() => ({
   actions: [] as Array<Record<string, unknown>>,
@@ -32,7 +32,7 @@ vi.mock('@/lib/supabase', () => {
   function chainFor(table: string): Record<string, unknown> {
     const chain: Record<string, unknown> = {}
     const passthrough = () => chain
-    for (const name of ['select', 'not', 'lt', 'gte', 'lte', 'order', 'limit', 'is', 'neq', 'delete', 'update']) {
+    for (const name of ['select', 'not', 'lt', 'gte', 'lte', 'order', 'limit', 'is', 'neq', 'delete', 'update', 'in', 'eq']) {
       chain[name] = passthrough
     }
     chain.eq = (column: string, value: unknown) => {
@@ -67,6 +67,20 @@ const SOURCE: ReviewSource = {
   prescriptionId: 'rx-1', version: 2, goalId: 'goal-1', planId: 'plan-1', planHash: 'hash-1', approvedOn: '2026-11-01',
 }
 const DUE = new Date('2026-02-01T00:00:00.000Z')
+
+function campaign(payloadExtra: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: 'camp-1', client_id: 'client-1', flywheel: 'ads', action_type: CAMPAIGN_PAUSE_ACTION,
+    payload: {
+      status: 'executed', kind: 'pause', wrote: true, campaign_id: 'camp-a',
+      cardRunId: 'card-camp-1', issuedAt: '2026-01-01T00:00:00.000Z',
+      ...payloadExtra,
+    },
+    expected_metric: 'ads.account.cost_per_lead', expected_delta: null,
+    executed_at: '2026-01-01T00:00:00.000Z',
+    execution_item_id: null, action_run_id: 'run-camp', vendor: 'meta',
+  }
+}
 
 function budget(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -142,7 +156,7 @@ describe('attribution consumes the card window', () => {
     expect(result.written).toBe(2)
     expect(hoisted.upserts.map(row => [row.verdict, row.window_days, row.baseline])).toEqual([
       ['inconclusive', 7, null],
-      ['inconclusive', 3, null],
+      ['inconclusive', 7, null],
     ])
   })
 
@@ -185,7 +199,7 @@ describe('attribution consumes the card window', () => {
     hoisted.insights = [day('2025-12-30', 40, 0), day('2026-01-03', 0, 0)]
     const { runAttributionJob } = await import('../job')
     expect((await runAttributionJob({ now: DUE })).written).toBe(1)
-    expect(hoisted.upserts[0]).toMatchObject({ verdict: 'inconclusive', window_days: 3 })
+    expect(hoisted.upserts[0]).toMatchObject({ verdict: 'inconclusive', window_days: 7 })
     const text = caseText()
     expect(text).toContain('结论：')
     expect(text).not.toContain('变好了')
@@ -202,6 +216,29 @@ describe('attribution consumes the card window', () => {
     expect(result.written).toBe(2)
     expect(hoisted.upserts.every(row => row.verdict === 'inconclusive')).toBe(true)
     expect(caseText()).toContain('还被改过')
+  })
+
+  it('reviews a campaign pause for 7 days unless the card or config names another window', async () => {
+    const { runAttributionJob } = await import('../job')
+    const rulesMod = await import('../review-verdict-rules')
+    hoisted.actions = [campaign()]
+    expect((await runAttributionJob({ now: DUE })).written).toBe(1)
+    expect(hoisted.upserts[0]?.window_days).toBe(7)
+
+    hoisted.upserts = []
+    hoisted.actions = [campaign({ observationDays: 4 })]
+    expect((await runAttributionJob({ now: DUE })).written).toBe(1)
+    expect(hoisted.upserts[0]?.window_days).toBe(4)
+
+    hoisted.upserts = []
+    hoisted.actions = [campaign()]
+    vi.mocked(rulesMod.loadClientReviewContext).mockResolvedValueOnce({
+      rules: { ...rulesMod.DEFAULT_REVIEW_VERDICT_RULES, campaignPauseWindowDays: 9 },
+      targetCostPerPrimary: null,
+      primary: 'lead',
+    })
+    expect((await runAttributionJob({ now: DUE })).written).toBe(1)
+    expect(hoisted.upserts[0]?.window_days).toBe(9)
   })
 
   it('retries a failed read or a failed case save instead of storing a guess', async () => {
