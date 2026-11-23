@@ -8,6 +8,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { computeVerdict } from '../job'
+import { ADS_METRIC_KEY } from '../../vocabulary'
 import type { supabaseAdmin } from '@/lib/supabase'
 
 type SupabaseQuery = ReturnType<typeof supabaseAdmin.from>
@@ -237,6 +238,45 @@ describe('runAttributionJob', () => {
     const result = await runAttributionJob()
     expect(result.written).toBe(1)
     expect(result.skipped).toBe(0)
+  })
+
+  it('still writes the temporal CPL outcome when the funnel check finds a candidate lesson', async () => {
+    const { supabaseAdmin } = await import('@/lib/supabase')
+    const sharedChain = vi.mocked(supabaseAdmin.from)('flywheel_metrics') as unknown as Record<string, ReturnType<typeof vi.fn>>
+    const actionsChain = makeChain()
+    ;(actionsChain as Record<string, unknown>)['range'] = vi.fn().mockResolvedValue({
+      data: [{
+        id: 'action-cpl',
+        client_id: 'client-1',
+        flywheel: 'ads',
+        expected_metric: ADS_METRIC_KEY.COST_PER_LEAD,
+        expected_delta: -1,
+        executed_at: new Date(Date.now() - 5 * 86_400_000).toISOString(),
+        payload: {
+          funnel_health: {
+            plan: null,
+            actual: null,
+            subject: { id: 'ad-sub', adAccountId: 'acct-a', spend: 400, impressions: 10_000, linkClicks: 200, leads: 20, formOpens: null, videoP100: null, videoThruPlay: null },
+            peers: [{ id: 'ad-win', adAccountId: 'acct-a', spend: 250, impressions: 10_000, linkClicks: 500, leads: 25, formOpens: null, videoP100: null, videoThruPlay: null }],
+          },
+        },
+      }],
+      error: null,
+    })
+    vi.mocked(supabaseAdmin.from).mockReturnValueOnce(asSupabaseQuery(actionsChain))
+    maybeSingleQueue.push(async () => ({ data: null, error: null })) // candidate lesson does not exist
+    maybeSingleQueue.push(async () => ({ data: { metric_value: 15 }, error: null })) // temporal baseline
+    maybeSingleQueue.push(async () => ({ data: { metric_value: 11 }, error: null })) // temporal after
+
+    const { runAttributionJob } = await import('../job')
+    const result = await runAttributionJob()
+    expect(result.written).toBe(1)
+    expect(result.failed).toBe(0)
+    const rows = sharedChain.upsert.mock.calls.map(([row]) => row as Record<string, unknown>)
+    expect(rows.filter((row) => row.metric_key === ADS_METRIC_KEY.COST_PER_LEAD)).toEqual([
+      expect.objectContaining({ action_id: 'action-cpl', baseline: 15, after_value: 11 }),
+    ])
+    expect(rows.some((row) => row.is_active === false)).toBe(true)
   })
 
   it('increments failed (not skipped) and logs when DB throws on upsert', async () => {
