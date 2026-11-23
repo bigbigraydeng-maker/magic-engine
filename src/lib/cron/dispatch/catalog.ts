@@ -68,6 +68,8 @@ export const DISPATCH_CATALOG: readonly DispatchJob[] = [
   // Switch: env INNGEST_DIRECT_FALLBACK=off. Safe beside Inngest (both only pick unfinished work).
   { service: 'telephony-direct-sweep', route: 'telephony-direct-sweep', method: 'GET', auth: 'bearer', schedule: '*/10 * * * *' },
   { service: 'lead-sheet-direct-sync', route: 'lead-sheet-direct-sync', method: 'GET', auth: 'bearer', schedule: '50 * * * *' },
+  // 2026-11-23: same quota gap left admitted finished videos without a 马良 verdict. One review per run.
+  { service: 'maliang-direct-sweep', route: 'maliang-direct-sweep', method: 'GET', auth: 'bearer', schedule: '*/20 * * * *' },
   // 2026-11-16 CRM follow-up hand-over: stop line first (guests who replied go back to staff), then the AI pickup.
   // 18:30 / 18:45 UTC = 07:30 / 07:45 NZDT (06:30 / 06:45 in NZ winter). Switches in the route files.
   { service: 'crm-followup-stopline-direct', route: 'crm-followup-stopline', method: 'GET', auth: 'bearer', schedule: '30 18 * * *' },
