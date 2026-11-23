@@ -57,7 +57,7 @@
 
 1. **Markdown 技能卡仍是人工审核过的正本**；数据库里的 points / events 是它的机器可读副本与历史，不是第二个正本。
 2. **只有 `adopted` 且有 `rule` 的点才可能进提示词**；`verifying / pm_decision / learning` 永不注入。
-3. **不新建知识表**：学会的规则落在既有 `global_learned_lessons`，复用既有读取、既有 `contradicted_count` 机制与既有脱敏闸。
+3. **不新建知识表**：学会的规则落在既有 `global_learned_lessons`，复用既有读取、既有 `contradicted_count` 机制与既有脱敏闸。v1 阶段以 `is_active` 为采纳标志：候选先写成未启用，人点采纳后才进入下一份处方。
 4. **失败要显示**：所有新写入函数返回 `Result`（成功/失败+原因），不吞错；运行回执写 `agent_learning_runs`；看板失败标红，不显示 0。
 5. **客户私有内容不进共享层**：本契约的所有新表都是平台级（无 `client_id`）。客户私有学习仍留在 `client_*` 四张表。
 
