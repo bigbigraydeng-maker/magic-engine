@@ -3,7 +3,9 @@
 // ============================================
 
 import type { ExecutionTarget } from '@/lib/flywheel/adapters/types'
+import type { PrescriptionActionListItem } from '@/lib/ads/prescription-action-list'
 export type { ExecutionTarget }
+export type { PrescriptionActionListItem }
 
 export type DiagnosticDimension =
   | 'seo'
@@ -466,4 +468,11 @@ export interface PrescriptionContent {
    * 由 attachPlanSeed 在保存前重新构建。形状见 src/lib/ads-strategy/plan-seed/types.ts。
    */
   plan_seed?: unknown
+  /**
+   * AD-2 — 机器可读的广告执行动作（最多一条暂停 + 一条调日预算）。AD-3 才消费发卡。
+   * 校验见 src/lib/ads/prescription-action-list.ts。
+   */
+  action_list?: PrescriptionActionListItem[]
+  /** 旧版暂停块。action_list 的暂停行不再写入这里；AD-3 用 issueOnePauseCard。 */
+  pause_ad_set?: unknown
 }
