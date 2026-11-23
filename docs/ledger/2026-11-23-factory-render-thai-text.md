@@ -4,7 +4,7 @@ title: 视频工厂出片机能正确显示泰文了：泰文用 Kanit 字体、
 status: done
 owner: agent
 decided_on: 2026-11-23
-source: doc:docs/clients/pj-international/2026-11-23-thai-content-generation-assessment.md
+source: session:7fd0e712
 verify_by: 2026-12-07
 verify_how: 出片电脑更新到含本改动的版本后，第一条带泰文标题的成片逐帧看开头大字和片尾按钮：泰文是 Kanit 字体、没有方块、没有行首孤立的声调符号、换行落在词与词之间；没有泰文工单就写「判不了」，不算成
 done_on: 2026-11-23
