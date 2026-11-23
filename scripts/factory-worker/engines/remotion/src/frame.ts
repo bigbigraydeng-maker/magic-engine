@@ -67,6 +67,7 @@ export interface FramePlan {
 
 const QUESTION_END = /[?？]\s*$/
 const CJK = /[\u3400-\u9fff]/
+const THAI = /[\u0e00-\u0e7f]/
 // Media file names carry no copy language, so the language scan skips them.
 const ASSET_FILE = /\.(?:png|jpe?g|webp|gif|avif|mp4|mov|m4v|webm|mp3|wav|m4a|aac)$/i
 const HOOK_DEFAULT_ON =new Set(['postcard'])
@@ -74,6 +75,11 @@ const HOOK_DEFAULT_ON =new Set(['postcard'])
 /** True when the string contains Han characters. */
 export function looksChinese(value: string): boolean {
   return CJK.test(value)
+}
+
+/** True when the string contains Thai script. */
+export function looksThai(value: string): boolean {
+  return THAI.test(value)
 }
 
 function collectStrings(value: unknown, out: string[], depth: number): void {
@@ -245,18 +251,47 @@ export function inferHookStyle(lines: string[], spec: FrameHookSpec): HookStyle 
   return 'kinetic'
 }
 
+function graphemeCount(text: string): number {
+  return Array.from(new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text)).length
+}
+
 function chunkChars(text: string, size: number): string[] {
-  const chars = Array.from(text)
-  if (chars.length <= size) return [text]
+  const graphemes = Array.from(
+    new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text),
+    (s) => s.segment,
+  )
+  if (graphemes.length <= size) return [text]
   const lines: string[] = []
-  for (let i = 0; i < chars.length && lines.length < 3; i += size) {
-    lines.push(chars.slice(i, i + size).join(''))
+  for (let i = 0; i < graphemes.length && lines.length < 3; i += size) {
+    lines.push(graphemes.slice(i, i + size).join(''))
   }
   return lines
 }
 
+/** Wrap Thai copy between words; a single long word is allowed to overflow rather than be cut. */
+function wrapThai(text: string): string[] {
+  const tokens = Array.from(
+    new Intl.Segmenter('th', { granularity: 'word' }).segment(text.trim()),
+    (s) => s.segment,
+  )
+  const lines: string[] = []
+  let current = ''
+  for (const token of tokens) {
+    const next = current + token
+    if (current && graphemeCount(next) > 16 && lines.length < 2) {
+      lines.push(current.trim())
+      current = token.trimStart()
+    } else {
+      current = next
+    }
+  }
+  if (current.trim()) lines.push(current.trim())
+  return lines.filter((line) => line.length > 0).slice(0, 3)
+}
+
 /** Break a headline into at most three lines that can sit in the safe width. */
 export function wrapHeadline(text: string): string[] {
+  if (looksThai(text)) return wrapThai(text)
   const words = text.split(/\s+/).filter(Boolean)
   if (words.length <= 1) return chunkChars(text, 10)
   const lines: string[] = []
