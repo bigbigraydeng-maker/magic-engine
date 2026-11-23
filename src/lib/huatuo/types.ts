@@ -130,6 +130,8 @@ export interface HuatuoGenerationMeta {
   cost_usd: number
   duration_ms: number
   industry_category_used: string | null   // 映射后的行业代码
+  /** AD-2: 华佗输出 action_list 超过 1+1 条时服务端裁剪留痕（与 manual paste 同键） */
+  action_list_dropped_reason?: string
 }
 
 // ─── Lookup payload (passed into agent) ────────────────────────────────────────
