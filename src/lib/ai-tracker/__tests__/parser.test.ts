@@ -165,3 +165,31 @@ describe('parseRanking — no-client mode', () => {
     expect(out.brands).toHaveLength(1)
   })
 })
+
+describe('parseRanking — an answer too short to score', () => {
+  // A refused or truncated completion reaches here as '' with the runner's
+  // error_message still null. Returning an empty ranking would store it as
+  // "the AI named nobody" — a real zero — and it would land in the
+  // mention-rate denominator. Throwing routes it to parse_error_message
+  // instead, where run-conclusive.ts can reject it.
+  it('throws on an empty response instead of returning an empty ranking', async () => {
+    await expect(
+      parseRanking({ rawResponse: '', clientBrandName: 'CTS Tours' })
+    ).rejects.toThrow(/too short to parse/)
+  })
+
+  it('throws on a response under the 30-character floor', async () => {
+    await expect(
+      parseRanking({ rawResponse: 'I cannot help.', clientBrandName: 'CTS Tours' })
+    ).rejects.toThrow(/nothing was measured/)
+  })
+
+  it('still parses an answer that clears the floor', async () => {
+    modelReturns([{ brand: 'CTS Tours', rank: 1, snippet: 'CTS Tours runs NZ coach tours' }])
+    const out = await parseRanking({
+      rawResponse: 'CTS Tours runs guided coach tours all over New Zealand.',
+      clientBrandName: 'CTS Tours',
+    })
+    expect(out.client_brand_rank).toBe(1)
+  })
+})
