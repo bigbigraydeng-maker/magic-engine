@@ -10,6 +10,7 @@ import { summarizeResultsByType, type ResultSummary } from '@/lib/ads-strategy/p
 import type { LiveTodayView } from '@/lib/ads-strategy/heartbeat/live-view'
 import { HeldCards } from '@/components/confirmation-card/HeldCards'
 import { AdsExecutionReviewPanel } from '../_components/AdsExecutionReviewPanel'
+import { AdsDecisionLogPanel } from '../_components/AdsDecisionLogPanel'
 import { MeButton, MePill, MeStatCard, MeTable } from '@/components/ui/me-primitives'
 import AdsNextStepCard from './ads-next-step-card'
 import OutsideChangePanel from './outside-change-panel'
@@ -241,6 +242,10 @@ export function AdsHealthTodayTab(props: TodayTabProps) {
 
       <section className="mb-6">
         <AdsExecutionReviewPanel clientId={clientId} />
+      </section>
+
+      <section className="mb-6">
+        <AdsDecisionLogPanel clientId={clientId} />
       </section>
 
       <AdsNextStepCard clientId={clientId} refreshKey={refreshKey} />
