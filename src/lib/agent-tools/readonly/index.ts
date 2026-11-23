@@ -18,6 +18,7 @@ import { queryKeywordDetail } from './keyword-detail'
 import { querySearchConsole } from './search-console'
 import { queryAnalytics } from './analytics'
 import { queryFlywheelHistory } from './flywheel-history'
+import { readPlanSeed, readPrescriptionProgress, readSpendAndLeads } from './prescription-read'
 
 export type { ReadonlyToolContext } from './types'
 
@@ -27,6 +28,9 @@ const MODULES: ReadonlyToolModule[] = [
   querySearchConsole,
   queryAnalytics,
   queryFlywheelHistory,
+  readPrescriptionProgress,
+  readPlanSeed,
+  readSpendAndLeads,
 ]
 
 /**
