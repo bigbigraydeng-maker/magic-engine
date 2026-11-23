@@ -7,6 +7,7 @@ import {
   pausedDraftClickUrl,
 } from '@/lib/ads-strategy/paused-draft-copy'
 import type { AddCreativeCardDetail } from '@/lib/ads-creative-card/display'
+import type { VideoUploadCardDetail } from '@/lib/ads-strategy/video-upload-card'
 import type { CardStatus } from '@/lib/confirmation-card/view'
 import { ConfirmationCard } from './ConfirmationCard'
 import { STATUS_CHIP_LABEL, addCreativeChipClass, isMutedStatus, visibleStatusChip } from './card-display'
@@ -28,10 +29,18 @@ export interface CardPayload {
   readonly blockedReason: string | null
   readonly addCreativeDetail?: AddCreativeCardDetail | null
   readonly addCreativeStatusChip?: string | null
+  readonly videoUploadDetail?: VideoUploadCardDetail | null
 }
 
 function text(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value : null
+}
+
+function readVideoUploadDetail(value: unknown): VideoUploadCardDetail | null {
+  if (!value || typeof value !== 'object') return null
+  const row = value as Record<string, unknown>
+  if (typeof row.videoUrl !== 'string' || !row.videoUrl.startsWith('https://')) return null
+  return { videoUrl: row.videoUrl, title: text(row.title) }
 }
 
 function readAddCreativeDetail(value: unknown): AddCreativeCardDetail | null {
@@ -103,6 +112,7 @@ export function toCardPayload(value: unknown): CardPayload | null {
     blockedReason: row.blockedReason,
     addCreativeDetail: readAddCreativeDetail(row.addCreativeDetail),
     addCreativeStatusChip: text(row.addCreativeStatusChip),
+    videoUploadDetail: readVideoUploadDetail(row.videoUploadDetail),
   }
 }
 
@@ -158,6 +168,7 @@ function CardRow({ clientId, card }: { clientId: string; card: CardPayload }) {
         ...result,
         addCreativeDetail: result.addCreativeDetail ?? view.addCreativeDetail,
         addCreativeStatusChip: result.addCreativeStatusChip ?? view.addCreativeStatusChip,
+        videoUploadDetail: result.videoUploadDetail ?? view.videoUploadDetail,
       })
     }
     setBusy(false)
@@ -183,6 +194,7 @@ function CardRow({ clientId, card }: { clientId: string; card: CardPayload }) {
         goLiveLabel={goLive ? GO_LIVE_CONFIRM_LABEL : undefined}
         addCreativeDetail={view.addCreativeDetail}
         addCreativeStatusChip={view.addCreativeStatusChip}
+        videoUploadDetail={view.videoUploadDetail}
         onConfirm={() => { void send('confirm') }}
         onDecline={() => { void send('decline') }}
       />
