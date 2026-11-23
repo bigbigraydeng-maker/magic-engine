@@ -1,0 +1,22 @@
+{
+  "schema": "ME_LOCAL_EXECUTOR_POLICY_V1",
+  "repository": "bigbigraydeng-maker/magic-engine",
+  "github_cli_path": "/opt/homebrew/bin/gh",
+  "executor_id": "com.magicengine.obsidian-control-sync",
+  "allowed_issues": [1222],
+  "allowed_profiles": ["obsidian_skin_v1"],
+  "attempt_limit": 1,
+  "max_ttl_seconds": 900,
+  "denied_actions": [
+    "arbitrary_issue_text",
+    "shell_payload",
+    "prompt_payload",
+    "repository_write",
+    "branch_or_pr",
+    "merge_or_deploy",
+    "migration_or_rls",
+    "production_or_provider_write",
+    "credential_access",
+    "publish_or_spend"
+  ]
+}
