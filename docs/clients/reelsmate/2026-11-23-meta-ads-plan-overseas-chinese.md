@@ -1,5 +1,7 @@
 # ReelsMate · Facebook / Instagram 广告投放计划（海外华人 · 涨粉）v0.3
 
+> **定位（PM 2026-11-23）：这份是窗口手写的参考稿，不是最终路线。** PM 要求「用 Magic Engine 完整生成，走通路线，不能每次都在窗口里工作」。新版 ME 目前缺两样，已上报：MAGICE-0014（广告目标没有「涨粉」）、MAGICE-0015（没有「推广计划」功能）。ME 补上后，计划和广告都改在 ME 里生成和批准，本文件只作参考。
+>
 > **批准状态：未批。** 只有 PM 本人在对话里批了才算定。批了计划也不等于批了开投，开投要另外一次点名。
 > 起草：2026-11-23 · 流程：`me-ads-launch-flow` 第 1 步「计划」+ `client-promo-readiness` 三道门
 > 本文件是 ReelsMate 推广的唯一一份计划；以后改版就改这份，把版本号往上加。
@@ -43,7 +45,7 @@
 | # | 检查项 | 现状 | 来源 | 谁补 |
 |---|---|---|---|---|
 | T1a | Facebook 主页 | ✅ 有，名字「ReelsMate」，PM 的账号能用它建广告 | Meta 接口 · 我核了 | — |
-| T1b | Instagram 账号 | 🟡 **没法证明有没有。** Magic Engine 广告账户下能用的 Instagram 里没有 ReelsMate。第一阶段只投 Facebook，不挡开投；涨 Instagram 粉丝要先有并绑上 | Meta 接口 · 我核了 | PM：有就绑到 ReelsMate 主页；没有就先新建 |
+| T1b | Instagram 账号 | ✅ **有：@reelsmatenz**，已和 ReelsMate 主页一起接进新版 ME（11-23 在 ME 里读到）。之前说「没看到」是因为它没挂在 Magic Engine 广告账户下 | 新版 ME · 我核了 | — |
 | T1c | 广告账户 | ✅ **PM 2026-11-23 回「借用」：借用现有的「Magic Engine」广告账户**（新西兰元、在用、已绑卡）。ReelsMate 的系列名字一律以「ReelsMate」开头，花费按系列分开算。此前新开 ReelsMate 专用账户被 Meta 拒（数量已达上限） | PM 原话 + Meta 接口 · 我核了 | — |
 | T1d | 付款方式 | ✅ 「Magic Engine」广告账户状态正常、有付款方式（开投当天还要再读一次） | Meta 接口 · 我核了 | — |
 | T1e | 每天最多花多少钱（日预算上限） | ✅ **NZ$20 / 天，只投新西兰**（PM 2026-11-23 原话「先从新西兰开始，每天 20」）。澳洲的预算到第二阶段再定 | PM 原话 | — |
@@ -127,7 +129,7 @@
 |---|---|
 | ReelsMate 主页 | 有 |
 | 广告账户 | 借用「Magic Engine」广告账户（PM 11-23「借用」）；新开 ReelsMate 专用账户被 Meta 拒 |
-| 绑定的 Instagram | 没看到 |
+| 绑定的 Instagram | @reelsmatenz，已接进新版 ME |
 | 新版 ME | 已有 ReelsMate 客户档案和品牌规范；**还没连 Meta 广告账户**（11-23 读到「尚未连接 Meta 广告账户」） |
 | 付款方式 | 有（11-23 读到；开投当天重读） |
 | 日预算上限 | NZ$20 / 天，只投新西兰（PM 11-23） |

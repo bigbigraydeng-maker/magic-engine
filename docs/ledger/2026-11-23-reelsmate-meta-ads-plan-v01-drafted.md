@@ -11,3 +11,4 @@ verify_how: PM 在对话里回「批」，计划文件顶部改成「已批 + PM
 PM 11-23 定主要目的：增加海外粉丝关注，尤其澳洲和新西兰 → 目标改成涨主页关注，澳新分两个广告组。
 11-23 在 Magic Engine 商务账户下新开 ReelsMate 广告账户，Meta 报「广告账户数量已达上限」，没建成；PM 11-23 回「借用」：用现有 Magic Engine 广告账户。
 另：官网页脚写着「Magic Engine 旗下品牌」，跟「客户眼里没有 Magic Engine」规矩不一致，待 PM 定。
+PM 11-23：要用 Magic Engine 完整生成、走通路线，不在窗口里做。新版 ME 已有 ReelsMate 档案、品牌规范、主页和 Instagram @reelsmatenz，但没接广告账户；缺「涨粉」广告目标（MAGICE-0014）和「推广计划」功能（MAGICE-0015），已上报。
