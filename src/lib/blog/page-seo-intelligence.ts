@@ -11,6 +11,7 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
+import { isRunConclusive } from '@/lib/ai-tracker/run-conclusive'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -121,10 +122,11 @@ async function fetchGeoGaps(
 
   const avgRank = (snapshot?.avg_rank as number | null) ?? null
 
-  // Queries from recent runs where brand rank is null or > 3 (poor visibility)
+  // Queries from recent runs where brand rank is null or > 3 (poor visibility).
+  // Include error fields so we can exclude failed probes (playbook-geo §九.8).
   const { data: runs } = await supabaseAdmin
     .from('ai_visibility_runs')
-    .select('client_brand_rank, query:ai_visibility_queries!inner(question)')
+    .select('client_brand_rank, error_message, parse_error_message, query:ai_visibility_queries!inner(question)')
     .eq('client_id', clientId)
     .or('client_brand_rank.is.null,client_brand_rank.gt.3')
     .order('ran_at', { ascending: false })
@@ -132,9 +134,12 @@ async function fetchGeoGaps(
 
   if (!runs) return { gaps: [], avgRank }
 
+  // Exclude failed probes — a parse-failed run with null rank is NOT "poor visibility"
+  const conclusiveRuns = runs.filter(r => isRunConclusive(r))
+
   // Deduplicate by question — keep worst (null > high rank)
   const seen = new Map<string, GeoGapSignal>()
-  for (const run of runs) {
+  for (const run of conclusiveRuns) {
     const queryRaw = run.query as unknown
     const question: string = Array.isArray(queryRaw)
       ? ((queryRaw[0] as { question: string })?.question ?? '')

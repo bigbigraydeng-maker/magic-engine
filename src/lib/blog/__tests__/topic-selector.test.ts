@@ -96,12 +96,14 @@ function makeRuns(
   queryId: string,
   count: number,
   weak = true
-): Array<{ query_id: string; ai_engine: string; client_brand_rank: number | null; ran_at: string }> {
+): Array<{ query_id: string; ai_engine: string; client_brand_rank: number | null; ran_at: string; error_message: string | null; parse_error_message: string | null }> {
   return Array.from({ length: count }, (_, i) => ({
     query_id: queryId,
     ai_engine: 'openai',
     client_brand_rank: weak ? null : 1,
     ran_at: `2026-05-${String(i + 1).padStart(2, '0')}T10:00:00Z`,
+    error_message: null,
+    parse_error_message: null,
   }))
 }
 
@@ -590,10 +592,10 @@ describe('getWeakSpotOpportunities', () => {
           // q-high: 5/5 weak → score = 1.0
           ...makeRuns('q-high', 5, true),
           // q-low: 2/4 weak → score = 0.5
-          { query_id: 'q-low', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' },
-          { query_id: 'q-low', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-02T10:00:00Z' },
-          { query_id: 'q-low', ai_engine: 'openai', client_brand_rank: 1, ran_at: '2026-05-03T10:00:00Z' },
-          { query_id: 'q-low', ai_engine: 'openai', client_brand_rank: 1, ran_at: '2026-05-04T10:00:00Z' },
+          { query_id: 'q-low', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z', error_message: null, parse_error_message: null },
+          { query_id: 'q-low', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-02T10:00:00Z', error_message: null, parse_error_message: null },
+          { query_id: 'q-low', ai_engine: 'openai', client_brand_rank: 1, ran_at: '2026-05-03T10:00:00Z', error_message: null, parse_error_message: null },
+          { query_id: 'q-low', ai_engine: 'openai', client_brand_rank: 1, ran_at: '2026-05-04T10:00:00Z', error_message: null, parse_error_message: null },
         ]
       )
 
@@ -616,14 +618,14 @@ describe('getWeakSpotOpportunities', () => {
         null,
         [
           // q-multi: weak across 3 engines (3/3 runs → score=1.0, 3 engines)
-          { query_id: 'q-multi', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' },
-          { query_id: 'q-multi', ai_engine: 'anthropic', client_brand_rank: null, ran_at: '2026-05-01T11:00:00Z' },
-          { query_id: 'q-multi', ai_engine: 'perplexity', client_brand_rank: null, ran_at: '2026-05-01T12:00:00Z' },
+          { query_id: 'q-multi', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z', error_message: null, parse_error_message: null },
+          { query_id: 'q-multi', ai_engine: 'anthropic', client_brand_rank: null, ran_at: '2026-05-01T11:00:00Z', error_message: null, parse_error_message: null },
+          { query_id: 'q-multi', ai_engine: 'perplexity', client_brand_rank: null, ran_at: '2026-05-01T12:00:00Z', error_message: null, parse_error_message: null },
           // q-single: weak in 1 engine, strong in 2 (1/3 runs weak → score=0.33, 1 engine)
           // But 0.33 >= 0.3, so it's included
-          { query_id: 'q-single', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' },
-          { query_id: 'q-single', ai_engine: 'anthropic', client_brand_rank: 1, ran_at: '2026-05-01T11:00:00Z' },
-          { query_id: 'q-single', ai_engine: 'perplexity', client_brand_rank: 1, ran_at: '2026-05-01T12:00:00Z' },
+          { query_id: 'q-single', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z', error_message: null, parse_error_message: null },
+          { query_id: 'q-single', ai_engine: 'anthropic', client_brand_rank: 1, ran_at: '2026-05-01T11:00:00Z', error_message: null, parse_error_message: null },
+          { query_id: 'q-single', ai_engine: 'perplexity', client_brand_rank: 1, ran_at: '2026-05-01T12:00:00Z', error_message: null, parse_error_message: null },
         ]
       )
 
@@ -648,9 +650,9 @@ describe('getWeakSpotOpportunities', () => {
         [{ id: 'q-1', question: 'best china tours from auckland' }],
         null,
         [
-          { query_id: 'q-1', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' },
-          { query_id: 'q-1', ai_engine: 'anthropic', client_brand_rank: null, ran_at: '2026-05-02T10:00:00Z' },
-          { query_id: 'q-1', ai_engine: 'perplexity', client_brand_rank: 1, ran_at: '2026-05-03T10:00:00Z' },
+          { query_id: 'q-1', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z', error_message: null, parse_error_message: null },
+          { query_id: 'q-1', ai_engine: 'anthropic', client_brand_rank: null, ran_at: '2026-05-02T10:00:00Z', error_message: null, parse_error_message: null },
+          { query_id: 'q-1', ai_engine: 'perplexity', client_brand_rank: 1, ran_at: '2026-05-03T10:00:00Z', error_message: null, parse_error_message: null },
         ]
       )
 
@@ -705,9 +707,9 @@ describe('getWeakSpotOpportunities', () => {
         [{ id: 'q-1', question: 'china tour packages from wellington' }],
         null,
         [
-          { query_id: 'q-1', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' },
-          { query_id: 'q-1', ai_engine: 'anthropic', client_brand_rank: null, ran_at: '2026-05-02T10:00:00Z' },
-          { query_id: 'q-1', ai_engine: 'perplexity', client_brand_rank: 2, ran_at: '2026-05-03T10:00:00Z' },
+          { query_id: 'q-1', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z', error_message: null, parse_error_message: null },
+          { query_id: 'q-1', ai_engine: 'anthropic', client_brand_rank: null, ran_at: '2026-05-02T10:00:00Z', error_message: null, parse_error_message: null },
+          { query_id: 'q-1', ai_engine: 'perplexity', client_brand_rank: 2, ran_at: '2026-05-03T10:00:00Z', error_message: null, parse_error_message: null },
         ]
       )
 
@@ -774,7 +776,7 @@ describe('getWeakSpotOpportunities', () => {
       setupSupabaseMock(
         [{ id: 'q-1', question: 'china tours nz booking' }],
         null,
-        [{ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' }]
+        [{ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z', error_message: null, parse_error_message: null }]
       )
 
       mockBulkKeywordVolume.mockResolvedValue([])
@@ -786,7 +788,7 @@ describe('getWeakSpotOpportunities', () => {
       setupSupabaseMock(
         [{ id: 'q-1', question: 'china holiday packages nz' }],
         null,
-        [{ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: 4, ran_at: '2026-05-01T10:00:00Z' }]
+        [{ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: 4, ran_at: '2026-05-01T10:00:00Z', error_message: null, parse_error_message: null }]
       )
 
       mockBulkKeywordVolume.mockResolvedValue([])
@@ -799,7 +801,7 @@ describe('getWeakSpotOpportunities', () => {
       setupSupabaseMock(
         [{ id: 'q-1', question: 'china tours booking nz' }],
         null,
-        [{ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: 3, ran_at: '2026-05-01T10:00:00Z' }]
+        [{ query_id: 'q-1', ai_engine: 'openai', client_brand_rank: 3, ran_at: '2026-05-01T10:00:00Z', error_message: null, parse_error_message: null }]
       )
 
       mockBulkKeywordVolume.mockResolvedValue([])
@@ -812,9 +814,9 @@ describe('getWeakSpotOpportunities', () => {
         [{ id: 'q-1', question: 'latest run date test' }],
         null,
         [
-          { query_id: 'q-1', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z' },
-          { query_id: 'q-1', ai_engine: 'anthropic', client_brand_rank: null, ran_at: '2026-05-04T15:00:00Z' },
-          { query_id: 'q-1', ai_engine: 'perplexity', client_brand_rank: null, ran_at: '2026-05-02T08:00:00Z' },
+          { query_id: 'q-1', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z', error_message: null, parse_error_message: null },
+          { query_id: 'q-1', ai_engine: 'anthropic', client_brand_rank: null, ran_at: '2026-05-04T15:00:00Z', error_message: null, parse_error_message: null },
+          { query_id: 'q-1', ai_engine: 'perplexity', client_brand_rank: null, ran_at: '2026-05-02T08:00:00Z', error_message: null, parse_error_message: null },
         ]
       )
 
@@ -822,6 +824,40 @@ describe('getWeakSpotOpportunities', () => {
 
       const result = await getWeakSpotOpportunities('client-1', 20, 10, true)
       expect(result[0].last_run_at).toBe('2026-05-04T15:00:00Z')
+    })
+
+    it('excludes runs with error_message from weakness scoring', async () => {
+      setupSupabaseMock(
+        [{ id: 'q-1', question: 'failed probe test' }],
+        null,
+        [
+          { query_id: 'q-1', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z', error_message: 'API timeout', parse_error_message: null },
+          { query_id: 'q-1', ai_engine: 'openai', client_brand_rank: 1, ran_at: '2026-05-02T10:00:00Z', error_message: null, parse_error_message: null },
+        ]
+      )
+
+      mockBulkKeywordVolume.mockResolvedValue([])
+      const result = await getWeakSpotOpportunities('client-1', 20, 10, true)
+      // Only the successful run (rank=1) should count → weakness_score = 0 → filtered out
+      expect(result).toEqual([])
+    })
+
+    it('excludes runs with parse_error_message from weakness scoring', async () => {
+      setupSupabaseMock(
+        [{ id: 'q-1', question: 'parse error test' }],
+        null,
+        [
+          { query_id: 'q-1', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-01T10:00:00Z', error_message: null, parse_error_message: 'JSON parse failed' },
+          { query_id: 'q-1', ai_engine: 'openai', client_brand_rank: null, ran_at: '2026-05-02T10:00:00Z', error_message: null, parse_error_message: null },
+        ]
+      )
+
+      mockBulkKeywordVolume.mockResolvedValue([])
+      const result = await getWeakSpotOpportunities('client-1', 20, 10, true)
+      // 1 conclusive weak run out of 1 → score = 1.0
+      expect(result).toHaveLength(1)
+      expect(result[0].total_runs_checked).toBe(1)
+      expect(result[0].weakness_score).toBe(1)
     })
   })
 
