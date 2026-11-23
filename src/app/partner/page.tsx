@@ -147,6 +147,10 @@ function ReferralCard({ code }: { code: string }) {
         </p>
         <CopyRow label="发给客户：产品介绍页" value={`${origin}/ai-steward?ref=${code}`} />
         <CopyRow label="发给想做经销商的人：申请页（审核通过后挂在你下面）" value={`${origin}/partner/apply?ref=${code}`} />
+        <p className="mt-4 text-sm text-me-charcoal/75">
+          <a href="/partner/network" className="font-bold text-me-ochre">单位制账本</a>
+          用业绩单位记账。汇率和身份过渡还没定，不改你现在的月结。
+        </p>
       </div>
     </div>
   )
