@@ -61,6 +61,8 @@ import { POST as discoverPOST } from '../discover/route'
 import { POST as pendingPOST } from '../analyze-pending/route'
 import { POST as retryPOST } from '../[id]/retry/route'
 import { POST as uploadPOST } from '../upload/route'
+import { PATCH as idPATCH } from '../[id]/route'
+import { POST as detectPOST } from '../detect-industry-batch/route'
 
 const ENV = ['ADMIN_EMAILS', 'ADMIN_EMAIL_DOMAIN', 'DEMO_ADMINS', 'CLIENT_VIEWERS'] as const
 const saved: Record<string, string | undefined> = {}
@@ -76,6 +78,8 @@ const ROUTES: Array<[string, () => Promise<Response>]> = [
   ['POST /discover', () => discoverPOST(json({}))],
   ['POST /analyze-pending', () => pendingPOST()],
   ['POST /[id]/retry', () => retryPOST(json({}), { params: { id: 'x' } })],
+  ['PATCH /[id]', () => idPATCH(json({}), { params: { id: 'x' } })],
+  ['POST /detect-industry-batch', () => detectPOST()],
   ['POST /upload', () => uploadPOST(new NextRequest('http://localhost/x', { method: 'POST', body: new FormData() }))],
 ]
 

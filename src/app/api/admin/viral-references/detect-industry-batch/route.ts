@@ -8,7 +8,7 @@
 import { NextResponse } from 'next/server'
 import { getOpenAIClient } from '@/lib/ai/openai-client'
 import { supabaseAdmin } from '@/lib/supabase'
-import { guardAdmin } from '@/lib/auth/require-admin'
+import { guardGlobalAdmin } from '@/lib/auth/require-admin'
 
 const KNOWN_INDUSTRIES = [
   'travel', 'flooring', 'real_estate', 'food', 'fashion',
@@ -55,7 +55,7 @@ async function inferIndustry(
 }
 
 export async function POST() {
-  const guard = await guardAdmin()
+  const guard = await guardGlobalAdmin()
   if (guard) return guard
 
   const { data: records, error } = await supabaseAdmin
