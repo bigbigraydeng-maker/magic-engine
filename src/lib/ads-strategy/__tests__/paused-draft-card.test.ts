@@ -116,7 +116,10 @@ describe('paused draft confirmation', () => {
       createPaused,
     })
     expect(createPaused).toHaveBeenCalledTimes(1)
-    expect(createPaused).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ adAccountId: 'act_test' }))
+    expect(createPaused).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ adAccountId: 'act_test', maxDailyBudget: 100 }),
+    )
     expect(result.queued).toBe(true)
     expect(result.wroteMeta).toBe(true)
     expect(result.resultLine).toContain('opc@example.com')

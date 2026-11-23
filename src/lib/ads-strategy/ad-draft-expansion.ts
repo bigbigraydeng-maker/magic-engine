@@ -54,6 +54,8 @@ export interface DraftBuildReviewContext {
   minDailyBudget?: { minor: number; currency: string } | null
   /** 不传这个键 = 这次不核。传 null = 名单没读到。地图里要是这个账户的受众。 */
   audienceFacts?: ReadonlyMap<string, AudienceFact> | null
+  /** 单份草稿每天预算的顶（元）。不传 = `MAX_AUTO_DAILY_BUDGET`。由客户自己设的上限算出，见 `draftDailyCeiling`。 */
+  maxDailyBudget?: number
 }
 
 export interface PromoPhaseAdSets {
@@ -98,9 +100,9 @@ function multiSetBlocks(d: AdDraft): string[] {
 }
 
 /** `validateDraft` 里多出来的那部分。旧草稿一个新字段都没有时，返回空。 */
-export function expandedDraftProblems(d: AdDraft): DraftProblem[] {
+export function expandedDraftProblems(d: AdDraft, maxDailyBudget = MAX_AUTO_DAILY_BUDGET): DraftProblem[] {
   return [
-    ...budgetProblems(d),
+    ...budgetProblems(d, maxDailyBudget),
     ...attachIdProblems(d),
     ...placementProblems(d),
     ...spendCapProblems(d),
@@ -158,7 +160,7 @@ function placementTokens(tokens: unknown): string[] | null {
  * `validateDraft` 本身仍放行那种旧草稿，避免把已经合入的单组起草入口拦住。
  */
 export function reviewDraftForBuild(d: AdDraft, ctx?: DraftBuildReviewContext): DraftProblem[] {
-  const problems = [...validateDraft(d)]
+  const problems = [...validateDraft(d, ctx?.maxDailyBudget === undefined ? undefined : { maxDailyBudget: ctx.maxDailyBudget })]
   if (!Array.isArray(d.adSets)) {
     problems.push(...missingExpansionProblem(d.audienceIds, d.excludedAudienceIds, d.expansion, 'expansion'))
   }
@@ -301,18 +303,18 @@ function spendCapProblems(d: AdDraft): DraftProblem[] {
   return []
 }
 
-function budgetProblems(d: AdDraft): DraftProblem[] {
+function budgetProblems(d: AdDraft, maxDailyBudget: number): DraftProblem[] {
   const mode = d.budgetMode
   const hasSets = Array.isArray(d.adSets)
   if (mode === undefined && d.campaignDailyBudget === undefined && !hasSets) return []
   if (mode !== 'ad_set' && mode !== 'campaign') {
     return [{ field: 'budgetMode', message: '多个广告组或系列预算必须写明预算放在系列上还是每个广告组上' }]
   }
-  if (mode === 'campaign') return campaignBudgetProblems(d)
+  if (mode === 'campaign') return campaignBudgetProblems(d, maxDailyBudget)
   return adSetBudgetProblems(d)
 }
 
-function campaignBudgetProblems(d: AdDraft): DraftProblem[] {
+function campaignBudgetProblems(d: AdDraft, maxDailyBudget: number): DraftProblem[] {
   const p: DraftProblem[] = []
   const campaign = d.campaignDailyBudget
   if (!Number.isFinite(campaign) || (campaign ?? 0) <= 0) {
@@ -322,8 +324,8 @@ function campaignBudgetProblems(d: AdDraft): DraftProblem[] {
   if (cents(campaign as number) !== cents(d.dailyBudget)) {
     p.push({ field: 'campaignDailyBudget', message: '系列日预算要和草稿上的每天预算是同一个数' })
   }
-  if ((campaign as number) > MAX_AUTO_DAILY_BUDGET) {
-    p.push({ field: 'campaignDailyBudget', message: `每天 ${campaign} 超过自动发布上限 ${MAX_AUTO_DAILY_BUDGET}` })
+  if ((campaign as number) > maxDailyBudget) {
+    p.push({ field: 'campaignDailyBudget', message: `每天 ${campaign} 超过建草稿的每日上限 ${maxDailyBudget}` })
   }
   if (!Array.isArray(d.adSets)) return p
   let minSum = 0
