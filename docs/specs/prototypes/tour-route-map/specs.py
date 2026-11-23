@@ -9,6 +9,7 @@ C = {
  'Chongqing':(29.5630,106.5516),'Chengdu':(30.5728,104.0668),'Dali':(25.6065,100.2676),
  'Kunming':(24.8801,102.8329),'Zhangjiajie':(29.1170,110.4790),'Guilin':(25.2736,110.2907),'Yangshuo':(24.7784,110.4903),
  'Guangzhou':(23.1291,113.2644),'Yangtze Cruise':(30.70,110.50),
+ 'Lhasa':(29.6500,91.1000),'Yichang':(30.6919,111.2863),
 }
 def S(city,nights,acts,name=None):
     lat,lon=C[city]
@@ -167,6 +168,22 @@ TOURS['grand-tour-oct-2027'] = {
     'nodes':[('Hangzhou','1 night',0.19,0.7),('Xinshi','1 night',0.34,0.34),('Suzhou','1 night',0.67,0.34),('Shanghai','2 nights',0.81,0.7)],
     'segs':[(0,1,'coach',-18),(1,2,'coach',-18),(2,3,'coach',-18)],'finish':3},
  ],
+}
+
+TOURS['imperial-heritage'] = {
+ 'title':'LEGACY OF CHINA','subtitle':"17 Days · Beijing to Shanghai via Tibet · Fully inclusive",
+ 'origin':'Auckland','return_to':'Auckland','start_idx':0,'finish_idx':5,
+ 'stops':[
+   S('Beijing','3 nights',['Forbidden City & Tiananmen Square','Mutianyu Great Wall','Summer Palace gardens']),
+   S("Xi'an",'2 nights',['Terracotta Warriors','City Wall & Muslim Quarter']),
+   S('Lhasa','3 nights',['Potala Palace','Jokhang Temple & Barkhor Street','Sera Monastery debates']),
+   S('Chengdu','1 night',['Giant panda breeding base']),
+   S('Yangtze Cruise','3 nights',['Three Gorges 5-star cruise','Shennong Stream & Three Gorges Dam']),
+   S('Shanghai','2 nights',['The Bund & Huangpu River cruise','Yuyuan Garden']),
+ ],
+ 'segments':[{'a':0,'b':1,'mode':'train','off':40},{'a':1,'b':2,'mode':'flight','off':-40},
+             {'a':2,'b':3,'mode':'flight','off':30},{'a':3,'b':4,'mode':'train','off':-24},
+             {'a':4,'b':5,'mode':'flight','off':40}],
 }
 
 _icons_stops = [
