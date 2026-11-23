@@ -118,12 +118,38 @@ export async function createItinerary(
   return data as TailorMadeRecord
 }
 
+/**
+ * @param opts.expectedUpdatedAt 传了就是条件写：只在库里当前 updated_at 跟这个
+ *   值一致时才真的落这次更新——单条 UPDATE 语句里的 `.eq('updated_at', ...)`，
+ *   不是「先读再判断再写」，中间没有能被别的写入插进来的空隙。
+ *
+ *   给 import/extract 后台任务回存草稿这类场景用：任务跑的时候用户可能已经
+ *   手动存过新版本，这时候条件不匹配、UPDATE 影响 0 行，返回 null——调用方
+ *   把这当成「跳过，不是失败」处理，不能覆盖用户更新的内容。
+ *
+ * 不传这个 option 时行为不变：无条件更新，找不到行直接抛错（原来 .single()
+ * 在 0 行时也是走这条路）。
+ */
 export async function saveItinerary(
   clientId: string,
   id: string,
   payload: TailorMadeItinerary,
   status?: TailorMadeStatus,
-): Promise<TailorMadeRecord> {
+): Promise<TailorMadeRecord>
+export async function saveItinerary(
+  clientId: string,
+  id: string,
+  payload: TailorMadeItinerary,
+  status: TailorMadeStatus | undefined,
+  opts: { expectedUpdatedAt: string },
+): Promise<TailorMadeRecord | null>
+export async function saveItinerary(
+  clientId: string,
+  id: string,
+  payload: TailorMadeItinerary,
+  status?: TailorMadeStatus,
+  opts?: { expectedUpdatedAt?: string },
+): Promise<TailorMadeRecord | null> {
   const patch: Record<string, unknown> = {
     // 列表页字段跟着 payload 走，保持一致
     quote_ref: payload.meta.quoteRef,
@@ -136,16 +162,17 @@ export async function saveItinerary(
   if (status) patch.status = status
   if (status === 'sent') patch.sent_at = new Date().toISOString()
 
-  const { data, error } = await supabaseAdmin
-    .from(TABLE)
-    .update(patch)
-    .eq('client_id', clientId)
-    .eq('id', id)
-    .select('*')
-    .single()
+  let query = supabaseAdmin.from(TABLE).update(patch).eq('client_id', clientId).eq('id', id)
+  if (opts?.expectedUpdatedAt !== undefined) query = query.eq('updated_at', opts.expectedUpdatedAt)
 
+  const { data, error } = await query.select('*')
   if (error) throw new Error(`保存行程单失败：${error.message}`)
-  return data as TailorMadeRecord
+
+  const record = (data?.[0] as TailorMadeRecord | undefined) ?? null
+  if (!record && opts?.expectedUpdatedAt === undefined) {
+    throw new Error('保存行程单失败：未找到对应行程单')
+  }
+  return record
 }
 
 /**
