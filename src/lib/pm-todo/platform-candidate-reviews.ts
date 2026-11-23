@@ -106,7 +106,7 @@ export const PLATFORM_CANDIDATE_REVIEWS: PlatformCandidateReview[] = [
   {
     // 与 docs/registry/platform-candidates.md 候选名逐字一致
     name: 'Meta 广告受众管理与类似人群能力（建/改自定义受众 + 建 Lookalike 类似人群 + audience-ladder 接线到触发点）',
-    reviewDate: '2026-10-06',
+    reviewDate: '2026-09-14',
   },
   {
     // 与 docs/registry/platform-candidates.md 候选名逐字一致
