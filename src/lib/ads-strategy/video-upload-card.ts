@@ -55,7 +55,13 @@ export interface VideoUploadResult {
 }
 
 function clip(text: string | undefined, max: number): string | null {
-  const value = (text ?? '').replace(/\s+/g, ' ').trim()
+  // The card refuses {}[] and backticks as "code"; titles may legitimately contain them.
+  const value = (text ?? '')
+    .replace(/[[{]/g, '(')
+    .replace(/[\]}]/g, ')')
+    .replace(/`/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
   if (!value) return null
   return value.length > max ? `${value.slice(0, max - 1)}…` : value
 }

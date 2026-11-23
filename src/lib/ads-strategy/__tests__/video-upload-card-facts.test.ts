@@ -26,6 +26,13 @@ describe('video upload card wording', () => {
     expect(a).not.toBe(b)
   })
 
+  it('still issues a card when the title or account name contains brackets or backticks', () => {
+    const facts = videoUploadFacts('wo-1', 'act_123', url, { title: '[BF] {50% off} `now`', accountLabel: 'CTS [main]' })
+    expect(() => normalizeFacts(facts)).not.toThrow()
+    expect(facts.scope).toContain("(BF) (50% off) 'now'")
+    expect(facts.account).toBe('CTS (main)（act_123）')
+  })
+
   it('keeps long titles inside the card length limit', () => {
     const facts = videoUploadFacts('wo-1', 'act_123', url, { title: 'x'.repeat(400), accountLabel: 'y'.repeat(300) })
     expect(() => normalizeFacts(facts)).not.toThrow()
