@@ -74,6 +74,8 @@
 | `MODELSLAB_API_KEY` | Muapi 图/视频引擎（P21.J 后主用） | Render-web | ❌ |
 | `UNSPLASH_ACCESS_KEY` | 免费商用图库（素材抓取政策首选源） | Render-web | ❌ |
 | `APIFY_API_KEY` | Apify scraper | Render-web | ❌ 🔴 |
+| `SCRIPT_AGENT_ENABLED` | 脚本 Agent 总开关；仅 `true` 开启，缺失/读取失败均关闭 | Render-web | 默认关闭，五关未过 |
+| `SCRIPT_AGENT_ALLOWED_CLIENT_IDS` | 脚本 Agent 客户白名单；为空则所有客户均关闭 | Render-web | 未配置 |
 | `APIFY_TOKEN` | 同上 — **两个变量名并存，代码里都在读，需统一** | Render-web | ❌ 🔴 |
 | `SUPADATA_API_KEY` | 视频字幕 / 转录 | Render-web | ❌ |
 | `VISION_BASE_URL` | vision-analyzer 脚本目标基址 | 本地 | ❌ |

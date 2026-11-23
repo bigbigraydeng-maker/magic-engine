@@ -43,11 +43,13 @@ export async function PATCH(
         { error: `选题对齐未通过：${topic.gaps.join('；')}`, gaps: topic.gaps }, { status: 409 })
     }
 
+    let manualRecording = false
     if (body.action === 'confirm' || body.action === 'schedule') {
       const { data: peek, error: peekErr } = await supabaseAdmin
-        .from('content_posts').select('platforms').eq('client_id', params.id).eq('id', params.postId).maybeSingle()
+        .from('content_posts').select('platforms, generation_context_snapshot').eq('client_id', params.id).eq('id', params.postId).maybeSingle()
       // fail closed：预读失败不能当成"不是 YouTube"往下走。
       if (peekErr) throw peekErr
+      manualRecording = (peek?.generation_context_snapshot as { manual_recording?: boolean } | null)?.manual_recording === true
       const topicBlocked = await enforceTopicIfYouTube(peek?.platforms)
       if (topicBlocked) return topicBlocked
     }
@@ -111,6 +113,9 @@ export async function PATCH(
     }
 
     // 讲课式不在这里排做片——要先在单讲工作台选制作方式/传录像，直接排必失败(魏征 m2)
+    if (body.action === 'confirm' && manualRecording) {
+      return NextResponse.json({ post: data, render: { jobId: null, created: false, reason: '真人口播稿由创作者录制' } })
+    }
     if (body.action === 'confirm' && data.format === '讲课式') {
       return NextResponse.json({ post: data, render: { jobId: null, created: false, reason: '讲课式内容请进该讲的工作台开始做片' } })
     }
