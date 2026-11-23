@@ -1,0 +1,1149 @@
+{
+ "built_on": "2026-10-16",
+ "purpose": "出片机本机素材镜像：不在 Dropbox 内，避免『仅云端』读不出来",
+ "mirror_of": "~/Dropbox/MagicLab_Studio/{CTS,East_Inter}/{brandkit,remotion-assets} 与 _shared/music",
+ "provenance_and_licence": "来源与授权仍以原始登记为准：CTS/remotion-assets/clips/credits-v*.json、CTS/footage/photos/silk-road-2026-10-15/SOURCES.json（Dropbox 里）；本清单只记文件与 sha256",
+ "how_to_refresh": "在交互窗口运行 docs/sops 交接单第 6 节的 rsync 命令，然后重建本清单",
+ "files": [
+  {
+   "path": "CTS/remotion-assets/music/analytical-scholar.mp3",
+   "bytes": 425526,
+   "sha256": "e2c7220995f1a7fb85f49ef1e06182501f9072a57ba7b03ece6baddc66c113a7"
+  },
+  {
+   "path": "CTS/remotion-assets/music/analytical-scholar_n.mp3",
+   "bytes": 638266,
+   "sha256": "be125da5055f463d92139541b77b7d07a3d2ca286878a161c802e9c7e2b6028b"
+  },
+  {
+   "path": "CTS/remotion-assets/music/feel-good-travel.m4a",
+   "bytes": 2751634,
+   "sha256": "8c171e120f34eece10b42f5b2828cf8e2e9afa509610bd3200aa5c0a495a78d7"
+  },
+  {
+   "path": "CTS/remotion-assets/music/founders-at-dawn.mp3",
+   "bytes": 3613976,
+   "sha256": "d88e4253e41f189ff9f45637893d5392050c64870ea02d98d6482feea3a5aeb5"
+  },
+  {
+   "path": "CTS/remotion-assets/music/horizons-breath.m4a",
+   "bytes": 538205,
+   "sha256": "493f6e4a8264612427c74a69af01fd628d86bc5e4717844b72a94bea6c3fde9c"
+  },
+  {
+   "path": "CTS/remotion-assets/music/horizons-call.mp3",
+   "bytes": 719811,
+   "sha256": "53e201d1499663b10f3e0d1e7283007520f8a590b88ea9c4e3031c0a87e7a83b"
+  },
+  {
+   "path": "CTS/remotion-assets/music/jade_river_journey.mp3",
+   "bytes": 5573965,
+   "sha256": "5e4ef1ac304d505fefdcb46d09735fb1c2bd05e660fd2597198983b46afd2ac5"
+  },
+  {
+   "path": "CTS/remotion-assets/music/jade_river_journey_q.mp3",
+   "bytes": 5539199,
+   "sha256": "d37e2ed9cae4f0f1d9ff2b01ce5d7cdab362f17b9e440d75d19c1b061f9fbf4f"
+  },
+  {
+   "path": "CTS/remotion-assets/music/momentum.mp3",
+   "bytes": 968024,
+   "sha256": "f2274f45b5bffe042baf13147ac5d91fb51b27c77ca4992eb014b00a46dca1e7"
+  },
+  {
+   "path": "CTS/remotion-assets/music/momentum_q.mp3",
+   "bytes": 955568,
+   "sha256": "a62a88e214cbe320f365e8c564988336bc7e9017239a96b1d3e63d501261dc39"
+  },
+  {
+   "path": "CTS/remotion-assets/music/road-afar.m4a",
+   "bytes": 513180,
+   "sha256": "7deaaef5dabbd7e68369f1a8c00d57030878cd340f4dac4ad9a6dab7a8deff06"
+  },
+  {
+   "path": "CTS/remotion-assets/music/second-hand-sunrise.mp3",
+   "bytes": 1309490,
+   "sha256": "0a83ee7f5495ed877885d90eb7455c6fba5e4890a82be2ced19503ae968085e7"
+  },
+  {
+   "path": "CTS/remotion-assets/music/second-hand-sunrise_n.mp3",
+   "bytes": 1376532,
+   "sha256": "67f6fbf470060da056cd2d4c6b7b7a422aa93df1f57073bce6a5e11b7b3c173d"
+  },
+  {
+   "path": "CTS/remotion-assets/music/sunlit-kitchen-window.mp3",
+   "bytes": 2242897,
+   "sha256": "1efc49f91de4731f4cb16d94b33cbf4759fcea9d8a386c7615b778b2e7c46db4"
+  },
+  {
+   "path": "CTS/remotion-assets/music/sunlit-kitchen-window_n.mp3",
+   "bytes": 2549286,
+   "sha256": "16e7f6fe02452a5e7371804965161abd60759c937e1ae5793e8b991d81ffec6c"
+  },
+  {
+   "path": "CTS/remotion-assets/music/suno/cts-beyond-the-postcard-v1-preview.mp3",
+   "bytes": 1614272,
+   "sha256": "8e58af159d9e36c587a8d89daba4454f51357ea6dbce7344208ee387e42c502e"
+  },
+  {
+   "path": "CTS/remotion-assets/music/suno/cts-beyond-the-postcard-v2-preview.mp3",
+   "bytes": 1634192,
+   "sha256": "8202f3e04fb8a489992edf0162bcc3adf301c6fb39e2263c9b600ba38b4bcdd8"
+  },
+  {
+   "path": "CTS/remotion-assets/music/suno/cts-beyond-the-postcard.json",
+   "bytes": 1863,
+   "sha256": "5eb00032dfdfe615f292f1c9ddc70e3bc733a2132a74e3d8d2ea8584ae82cdd8"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/b1_greatwall_wild_aerial.mp4",
+   "bytes": 4811924,
+   "sha256": "66df261b1044078fb8e3c0497bc6552be8716d0da0a6414f0715fc5b32616738"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/b3_westlake_walk.mp4",
+   "bytes": 6062145,
+   "sha256": "d2c31dab934415986715e1c2ba6b2d0546c886ffe24b6b7b35bff09711dea662"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/b4_tea_terraces_aerial.mp4",
+   "bytes": 3295916,
+   "sha256": "1c6a213a1de4cb105802d6bae00679e5ec2bb2d2ec8564c90733be3b80b9c15c"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c1_forbiddencity_aerial.mp4",
+   "bytes": 6782855,
+   "sha256": "643046782b44a38d58d6968752f340c9c928bc630f6d5173edac354cefbb497e"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c1_greatwall_aerial.mp4",
+   "bytes": 7348925,
+   "sha256": "334113799f9ae31eb88e0cc8bab251c21369aecb60bce5d69565828ccd72c145"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c1_greatwall_jinshanling.mp4",
+   "bytes": 9189057,
+   "sha256": "845d9288b0de75302be5ad54c541a7739fda3aaf51dda4d011cd5582c40bf707"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c1_terracotta.mp4",
+   "bytes": 6035253,
+   "sha256": "d2becb6a45144df838be545bf6e4d21b4ecf42e876c45582ce6fd28f905a8a0f"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c1b_terracotta.mp4",
+   "bytes": 6493199,
+   "sha256": "616f93234e250ad6b0a1ae9f25440f44e24ab60703ad29bfc5f01a9733e415db"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c2_chengdu_panda.mp4",
+   "bytes": 2446564,
+   "sha256": "6cd78a42263c9e687075e5d9679263b4e3833d9463bc5553edbd5ceb12659d78"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c2_chongqing_hongyadong.mp4",
+   "bytes": 8908626,
+   "sha256": "953fb720b338f42db48ff04ff1392824730a68502c17306ab822a6925b71caea"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c2_tianmen_gate.mp4",
+   "bytes": 8616497,
+   "sha256": "f09e95f37d216e39a95945efe2a8f060b5bf370f0a69e942f3f3cd7d0f27126b"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c2_zhangjiajie_mist.mp4",
+   "bytes": 2135825,
+   "sha256": "b4a88d588b1c6cbd2e243556d9adf6313019f2fd5f2920f6564aded651bcfe2b"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c2_zhangjiajie_peaks.mp4",
+   "bytes": 11171806,
+   "sha256": "a345899b2d2a1b89a6a9b1899f90b72c395dfa390d48a0844e56988d50994e09"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c2_zhangjiajie_pillar.mp4",
+   "bytes": 7534896,
+   "sha256": "f08d6610f9e8d130c2c8f29b607739cdab931409517d4f638bc286b680a36b0e"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c2b_chengdu_panda.mp4",
+   "bytes": 2920464,
+   "sha256": "13ffc5965f2975569c154aaf5fe207398ceda7d3ea087bc305050a6dde2c1520"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c2b_chongqing_hongyadong.mp4",
+   "bytes": 9409750,
+   "sha256": "52acb53ecbde4dadf9b04c1690bfdb94b74a7a68203cd0eb53248d5a40bbe0f7"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c2b_tianmen_gate.mp4",
+   "bytes": 9518838,
+   "sha256": "c783eb7c37cd209f0f39c57833b31769c4c2a004ec9c78bdac79dac0556234ad"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c2b_zhangjiajie_pillar.mp4",
+   "bytes": 7816140,
+   "sha256": "3bb75173c7f681a3cfddcaa88e3f72325becbcdf9c753cd04b33700643d00985"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c2c_zhangjiajie_peaks.mp4",
+   "bytes": 13026805,
+   "sha256": "dee186f47cd923223a9951681477de8ca9a83c14222dea6c3cbc2a2ddc7484f8"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c3_bigwildgoose.mp4",
+   "bytes": 5323667,
+   "sha256": "fc1581d79be9f2e7f753134e9478a82cc2c1d9bc0ea800a234dcc921736e3e10"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c3_xiancitywall_a.mp4",
+   "bytes": 5296788,
+   "sha256": "c43cc1efbe707f70323220040e1e239e7a9b41f3e8938dfe12a7fba5c9c37c1a"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c3_xiancitywall_b.mp4",
+   "bytes": 5081794,
+   "sha256": "c2fc478ba6434ab7f3731d6b6e2ed238960274ba72e2ecc48137ca961660e823"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c3b_bigwildgoose.mp4",
+   "bytes": 4973094,
+   "sha256": "fbf078fba84545191c38674f63616462b410c811753e607bf5b09d83f63fdef0"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c4_greatwall_huairou.mp4",
+   "bytes": 9459484,
+   "sha256": "6fc7cbb28d5d1f8270d394338f12d043b2a809d9f6137f21464b318219359abc"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c4_train.mp4",
+   "bytes": 4580268,
+   "sha256": "b141e3781ed2ece1aaa705adfa449e7a97c5918901be395c436555175e56efa2"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c4_westlake_boats.mp4",
+   "bytes": 10884414,
+   "sha256": "8b9a62d7948d3da1746d90ef37a7858b8d75d2402124a82abf2971017b4e43db"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c4_westlake_pavilion.mp4",
+   "bytes": 11469965,
+   "sha256": "6c946be7cd44efbff0a2f0e824287978d8b2f5a8a9ff9006fe43c3f7c4ecfb03"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c4b_train.mp4",
+   "bytes": 3320004,
+   "sha256": "865e7163952225061edeefbbdb118815817c107bb8eff194e668edd0f1a499f6"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c4c_train_gz.mp4",
+   "bytes": 9340868,
+   "sha256": "104b7ca37f63c7c48135b7bd81212c1125075d1687a57b7d53301d5d8dcc708e"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c5_boc2_hook.mp4",
+   "bytes": 6069313,
+   "sha256": "ca2338ed25226c127fe58e422689aa02e5b103d2a394ff18a44f02179b6ad027"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c5_nat_hook.mp4",
+   "bytes": 7403559,
+   "sha256": "93b92deeaa4e5564eed0f8609a79fa8a38f52dc1ff5926655b028e460b0e71bd"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c5_sh2_hook.mp4",
+   "bytes": 10120126,
+   "sha256": "f23ce723eabe9eec245e4b0422a8822ff1567d6ed9f55ee672a8185e609e88fe"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c5_tale1_hook.mp4",
+   "bytes": 6480835,
+   "sha256": "e05a3206ff1be2515d608a73a7291f8696290d81fb6df9c54bfaa7fc569f2072"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c5_tale2_hook.mp4",
+   "bytes": 8771038,
+   "sha256": "f74813a5b2b38dfec7a94019b67f053de05626ac0b11422697119b5f120a2c30"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c5_tale2_hook_b.mp4",
+   "bytes": 8774050,
+   "sha256": "5c7f3166b196c7ef401e1288b98cbb7430f7068893ad2a7828edd7d5afe4c862"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c6_boc2_hook.mp4",
+   "bytes": 6067147,
+   "sha256": "3505a365e6ae071a92339b7b10200c5c802b1529c5b14173c4e8e2468cd59fe3"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c6_nat_hook.mp4",
+   "bytes": 7394967,
+   "sha256": "e78dc17695e2e7a4ec0c2affea8ea89e3b47a284d1d9b59b06140a3069b92846"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c6_sh2_hook.mp4",
+   "bytes": 10126217,
+   "sha256": "f181170a4b1da043d929d8f9fc26852fa3464c122e168ba06ee451f8ad6590de"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c6_tale1_hook.mp4",
+   "bytes": 6466986,
+   "sha256": "8375035db5e671024d83718ccb6ea0c83c762d1d35da64cb83c353a27d79396d"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/c6_tale2_hook.mp4",
+   "bytes": 8780272,
+   "sha256": "bad2093f76db24819237296bb4b7a78c91ad4d85656a3f675e041f5bb7484cad"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/credits-v2.json",
+   "bytes": 1163,
+   "sha256": "8eb93156b0a6aef232134733c07592aec2e9577065cba2235c3da9be18616e43"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/credits-v5.json",
+   "bytes": 2109,
+   "sha256": "c2b0dd2598116c2f7e3d2a667ad3baa58e1b80d6a4c8afffc8bc371919aa4add"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/credits-v6.json",
+   "bytes": 6743,
+   "sha256": "0aac62b94c10c18428aa31dab254f3aefdf4bcf286504309c6c18a174903e97c"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/credits-v7.json",
+   "bytes": 781,
+   "sha256": "9da359afd5006dca65d9d9371b8ac73e0a7f7013cc36d2a6a5b5196dcd6c3c3a"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/credits-v8.json",
+   "bytes": 2290,
+   "sha256": "7eefa3dd1a647c2dd677f88f47c73696f3ceb855e89f8ea985579f1c199e5c52"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/hook_bundgroup.mp4",
+   "bytes": 2383695,
+   "sha256": "ac75eca8c1e8caf10bdc32c5759737be8c2e3ced1166e567fb3b20262e938ac4"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/item1_skylineday.mp4",
+   "bytes": 5099495,
+   "sha256": "2dcab1fb53d6bd890422a1ef2ab687526956fbf1ac05e27aa2f1f2cf08d63691"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/item2_aerialnight.mp4",
+   "bytes": 4595310,
+   "sha256": "b227bbb479721dd98d8b213e6d4d8c0ebd9c97e5088117f07a2e87fbba0e012e"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/item2_watertown.mp4",
+   "bytes": 4940754,
+   "sha256": "f55fa4eda63ae5f274da311edb7a9bb7cd8fe1ffbc208fa3dc540616060a1ae7"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/item3_bund.mp4",
+   "bytes": 9223335,
+   "sha256": "97b646e4028217b5a96ef93c93953a91f53d18d55c82724cb0dc500a4e25bad1"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/item3_walklane.mp4",
+   "bytes": 3730268,
+   "sha256": "c73e7fd96b879280197133795038ddd2156374cdcdef818eb86df47ef337013f"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/item5_nanjingroad.mp4",
+   "bytes": 5898052,
+   "sha256": "d26e2c3c70f449b38622f4f74700d4e92688dca4284e3091e52d6c05de4c089f"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/item5_nanjingroad_b.mp4",
+   "bytes": 5050036,
+   "sha256": "10847d1a425c1c0fb4a7125b5e8cde808cc507dcb7541df99b3aa419cb63f29d"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/price_shanghaiday.mp4",
+   "bytes": 9290948,
+   "sha256": "5aaf7ab2ceb4fdcffefa796ba4261dca1616e5997eb9a9fd37c92f6ea865f3c8"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/s1_shanghai_aerial_night.mp4",
+   "bytes": 4595310,
+   "sha256": "b227bbb479721dd98d8b213e6d4d8c0ebd9c97e5088117f07a2e87fbba0e012e"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/s1_zhangye_danxia.mp4",
+   "bytes": 3277272,
+   "sha256": "fbe3cf21f26b7f938a40c96dd1a25a33b14cc15e29fd4aa1adf600d35ed11610"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/s1b_zhangye_ridges.mp4",
+   "bytes": 1910735,
+   "sha256": "1625c1d2a24a8cb786682a9d2fce440b7182d39f922c080efba4f43bcdbb79a1"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/s2_bund_night.mp4",
+   "bytes": 4835141,
+   "sha256": "c131647a0811c7bda1b85324bbccf31c769f52c46831a1a8f68fe947d435f75c"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/s2_jiayuguan.mp4",
+   "bytes": 4099804,
+   "sha256": "5022883fcca4364026684cd20060b41e395dfd76bd1d71ad2ef7738909881d48"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/s2b_jiayuguan_fortress.mp4",
+   "bytes": 4965594,
+   "sha256": "a3c577f80e03aab4600286c96bda6b4239a38fc351f3fbf29b88f3eaf2c757f1"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/s3_terracotta_pit.mp4",
+   "bytes": 2271929,
+   "sha256": "ed581a86bd511ec70fa547c5e56f07e065bb5ad90db8f242ce312888e9528621"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/s4_greatwall_people.mp4",
+   "bytes": 868811,
+   "sha256": "75ffba44b70ad4e54e04f4655fde5e14615f65bfe6eac6a0c87f5c6304b9b934"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/s4_mogao_caves.mp4",
+   "bytes": 8500823,
+   "sha256": "3dec0d048895644504a76346d6dbe582593d048d8531ee431a3ecd1816992236"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/s5_crescent_spring.mp4",
+   "bytes": 4191183,
+   "sha256": "b3d0c903836cb41eeddc55b12f5f2cc20873e58f507a74805e6d0fc4aa35d06f"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/s6_tianchi_lake.mp4",
+   "bytes": 4319389,
+   "sha256": "4bd833c40cbae3c01a94f8bd6182328d1e77f734fe9a6dd69a04b6711a29fd04"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/s7_temple_of_heaven.mp4",
+   "bytes": 2961689,
+   "sha256": "cfdbe5e1e9c37faa6a49882eeff950de00c4bb0f5e6dde98bdfdd392295977d5"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/s7b_shanghai_day.mp4",
+   "bytes": 3516450,
+   "sha256": "bb9424dcc0222d913aae8c5e61083c1d00898a8ee43b6ff388e9c65769369285"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/s8_tiananmen.mp4",
+   "bytes": 2545535,
+   "sha256": "f092528fe731228b556f1967669576d2d8e7f7793440fcf88f2d5b2babbaac33"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/s9_forbidden_city_view.mp4",
+   "bytes": 6622652,
+   "sha256": "c1efb1ff459118a407ffd31e4fc027e557e68c68bd5f3c89dedc21d6269df860"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/v2_guide_walklane.mp4",
+   "bytes": 2780023,
+   "sha256": "269efbcb420535d06af1c6aea7c4dd7c43070887e10cf66523e1d458ed3f6c8c"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/v2_hook_bundselfie.mp4",
+   "bytes": 3715774,
+   "sha256": "bcdc22c88dfaeae6de6e72c70c439425a5b221f4b43157c223788912a65a5d1d"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/v2_suzhou_garden.mp4",
+   "bytes": 6110201,
+   "sha256": "b864ec2add12c9e3f3843b6a7bb2e19a6ddebb570365374639ae4d4ac7b1e333"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/v2_westlake_hangzhou.mp4",
+   "bytes": 11651777,
+   "sha256": "820b43a8f3780b4e107d0cc9d51ed6e62018f2e763d12973d828e7aaa6604ad4"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/v2b_bund_night.mp4",
+   "bytes": 5756571,
+   "sha256": "88d82ffdc19806e8c678201d085fb13a804c2176ee5539d9f4584f59c450c8dc"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/v2b_guide_walklane.mp4",
+   "bytes": 3156550,
+   "sha256": "1361608b2e9d1e5a6d2f75c4ab76759a88ebf99997f8c39adf8e805f474fe29a"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/v2b_suzhou_garden.mp4",
+   "bytes": 6009809,
+   "sha256": "0a497ab8d89a6cdd043f118018df709797ae8e67741ad0b413ce03dd40998c9e"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/v3_bund_night_zoom.mp4",
+   "bytes": 10607818,
+   "sha256": "ff88f1ca4ecda9c701e4fb9a52c87e3327b74dc99523b10eb9efcbf40af80d42"
+  },
+  {
+   "path": "CTS/remotion-assets/clips/v3_westlake_band.mp4",
+   "bytes": 11323314,
+   "sha256": "ed148880e8dac4e0b9094bba3f7fd14012d169f9a296ab713d17deea8d605944"
+  },
+  {
+   "path": "CTS/brandkit/brand_red.txt",
+   "bytes": 18,
+   "sha256": "92965f73cb28e052f002cc521419cd8315cf815a5f613fc2d7b15503c39c8723"
+  },
+  {
+   "path": "CTS/brandkit/factory_profile.json",
+   "bytes": 1436,
+   "sha256": "3906df3ba32b6392a4b10573fa0caa5aa1aa6431db84778dc1aa2eaf6f8eef61"
+  },
+  {
+   "path": "CTS/brandkit/voice-preset.json",
+   "bytes": 750,
+   "sha256": "f80bc653a6ff3410960bca98a55e08eb36de3f0e32057b8bc3d97b612fe79ef7"
+  },
+  {
+   "path": "CTS/brandkit/digital-presenter/kiwi-guide-v1/generation-prompt.txt",
+   "bytes": 1472,
+   "sha256": "8f97e04caa10bb96b0af4c5c3eeb469269e418804c515d072d9000843c35d023"
+  },
+  {
+   "path": "CTS/brandkit/digital-presenter/kiwi-guide-v1/kiwi-guide-reference.png",
+   "bytes": 2102498,
+   "sha256": "b1f1630fc2fc0b44bd4ec9adcc5bf8174d36f21661bf2722df4200450c60f828"
+  },
+  {
+   "path": "CTS/brandkit/digital-presenter/kiwi-guide-v1/presentation-format.txt",
+   "bytes": 635,
+   "sha256": "61172276f5c04359aa952239e46010ee6a54617246e55f6a91d4740d0250d963"
+  },
+  {
+   "path": "CTS/brandkit/digital-presenter/kiwi-guide-v1/presenter-profile.json",
+   "bytes": 4296,
+   "sha256": "b5b40c9ea778fbe372e50e04444127d1d60fa7e1ddc2d7e6dd8283b1e78bb082"
+  },
+  {
+   "path": "CTS/brandkit/digital-presenter/kiwi-guide-v1/voice-preset.json",
+   "bytes": 588,
+   "sha256": "ee8268cd5f0dba2a1fc89b04e9aa3630b55962b177aec5282e953014a7163bff"
+  },
+  {
+   "path": "CTS/brandkit/digital-presenter/kiwi-guide-v1/animation-tests/ltx2-20261015/receipt.json",
+   "bytes": 673,
+   "sha256": "5be8f0048b1af31dc1a2c9d403deacc1af5b9e236e6a9b0cf140627ecd640dc3"
+  },
+  {
+   "path": "CTS/brandkit/digital-presenter/kiwi-guide-v1/animation-tests/ltx2-20261015/sam-test.mp4",
+   "bytes": 977659,
+   "sha256": "671859b999a45129881fa4b8127262b667009b81f932762fed07840f311bc676"
+  },
+  {
+   "path": "CTS/brandkit/documentary-films/v1/film-style-standard.txt",
+   "bytes": 3986,
+   "sha256": "d2b1a71aa3a570fa08b4e775d0bc7a481f0273871d01c165ac4660f66133c7e2"
+  },
+  {
+   "path": "CTS/brandkit/documentary-covers/v1/SKILL.md",
+   "bytes": 3568,
+   "sha256": "051d1248fa098e15c81e5af35e3cbf4087f91608e681d34721b22ff12e058128"
+  },
+  {
+   "path": "CTS/brandkit/documentary-covers/v1/series-contract.txt",
+   "bytes": 1286,
+   "sha256": "59a381ec35464aeb0ef06bebbc4ccf684403b1f181ef24ca248ed3f6260ec604"
+  },
+  {
+   "path": "CTS/brandkit/documentary-covers/v1/shanghai-example.png",
+   "bytes": 1219341,
+   "sha256": "201ffce9ff8833e1cde64d31cca7655e7dec94e053ffb8406722ccb098a42afb"
+  },
+  {
+   "path": "CTS/brandkit/documentary-covers/v1/shanghai-mobile-example.png",
+   "bytes": 73656,
+   "sha256": "6e26a7006e48afb1f24c0586c272b0c2539279f39597d0056e8efd18dd2e210d"
+  },
+  {
+   "path": "CTS/brandkit/documentary-covers/v1/style-v1.json",
+   "bytes": 1163,
+   "sha256": "06dc9b739571c0f0800cde5c7b35cecd2501e726c0946939136a7f4baf5d5589"
+  },
+  {
+   "path": "CTS/brandkit/documentary-covers/v1/references/series-contract.txt",
+   "bytes": 1286,
+   "sha256": "59a381ec35464aeb0ef06bebbc4ccf684403b1f181ef24ca248ed3f6260ec604"
+  },
+  {
+   "path": "CTS/brandkit/documentary-covers/v1/scripts/render_cover.py",
+   "bytes": 6622,
+   "sha256": "dda6964ac002f57e0e01ca9e614d20d35b2de1994b9a1ba79a34c26dc003cb4f"
+  },
+  {
+   "path": "CTS/brandkit/documentary-covers/v1/assets/cts-logo-color.png",
+   "bytes": 208349,
+   "sha256": "23b3b97359544c60dbb0dc7b8db28af3cf6d4f9b9e02da72882c7fae4d8264bf"
+  },
+  {
+   "path": "CTS/brandkit/documentary-covers/v1/assets/style-v1.json",
+   "bytes": 1163,
+   "sha256": "06dc9b739571c0f0800cde5c7b35cecd2501e726c0946939136a7f4baf5d5589"
+  },
+  {
+   "path": "CTS/brandkit/youtube-operations/CTS-YouTube运营标准-v1.txt",
+   "bytes": 8993,
+   "sha256": "adaabc48350b5ddd58de037701a23b4be0c25cde14f60d8e656902f5244df331"
+  },
+  {
+   "path": "CTS/brandkit/assets/.DS_Store",
+   "bytes": 6148,
+   "sha256": "d65165279105ca6773180500688df4bdc69a2c7b771752f0a46ef120b7fd8ec3"
+  },
+  {
+   "path": "CTS/brandkit/assets/Jade River Journey.mp3",
+   "bytes": 5573965,
+   "sha256": "5e4ef1ac304d505fefdcb46d09735fb1c2bd05e660fd2597198983b46afd2ac5"
+  },
+  {
+   "path": "CTS/brandkit/assets/logo_color.png",
+   "bytes": 208349,
+   "sha256": "23b3b97359544c60dbb0dc7b8db28af3cf6d4f9b9e02da72882c7fae4d8264bf"
+  },
+  {
+   "path": "CTS/brandkit/assets/logo_white.png",
+   "bytes": 93636,
+   "sha256": "2e18f27bf18dfcc4ad872e21983265730803dec1992df6b3c8221cf70b1f91a1"
+  },
+  {
+   "path": "CTS/brandkit/assets/voice.onnx",
+   "bytes": 63201294,
+   "sha256": "57a219ae8e638873db7d18893304be5069c42868f392bb95c3ff17f0690d0689"
+  },
+  {
+   "path": "CTS/brandkit/assets/voice.onnx.json",
+   "bytes": 4847,
+   "sha256": "69557ed3d974463453e9b0c09dd99a7ed0e52b8b87b64b357dbeeb2540a97d47"
+  },
+  {
+   "path": "CTS/brandkit/assets/watermark.png",
+   "bytes": 37050,
+   "sha256": "90bd303761e9e4606049736b4e00bcf26571637f0d243a99707313deb8403e55"
+  },
+  {
+   "path": "CTS/brandkit/assets/whoosh.wav",
+   "bytes": 134478,
+   "sha256": "ce90a06d619001d585d4f6cb7c1db4e4235feb9b464352f3f9e65a351c5814d7"
+  },
+  {
+   "path": "CTS/brandkit/channel-positioning-20261013/brand-editorial-spec.json",
+   "bytes": 1299,
+   "sha256": "fc862f3efbb81a2e687ba63ef2c0d977d150198fc6410028fcd7235accb39321"
+  },
+  {
+   "path": "CTS/brandkit/channel-positioning-20261013/账号定位与简介.txt",
+   "bytes": 4089,
+   "sha256": "ad7da93217664f900216d7530cf0abd1ae78a1b0e3e6a54dcd8dda0ee7d398e2"
+  },
+  {
+   "path": "CTS/brandkit/channel-positioning-20261013/首批三平台脚本.txt",
+   "bytes": 4496,
+   "sha256": "70e293c929dd285f510da0de8130d3499c1111f8d5207646f709289a576501d1"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v2_archived_rejected/SOURCES.txt",
+   "bytes": 1191,
+   "sha256": "c1d9d8bd5a0a69def9429caa62ee6291484d58faf9eaa0a049c2ecd7bb1c71fe"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v2_archived_rejected/aerial-a.mp4",
+   "bytes": 1976173,
+   "sha256": "ecdb1c5b96adb04a671134a0decd7efcf059ad10ac55ad1d2df19e56bd2e63cf"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v2_archived_rejected/aerial-b.mp4",
+   "bytes": 2235522,
+   "sha256": "1d0589f4fae219cdef8bd57d4b65395d15244562c0c2d457f0e4ddb7f802b137"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v2_archived_rejected/aerial-c.mp4",
+   "bytes": 4299463,
+   "sha256": "f0ea32aca0df0039d7b0f6e4062f18689648aeffaae26af2b2681ae660edfe8e"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v2_archived_rejected/forklift-a.mp4",
+   "bytes": 2389860,
+   "sha256": "4caea3e9d79ae5431c69b040df798d217e1b6fdf4588cb5355b13777f2501b43"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v2_archived_rejected/forklift-b.mp4",
+   "bytes": 2689001,
+   "sha256": "78d740664b74697891afaad5c3b09803c83f8da221b23bb2ae5627ad63b147ed"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v2_archived_rejected/parcels-a.mp4",
+   "bytes": 1958648,
+   "sha256": "7eed5520f26a4b551a2f76b2ff13f15e49ac25ea9c52d9d50a21ed740f4d4784"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v2_archived_rejected/parcels-b.mp4",
+   "bytes": 2133710,
+   "sha256": "6e4c931522c6a3b33fedd719f7c8218d02f1eafa9a4f4962605eb97d1d6f63fa"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v2_archived_rejected/parcels-c.mp4",
+   "bytes": 1909316,
+   "sha256": "b3779b9ee0a5d634d1feea5af9e3984f1991b3e2be74bd5d30d701c15f6fc943"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v2_archived_rejected/ship-a.mp4",
+   "bytes": 4515636,
+   "sha256": "6c7fd96ddcf0cf1e612958a3f8d1156cedb61d8b04c65bd9a9058c437ae74ccd"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v2_archived_rejected/ship-b.mp4",
+   "bytes": 5340225,
+   "sha256": "6109f6d7108df4dc18f42be278afe4824c61f10221d51426214dd61562b2f15c"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v3_archived_rejected/SOURCES.txt",
+   "bytes": 1402,
+   "sha256": "76cef218cd64257836f1bd0e95a3630f7a21acbb026341bd23ef2c33a59ed55a"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v3_archived_rejected/aerial-a.mp4",
+   "bytes": 1602231,
+   "sha256": "12d4eb46c490d1b69664739a7a8dbad98538de641486a03fd8e9a602592a46ff"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v3_archived_rejected/aerial-b.mp4",
+   "bytes": 1738706,
+   "sha256": "85cfbbdaf8b13dd848cf1c4c4f134f86424d5f37975c92830540a70f66907ada"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v3_archived_rejected/cover-a.mp4",
+   "bytes": 1540992,
+   "sha256": "9a844aeb25b0356409f0991d1782ee259154b794250fe738ac96f5efaa32690d"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v3_archived_rejected/cover-b.mp4",
+   "bytes": 1673666,
+   "sha256": "acb8237345a8e3d952ea11f5b52f130ede395ca059a51c299e8ee4a809b98491"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v3_archived_rejected/dock-a.mp4",
+   "bytes": 495864,
+   "sha256": "92cf42ec94f28e4d676cd5142828c0cae1473b0834c1c2e2f99a6f47960d2c3d"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v3_archived_rejected/dock-b.mp4",
+   "bytes": 561298,
+   "sha256": "6130b35c64fde248062ba4636776b27dfc90d4aab0c1fd7449dd0142a3a35ed6"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v3_archived_rejected/endcard-a.mp4",
+   "bytes": 40421,
+   "sha256": "bb56d7c303927f68eb423c35fbf73d60ae49c41be915f02fe113fbca72572a2a"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v3_archived_rejected/endcard-b.mp4",
+   "bytes": 40421,
+   "sha256": "bb56d7c303927f68eb423c35fbf73d60ae49c41be915f02fe113fbca72572a2a"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v3_archived_rejected/endcardb-a.mp4",
+   "bytes": 34217,
+   "sha256": "a7361f4e538232201af21049f65d462da531aace8e2dcf3e5abafe4faaa7d015"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v3_archived_rejected/endcardb-b.mp4",
+   "bytes": 34217,
+   "sha256": "a7361f4e538232201af21049f65d462da531aace8e2dcf3e5abafe4faaa7d015"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v3_archived_rejected/racks-a.mp4",
+   "bytes": 516658,
+   "sha256": "459d335dbc97357cc445a0a81505f7ddb29b8a3e3b9b41e104fb7949f4a72cc4"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v3_archived_rejected/racks-b.mp4",
+   "bytes": 517565,
+   "sha256": "a5d8a13f96af47a782f43ebf0da8238e54f093f344163ac4c762c8ca74829c37"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v3_archived_rejected/scan-a.mp4",
+   "bytes": 521236,
+   "sha256": "3fc033bf81e8fda402e8ed36180b23d702ce9fe846ad2fd7e557a4953d58ea26"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v3_archived_rejected/scan-b.mp4",
+   "bytes": 521214,
+   "sha256": "275cd87a53a337b8f37e42d38b51b2b35c64096851149ebe2769c10cf94f675b"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v3_archived_rejected/ship-a.mp4",
+   "bytes": 4515636,
+   "sha256": "6c7fd96ddcf0cf1e612958a3f8d1156cedb61d8b04c65bd9a9058c437ae74ccd"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v3_archived_rejected/ship-b.mp4",
+   "bytes": 5340225,
+   "sha256": "6109f6d7108df4dc18f42be278afe4824c61f10221d51426214dd61562b2f15c"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v3_archived_rejected/wrap-a.mp4",
+   "bytes": 745682,
+   "sha256": "a614875939b1e87c68d4605aa76a4ea395a9ac65957d92eb925f2e3073d17cc2"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v3_archived_rejected/wrap-b.mp4",
+   "bytes": 777190,
+   "sha256": "eb4417557a469c238b4c4f2ecc58790d560c63131c8163dea9aa54dfe107ff03"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips/SOURCES.txt",
+   "bytes": 1488,
+   "sha256": "23d123fb6ebef54eae77312e1374f9ad1f9c3a9b42687f88e77c296f7f6edf05"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips/aerial-a.mp4",
+   "bytes": 1602231,
+   "sha256": "12d4eb46c490d1b69664739a7a8dbad98538de641486a03fd8e9a602592a46ff"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips/aerial-b.mp4",
+   "bytes": 1738706,
+   "sha256": "85cfbbdaf8b13dd848cf1c4c4f134f86424d5f37975c92830540a70f66907ada"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips/cover-a.mp4",
+   "bytes": 1548049,
+   "sha256": "35ee686e17f27b2f4a1767b4c5c8482ac650e36c8c7a92d098cdc5cb7555666d"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips/cover-b.mp4",
+   "bytes": 1687112,
+   "sha256": "879925a55bf36f67abd8cf08834ea7899b062784ca77bd222bb6ab107f6b6273"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips/endcard-a.mp4",
+   "bytes": 46753,
+   "sha256": "09d91b42141d6e2740848830041633cd25ad90834f1aae2cf26ce27bf7ebc159"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips/endcard-b.mp4",
+   "bytes": 46753,
+   "sha256": "09d91b42141d6e2740848830041633cd25ad90834f1aae2cf26ce27bf7ebc159"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips/racks-a.mp4",
+   "bytes": 516658,
+   "sha256": "459d335dbc97357cc445a0a81505f7ddb29b8a3e3b9b41e104fb7949f4a72cc4"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips/racks-b.mp4",
+   "bytes": 517565,
+   "sha256": "a5d8a13f96af47a782f43ebf0da8238e54f093f344163ac4c762c8ca74829c37"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips/scan-a.mp4",
+   "bytes": 521236,
+   "sha256": "3fc033bf81e8fda402e8ed36180b23d702ce9fe846ad2fd7e557a4953d58ea26"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips/scan-b.mp4",
+   "bytes": 521214,
+   "sha256": "275cd87a53a337b8f37e42d38b51b2b35c64096851149ebe2769c10cf94f675b"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips/ship-a.mp4",
+   "bytes": 4515636,
+   "sha256": "6c7fd96ddcf0cf1e612958a3f8d1156cedb61d8b04c65bd9a9058c437ae74ccd"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips/ship-b.mp4",
+   "bytes": 5340225,
+   "sha256": "6109f6d7108df4dc18f42be278afe4824c61f10221d51426214dd61562b2f15c"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips/wrap-a.mp4",
+   "bytes": 745682,
+   "sha256": "a614875939b1e87c68d4605aa76a4ea395a9ac65957d92eb925f2e3073d17cc2"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips/wrap-b.mp4",
+   "bytes": 777190,
+   "sha256": "eb4417557a469c238b4c4f2ecc58790d560c63131c8163dea9aa54dfe107ff03"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v4_archived/SOURCES.txt",
+   "bytes": 1445,
+   "sha256": "c3f1c7643c25bea2b8931f719a0eb4c458b4f67ed3cb3955f34e334ca57029a1"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v4_archived/aerial-a.mp4",
+   "bytes": 1602231,
+   "sha256": "12d4eb46c490d1b69664739a7a8dbad98538de641486a03fd8e9a602592a46ff"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v4_archived/aerial-b.mp4",
+   "bytes": 1738706,
+   "sha256": "85cfbbdaf8b13dd848cf1c4c4f134f86424d5f37975c92830540a70f66907ada"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v4_archived/cover-a.mp4",
+   "bytes": 1564060,
+   "sha256": "56f2f64b90ce9a96adb6b46c30c9df638ca44a7f1819c271466f329e321a94b4"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v4_archived/cover-b.mp4",
+   "bytes": 1699544,
+   "sha256": "57ce3f05ed35c63f861ceda7179f4750ca46754cfef5c5059b350099dac1d196"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v4_archived/endcard-a.mp4",
+   "bytes": 41603,
+   "sha256": "521f3eea9d3670c59ad8938b00ecefca25eeee1b45b75ae25c7a1917654928af"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v4_archived/endcard-b.mp4",
+   "bytes": 41603,
+   "sha256": "521f3eea9d3670c59ad8938b00ecefca25eeee1b45b75ae25c7a1917654928af"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v4_archived/endcardb-a.mp4",
+   "bytes": 35613,
+   "sha256": "812c60edff49e86cc02370222e3bef5dcda9ea133020bff160cc5b108c97d533"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v4_archived/endcardb-b.mp4",
+   "bytes": 35613,
+   "sha256": "812c60edff49e86cc02370222e3bef5dcda9ea133020bff160cc5b108c97d533"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v4_archived/racks-a.mp4",
+   "bytes": 516658,
+   "sha256": "459d335dbc97357cc445a0a81505f7ddb29b8a3e3b9b41e104fb7949f4a72cc4"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v4_archived/racks-b.mp4",
+   "bytes": 517565,
+   "sha256": "a5d8a13f96af47a782f43ebf0da8238e54f093f344163ac4c762c8ca74829c37"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v4_archived/scan-a.mp4",
+   "bytes": 521236,
+   "sha256": "3fc033bf81e8fda402e8ed36180b23d702ce9fe846ad2fd7e557a4953d58ea26"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v4_archived/scan-b.mp4",
+   "bytes": 521214,
+   "sha256": "275cd87a53a337b8f37e42d38b51b2b35c64096851149ebe2769c10cf94f675b"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v4_archived/ship-a.mp4",
+   "bytes": 4515636,
+   "sha256": "6c7fd96ddcf0cf1e612958a3f8d1156cedb61d8b04c65bd9a9058c437ae74ccd"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v4_archived/ship-b.mp4",
+   "bytes": 5340225,
+   "sha256": "6109f6d7108df4dc18f42be278afe4824c61f10221d51426214dd61562b2f15c"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v4_archived/wrap-a.mp4",
+   "bytes": 745682,
+   "sha256": "a614875939b1e87c68d4605aa76a4ea395a9ac65957d92eb925f2e3073d17cc2"
+  },
+  {
+   "path": "East_Inter/remotion-assets/clips_v4_archived/wrap-b.mp4",
+   "bytes": 777190,
+   "sha256": "eb4417557a469c238b4c4f2ecc58790d560c63131c8163dea9aa54dfe107ff03"
+  },
+  {
+   "path": "East_Inter/brandkit/brand_red.txt",
+   "bytes": 19,
+   "sha256": "1a50127481746587ff4e9cedffd6d0b13e8a69153f4a5603c5e978f419465299"
+  },
+  {
+   "path": "East_Inter/brandkit/assets/logo_color.png",
+   "bytes": 41855,
+   "sha256": "66403d7b57bf55e7a6050cdf3633cd948dd7e71515aae14942896bfae097e19f"
+  },
+  {
+   "path": "East_Inter/brandkit/assets/logo_white.png",
+   "bytes": 36755,
+   "sha256": "d7ba71bf4c9d1f26548e38e8b08db46efd095d813c579ba762414c12f1ced121"
+  },
+  {
+   "path": "East_Inter/brandkit/assets/watermark.png",
+   "bytes": 36755,
+   "sha256": "d7ba71bf4c9d1f26548e38e8b08db46efd095d813c579ba762414c12f1ced121"
+  },
+  {
+   "path": "_shared/music/Founders at Dawn.mp3",
+   "bytes": 3613976,
+   "sha256": "d88e4253e41f189ff9f45637893d5392050c64870ea02d98d6482feea3a5aeb5"
+  },
+  {
+   "path": "_shared/music/Founders in Motion.mp3",
+   "bytes": 1959291,
+   "sha256": "e0053330c3aa6056eb580d0f52d3685b0492f40f04d286febc46deb32c5016d2"
+  },
+  {
+   "path": "_shared/music/Jade River Journey.mp3",
+   "bytes": 5573965,
+   "sha256": "5e4ef1ac304d505fefdcb46d09735fb1c2bd05e660fd2597198983b46afd2ac5"
+  },
+  {
+   "path": "_shared/music/Jayden小弟.mp3",
+   "bytes": 4070304,
+   "sha256": "8a882fb706d47e29fd1bbe28dc4596ce1ebddf4eb478d230d8ff8a75850190ba"
+  },
+  {
+   "path": "_shared/music/MiniMax_2026-06-24_03_39_52_Analytical_Scholar.mp3",
+   "bytes": 425526,
+   "sha256": "e2c7220995f1a7fb85f49ef1e06182501f9072a57ba7b03ece6baddc66c113a7"
+  },
+  {
+   "path": "_shared/music/Second Hand Sunrise (1).mp3",
+   "bytes": 1626829,
+   "sha256": "86206d7c942e7bc4d3bce34cd491e496abfa7f399123c284781aa1f90ecc24e4"
+  },
+  {
+   "path": "_shared/music/Second Hand Sunrise.mp3",
+   "bytes": 1309490,
+   "sha256": "0a83ee7f5495ed877885d90eb7455c6fba5e4890a82be2ced19503ae968085e7"
+  },
+  {
+   "path": "_shared/music/Snap the Floor (1).mp3",
+   "bytes": 4250545,
+   "sha256": "d958bd1836504d87991c13e00fe7a6b91f6f22493a21db88e80782c1d9c7b094"
+  },
+  {
+   "path": "_shared/music/Snap the Floor.mp3",
+   "bytes": 3476015,
+   "sha256": "4650d7056d607e0d5c7ba6b34c071daa22c66a176e4552ea19d7e24455f5349a"
+  },
+  {
+   "path": "_shared/music/Sunday Hammer (1).mp3",
+   "bytes": 1368887,
+   "sha256": "9be060044bb85f975eb61ca62c47a380ac7f28b769974910f489a88040cc8265"
+  },
+  {
+   "path": "_shared/music/Sunday Hammer.mp3",
+   "bytes": 1519301,
+   "sha256": "7f9009212ed6f08afe5180df4689175a08ccc84e892871dda6a477f5d8aa12d2"
+  },
+  {
+   "path": "_shared/music/Sunlit Kitchen Window (1).mp3",
+   "bytes": 1323980,
+   "sha256": "4ae10f28038a59a940ecca085a7f1de10dc3fdd8f4b06ea24588b55f64d1b174"
+  },
+  {
+   "path": "_shared/music/Sunlit Kitchen Window.mp3",
+   "bytes": 2242897,
+   "sha256": "1efc49f91de4731f4cb16d94b33cbf4759fcea9d8a386c7615b778b2e7c46db4"
+  },
+  {
+   "path": "_shared/music/The Dragon's Dance.mp3",
+   "bytes": 479906,
+   "sha256": "e2969abbb78055e0cfc5699ed9596fd09d47a557337d982fe1850f6401b47e56"
+  },
+  {
+   "path": "_shared/music/cts_xmas_suno.mp3",
+   "bytes": 3026469,
+   "sha256": "63158925d3dafd65bd14c913ea0c032d8ab571fbff8f2a956d454dde09d5c6f9"
+  },
+  {
+   "path": "_shared/music/music_library.json",
+   "bytes": 5257,
+   "sha256": "0ff60ecbfdfa9b3b25294dfc811e78f01a4f7eda9b4ce709b01aa2c9b03b91aa"
+  },
+  {
+   "path": "_shared/music/青瓷回声.mp3",
+   "bytes": 718213,
+   "sha256": "8be48181ac5aee706fe7733277f6370100ffc52af9e1ec5dbad78f83f43104d6"
+  },
+  {
+   "path": "_shared/music/龙旗破云 (1).mp3",
+   "bytes": 1805581,
+   "sha256": "80abf2c44808f4d1fd4678d5a962c90ac17f097063990294b7339dc34097baf4"
+  },
+  {
+   "path": "_shared/music/龙旗破云.mp3",
+   "bytes": 1431926,
+   "sha256": "52d1d48c580a7d00ac97820489732cdbbdc01e6614e542d7f98b7a178e020afd"
+  },
+  {
+   "path": "_shared/music/_preview/A_intro_0s.mp3",
+   "bytes": 240825,
+   "sha256": "a02010fd80ebc07063902766457b0b17b6787bd8a9261de378cbb67f8aef8ea9"
+  },
+  {
+   "path": "_shared/music/_preview/B_energetic_42s.mp3",
+   "bytes": 240825,
+   "sha256": "43f151c72da10cfa07a49abf1fbef6fcc721eff7a565e2c315aa869a54370a90"
+  },
+  {
+   "path": "_shared/music/_preview/C_build_143s.mp3",
+   "bytes": 240825,
+   "sha256": "494e40c3ffad79be421e920b19a2ab033eb3e3e74ec61ba8613dfed07d95f9fb"
+  },
+  {
+   "path": "_shared/music/cts-winter-20261015/curious-journey-v1.json",
+   "bytes": 1381,
+   "sha256": "4b2bc5c5ef6518a1118743f9289c32ac13d3f2dbad3bb9b035943ed02bfccd02"
+  },
+  {
+   "path": "_shared/music/cts-winter-20261015/curious-journey-v1.mp3",
+   "bytes": 4049844,
+   "sha256": "d76cd2c8c36df00d9a3cfd9815ec2a346853caab7a1f4c062807a3ca046d899c"
+  },
+  {
+   "path": "_shared/music/cts-winter-20261015/curious-journey-v2.json",
+   "bytes": 1381,
+   "sha256": "c139ed1ae4111eca76ca240d6125a48e9d78db5c4b2bbd784510a9630b74e45a"
+  },
+  {
+   "path": "_shared/music/cts-winter-20261015/curious-journey-v2.mp3",
+   "bytes": 4264908,
+   "sha256": "f5293982c9e3c736cf62c450db5132459add9f383b71ce5a91f91307cd069285"
+  },
+  {
+   "path": "_shared/music/cts-winter-20261015/ice-light-v1.json",
+   "bytes": 1319,
+   "sha256": "a67c43575a6ee46feec09a72ee3abf9c410a6ac4bf37586f67e474f645bd471a"
+  },
+  {
+   "path": "_shared/music/cts-winter-20261015/ice-light-v1.mp3",
+   "bytes": 4110800,
+   "sha256": "aac1b5a6866b3b216e082ce89ad38c472d8100fafeb1645834eeea7e5de3f4d8"
+  },
+  {
+   "path": "_shared/music/cts-winter-20261015/ice-light-v2.json",
+   "bytes": 1318,
+   "sha256": "cd73a5590a735dd274f2be5b4f91dcaffcf38ee8420aed1bf5b7d65b78d72ff3"
+  },
+  {
+   "path": "_shared/music/cts-winter-20261015/ice-light-v2.mp3",
+   "bytes": 4148816,
+   "sha256": "6c10a57dd69391ba2647b2a41a7a065840a344076a281a0927ee132ef7c5f4cc"
+  },
+  {
+   "path": "_shared/music/cts-winter-20261015/warm-streets-v1.json",
+   "bytes": 1403,
+   "sha256": "4c4d577c00515f59def44bddce2c275d022f89fb3adbe71ff9626aa67c250280"
+  },
+  {
+   "path": "_shared/music/cts-winter-20261015/warm-streets-v1.mp3",
+   "bytes": 4000591,
+   "sha256": "3dd15de27a797ad88c77ee91e63220b5d3943723924c24e1e1cd31452ec2ed27"
+  },
+  {
+   "path": "_shared/music/cts-winter-20261015/warm-streets-v2.json",
+   "bytes": 1404,
+   "sha256": "c3899ba78e6df4ad288cc44aec354a1d1e64902657a55b4b17609fb9331f9511"
+  },
+  {
+   "path": "_shared/music/cts-winter-20261015/warm-streets-v2.mp3",
+   "bytes": 4092943,
+   "sha256": "b571779d97889cea1445fbbaadd6247e6905fca91068cbbee2b4b5c448dc5708"
+  }
+ ]
+}

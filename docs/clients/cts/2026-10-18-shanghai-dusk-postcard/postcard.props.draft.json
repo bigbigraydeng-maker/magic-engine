@@ -1,0 +1,63 @@
+{
+ "engine": "remotion",
+ "remotion": {
+  "template": "postcard",
+  "props": {
+   "brandColor": "#B61E2E",
+   "logoFile": "logo.png",
+   "logoMode": "always",
+   "musicFile": "music/jade_river_journey.mp3",
+   "musicStartSec": 0.1333,
+   "scrim": 0.35,
+   "cardOpacity": 0.55,
+   "cardSide": "left",
+   "cardTop": 870,
+   "accent": "#FFD27A",
+   "hook": {
+    "clip": "clips/pc1_tower_sunset_hook.mp4",
+    "lines": [
+     "SHANGHAI",
+     "AT DUSK"
+    ]
+   },
+   "scenes": [
+    {
+     "clip": "clips/pc1_huangpu_sunset_a.mp4",
+     "place": "Shanghai",
+     "line": "The Shanghai skyline",
+     "sourceQuote": "Water towns, gardens and the Shanghai skyline.",
+     "placeSourceQuote": "Auckland → Shanghai → Suzhou → Wuxi → Xinshi Ancient Town → Hangzhou → Shanghai → Auckland",
+     "sourceUrl": "https://www.ctstours.co.nz/tours/china/discovery/shanghai-surroundings"
+    },
+    {
+     "clip": "clips/pc1_tower_sunset_b.mp4",
+     "place": "Shanghai",
+     "line": "Lujiazui skyline corridor",
+     "sourceQuote": "Shanghai: Yuyuan Garden, Bund, Nanjing Road, Lujiazui skyline corridor, World Cultural Heritage Art Exhibition Centre",
+     "placeSourceQuote": "Auckland → Beijing → Xi'an → Puyuan (Tongxiang) → Hangzhou → Shanghai → Beijing → Auckland",
+     "sourceUrl": "https://www.ctstours.co.nz/tours/china/discovery/essentials"
+    }
+   ],
+   "price": null,
+   "end": {
+    "backdropClip": "clips/pc1_huangpu_sunset_end.mp4",
+    "title": "CTS TOURS"
+   },
+   "timing": {
+    "hookSec": 3,
+    "sceneSec": 5,
+    "priceSec": 4
+   }
+  }
+ },
+ "copy": {
+  "caption": "Full itinerary and inclusions in the first comment.",
+  "endcard": {
+   "cta": "Full itinerary and inclusions",
+   "url": "https://www.ctstours.co.nz/tours/china/discovery/shanghai-surroundings",
+   "offer": [
+    "10 days, 7 hotel nights"
+   ]
+  }
+ }
+}

@@ -1,0 +1,42 @@
+{
+ "client_id": "c0000000-0000-0000-0000-000000000000",
+ "goal_id": "287dc046-0b95-42fd-9fc1-4f5d39ecd8be",
+ "master_brief_id": "a93c40e0-a5d3-4f53-8cd5-88a85ff83e73",
+ "order_type": "fresh_angle",
+ "angle": "Atmosphere sample: single-shot golden hour on the Huangpu (calm, no text, licensed music) - for PM review only",
+ "angle_source": {
+  "source": "manual_remotion_cts_atmosphere",
+  "authorized_by": "18 号统筹 2026-10-18：PM 回「做」；样片只出到待审，只发 PM 看，不发布、不进广告素材池",
+  "facts_checked": "素材：Pexels 18803234（作者 Cfq938888 Chen），Shanghai/黄浦江日落，无人像；出处见 credits-v10.json；本片无任何文字断言",
+  "note": "配方对账：真人背影=未满足（无自有素材/无肖像授权）；不用参考视频画面与歌曲；音乐只用已登记无人声曲 jade_river_journey（窗口≤19s）"
+ },
+ "rationale_one_liner": "氛围片样片：外滩日落单镜头 16 秒 + 库乐，无字；只发 PM 看，不发布。",
+ "budget_cap_usd": 0.5,
+ "brief": {
+  "engine": "remotion",
+  "remotion": {
+   "template": "atmosphere",
+   "props": {
+    "logoFile": "logo.png",
+    "logoMode": "always",
+    "musicFile": "music/jade_river_journey.mp3",
+    "musicStartSec": 0,
+    "clip": "clips/atm1_shanghai_sunset_huangpu.mp4",
+    "sourceIn": 2,
+    "durationSec": 16,
+    "push": 1.03,
+    "fadeInSec": 0.8,
+    "fadeOutSec": 1.5,
+    "line": null
+   }
+  },
+  "copy": {
+   "caption": "",
+   "endcard": {
+    "cta": "",
+    "url": "https://www.ctstours.co.nz/",
+    "offer": []
+   }
+  }
+ }
+}
