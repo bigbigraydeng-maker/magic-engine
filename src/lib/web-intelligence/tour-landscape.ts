@@ -11,6 +11,7 @@ export type TourLandscape = {
   recommended_focus: string[]
   unknowns: string[]
   confidence: number
+  evidence_urls: string[]
 }
 
 export type TourLandscapeExternalSignal = {
@@ -78,7 +79,7 @@ ${input.memory_context ? input.memory_context.slice(0, 5000) : '暂无已确认�
 
 行业与媒体只能作为补充证据：必须区分文章明确说了什么和你的推断，不得因为一篇文章就声称整个市场发生变化；如果引用行业证据，在结论或建议中写出来源名称、标题或观察日期。不要把没有来源链接或观察时间的内容当作可核实事实。
 流量方向只能作为低置信度的辅助信号；没有估算值或变化百分比时不要推断流量变化，也不得据此声称竞品销售增长、客户流失或 CTS 受到影响。
-输出字段：headline（不超过40字，直接说现在最重要的经营判断）、market_summary（2-4句，必须引用至少2个输入中的具体事实，例如产品数量、产品名、城市、天数或价格带，并给出明确判断；如使用行业证据，注明来源）、client_opportunities（最多4条，每条都要是“建议现在做”的具体动作，尽量点名 CTS 产品或产品层级）、client_risks（最多4条，每条都要是“暂时不要做”的具体动作或风险，并说明依据）、recommended_focus（最多4条，每条都要是下一步先确认的事项）、unknowns（最多4条，列出缺失的关键证据）、confidence（0到1）。
+输出字段：headline（不超过40字，直接说现在最重要的经营判断）、market_summary（2-4句，必须引用至少2个输入中的具体事实，例如产品数量、产品名、城市、天数或价格带，并给出明确判断；如使用行业证据，注明来源）、client_opportunities（最多4条，每条都要是“建议现在做”的具体动作，尽量点名 CTS 产品或产品层级）、client_risks（最多4条，每条都要是“暂时不要做”的具体动作或风险，并说明依据）、recommended_focus（最多4条，每条都要是下一步先确认的事项）、unknowns（最多4条，列出缺失的关键证据）、confidence（0到1）、evidence_urls（最多8个，只能填写输入资料中已有的 http/https 来源链接）。
 不要输出“加强竞争力”“优化产品”“关注市场”等无法执行的空话。不要为了凑满字段而编造事实；但只要输入中有证据，就必须把证据写进结论和建议。每个数组最多3条，优先保留最影响经营决策的内容。
 必须返回以上全部字段；没有证据时对应字段返回 []，不要省略字段。只返回 JSON，不要 Markdown 代码块。`
 }
@@ -119,6 +120,7 @@ function fallbackTourLandscape(input: Parameters<typeof tourLandscapePrompt>[0])
     recommended_focus: [`先确认${clientNames[0] ?? '重点产品'}的完整路线、出发日期、余位和价格包含项目，再决定是否调整。`],
     unknowns: ['竞品完整产品线、真实出发窗口、余位和询盘转化数据仍未纳入。'],
     confidence: competitorCount > 0 && clientCount > 0 ? 0.35 : 0.2,
+    evidence_urls: input.competitor_products.map(product => product && typeof product === 'object' ? (product as Record<string, unknown>).source_url : null).filter((url): url is string => typeof url === 'string' && /^https?:\/\//i.test(url)).slice(0, 8),
   }
 }
 
@@ -137,6 +139,7 @@ export function validateTourLandscape(value: unknown): TourLandscape {
     recommended_focus: cleanList(item.recommended_focus ?? item.recommendations),
     unknowns: cleanList(item.unknowns ?? item.missing_evidence),
     confidence,
+    evidence_urls: Array.isArray(item.evidence_urls) ? item.evidence_urls.filter((url): url is string => typeof url === 'string' && /^https?:\/\//i.test(url)).slice(0, 8) : [],
   }
 }
 
