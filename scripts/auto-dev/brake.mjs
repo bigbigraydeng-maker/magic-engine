@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { argv } from 'node:process';
+
 const STALE_DRAFT_HOURS = 24;
 const STUCK_IN_PROGRESS_HOURS = 6;
 const BRAKE_OPEN_PR_HOURS = 48;
@@ -98,4 +101,14 @@ export function heartbeatLine(now, issuesPicked, brakeReason) {
     return `${ts} brake: ${brakeReason}`;
   }
   return `${ts} picked=${issuesPicked}`;
+}
+
+// ── CLI entry point: node brake.mjs <input.json> ──
+if (argv[1] && argv[1].endsWith('brake.mjs') && argv[2]) {
+  const raw = readFileSync(argv[2], 'utf8');
+  const input = JSON.parse(raw);
+  const now = input.now || new Date().toISOString();
+  const result = checkBrakes(input, now);
+  process.stdout.write(JSON.stringify(result) + '\n');
+  process.exit(result.brake ? 1 : 0);
 }

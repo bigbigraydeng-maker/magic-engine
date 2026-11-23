@@ -9,6 +9,9 @@
 (deny mach-lookup (global-name "com.apple.securityd.xpc"))
 (deny mach-lookup (global-name "com.apple.security.agent"))
 
+;; ── deny /usr/bin/security to prevent keychain CLI access ──
+(deny process-exec (literal "/usr/bin/security"))
+
 ;; ── process: allow fork/exec for node/vitest workers ──
 (allow process-fork)
 (allow process-exec)
@@ -26,7 +29,10 @@
 (allow mach-lookup (global-name "com.apple.lsd.mapdb"))
 (allow mach-lookup (global-name "com.apple.coreservices.launchservicesd"))
 
-;; ── read: allow system paths, deny user home ──
+;; ── read: root listing required for anything to start ──
+(allow file-read* (literal "/"))
+
+;; ── read: allow system paths ──
 (allow file-read*
   (subpath "/usr")
   (subpath "/bin")
@@ -38,23 +44,21 @@
   (subpath "/private/etc")
   (subpath "/private/var")
   (subpath "/var")
-  (subpath "/etc")
-  (subpath "/tmp")
-  (subpath "/private/tmp"))
+  (subpath "/etc"))
+
+;; ── read: only allow the task's own tmp directory, not all of /private/tmp ──
+(allow file-read* (subpath (param "TASK_TMP")))
 
 ;; deny reading the entire user home directory (secrets, configs, keys)
 (deny file-read* (subpath (param "USER_HOME")))
 
-;; but allow reading the work repo (under /private/tmp/auto-dev/<n>/repo/)
+;; but allow reading the work repo (under TASK_TMP)
 (allow file-read* (subpath (param "WORK_REPO")))
 
-;; allow reading node_modules inside the work repo
-;; (already covered by WORK_REPO subpath above)
-
-;; ── write: default deny, only allow specific paths ──
+;; ── write: default deny, then allow, then deny-override (last match wins) ──
 (deny file-write*)
 
-;; allow writing to the work repo (but not .git pointer to avoid tampering)
+;; allow writing to the work repo
 (allow file-write*
   (subpath (param "WORK_REPO")))
 
@@ -66,3 +70,8 @@
 (allow file-write*
   (literal "/dev/null")
   (literal "/dev/tty"))
+
+;; deny-override: .git directory and sensitive files AFTER the allow (last match wins)
+(deny file-write* (subpath (param "GIT_DIR")))
+(deny file-write* (literal (param "WORK_AIDERCONF")))
+(deny file-write* (literal (param "WORK_DOTENV")))
