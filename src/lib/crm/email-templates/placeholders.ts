@@ -13,6 +13,30 @@ export const COMMON_VARIABLES: readonly string[] = ['first_name', 'sender_name',
 
 export const INPUT_VARIABLE_RE: RegExp = /^input\.[a-z][a-z0-9_]{0,30}$/
 
+const VARIABLE_LABELS: Readonly<Record<string, string>> = {
+  first_name: '客人名字',
+  sender_name: '销售名字',
+  call_when: '通话时间',
+  catalogue_url: '目录链接',
+  tour_name: '团名',
+  tour_duration: '几天',
+  tour_price: '价格',
+  departure_date: '出发日期',
+  tour_url: '团页链接',
+  tour_highlights: '行程亮点',
+  tour_inclusions: '费用包含',
+  tour_cards: '多个团卡片',
+  all_tours_url: '全部团链接',
+}
+
+export function variableLabel(name: string): string {
+  if (name.startsWith('input.')) {
+    const tail = name.slice('input.'.length).replace(/_/g, ' ')
+    return tail === '' ? name : `手填：${tail}`
+  }
+  return VARIABLE_LABELS[name] ?? name
+}
+
 // {{ name }} or {{ name:N }} with optional inner spaces; N is 1-2 digits.
 const PLACEHOLDER_RE = /\{\{\s*([a-z_][a-z0-9_.]*)\s*(?::\s*(\d{1,2})\s*)?\}\}/g
 
