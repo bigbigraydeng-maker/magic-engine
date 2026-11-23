@@ -1,8 +1,4 @@
-/**
- * Content-side todo for a Tune finding that has no usable image.
- * The row is a request, not an ad change.
- */
-
+/** Content-side todo when a finding has no usable image. The row is a request, not an ad change. */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { nzToday } from '@/lib/ads-strategy/promo-window'
 import { APP_BASE } from '@/lib/pm-todo/binding-request-items'

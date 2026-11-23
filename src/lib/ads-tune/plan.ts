@@ -10,45 +10,18 @@ const ADSET_RE = /^\d{1,32}$/
 const CREATIVE = new Set(['swap_creative', 'add_creative'])
 export interface TuneImage { readonly path: string; readonly approved: boolean; readonly usedInAds: boolean }
 export interface TuneLive {
-  readonly accountId: string
-  readonly adSetId: string
-  readonly primaryText: string
-  readonly headline: string
-  readonly ctaType: CtaType
-  readonly copy: CopiedStory
-  readonly imageUrl: string
-  readonly planId: string
-  readonly adSetActive: boolean
+  readonly accountId: string; readonly adSetId: string; readonly primaryText: string; readonly headline: string
+  readonly ctaType: CtaType; readonly copy: CopiedStory; readonly imageUrl: string; readonly planId: string; readonly adSetActive: boolean
 }
 export interface TuneMarker {
-  readonly kind: 'ads_tune'
-  readonly cardRunId: string | null
-  readonly subjectKey: string
-  readonly nzDay: string
-  readonly subjectRef: string
-  readonly diagnosis: string
-  readonly remedy: 'creative' | 'ticket'
-  readonly label: string
+  readonly kind: 'ads_tune'; readonly cardRunId: string | null; readonly subjectKey: string; readonly nzDay: string
+  readonly subjectRef: string; readonly diagnosis: string; readonly remedy: 'creative' | 'ticket'; readonly label: string
 }
 export type TuneDecision =
   | { readonly kind: 'skip'; readonly reason: string; readonly subjectKey: string | null }
-  | {
-    readonly kind: 'creative'
-    readonly subjectKey: string
-    readonly order: CreativeOrder
-    readonly copy: CopiedStory
-    readonly planId: string
-    readonly imageUrl: string
-    readonly marker: TuneMarker
-  }
   | { readonly kind: 'ticket'; readonly subjectKey: string; readonly marker: TuneMarker }
-interface Found {
-  subjectRef: string
-  adSetId: string | null
-  label: string
-  diagnosis: string
-  creative: boolean
-}
+  | { readonly kind: 'creative'; readonly subjectKey: string; readonly order: CreativeOrder; readonly copy: CopiedStory; readonly planId: string; readonly imageUrl: string; readonly marker: TuneMarker }
+interface Found { subjectRef: string; adSetId: string | null; label: string; diagnosis: string; creative: boolean }
 export function tuneCardsEnabled(leadsConfig: unknown): boolean {
   return objectOf(leadsConfig)?.[ADS_TUNE_SWITCH_KEY] === true
 }
@@ -74,13 +47,8 @@ export function pickUnusedImage(clientId: string, rows: readonly TuneImage[]): s
   return null
 }
 export function planTune(input: {
-  clientId: string
-  now: Date
-  finding: unknown
-  images: readonly TuneImage[]
-  live: TuneLive | null
-  already: boolean
-  enabled: boolean
+  clientId: string; now: Date; finding: unknown; images: readonly TuneImage[]
+  live: TuneLive | null; already: boolean; enabled: boolean
 }): TuneDecision {
   if (!input.enabled) return skip('这个客户没开调方确认卡。', null)
   const found = adaptFinding(input.finding)
@@ -138,14 +106,8 @@ function creativeOrTicket(
     imageUrl: live.imageUrl,
     marker: { ...marker, remedy: 'creative' },
     order: {
-      adAccountId: live.accountId,
-      adSetId: live.adSetId,
-      imagePath: image,
-      primaryText: live.primaryText,
-      headline: live.headline,
-      ctaType: live.ctaType,
-      adName: live.headline.slice(0, 40),
-      status: 'PAUSED',
+      adAccountId: live.accountId, adSetId: live.adSetId, imagePath: image, primaryText: live.primaryText,
+      headline: live.headline, ctaType: live.ctaType, adName: live.headline.slice(0, 40), status: 'PAUSED',
     },
   }
 }

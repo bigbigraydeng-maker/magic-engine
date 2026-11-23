@@ -19,28 +19,15 @@ const AGENT: CardClicker = { kind: 'agent', email: null }
 const FRESH_MS = 36 * 60 * 60 * 1000
 const CREATIVE_REFUSAL = '这张加图卡不能在这里点。'
 const MARKER_UNREAD = '读不到调方标记，没有改广告'
-export interface TuneGate {
-  readonly tune: boolean
-  readonly block: string | null
-  readonly remedy: TuneMarker['remedy'] | null
-}
+export interface TuneGate { readonly tune: boolean; readonly block: string | null; readonly remedy: TuneMarker['remedy'] | null }
 export interface TuneResult {
-  readonly kind: TuneDecision['kind']
-  readonly issued: boolean
-  readonly wroteMeta: false
-  readonly reason: string
-  readonly runId: string | null
-  readonly subjectKey: string | null
+  readonly kind: TuneDecision['kind']; readonly issued: boolean; readonly wroteMeta: false
+  readonly reason: string; readonly runId: string | null; readonly subjectKey: string | null
 }
 export function tuneAwareDeps(base: CreativeDeps, tune: boolean, readTune: CreativeDeps['switchState']): CreativeDeps {
   return tune ? { ...base, switchState: readTune } : base
 }
-export async function issueTune(args: {
-  kernel: KernelDeps
-  clientId: string
-  decision: TuneDecision
-  now?: Date
-}): Promise<TuneResult> {
+export async function issueTune(args: { kernel: KernelDeps; clientId: string; decision: TuneDecision; now?: Date }): Promise<TuneResult> {
   const now = args.now ?? args.kernel.now()
   if (args.decision.kind === 'skip') return skipped(args.decision.reason, args.decision.subjectKey)
   if (args.decision.kind === 'ticket') return writeTicket(args.kernel, args.clientId, args.decision.marker)
