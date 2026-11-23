@@ -136,6 +136,10 @@ export const A_RISK_RULES = [
   // (DR71-4, #2071). `scripts/db-invariants.sql` is already A via `.sql`.
   { exact: 'scripts/check-policy-to-clause.mjs', why: 'RLS 红线检查脚本 —— 改成直接放行就关掉「策略必须写 TO service_role」', category: RISK_CATEGORY.CONTROL_PLANE },
   { exact: 'scripts/db-replay-and-verify.sh', why: '数据库红线回放检查脚本 —— 改成直接放行就关掉整套数据库安全检查', category: RISK_CATEGORY.CONTROL_PLANE },
+  // Scripts that CI workflows run to decide pass/fail (e.g. Changed-area tests).
+  // The workflow is A via `.github/workflows/`; without this line the logic it
+  // calls could be turned into `exit 0` by a B PR (子牙 review 2026-09-29).
+  { prefix: 'scripts/ci/', why: 'CI 检查脚本 —— 改成直接放行就关掉对应的 PR 检查', category: RISK_CATEGORY.CONTROL_PLANE },
 
   // --- Build and production runtime --------------------------------------
   // Same finding: these decide what production builds and runs, and rated B.
