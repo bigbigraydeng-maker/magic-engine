@@ -158,6 +158,7 @@ const env: Collected<EnvFacts> = {
     capi_preflight: { ok: true, stage: null, token_valid: true, pixel_visible: true },
     capi_events_7d: { confirmed: 1, in_doubt: 0, failed: 0 },
     meta_token_resolved: true,
+    conversion_stage: null,
     jobs: [{ job: 'meta-leads-sync', max_age_hours: 3, last_finished_at: '2026-10-19T09:30:00.000Z', last_status: 'completed' }],
     as_of: AS_OF,
   },
