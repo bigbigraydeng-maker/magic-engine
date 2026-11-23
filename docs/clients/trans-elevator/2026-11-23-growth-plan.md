@@ -1,6 +1,7 @@
 # Trans Elevator — Magic Engine 处方文档
 
 > 版本：v0.2（按 ME 处方模板 `docs/templates/prescription.md` 重写） | 日期：2026-11-23 | FDE：待定 | 审核：PM（未审）
+> **对外版（ME 品牌视觉）**：`2026-11-23-growth-plan-me-vi.html` / `.pdf`（8 页 A4，已去掉内部信息：价位、内部决策、不对外的说明）。本文件是内部完整版。
 > 状态：**草稿，等 PM 看**。本文件没投广告、没碰广告账户、没发帖、没联系客户、没开门户账号、没花钱。
 > 客户：Trans Elevator（奥克兰定制家用电梯，井道加安装一起包）· 对接人 Calvin Zhang（线索由 Calvin 接）· 官网 https://www.transelevator.co.nz/ · 后台：新版 ME（2026-11-22 建档，11-23 补齐）
 
