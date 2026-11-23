@@ -126,7 +126,8 @@ export async function uploadVideoToMeta(
  *
  * Graph has no `/act_x/advideos/<id>` path (2026-11-23: every read-back failed that way while
  * both uploads were really in the account), so this lists the account's videos and looks for
- * the id. A fresh upload can take a few seconds to show up, so it looks again a few times.
+ * the id. A fresh upload is only listed once Meta finishes processing it (2026-11-23: ~21 s for an
+ * 18 s clip), so it keeps looking for about a minute — inside the 120 s confirm route.
  */
 export async function readVideoInAdAccount(
   adAccountId: string,
@@ -135,10 +136,10 @@ export async function readVideoInAdAccount(
   opts: { attempts?: number; waitMs?: number; sleep?: (ms: number) => Promise<void> } = {},
 ): Promise<{ ok: true; videoId: string } | { ok: false; error: string }> {
   if (!/^\d{1,32}$/.test(videoId)) return { ok: false, error: '回读的视频编号格式不对。' }
-  const attempts = opts.attempts ?? 4
+  const attempts = opts.attempts ?? 12
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
   for (let i = 0; i < attempts; i++) {
-    if (i > 0) await sleep(opts.waitMs ?? 4000)
+    if (i > 0) await sleep(opts.waitMs ?? 5000)
     const found = await accountListsVideo(adAccountId, videoId, accessToken)
     if (found === 'found') return { ok: true, videoId }
     if (found === 'error') return { ok: false, error: '回读广告账户里的视频失败。' }
