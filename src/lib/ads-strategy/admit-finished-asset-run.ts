@@ -6,6 +6,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { isAssetOnly } from '@/lib/factory/deliverable'
 import { validateRenderPath } from '@/lib/factory/worker-guard'
+import { isExternalUpload } from '@/lib/factory/talent-consent'
 import { createKernel } from '@/lib/kernel'
 import { getRegisteredAccountIds } from '@/lib/meta/campaign-ownership'
 import { getClientAdAccounts } from '@/lib/meta/client-ad-accounts'
@@ -15,6 +16,7 @@ import {
   ACCOUNT_UPLOAD_SOURCE,
   ASSET_UPLOAD_REFUSED,
   admitFinishedAsset,
+  externalUploadPath,
   creativePoolUploadEnabled,
   readyToUpload,
   type AdmitDeps,
@@ -41,7 +43,9 @@ function toOrder(row: Record<string, unknown>): AdmitWorkOrder | null {
     clientId,
     status: typeof row.status === 'string' ? row.status : '',
     assetOnly: isAssetOnly(row.brief),
-    videoPath: rawPath ? validateRenderPath(rawPath, clientId, id) : null,
+    videoPath: rawPath
+      ? validateRenderPath(rawPath, clientId, id) ?? (isExternalUpload(row.brief) ? externalUploadPath(rawPath, clientId) : null)
+      : null,
     reviewRef: (row.review_ref ?? {}) as Record<string, unknown>,
   }
 }
