@@ -117,4 +117,26 @@ describe('/api/auth/session-route', () => {
 
     expect(body.redirect).toBe('/dashboard/clients/client-123/execution')
   })
+
+  // 狄仁杰 review of PR 2123: an account with no client_portal_users row and no
+  // scan job gets the raw safePath back — it must never be an off-site path.
+  it.each(['/\\evil.com', '/%5Cevil.com', '//evil.com', 'https://evil.com'])(
+    'membership-less accounts never get an off-site redirect for next=%j',
+    async (next) => {
+      mocks.getUser.mockResolvedValue({ data: { user: { email: 'nobody@example.com' } } })
+      mocks.from
+        .mockReturnValueOnce(accessRows([]))
+        .mockReturnValueOnce({
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          limit: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({ data: null }),
+        })
+
+      const res = await GET(request(next))
+      const body = await res.json() as { redirect: string }
+
+      expect(body.redirect).toBe('/dashboard')
+    },
+  )
 })

@@ -11,11 +11,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { getPublicOrigin } from '@/lib/auth/public-origin'
+import { safeInternalPath } from '@/lib/auth/safe-internal-path'
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
-  const next = searchParams.get('next') ?? '/dashboard'
-  const safePath = next.startsWith('/') && !next.startsWith('//') ? next : '/dashboard'
+  const safePath = safeInternalPath(searchParams.get('next'), '/dashboard')
   const selfServeIntent = searchParams.get('intent') === 'self_serve'
 
   const origin = getPublicOrigin(request)

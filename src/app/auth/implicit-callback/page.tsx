@@ -3,6 +3,7 @@
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createBrowserClient } from '@supabase/ssr'
+import { safeInternalPath } from '@/lib/auth/safe-internal-path'
 
 interface SessionRouteResponse {
   redirect?: string
@@ -13,8 +14,7 @@ function loginPathFor(next: string): string {
 }
 
 function safeNext(value: string | null): string {
-  if (!value || !value.startsWith('/') || value.startsWith('//')) return '/dashboard'
-  return value
+  return safeInternalPath(value, '/dashboard')
 }
 
 export default function ImplicitCallbackPage() {
@@ -61,7 +61,7 @@ export default function ImplicitCallbackPage() {
         cache: 'no-store',
       })
       const route = await res.json() as SessionRouteResponse
-      router.replace(route.redirect ?? next)
+      router.replace(safeInternalPath(route.redirect, next))
     }
 
     void finishLogin()
