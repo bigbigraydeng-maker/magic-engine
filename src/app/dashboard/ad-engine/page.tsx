@@ -29,6 +29,7 @@ import LessonTrial from './_components/LessonTrial'
 import AutoJudgeAll from './_components/AutoJudgeAll'
 import AiVerdictBanner from './_components/AiVerdictBanner'
 import { trialSampleFor } from '@/lib/agent-learning/lesson-trial/eligibility'
+import { lessonAudienceLabel } from '@/lib/agent-learning/lesson-audience'
 
 export const dynamic = 'force-dynamic'
 
@@ -197,8 +198,8 @@ export default async function AdEnginePage() {
       <section>
         <h2 className="text-lg font-semibold text-slate-900">系统现在相信什么</h2>
         <p className="mt-1 text-sm text-slate-600">
-          这些会被拼进每个客户的 AI 提示词。发现哪条不对，当场按「停用」——
-          不用找人改数据库。
+          没标明「只给某个客户」的，会进每个客户的 AI 提示词。标明了的，只有那一个客户读得到。
+          发现哪条不对，当场按「停用」。
         </p>
 
         <div className="mt-4 space-y-3">
@@ -369,6 +370,23 @@ export default async function AdEnginePage() {
   )
 }
 
+function ScopeBadge({ lesson, clients }: { lesson: LessonRow; clients: SiteOption[] }) {
+  const pilotLabel = lessonAudienceLabel(lesson.evidence, (id) => clients.find((c) => c.id === id)?.name)
+  if (pilotLabel) {
+    return (
+      <span className="rounded bg-teal-50 px-2 py-0.5 text-[11px] font-medium text-teal-800 ring-1 ring-teal-200">
+        {pilotLabel}
+      </span>
+    )
+  }
+  return (
+    <span className={`rounded px-2 py-0.5 text-[11px] font-medium ring-1 ${SCOPE_STYLE[lesson.scope] ?? 'bg-slate-50 text-slate-600 ring-slate-200'}`}>
+      {SCOPE_LABEL[lesson.scope] ?? lesson.scope}
+      {lesson.industry ? ` · ${lesson.industry}` : ''}
+    </span>
+  )
+}
+
 function LessonCard({ lesson: l, sites, clients }: { lesson: LessonRow; sites: SiteOption[]; clients: SiteOption[] }) {
   const redacted = Boolean(l.evidence && 'original_rationale' in l.evidence)
   const expertSource = l.evidence?.kind === 'expert_rss_candidate' && typeof l.evidence.expert === 'string'
@@ -379,10 +397,7 @@ function LessonCard({ lesson: l, sites, clients }: { lesson: LessonRow; sites: S
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <span className={`rounded px-2 py-0.5 text-[11px] font-medium ring-1 ${SCOPE_STYLE[l.scope] ?? 'bg-slate-50 text-slate-600 ring-slate-200'}`}>
-              {SCOPE_LABEL[l.scope] ?? l.scope}
-              {l.industry ? ` · ${l.industry}` : ''}
-            </span>
+            <ScopeBadge lesson={l} clients={clients} />
             {l.flywheel && (
               <span className="rounded bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">{l.flywheel}</span>
             )}
@@ -407,7 +422,7 @@ function LessonCard({ lesson: l, sites, clients }: { lesson: LessonRow; sites: S
           {l.rationale && <p className="mt-1 text-xs leading-relaxed text-slate-600">{l.rationale}</p>}
           <p className="mt-1 font-mono text-[10px] text-slate-300">{l.lesson_key}</p>
         </div>
-        <LessonToggle lessonKey={l.lesson_key} isActive={l.is_active} />
+        <LessonToggle lessonKey={l.lesson_key} isActive={l.is_active} clients={clients} />
       </div>
       <LessonVerify lessonKey={l.lesson_key} lesson={l.lesson} rationale={l.rationale} sites={sites} clients={clients} />
       {!l.is_active && <AiVerdictBanner verdict={l.evidence?.ai_verdict} />}
