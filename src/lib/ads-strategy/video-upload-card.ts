@@ -29,6 +29,9 @@ export interface VideoUploadHold {
   videoId: string | null
   wrote: boolean
   resultLine?: string
+  /** What a person sees on the card: the work order's angle and the account's name. */
+  title?: string
+  accountLabel?: string
 }
 
 interface HoldRow { readonly id: string; readonly payload: VideoUploadHold }
@@ -51,16 +54,38 @@ export interface VideoUploadResult {
   readonly videoId: string | null
 }
 
-export function videoUploadFacts(workOrderId: string, accountId: string, fileUrl: string): CardFacts {
+function clip(text: string | undefined, max: number): string | null {
+  // The card refuses {}[] and backticks as "code"; titles may legitimately contain them.
+  const value = (text ?? '')
+    .replace(/[[{]/g, '(')
+    .replace(/[\]}]/g, ')')
+    .replace(/`/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!value) return null
+  return value.length > max ? `${value.slice(0, max - 1)}…` : value
+}
+
+/** Card text a person can act on: which video, which account. The file stamp stays in the fingerprint only. */
+export function videoUploadFacts(
+  workOrderId: string,
+  accountId: string,
+  fileUrl: string,
+  label: { title?: string; accountLabel?: string } = {},
+): CardFacts {
   const stamp = canonicalHashOfInput({ workOrderId, accountId, fileUrl }).slice(0, 8)
+  const title = clip(label.title, 110)
+  const accountName = clip(label.accountLabel, 80)
   return {
     subjectKey: `video-upload:${canonicalHashOfInput({ workOrderId }).slice(0, 12)}`,
     what: VIDEO_UPLOAD_WHAT,
-    account: '已登记的广告账户',
+    account: accountName ? `${accountName}（${accountId}）` : `已登记的广告账户（${accountId}）`,
     amount: '不花钱',
     date: '确认之后才传',
-    scope: `只上传这一条视频（记号 ${stamp}），不建广告、不打开、不改预算`,
-    hardChecks: [{ label: '只传文件', state: 'green', reason: '不建广告，不打开，不改预算' }],
+    scope: title
+      ? `只上传「${title}」这一条视频，不建广告、不打开、不改预算`
+      : '只上传这一条视频，不建广告、不打开、不改预算',
+    hardChecks: [{ label: '只传文件', state: 'green', reason: `不建广告，不打开，不改预算（文件记号 ${stamp}）` }],
   }
 }
 
@@ -71,13 +96,18 @@ export async function requestVideoUploadCard(args: {
   workOrderId: string
   accountId: string
   fileUrl: string
+  title?: string
+  accountLabel?: string
   now?: Date
 }): Promise<ConfirmationCardView> {
   assertMayIssue(args.clicker, args.clientId)
   if (!args.fileUrl.startsWith('https://')) {
     throw new ConfirmationCardError('invalid', '成片地址不对，没有出上传确认卡。')
   }
-  const facts = videoUploadFacts(args.workOrderId, args.accountId, args.fileUrl)
+  const facts = videoUploadFacts(args.workOrderId, args.accountId, args.fileUrl, {
+    title: args.title,
+    accountLabel: args.accountLabel,
+  })
   const fingerprint = contentFingerprint(normalizeFacts(facts))
   await retireOther(args.kernel.supabase, args.clientId, args.workOrderId, fingerprint)
   const card = await issueConfirmationCard(args.kernel, {
@@ -89,6 +119,8 @@ export async function requestVideoUploadCard(args: {
     status: 'holding', cardRunId: card.runId, fingerprint: card.fingerprint,
     workOrderId: args.workOrderId, accountId: args.accountId, fileUrl: args.fileUrl,
     videoId: null, wrote: false,
+    ...(args.title ? { title: args.title } : {}),
+    ...(args.accountLabel ? { accountLabel: args.accountLabel } : {}),
   })
   return card
 }
@@ -298,4 +330,28 @@ function asHold(row: { id?: unknown; payload?: unknown }): HoldRow[] {
   const payload = row.payload as VideoUploadHold
   if (!payload.cardRunId || !payload.workOrderId || !payload.accountId || !payload.fileUrl) return []
   return [{ id: row.id, payload }]
+}
+
+export interface VideoUploadCardDetail {
+  readonly videoUrl: string
+  readonly title: string | null
+}
+
+/** Display only: the file each upload card would send, so a person can play it before confirming. */
+export async function videoUploadDetailsByRunId(sb: Sb, clientId: string): Promise<Map<string, VideoUploadCardDetail>> {
+  const out = new Map<string, VideoUploadCardDetail>()
+  try {
+    const { data, error } = await sb.from('flywheel_actions')
+      .select('id, payload')
+      .eq('client_id', clientId)
+      .eq('action_type', VIDEO_UPLOAD_HOLD)
+    if (error) return out
+    for (const row of ((data ?? []) as Array<{ id?: unknown; payload?: unknown }>).flatMap(asHold)) {
+      if (!row.payload.fileUrl.startsWith('https://')) continue
+      out.set(row.payload.cardRunId, { videoUrl: row.payload.fileUrl, title: row.payload.title ?? null })
+    }
+  } catch {
+    return out
+  }
+  return out
 }

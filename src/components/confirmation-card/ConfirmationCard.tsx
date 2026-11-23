@@ -6,6 +6,7 @@
  */
 
 import type { AddCreativeCardDetail } from '@/lib/ads-creative-card/display'
+import type { VideoUploadCardDetail } from '@/lib/ads-strategy/video-upload-card'
 import type { CardStatus } from '@/lib/confirmation-card/view'
 import { AddCreativeCardDetails } from './AddCreativeCardDetails'
 import { addCreativeChipClass, expiryBadgeText, touchesMetaAds } from './card-display'
@@ -30,6 +31,7 @@ export interface ConfirmationCardProps {
   readonly onDecline: () => void
   readonly addCreativeDetail?: AddCreativeCardDetail | null
   readonly addCreativeStatusChip?: string | null
+  readonly videoUploadDetail?: VideoUploadCardDetail | null
 }
 
 function DetailRow({ label, value }: { label: string; value: string }) {
@@ -74,6 +76,22 @@ export function ConfirmationCard(props: ConfirmationCardProps) {
       </div>
 
       <p className="mt-4 text-lg font-bold leading-snug text-me-charcoal">{props.what}</p>
+
+      {props.videoUploadDetail ? (
+        <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-start">
+          <video
+            src={props.videoUploadDetail.videoUrl}
+            controls
+            preload="metadata"
+            playsInline
+            className="max-h-[320px] w-[180px] shrink-0 rounded-lg border border-black/10 bg-black"
+          />
+          <div className="min-w-0 space-y-1 text-sm text-me-charcoal">
+            <p className="font-semibold">{props.videoUploadDetail.title ?? '这条成片'}</p>
+            <p className="text-me-charcoal/70">点左边可以先播放，看的就是确认后要传上去的那个文件。</p>
+          </div>
+        </div>
+      ) : null}
 
       {addCreative ? (
         <AddCreativeCardDetails detail={addCreative} expiresLabel={props.expiresLabel} />
