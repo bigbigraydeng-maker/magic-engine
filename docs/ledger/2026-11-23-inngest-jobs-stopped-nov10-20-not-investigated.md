@@ -5,6 +5,6 @@ status: decided
 owner: pm
 decided_on: 2026-11-23
 source: session:6310fdee
+verify_how: PM 定下要查之后：在生产库 cron_run_logs 看这 4 个任务（ad-heartbeat / ad-breakdown-capture / conversion-daily-pipeline / ads-tracking-launch-watch）是否重新每天都有运行记录；4 个都恢复才算成，有一个没恢复就查它为什么停
 ---
-11-22 只读核查发现（生产库 glbdnayojixmexgofbsd 的 cron_run_logs）：ad-heartbeat 最后 11-10、ad-breakdown-capture 最后 11-14、conversion-daily-pipeline 最后 11-14（CTS 成交回传 Meta 自此停发）、ads-tracking-launch-watch 最后 11-20；都走 Inngest 调度，疑似免费额度用尽（未核实）。
-核查报告：https://claude.ai/artifact/5Lcze7YExnLqZhenAKytP5 。PM 回「先不用」查，什么时候查由 PM 定。
+详细记录（原卡正文，原样未改）在 doc:docs/ledger/notes/2026-11-23-inngest-jobs-stopped-nov10-20-not-investigated.md。
