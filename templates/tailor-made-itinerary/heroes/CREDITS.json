@@ -21,32 +21,32 @@
     "note": "resized to 1150px wide, re-encoded JPEG q68"
   },
   "beijing-hutong": {
-    "author": "Andrzej Otrębski",
-    "license": "CC BY-SA 4.0",
-    "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
-    "source": "https://commons.wikimedia.org/wiki/File:Beijing_hutong_Shuaifu_yuan.jpg",
-    "note": "resized to 1150px wide, re-encoded JPEG q68"
+    "author": "iStock (CTS subscription)",
+    "license": "iStock Standard License",
+    "licenseUrl": "https://www.istockphoto.com/legal/license-agreement",
+    "source": "https://www.istockphoto.com/photo/gm2285073122",
+    "note": "Beijing hutong rooftops; downloaded 2026-11-16 batch; resized to 1400px wide. iStock licence: no AI use, do not pass the file to third parties"
   },
   "summer-palace": {
-    "author": "xiquinhosilva",
-    "license": "CC BY 2.0",
-    "licenseUrl": "https://creativecommons.org/licenses/by/2.0",
-    "source": "https://commons.wikimedia.org/wiki/File:Longevity_Hill_of_the_Summer_Palace.jpg",
-    "note": "resized to 1150px wide, re-encoded JPEG q68"
+    "author": "iStock (CTS subscription)",
+    "license": "iStock Standard License",
+    "licenseUrl": "https://www.istockphoto.com/legal/license-agreement",
+    "source": "https://www.istockphoto.com/photo/gm2283366869",
+    "note": "Marble Boat, Summer Palace; downloaded 2026-11-16 batch; resized to 1400px wide. iStock licence: no AI use, do not pass the file to third parties"
   },
   "xian-city-wall": {
-    "author": "源義信",
-    "license": "CC BY-SA 4.0",
-    "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
-    "source": "https://commons.wikimedia.org/wiki/File:2023-10-07_Kuei-hsing_Tower_(%E9%AD%81%E6%98%9F%E6%A8%93),_Hsi-an_City_Wall_(%E8%A5%BF%E5%AE%89%E5%9F%8E%E7%89%86)_01.jpg",
-    "note": "resized to 1150px wide, re-encoded JPEG q68"
+    "author": "iStock (CTS subscription)",
+    "license": "iStock Standard License",
+    "licenseUrl": "https://www.istockphoto.com/legal/license-agreement",
+    "source": "https://www.istockphoto.com/photo/gm2166690000",
+    "note": "Xi'an city wall aerial; downloaded 2026-11-16 batch; resized to 1400px wide. iStock licence: no AI use, do not pass the file to third parties"
   },
   "wild-goose-pagoda": {
-    "author": "源義信",
-    "license": "CC BY-SA 4.0",
-    "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
-    "source": "https://commons.wikimedia.org/wiki/File:2023-10-10_Giant_Wild_Goose_Pagoda_%E5%A4%A7%E9%9B%81%E5%A1%94_02.jpg",
-    "note": "resized to 1150px wide, re-encoded JPEG q68"
+    "author": "iStock (CTS subscription)",
+    "license": "iStock Standard License",
+    "licenseUrl": "https://www.istockphoto.com/legal/license-agreement",
+    "source": "https://www.istockphoto.com/photo/gm2166532290",
+    "note": "Big Wild Goose Pagoda aerial, Xi'an; downloaded 2026-11-16 batch; resized to 1400px wide. iStock licence: no AI use, do not pass the file to third parties"
   },
   "tang-everbright-city": {
     "author": "源義信",
@@ -131,5 +131,40 @@
     "licenseUrl": "https://creativecommons.org/licenses/by/2.0",
     "source": "https://commons.wikimedia.org/wiki/File:Xi%27an_Bell_Tower_-_54075117224.jpg",
     "note": "resized to 1400px wide, re-encoded JPEG q58"
+  },
+  "shanghai-disneyland": {
+    "author": "Riku Lu",
+    "license": "CC0",
+    "licenseUrl": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+    "source": "https://commons.wikimedia.org/wiki/File:Enchanted_Storybook_Castle_(125424).jpg",
+    "note": "Enchanted Storybook Castle, Shanghai Disneyland; resized to 1400px wide, cropped bottom"
+  },
+  "guilin": {
+    "author": "iStock (CTS subscription)",
+    "license": "iStock Standard License",
+    "licenseUrl": "https://www.istockphoto.com/legal/license-agreement",
+    "source": "https://www.istockphoto.com/photo/gm2170006520",
+    "note": "Elephant Trunk Hill, Guilin; downloaded 2026-11-16 batch; resized to 1400px wide. iStock licence: no AI use, do not pass the file to third parties"
+  },
+  "lijiang": {
+    "author": "iStock (CTS subscription)",
+    "license": "iStock Standard License",
+    "licenseUrl": "https://www.istockphoto.com/legal/license-agreement",
+    "source": "https://www.istockphoto.com/photo/gm2270322339",
+    "note": "Lijiang Old Town rooftops with Jade Dragon Snow Mountain; downloaded 2026-11-16 batch; resized to 1400px wide. iStock licence: no AI use, do not pass the file to third parties"
+  },
+  "li-river": {
+    "author": "iStock (CTS subscription)",
+    "license": "iStock Standard License",
+    "licenseUrl": "https://www.istockphoto.com/legal/license-agreement",
+    "source": "https://www.istockphoto.com/photo/gm2163269837",
+    "note": "Bamboo raft on the Li River at sunset, Xingping; downloaded 2026-11-16 batch; resized to 1400px wide. iStock licence: no AI use, do not pass the file to third parties"
+  },
+  "zhangjiajie": {
+    "author": "iStock (CTS subscription)",
+    "license": "iStock Standard License",
+    "licenseUrl": "https://www.istockphoto.com/legal/license-agreement",
+    "source": "https://www.istockphoto.com/photo/gm526567272",
+    "note": "Yuanjiajie peaks, Zhangjiajie; downloaded 2026-11-16 batch; resized to 1400px wide. iStock licence: no AI use, do not pass the file to third parties"
   }
 }
