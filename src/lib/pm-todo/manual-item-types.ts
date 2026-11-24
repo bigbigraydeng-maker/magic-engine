@@ -41,6 +41,7 @@ import type { LeadFollowupItemKind } from './lead-followup-items'
 import type { CatalogueFollowupItemKind } from './catalogue-followup-items'
 import type { AdsAutonomyItemKind } from './ads-autonomy-items'
 import type { AdsRuleFindingItemKind } from './ads-rule-finding-items'
+import type { AdsTuneTicketKind } from '@/lib/ads-tune/ticket'
 import type { AdsHealthPatrolItemKind } from './ads-health-patrol-items'
 import type { AdsTrendCheckItemKind } from './ads-trend-check-items'
 import type { AdsCircuitItemKind } from './ads-circuit-items'
@@ -80,6 +81,8 @@ import type { PmKind } from './five-kinds'
 //   我们的探活 fetch 很可能拿到 403 → 整条被当坏链接丢掉。而这两条恰恰是
 //   「全站 AI 在空跑」和「这套告警自己瞎了」—— 宁可让人自己找入口，也不能让它静默消失。
 export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
+  // 调方缺素材：链接是登录后的确认卡页，探活容易判坏。丢了 = 内容侧不知道要出图。
+  'ads_tune_content_ticket',
   // distributor_application_pending：链接是登录后的经销商页，探活易判坏链接；丢了 = 有人申请了没人知道。
   'distributor_application_pending',
   // 标题效果判定的两条欠账：链接是要登录的后台页，探活会判坏链接——不能因此静默消失（2026-10-29）。
@@ -348,6 +351,8 @@ export type ManualItemKind =
   | AdsAutonomyItemKind
   /** 每日广告巡检的广告级规则（D2 素材疲劳 / D10 点进去之后差了）：要人拍板改不改，系统不会自动改 */
   | AdsRuleFindingItemKind
+  /** 调方没有可加的已审核新图，请内容侧出一条，系统不改广告 */
+  | AdsTuneTicketKind
   | AdsHealthPatrolItemKind
   | AdsTrendCheckItemKind
   | AdsCircuitItemKind

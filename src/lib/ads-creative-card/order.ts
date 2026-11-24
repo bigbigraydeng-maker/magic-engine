@@ -101,12 +101,44 @@ export function sameStory(left: CopiedStory, right: CopiedStory | null): boolean
     && left.leadFormId === right.leadFormId
 }
 
+export function textsFromAds(ads: readonly unknown[]): { primaryText: string; headline: string; ctaType: CtaType } | null {
+  for (const ad of ads) {
+    const text = textsFromAd(ad)
+    if (text) return text
+  }
+  return null
+}
+
 export function copyFromAds(ads: readonly unknown[]): CopiedStory | null {
   for (const ad of ads) {
     const copy = copyFromAd(ad)
     if (copy) return copy
   }
   return null
+}
+
+function textsFromAd(ad: unknown): { primaryText: string; headline: string; ctaType: CtaType } | null {
+  const block = linkData(ad)
+  if (!block) return null
+  const message = (block as { message?: unknown }).message
+  const name = (block as { name?: unknown }).name
+  if (typeof message !== 'string' || typeof name !== 'string') return null
+  const primaryText = message.trim()
+  const headline = name.trim()
+  if (!primaryText || primaryText.length > 500 || !headline || headline.length > 40) return null
+  if (/[{}[\]`]/.test(primaryText) || /[{}[\]`]/.test(headline)) return null
+  const raw = (block as { call_to_action?: { type?: unknown } }).call_to_action?.type
+  const ctaType = typeof raw === 'string' && (CTA_TYPES as readonly string[]).includes(raw) ? raw as CtaType : 'LEARN_MORE'
+  return { primaryText, headline, ctaType }
+}
+
+function linkData(ad: unknown): Record<string, unknown> | null {
+  if (!ad || typeof ad !== 'object') return null
+  const spec = (ad as { creative?: { object_story_spec?: unknown } }).creative?.object_story_spec
+  if (!spec || typeof spec !== 'object') return null
+  const block = (spec as { link_data?: unknown }).link_data
+  if (!block || typeof block !== 'object') return null
+  return block as Record<string, unknown>
 }
 
 function copyFromAd(ad: unknown): CopiedStory | null {

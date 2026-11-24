@@ -53,6 +53,7 @@ import { pushDistributorApplicationItems } from './distributor-application-items
 import { pushToolsWideBudgetItems } from './tools-wide-budget-items'
 import { pushAdsAutonomySyncItems } from './ads-autonomy-items'
 import { pushAdsRuleFindingItems } from './ads-rule-finding-items'
+import { pushTuneContentTickets } from '@/lib/ads-tune/ticket'
 import { pushAdsHealthPatrolItems } from './ads-health-patrol-items'
 import { pushAdsTrendCheckItems } from './ads-trend-check-items'
 import { pushAdsPredictiveEarlyWarningItems } from './ads-predictive-early-warning-items'
@@ -452,6 +453,9 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 每日广告巡检的广告级规则（D2 / D10）—— 只读，要不要改由人定；同一件事按 remind-cadence 节奏提醒
     (b) => pushAdsRuleFindingItems(supabase, b, now, nameOf).catch((e) =>
       console.warn('[manual-items] 广告级规则待办生成失败（不阻塞其他待办）:', e),
+    ),
+    (b) => pushTuneContentTickets(supabase, b, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 调方缺素材待办读不出来（不阻塞其他待办）:', e),
     ),
     (b) => pushAdsHealthPatrolItems(supabase, b, now, nameOf).catch((e) =>
       console.warn('[manual-items] 广告体检警报待办生成失败（不阻塞其他待办）:', e),

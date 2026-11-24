@@ -12,7 +12,7 @@ import { getRegisteredAccountIds } from '@/lib/meta/campaign-ownership'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import type { CreativeDeps, CreativeMeta, StepResult } from './flow'
 import type { Inspect, LiveFacts } from './guard'
-import { copyFromAds, factoryImagePath, type CreativeOrder } from './order'
+import { copyFromAds, factoryImagePath, textsFromAds, type CreativeOrder } from './order'
 import { readCreativeSwitch } from './switch'
 
 const WRITE_TIMEOUT_MS = 15_000
@@ -66,10 +66,14 @@ async function readLive(clientId: string, order: CreativeOrder): Promise<LiveFac
     && sameAccount(accountId, order.adAccountId)
   const ads = await graphGet(`${GRAPH_BASE}/${order.adSetId}/ads?fields=id,creative{object_story_spec}&limit=25&access_token=${encodeURIComponent(token)}`)
   const data = ads && Array.isArray(ads.data) ? ads.data : []
+  const texts = textsFromAds(data)
   return {
     accountKnown: known,
     adSetStatus: typeof adSet.status === 'string' ? adSet.status : null,
     copy: copyFromAds(data),
+    primaryText: texts?.primaryText ?? null,
+    headline: texts?.headline ?? null,
+    ctaType: texts?.ctaType ?? null,
   }
 }
 
