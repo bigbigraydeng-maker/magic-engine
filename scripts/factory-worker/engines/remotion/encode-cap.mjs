@@ -36,3 +36,43 @@ export function oversizeUploadMessage(sizeBytes, label = '成片') {
   const capMb = MAX_UPLOAD_BYTES / 1e6
   return `成片体检没过：${label} ${mb} MB，超过存储上限（${capMb} MB）。请缩短时长或换更静的镜头后重出`
 }
+
+/** Byte budget for one file at the bitrate ceiling, before the 10% health slack. */
+export function encodeCapLimit(durationSec) {
+  const cap = encodingCapFor(durationSec)
+  const maxBytes = Math.floor((cap.videoKbps + AUDIO_KBPS_ALLOWANCE) * 1000 * durationSec / 8)
+  return {
+    ...cap,
+    maxBytes,
+    slackBytes: Math.floor(maxBytes * 1.1),
+    slackBps: Math.floor(cap.videoKbps * 1000 * 1.1),
+  }
+}
+
+/**
+ * Health check: fail when the file is more than 10% over the encode-cap budget,
+ * or when a measured video bitrate is more than 10% over the ceiling.
+ * @param {{ sizeBytes: number, durationSec: number, videoBitrateBps?: number, label?: string }} input
+ */
+export function encodeCapVerdict(input) {
+  const label = input.label || '成片'
+  let limit
+  try {
+    limit = encodeCapLimit(input.durationSec)
+  } catch {
+    return { ok: false, message: `成片体检没过：${label} 读不到时长，没法核对体积` }
+  }
+  const size = Number(input.sizeBytes)
+  const rate = input.videoBitrateBps
+  const sizeOver = !Number.isFinite(size) || size > limit.slackBytes
+  const rateOver = Number.isFinite(rate) && rate > limit.slackBps
+  if (!sizeOver && !rateOver) return { ok: true, ...limit }
+  const mb = (Number.isFinite(size) ? size : 0) / 1e6
+  const capMb = limit.slackBytes / 1e6
+  const measured = Number.isFinite(rate) ? `、约 ${(rate / 1e6).toFixed(1)} Mbps` : ''
+  return {
+    ok: false,
+    ...limit,
+    message: `成片体检没过：${label} ${mb.toFixed(1)} MB${measured}，超过这支片子的体积上限（约 ${capMb.toFixed(1)} MB，允许比码率上限再高出 10%）。请用最新出片机重出`,
+  }
+}

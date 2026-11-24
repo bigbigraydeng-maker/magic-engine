@@ -6,6 +6,8 @@ import {
   MAX_VIDEO_KBPS,
   MIN_VIDEO_KBPS,
   STORAGE_TARGET_BYTES,
+  encodeCapLimit,
+  encodeCapVerdict,
   encodingCapFor,
   oversizeUploadMessage,
 } from '../encode-cap.mjs'
@@ -70,4 +72,20 @@ test('upload-size-gate re-exports the one ceiling', async () => {
   const gate = await import('../upload-size-gate.mjs')
   assert.equal(gate.MAX_UPLOAD_BYTES, MAX_UPLOAD_BYTES)
   assert.equal(gate.oversizeUploadMessage, oversizeUploadMessage)
+})
+
+test('a 19 second reel at the ceiling is about 24 MB and passes with 10% slack', () => {
+  const limit = encodeCapLimit(19)
+  assert.equal(limit.videoKbps, 10_000)
+  assert.ok(limit.maxBytes < 26_000_000)
+  assert.ok(limit.maxBytes > 20_000_000)
+  assert.equal(encodeCapVerdict({ sizeBytes: limit.maxBytes, durationSec: 19 }).ok, true)
+  assert.equal(encodeCapVerdict({ sizeBytes: limit.slackBytes, durationSec: 19 }).ok, true)
+})
+
+test('35 MB on a 19 second reel fails the health check', () => {
+  const verdict = encodeCapVerdict({ sizeBytes: 35_000_000, durationSec: 19, videoBitrateBps: 14_900_000 })
+  assert.equal(verdict.ok, false)
+  assert.match(verdict.message, /成片体检没过/)
+  assert.match(verdict.message, /35\.0 MB/)
 })

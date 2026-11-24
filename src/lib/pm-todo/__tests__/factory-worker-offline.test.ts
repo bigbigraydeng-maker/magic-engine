@@ -57,6 +57,20 @@ describe('出片机离线提醒（30 分钟）', () => {
     expect(await run(orders, [ping(1)])).toEqual([])
   })
 
+  it('出片机还活着但代码太旧 → 告诉人怎么更新，单子不进死信', async () => {
+    const logs = [ping(2)]
+    logs[0].summary = {
+      worker_id: 'mac-1',
+      client_ids: ['a'],
+      engine_stale: true,
+      engine_notice: '出片机版本过旧。在你那台 Mac 的出片机文件夹里：先拉取最新代码。队列里的单子还在，不会作废。',
+    }
+    const items = await run([order('a', 20)], logs)
+    expect(items.map((item) => item.what).join('')).toContain('出片机版本过旧')
+    expect(items.map((item) => item.how).join('')).toContain('不会作废')
+    expect(items.every((item) => item.kind !== 'factory_dead_letter_stuck')).toBe(true)
+  })
+
   it('只限定了客户 B 的出片机在报存活，不能替客户 A 担保', async () => {
     const items = await run([order('a', 50), order('b', 50)], [ping(1, ['b'])])
     expect(items.map(i => i.what).join('')).toContain('Client A')

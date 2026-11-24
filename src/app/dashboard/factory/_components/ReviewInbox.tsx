@@ -13,6 +13,7 @@ import { PendingCardHead } from './OrderTile'
 import { RejectDialog } from './RejectDialog'
 import { groupCounts, parseAngle } from './reviewCardMeta'
 import { maliangReviewNote, type MaliangReviewTone } from '@/lib/maliang/review-note'
+import { engineCardNote } from '@/lib/factory/engine-catalog.mjs'
 
 // P21.J ME 原生化 P1 — 审核 Inbox(spec me-native-design v0.2 §2.1)
 // 试验田:看片 + 拍板。in_review 工单 → 大号播放器 + 人话理由 +
@@ -177,6 +178,7 @@ const publicUrl = (path?: string) =>
 // hideWhenEmpty:没待审就不渲染(不占地方)
 export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?: string; hideWhenEmpty?: boolean; onReviewed?: () => void } = {}) {
   const [orders, setOrders] = useState<WorkOrder[]>([])
+  const [engineNotice, setEngineNotice] = useState<string | null>(null)
   const [assets, setAssets] = useState<WorkOrder[]>([])
   const [rejecting, setRejecting] = useState<{ order: WorkOrder; mode: 'quality' | 'budget' } | null>(null)
   const [musicChoicesByOrder, setMusicChoicesByOrder] = useState<Record<string, RemotionMusicChoice[]>>({})
@@ -226,6 +228,8 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
       const res = await fetch('/api/factory/work-orders')
       if (!res.ok) throw new Error(`加载失败 (${res.status})`)
       const json = await res.json()
+      const noticeText = json.worker?.engine_notice
+      setEngineNotice(typeof noticeText === 'string' && noticeText.trim() ? noticeText : null)
       const inReview = (json.orders ?? []).filter(
         (o: WorkOrder & { client_id?: string }) =>
           o.status === 'in_review' && (!clientId || o.client_id === clientId),
@@ -332,6 +336,11 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
       {notice && <div role="status" className="mb-3 px-4 py-2 rounded-lg bg-status-exec/10 text-me-charcoal text-sm">{notice}</div>}
 
       <p className="mb-3 text-xs text-me-charcoal/55">只列出待审核视频。已通过、已打回和被新版替代的记录自动从待办中收起，原工单记录保留。</p>
+      {engineNotice && (
+        <div className="mb-3 rounded-lg border border-status-rej/30 bg-status-rej/10 px-3 py-2 text-sm text-me-charcoal" data-testid="engine-stale-notice">
+          {engineNotice}
+        </div>
+      )}
 
       {groups.length > 1 && (
         <div className="flex flex-wrap gap-2 mb-4" role="group" aria-label="按团筛选">
@@ -352,6 +361,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
         <div className={gridCls}>
           {shownPending.map((o) => {
               const maliangNote = maliangReviewNote(o.output)
+              const staleNote = engineCardNote(o.output)
               return (
               <div key={o.id} className="border border-black/10 rounded-xl bg-white p-3 flex flex-col">
                 <PendingCardHead
@@ -367,6 +377,12 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
                   <span className="rounded bg-me-stone/60 px-2 py-1">模板 · {renderChoiceLabel(o.template_id)}</span>
                   <span className="rounded bg-me-stone/60 px-2 py-1">BGM · {musicChoiceLabel(o.music_file)}</span>
                 </div>
+
+                {staleNote && (
+                  <div className="mb-2 rounded-lg border border-status-rej/30 bg-status-rej/10 px-2 py-1.5 text-xs text-me-charcoal" data-testid="engine-stale-card">
+                    {staleNote}
+                  </div>
+                )}
 
                 {maliangNote && (
                   <div className={maliangNoteBox(maliangNote.tone)} data-testid="maliang-review-note" data-tone={maliangNote.tone}>

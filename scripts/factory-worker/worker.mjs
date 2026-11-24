@@ -51,6 +51,7 @@ import {
 } from './remotion-branch.mjs'
 import { MusicVocalGateError, assertBgmFileVocalClear, assertLegacyBgmVocalGate } from './music-vocal-gate.mjs'
 import { pingRenderWorker, watchRenderWorker } from './render-worker-watch.mjs'
+import { currentEngineReport } from './engine-report.mjs'
 
 // ── 配置 ──────────────────────────────────────────────────────────────────────
 
@@ -159,8 +160,19 @@ async function api(path, method = 'POST', body) {
 }
 
 async function claimOne() {
-  const r = await api('/api/factory/worker/claim', 'POST', buildClaimBody(WORKER_ID, TARGET_CLIENT_ID))
+  const r = await api('/api/factory/worker/claim', 'POST', {
+    ...buildClaimBody(WORKER_ID, TARGET_CLIENT_ID),
+    engine: currentEngineReport(),
+  })
   if (!r.ok) throw new Error(`claim ${r.status}: ${JSON.stringify(r.json)}`)
+  if (r.json?.stale_engine === true) {
+    const message = typeof r.json.message === 'string' && r.json.message.trim()
+      ? r.json.message.trim()
+      : '出片机版本过旧'
+    const err = new Error(message)
+    err.staleEngine = true
+    throw err
+  }
   if (!r.json.claimed) return null
   if (TARGET_CLIENT_ID && !claimMatchesTarget(r.json, TARGET_CLIENT_ID)) {
     throw new Error('claim 返回了目标客户之外的工单,已停止且未开始生成')
@@ -543,6 +555,7 @@ export async function processOrder(wo) {
       actual_cost_usd: cost,
       new_clips: newClips,
       media_evidence: mediaEvidence,
+      engine: currentEngineReport(),
     })
     if (!r.ok) throw new Error(`complete ${r.status}: ${JSON.stringify(r.json)}`)
     log(`✅ 工单 ${woId} 完成 → ${r.json.status ?? 'in_review'}`, r.json.redline_hits?.length ? `(红线标记: ${r.json.redline_hits})` : '')
@@ -832,6 +845,7 @@ export async function runRecipeSequence({ wo, recipe, tmp, deps }) {
     new_clips: newClips,
     recipe_receipt: receipt,
     media_evidence: mediaEvidence,
+    engine: currentEngineReport(),
   })
   if (!r.ok) throw new Error(`complete ${r.status}: ${JSON.stringify(r.json)}`)
   logFn?.(`✅ 工单 ${woId} recipe 完成 → ${r.json?.status ?? 'in_review'}`)
@@ -1071,6 +1085,7 @@ export async function pingAlive(fetchFn = fetch, now = Date.now(), watch = undef
       body: JSON.stringify({
         ...buildClaimBody(WORKER_ID, TARGET_CLIENT_ID),
         render_worker: pingRenderWorker(watch ?? defaultRenderWatch()),
+        engine: currentEngineReport(),
       }),
       signal: AbortSignal.timeout(10_000),
     })
@@ -1106,7 +1121,11 @@ async function main() {
       if (!result.claimed && loop) log('无 queued 工单,等待…')
       else if (!result.claimed) { log('无 queued 工单,退出'); break }
     } catch (e) {
-      log('循环异常:', e.message)
+      if (e?.staleEngine) {
+        log(e.message)
+        // Still report alive, so the inbox can say the machine is old instead of offline.
+        if (loop) await pingAlive()
+      } else log('循环异常:', e.message)
       if (jsonResult) {
         console.log(`FACTORY_WORKER_RESULT ${JSON.stringify({ claimed: false, ok: false, error: e.message })}`)
       }
