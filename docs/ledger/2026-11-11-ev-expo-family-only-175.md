@@ -9,6 +9,8 @@ verify_by: 2026-11-12
 verify_how: 11/12 上午读 Eventbrite 追踪链接页 Yesterday 的 meevexpoold1 卖票数，和 Meta 里带娃组 11/11 花费对比；花费接近 $175 且每张票不高于约 $50 算成，否则把预算退回 $100 的建议报 PM
 done_on: 2026-11-11
 done_ref: doc:docs/clients/ev-tech-expo/2026-11-08-ads-change-ledger.md
+last_checked: 2026-11-25
+check_note: "2026-11-25 积压清理：需要看 Eventbrite 追踪链接页的卖票数，这边读不到，判不了。"
 ---
 总账第 34–37 行：暂停大学生组、私信组；带娃组 $100→$175；外围+三城新组被 Meta 主页权限挡住没建成。
 累计成交率见 docs/clients/ev-tech-expo/2026-11-11-sales-snapshot.md（整体约 0.4%，带娃组约 0.8%）。

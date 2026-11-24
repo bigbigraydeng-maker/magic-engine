@@ -9,6 +9,8 @@ verify_by: 2026-11-08
 verify_how: "打开 https://www.ctstours.co.nz/tours/china/discovery/shanghai-surroundings ：返回 200、页面标题和一级标题含 Shanghai & Beyond、价格仍是 NZ$2,699；欢迎信底稿和草稿里的团页链接仍指这个网址（点开标题对）。出发日变没变、官网里 shanghai-beyond 的跳转要不要反向、ME 团目录改名不在本卡内"
 done_on: 2026-11-01
 done_ref: pr:3439
+last_checked: 2026-11-25
+check_note: "2026-11-25 积压清理：官网页面一半核实成了（200、新名、价格没变），但邮件里的链接在模板库里查不到，判不了。"
 ---
 11/1 凌晨 3 点复查官网：上海团页标题和一级标题都是 Shanghai & Beyond（页面里 Beyond 出现 18 次、Surroundings 0 次），价格 NZ$2,699 没变；旧网址 /tours/china/discovery/shanghai-surroundings 返回 200，打开的就是新名页面，/shanghai-beyond 仍跳回旧网址。
 所以邮件里（欢迎信 v2、每天 8:01 批次底稿、9 封草稿）的团页链接保持旧网址，不用换；换了反而要再改一遍底稿。

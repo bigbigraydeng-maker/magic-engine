@@ -1,7 +1,7 @@
 ---
 id: 2026-11-01-crm-auto-quoted-after-recommendation-email
 title: CRM：同事发出点名出发日的推荐邮件后，已联系自动改已报价（每小时，先只用规则）
-status: done
+status: verified
 owner: agent
 decided_on: 2026-11-01
 done_on: 2026-11-01
@@ -9,6 +9,9 @@ done_ref: pr:3488
 source: session:96dc6edf
 verify_by: 2026-11-03
 verify_how: 合并部署后第二天，查 CTS 里「已联系」且同事发过「推荐+出发日」主题邮件的人是否已变「已报价」：contact_stage_events 里 changed_by='system:quote-email-sent' 应有记录（首轮约 14 位较早客人），note 里带邮件主题；抽 3 位核对确实是我们发出的推荐行程。不成时第一步：看最近一次 messenger-hourly 回执里的 quoteAdvance（candidates/advanced/failed）。
+last_checked: 2026-11-25
+check_note: "2026-11-25 积压清理：系统自动改已报价的记录共 30 条，备注里带推荐邮件主题，一直在持续运行。"
+verified_ref: doc:docs/ledger/evidence/2026-11-01-crm-auto-quoted-after-recommendation-email--2026-11-25.md
 ---
 PM 2026-11-01 回「做自动」：当天人工把 29 位「已联系」补改为「已报价」之后，要让以后每封这样的邮件自动处理。
 规则：阶段是已联系 + 人发的一对一外发邮件主题同时有 recommendation/suggestion 和出发日（转发、群发、自动回执不算）；人在邮件之后手动定过阶段就不碰；只往前推。
