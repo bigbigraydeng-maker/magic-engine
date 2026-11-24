@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { filterRowsWithClientId, filterRowsWithId } from '@/lib/clients/external-data-pull-allowlist'
 import { supabaseAdmin } from '@/lib/supabase'
 import { syncClientMessenger, type MessengerSyncClient } from '@/lib/messenger/sync'
 import { startCronRun } from '@/lib/cron/run-logger'
@@ -85,7 +86,7 @@ export async function GET(req: NextRequest) {
   }
 
   const results = []
-  for (const client of (clients ?? []) as MessengerSyncClient[]) {
+  for (const client of filterRowsWithId((clients ?? []) as MessengerSyncClient[])) {
     results.push(await syncClientMessenger(client))
   }
 
@@ -200,7 +201,9 @@ async function syncConnectedMailboxes() {
     .eq('provider', MICROSOFT_MAIL_PROVIDER)
     .eq('status', CONNECTION_STATUS.ACTIVE)
 
-  const connections = (conns ?? []) as { id: string; client_id: string; account_id: string }[]
+  const connections = filterRowsWithClientId(
+    (conns ?? []) as { id: string; client_id: string; account_id: string }[],
+  )
   if (connections.length === 0) return []
 
   // leads_config 一起取回来：里面有设置页填的「客户自己的邮件域名」（关联公司），

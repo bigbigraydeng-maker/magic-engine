@@ -28,6 +28,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import { filterRowsWithId } from '@/lib/clients/external-data-pull-allowlist'
 import { supabaseAdmin } from '@/lib/supabase'
 import { startCronRun } from '@/lib/cron/run-logger'
 import { fetchAll } from '@/lib/supabase-paginate'
@@ -118,7 +119,9 @@ async function run(dryRun: boolean): Promise<NextResponse> {
 
   const results: Array<Record<string, unknown>> = []
 
-  for (const client of (clients ?? []) as Array<{ id: string; name: string | null; leads_config: unknown }>) {
+  for (const client of filterRowsWithId(
+    (clients ?? []) as Array<{ id: string; name: string | null; leads_config: unknown }>,
+  )) {
     const audience = await readAudienceId(client.id)
     if (!audience.ok) {
       results.push({ client: client.name, error: `读 audience id 失败: ${audience.message}` })

@@ -10,6 +10,7 @@
  * 每个账户独立降级：一个账户读失败不影响其它账户；读不全的层级**不写快照行、也不判消失**。
  */
 
+import { filterRowsWithId } from '@/lib/clients/external-data-pull-allowlist'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import { findSharedAdAccounts } from '@/lib/meta/client-ad-accounts'
@@ -292,5 +293,8 @@ export async function listSnapshotClients(): Promise<SnapshotClient[]> {
     if (extra.error) throw new Error(`读客户列表失败：${extra.error.message}`)
     for (const c of (extra.data ?? []) as Array<{ id: string; name: string | null; client_status: string | null }>) byId.set(c.id, c)
   }
-  return [...byId.values()].filter(c => c.client_status !== 'archived').map(c => ({ id: c.id, name: c.name }))
+  const roster = [...byId.values()]
+    .filter(c => c.client_status !== 'archived')
+    .map(c => ({ id: c.id, name: c.name }))
+  return filterRowsWithId(roster)
 }

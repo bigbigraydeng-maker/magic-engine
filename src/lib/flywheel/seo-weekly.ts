@@ -18,6 +18,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { filterRowsWithClientIdCamel } from '@/lib/clients/external-data-pull-allowlist'
 
 /**
  * 云端专属事件名 —— 本机 factory-worker 不消费（见 lib/inngest/client.ts 的
@@ -94,7 +95,7 @@ export async function loadSnapshotRoster(supabase: SupabaseClient): Promise<Rost
     return [{ clientId, domain: domain.trim() }]
   })
 
-  return { ok: true, entries }
+  return { ok: true, entries: filterRowsWithClientIdCamel(entries) }
 }
 
 /**

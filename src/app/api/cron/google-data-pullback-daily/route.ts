@@ -47,6 +47,11 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import {
+  filterRowsWithClientId,
+  filterRowsWithId,
+  isClientAllowedForExternalDataPull,
+} from '@/lib/clients/external-data-pull-allowlist'
 import { supabaseAdmin } from '@/lib/supabase'
 import { fetchGscSnapshot } from '@/lib/gsc/client'
 import { gscSiteUrlFromConfig } from '@/lib/gsc/connected-clients'
@@ -240,8 +245,12 @@ export async function GET(req: NextRequest) {
     )
   }
 
-  const connectors = connResult.data
-  const metaClients = (metaResult.data ?? []) as Array<{ id: string; name: string; domain: string | null; meta_ad_account_id: string }>
+  const connectors = (connResult.data ?? []).filter((row) =>
+    isClientAllowedForExternalDataPull((row as { client_id: string }).client_id),
+  )
+  const metaClients = filterRowsWithId(
+    (metaResult.data ?? []) as Array<{ id: string; name: string; domain: string | null; meta_ad_account_id: string }>,
+  )
   // googleAdsResult.error is non-fatal (table may not exist in some envs) — log
   // and proceed with an empty list rather than failing the whole cron run.
   if (googleAdsResult.error) {
@@ -250,7 +259,9 @@ export async function GET(req: NextRequest) {
       googleAdsResult.error.message,
     )
   }
-  const googleAdsClients = (googleAdsResult.data ?? []) as Array<{ client_id: string; account_id: string }>
+  const googleAdsClients = filterRowsWithClientId(
+    (googleAdsResult.data ?? []) as Array<{ client_id: string; account_id: string }>,
+  )
 
   // ── 2. Build per-client work map ───────────────────────────────────────────
   const workMap = new Map<string, ClientWork>()

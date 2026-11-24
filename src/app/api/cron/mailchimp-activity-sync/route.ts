@@ -20,6 +20,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import { filterRowsWithId } from '@/lib/clients/external-data-pull-allowlist'
 import { supabaseAdmin } from '@/lib/supabase'
 import { readSentRecordConfig, syncMailchimpActivity } from '@/lib/mailchimp/sync'
 import { ping } from '@/lib/mailchimp/client'
@@ -63,8 +64,10 @@ async function run(): Promise<NextResponse> {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  const targets = (clients ?? []).filter(
-    (c) => (c.leads_config as { mailchimp_enabled?: boolean } | null)?.mailchimp_enabled === true,
+  const targets = filterRowsWithId(
+    (clients ?? []).filter(
+      (c) => (c.leads_config as { mailchimp_enabled?: boolean } | null)?.mailchimp_enabled === true,
+    ) as Array<{ id: string; name: string | null; leads_config: unknown }>,
   )
 
   if (targets.length === 0) {

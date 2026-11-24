@@ -20,6 +20,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import { filterRowsWithId } from '@/lib/clients/external-data-pull-allowlist'
 import { supabaseAdmin } from '@/lib/supabase'
 import { syncClientMetaLeads, type MetaLeadsSyncClient } from '@/lib/meta/leads-sync'
 import { abandonAfterMs } from '@/lib/cron/expected-duration'
@@ -91,7 +92,7 @@ async function run(): Promise<NextResponse> {
   }
 
   const results = []
-  for (const client of (clients ?? []) as MetaLeadsSyncClient[]) {
+  for (const client of filterRowsWithId((clients ?? []) as MetaLeadsSyncClient[])) {
     // syncClientMetaLeads 自己吞异常，这层 try 给它之外的意外兜底：
     // 一个客户炸掉不能让其它客户今天都不同步。
     try {

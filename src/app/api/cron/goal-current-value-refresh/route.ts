@@ -16,6 +16,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import { filterClientIdsForExternalDataPull } from '@/lib/clients/external-data-pull-allowlist'
 import { supabaseAdmin } from '@/lib/supabase'
 import { autoFetchMetricValue } from '@/lib/strategy/auto-fetch'
 import { readSeatFetchExtras } from '@/lib/strategy/seat-scope'
@@ -96,7 +97,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       )
     }
 
-    const activeIds = new Set(((activeClients ?? []) as Array<{ id: string }>).map((c) => c.id))
+    const activeIds = new Set(
+      filterClientIdsForExternalDataPull(((activeClients ?? []) as Array<{ id: string }>).map((c) => c.id)),
+    )
     goals = allGoals.filter((g) => activeIds.has(g.client_id))
   }
 

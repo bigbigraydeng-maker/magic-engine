@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { makeFakeSupabase } from '@/lib/memory/__tests__/fake-supabase'
 import { gscSiteUrlFromConfig, loadGscConnectedClients } from '../connected-clients'
 
@@ -7,6 +7,13 @@ const B = 'd5c98811-1c1d-4ded-bdf0-4cefec6afb84'
 const C = '4ae76381-cd45-43bd-85cd-98cfd7604007'
 
 describe('loadGscConnectedClients', () => {
+  beforeEach(() => {
+    vi.stubEnv('EXTERNAL_DATA_PULL_CLIENT_IDS', '*')
+  })
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
   it('returns connected GSC clients with a trimmed site_url and ignores everything else', async () => {
     const supabase = makeFakeSupabase({
       client_connectors: [

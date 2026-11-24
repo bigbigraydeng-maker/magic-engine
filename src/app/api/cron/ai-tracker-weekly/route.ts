@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { filterClientIdsForExternalDataPull } from '@/lib/clients/external-data-pull-allowlist'
 import { supabaseAdmin } from '@/lib/supabase'
 import { runTracker } from '@/lib/ai-tracker/orchestrator'
 import { startCronRun } from '@/lib/cron/run-logger'
@@ -96,12 +97,14 @@ async function runInBackground() {
 
   // 🔴 排除已经开了 ai_visibility_inngest_enabled 的客户——他们这周改由 Inngest 那条新链路
   // 处理（见本文件顶部注释）。漏排会导致同一个客户被两条链路各花一次 provider 的钱。
-  const clientIds = (activeClients ?? [])
-    .filter(r => {
-      const cfg = (r as { seo_config?: unknown }).seo_config as Record<string, unknown> | null | undefined
-      return cfg?.['ai_visibility_inngest_enabled'] !== true
-    })
-    .map(r => (r as { id: string }).id)
+  const clientIds = filterClientIdsForExternalDataPull(
+    (activeClients ?? [])
+      .filter(r => {
+        const cfg = (r as { seo_config?: unknown }).seo_config as Record<string, unknown> | null | undefined
+        return cfg?.['ai_visibility_inngest_enabled'] !== true
+      })
+      .map(r => (r as { id: string }).id),
+  )
 
   if (clientIds.length === 0) {
     console.log('[ai-tracker-weekly] No active clients have enabled queries — nothing to run')

@@ -39,6 +39,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import { filterRowsWithClientId } from '@/lib/clients/external-data-pull-allowlist'
 import { supabaseAdmin } from '@/lib/supabase'
 import { startCronRun } from '@/lib/cron/run-logger'
 import { getValidTokenForConnection } from '@/lib/platform-oauth/token-manager'
@@ -222,7 +223,9 @@ async function run(lookbackDays: number, dryRun: boolean): Promise<NextResponse>
     return NextResponse.json({ error: connErr.message }, { status: 500 })
   }
 
-  const connections = (conns ?? []) as Array<{ id: string; client_id: string; account_id: string }>
+  const connections = filterRowsWithClientId(
+    (conns ?? []) as Array<{ id: string; client_id: string; account_id: string }>,
+  )
   if (connections.length === 0) {
     await cronRun.finish({ processed: 0, completed: 0, failed: 0, summary: { note: '还没有客户连邮箱' } })
     return NextResponse.json({ ok: true, mailboxes: 0, results: [] })

@@ -9,6 +9,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { filterRowsWithClientIdCamel } from '@/lib/clients/external-data-pull-allowlist'
 import { isoWeekKey } from '@/lib/flywheel/seo-weekly'
 import { normalizeSlug, parseProtectedSlugs, readProtectedRaw } from '@/lib/seo/protected-pages'
 import { STEP6_JOB_NAME } from './receipts'
@@ -92,7 +93,7 @@ export async function loadMetaCycleRoster(supabase: SupabaseClient): Promise<Ros
     return entry ? [entry] : []
   })
 
-  return { ok: true, entries }
+  return { ok: true, entries: filterRowsWithClientIdCamel(entries) }
 }
 
 function rowToEntry(row: { id?: unknown; domain?: unknown; semrush_db?: unknown; seo_config?: unknown }): MetaCycleRosterEntry | null {

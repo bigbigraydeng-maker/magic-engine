@@ -13,6 +13,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import { filterRowsWithClientId } from '@/lib/clients/external-data-pull-allowlist'
 import { supabaseAdmin } from '@/lib/supabase'
 import { startCronRun } from '@/lib/cron/run-logger'
 import {
@@ -51,7 +52,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: `Failed to load configs: ${error.message}` }, { status: 500 })
   }
 
-  const configs = (data ?? []) as CommentConfig[]
+  const configs = filterRowsWithClientId((data ?? []) as CommentConfig[])
   if (configs.length === 0) {
     await cronRun.finish({ processed: 0 })
     return NextResponse.json({ success: true, clients_processed: 0, message: 'No clients enabled', results: [] })
