@@ -638,6 +638,24 @@ describe('createDraftForApproval — 私信类型', () => {
     expect(inserted[0].redlinesSkipped).toBeUndefined()
   })
 
+  it('每天 80、没给客户上限 → 照旧按 50 拦，不去建', async () => {
+    const { sb } = fakeSupabase()
+    const r = await createDraftForApproval({ ...MSG, dailyBudget: 80 }, deps(sb))
+    expect(r.status).toBe('failed')
+    expect(r.error).toContain('每日上限 50')
+    expect(mPublish).not.toHaveBeenCalled()
+  })
+
+  it('每天 80、确认卡带来客户上限 200 → 放行去建；超过 200 仍拦', async () => {
+    const { sb } = fakeSupabase()
+    const r = await createDraftForApproval({ ...MSG, dailyBudget: 80 }, deps(sb, { maxDailyBudget: 200 }))
+    expect(r.status).toBe('awaiting_approval')
+    expect(mPublish).toHaveBeenCalledTimes(1)
+    const over = await createDraftForApproval({ ...MSG, dailyBudget: 200.01 }, deps(sb, { maxDailyBudget: 200 }))
+    expect(over.status).toBe('failed')
+    expect(mPublish).toHaveBeenCalledTimes(1)
+  })
+
   it('文案命中客户禁用词 → 拒建', async () => {
     const { sb, inserted } = fakeSupabase()
     const d = { ...MSG, creatives: [{ ...MSG.creatives[0], primaryText: 'Proudly founded in １９００' }] }

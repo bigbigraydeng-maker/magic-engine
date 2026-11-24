@@ -22,6 +22,7 @@ import {
   PAUSED_DRAFT_HOLD,
   metaErrorClass,
   pausedDraftBlock,
+  pausedDraftCeiling,
   pausedDraftFacts,
   pausedDraftRetry,
   plainMetaError,
@@ -193,7 +194,11 @@ async function confirmAndBuild(
     const again = await holdForRun(args.kernel.supabase, args.clientId, args.runId)
     return finished(again.payload, card)
   }
-  return publish(args, hold, who, card, { ...deps, adAccountId: hold.payload.adAccountId })
+  return publish(args, hold, who, card, {
+    ...deps,
+    adAccountId: hold.payload.adAccountId,
+    maxDailyBudget: pausedDraftCeiling(args.review),
+  })
 }
 
 async function confirmedCard(

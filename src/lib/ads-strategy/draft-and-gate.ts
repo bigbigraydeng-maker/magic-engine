@@ -156,6 +156,11 @@ export interface CreateDraftDeps {
    * 不要把读库失败的结果顺手写成 `[]`。
    */
   brandRedlines?: readonly string[]
+  /**
+   * 单份草稿每天预算的顶（元）。不传 = `MAX_AUTO_DAILY_BUDGET`。
+   * 只有人已经点过确认卡、且卡上核过客户上限的路径才传（见 paused-draft-submit）。
+   */
+  maxDailyBudget?: number
   /** 可注入的时钟，测试用。 */
   now?: () => number
 }
@@ -243,7 +248,8 @@ export async function createDraftForApproval(
   if (held) return failedOutcome(deps, clean, { ...base, error: held })
 
   // ── 0. ME 自己就能判的错，不要浪费一次真实创建 ────────────────────────
-  const problems = [...validateDraft(clean), ...checkDraftRedlines(clean, deps.brandRedlines)]
+  const limits = deps.maxDailyBudget === undefined ? undefined : { maxDailyBudget: deps.maxDailyBudget }
+  const problems = [...validateDraft(clean, limits), ...checkDraftRedlines(clean, deps.brandRedlines)]
   if (problems.length > 0) {
     const error = problems.map((p) => `${p.field}：${p.message}`).join('；')
     return failedOutcome(deps, clean, { ...base, error })
