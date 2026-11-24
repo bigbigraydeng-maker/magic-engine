@@ -205,6 +205,8 @@ export function createBlankItinerary(quoteRef: string): TailorMadeItinerary {
     inclusions: [],
     exclusions: [],
     notes: [
+      'All quotations provided are net rates and do not include any commission.',
+      'Prices may be adjusted in line with changes in exchange rates. We reserve the right to make such adjustments.',
       'For itineraries involving train tickets, availability and details can only be confirmed within 15 days prior to departure.',
       'For visits to the Forbidden City, ticket confirmation is only possible within 7 days of the intended visit date.',
       'Final itinerary and pricing are subject to confirmation upon booking.',
