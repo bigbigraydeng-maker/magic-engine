@@ -57,3 +57,16 @@ export async function loadHeroBuffer(name: string): Promise<Buffer | null> {
     return null
   }
 }
+
+/**
+ * 换封面面板里的小缩略图（320×200，heroes/thumbs/）。
+ * 原图每张 150–250KB，四十多张一次全拉会让面板卡好几秒，所以单独存一份小图。
+ */
+export async function loadHeroThumb(name: string): Promise<Buffer | null> {
+  if (!/^[a-z0-9-]+$/.test(name)) return null
+  try {
+    return await readFile(path.join(HERO_DIR, 'thumbs', `${name}.jpg`))
+  } catch {
+    return null
+  }
+}
