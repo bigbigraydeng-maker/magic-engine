@@ -881,6 +881,17 @@ describe('env.account_billing', () => {
     expect(g.reason).toContain('日预算不超上限')
   })
 
+  it('空账户单独出黄时标 empty_account_only；还有别的不放心就不标', () => {
+    const only = gate(judge(budget({ live_daily_budget_cents: 0, live_entity_count: 0 })), KEY)
+    expect(only.status).toBe('yellow')
+    expect(only.evidence.empty_account_only).toBe(true)
+    const more = gate(judge(budget({ live_daily_budget_cents: 0, live_entity_count: 0, registered_account_count: 2, client_cap_cents: 30000 })), KEY)
+    expect(more.status).toBe('yellow')
+    expect(more.evidence.empty_account_only).toBe(false)
+    const other = gate(judge(budget({ registered_account_count: 2, client_cap_cents: 30000 })), KEY)
+    expect(other.evidence.empty_account_only).toBe(false)
+  })
+
   it('黄：客户有多个登记账户 → 只核对这一个账户，文案不说客户级；客户总上限是各账户加起来比的，这里没算', () => {
     const g = gate(judge(budget({ registered_account_count: 2, client_cap_cents: 30000 })), KEY)
     expect(g.status).toBe('yellow')

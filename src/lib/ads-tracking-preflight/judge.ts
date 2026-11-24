@@ -768,6 +768,8 @@ export function judgeAccountBilling(input: Pick<JudgeInput, 'config' | 'meta' | 
       ? `；另有 ${others.accounts} 个登记账户${others.hidden > 0 ? `（其中 ${others.hidden} 个已在广告健康页隐藏）` : ''}里没有开着的预算，所以这里的合计就是整个客户的在投合计`
       : ''
   const verified = `账户正常、有付款方式；本账户现在在投的日预算合计 ${money(live, currency)}，没超库里的${capText}（不含本次要新开的计划预算）${otherText}`
+  // 只因「账户里一个在投的都没有」出黄时单独标出来：开投卡要分得清这一种（见 ads-go-live/checks.ts）
+  evidence.empty_account_only = notes.length === 1 && b.live_entity_count === 0
   if (notes.length > 0) {
     return receipt(key, 'yellow', `${verified}；但：${notes.map(f => f.reason).join('；')}`, notes.map(f => f.how).join('；'), evidence, as_of)
   }

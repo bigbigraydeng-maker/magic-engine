@@ -41,6 +41,69 @@ describe('go-live hard checks', () => {
     expect(checks[0]?.reason).toBe('还不是绿灯')
   })
 
+  it('lets the budget gate pass when it is yellow only because nothing is live yet', () => {
+    const gates = gatesFromReceipt({
+      receipt: {
+        checkedAt: hoursAgo(1),
+        gates: PREFLIGHT_GATE_KEYS.map((key) => (
+          key === 'env.account_billing'
+            ? { key, status: 'yellow', reason: '账户里现在一个在投的都没有', emptyAccountOnly: true }
+            : { key, status: 'green', reason: '记下了' }
+        )),
+      },
+      now: NOW,
+    })
+    expect(hardChecksForGoLive(gates, [])).toEqual([
+      { label: '开投前十道检查', state: 'green', reason: '十道都是绿灯' },
+    ])
+  })
+
+  it('still blocks a budget yellow that has any other cause', () => {
+    const gates = gatesFromReceipt({
+      receipt: {
+        checkedAt: hoursAgo(1),
+        gates: PREFLIGHT_GATE_KEYS.map((key) => (
+          key === 'env.account_billing'
+            ? { key, status: 'yellow', reason: '其它账户还有开着的预算', emptyAccountOnly: false }
+            : { key, status: 'green', reason: '记下了' }
+        )),
+      },
+      now: NOW,
+    })
+    expect(hardChecksForGoLive(gates, [])[0]?.state).toBe('red')
+  })
+
+  it('ignores the empty-account flag on any gate other than budget', () => {
+    const gates = gatesFromReceipt({
+      receipt: {
+        checkedAt: hoursAgo(1),
+        gates: PREFLIGHT_GATE_KEYS.map((key) => (
+          key === 'tracking.pixel_alive'
+            ? { key, status: 'yellow', reason: '像素慢', emptyAccountOnly: true }
+            : { key, status: 'green', reason: '记下了' }
+        )),
+      },
+      now: NOW,
+    })
+    expect(hardChecksForGoLive(gates, [])[0]?.state).toBe('red')
+  })
+
+  it('does not let a stale empty-account yellow pass', () => {
+    const gates = gatesFromReceipt({
+      receipt: {
+        checkedAt: hoursAgo(13),
+        gates: PREFLIGHT_GATE_KEYS.map((key) => (
+          key === 'env.account_billing'
+            ? { key, status: 'yellow', reason: '空', emptyAccountOnly: true }
+            : { key, status: 'green', reason: '记下了' }
+        )),
+      },
+      now: NOW,
+    })
+    const budget = hardChecksForGoLive(gates, []).find((row) => row.label === '广告账户与付款')
+    expect(budget).toMatchObject({ state: 'unread', reason: '这道检查的结果过期了' })
+  })
+
   it('keeps grey, missing, and stale results unreadable', () => {
     const grey = gatesFromReceipt({
       receipt: {

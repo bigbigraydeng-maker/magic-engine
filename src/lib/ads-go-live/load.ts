@@ -63,6 +63,7 @@ async function receiptOf(sb: SupabaseClient, clientId: string, now: Date) {
       status: gate.status,
       reason: gate.reason,
       na: gate.na,
+      emptyAccountOnly: gate.evidence?.empty_account_only === true,
     }))
     return { checkedAt: tracking.receipt.checked_at, gates }
   } catch {

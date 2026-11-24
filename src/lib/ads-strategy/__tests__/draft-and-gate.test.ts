@@ -656,6 +656,16 @@ describe('createDraftForApproval — 私信类型', () => {
     expect(mPublish).toHaveBeenCalledTimes(1)
   })
 
+  it('确认卡带来的账户名原样记进等人点头的草稿；没给就不写这一项', async () => {
+    const { sb, inserted } = fakeSupabase()
+    const r = await createDraftForApproval({ ...MSG }, deps(sb, { accountLabel: '主账户' }))
+    expect(r.status).toBe('awaiting_approval')
+    expect(inserted[0].accountLabel).toBe('主账户')
+    const plain = fakeSupabase()
+    await createDraftForApproval({ ...MSG }, deps(plain.sb))
+    expect(plain.inserted[0]).not.toHaveProperty('accountLabel')
+  })
+
   it('文案命中客户禁用词 → 拒建', async () => {
     const { sb, inserted } = fakeSupabase()
     const d = { ...MSG, creatives: [{ ...MSG.creatives[0], primaryText: 'Proudly founded in １９００' }] }

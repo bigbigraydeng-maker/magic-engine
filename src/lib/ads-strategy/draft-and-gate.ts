@@ -109,6 +109,8 @@ export interface DraftRecord {
    */
   adSetIds?: string[]
   adIds?: string[]
+  /** 确认卡上那个账户名。开投卡靠它认账户；客户登记了多个账户时没有它就开不了。 */
+  accountLabel?: string
   findings?: LaunchFinding[]
   /** 买家会看到的每一句，原样存下来给人过目。 */
   buyerWillSee?: { adName: string; lines: string[] }[]
@@ -161,6 +163,8 @@ export interface CreateDraftDeps {
    * 只有人已经点过确认卡、且卡上核过客户上限的路径才传（见 paused-draft-submit）。
    */
   maxDailyBudget?: number
+  /** 确认卡上那个账户名，原样记进草稿，开投卡用。只有确认卡路径会传。 */
+  accountLabel?: string
   /** 可注入的时钟，测试用。 */
   now?: () => number
 }
@@ -595,6 +599,7 @@ async function recordGate(
   const id = await record(deps.supabase, draft.clientId, {
     status, draft, summary: ctx.summary, readback,
     ...publishedIds(draft, published),
+    ...(deps.accountLabel ? { accountLabel: deps.accountLabel } : {}),
     findings: merged.findings,
     buyerWillSee: merged.buyerWillSee,
     redlinesChecked: ctx.redlinesChecked,
