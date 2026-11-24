@@ -30,6 +30,7 @@ import { adsTrackingPreflight } from './ads-tracking-preflight'
 import { adsTrackingLaunchWatch } from './ads-tracking-launch-watch'
 import { adsServicePauseNotify } from './ads-service-pause-notify'
 import { crmLeadFollowupDigest } from './crm-lead-followup-digest'
+import { crmEnquiryDailyDigest } from './crm-enquiry-daily-digest'
 import { adsAutonomySyncFunction } from './ads-autonomy-sync'
 import { adsCampaignBudgetDecrease } from './ads-campaign-budget'
 import { adsO1BudgetScale } from './ads-o1-budget-scale'
@@ -103,6 +104,7 @@ export const cloudFunctions = [
   leadSheetSyncOne,
   calendarClosureAudit,
   crmLeadFollowupDigest,
+  crmEnquiryDailyDigest,
   adsAutonomySyncFunction,
   adsCampaignBudgetDecrease,
   adsO1BudgetScale,
