@@ -1,7 +1,8 @@
 /**
  * Inngest 云端消费者：每天早上一封「昨天进来多少个咨询、各自问什么」的早报。
  *
- * PM 2026-11-25：「每天自动提醒昨天进来多少 enquiry，大概是关于什么，总结发给 info」。
+ * PM 2026-11-25：「每天自动提醒昨天进来多少 enquiry，大概是关于什么，总结发给 info」，
+ * 随后又定：「每天早上 7 点自动跑，然后发邮件给 info 的邮箱」。
  * 归类与渲染在 `crm/enquiry-daily-digest` / `crm/enquiry-daily-render`，取数在
  * `crm/enquiry-daily-load`。
  *
@@ -12,11 +13,15 @@
  *
  * ## 🔴 授权闸（fail-closed，同 `crm-lead-followup-digest`）
  *
- * 1. **收件人是本文件里的字面量常量** `ENQUIRY_DIGEST_RECIPIENT`，现在是 ME 自己的
- *    信箱。PM 看过几天样信、确认准了，再**改代码 + 复审 + PM 点头**换成客户信箱
- *    （CTS 的目标信箱是 info@ctstours.co.nz）。刻意不读环境变量：改一行配置就能把
- *    客人名单发去任意地址，正是这道闸要挡的。
- * 2. **默认不发**。`ENQUIRY_DAILY_DIGEST_ENABLED=true` 才真发；没配就只取数、只记回执。
+ * 1. **收件人是本文件里的字面量表** `ENQUIRY_DIGEST_RECIPIENTS`（客户 id → 信箱）。
+ *    不在表里的客户照样取数、记回执，**一封不发**。刻意不读环境变量、也不读客户
+ *    配置表：改一行配置就能把客人名单发去任意地址，正是这道闸要挡的 —— 加一个客户
+ *    = 改代码 + 复审 + PM 点头。
+ *    为什么客户 id 写在共享代码里而不是客户配置：这张表就是外发授权本身，授权要走
+ *    代码复审（同 `crm-lead-followup-digest` 的 `DIGEST_RECIPIENT`）。等「按客户配收件人
+ *    + 审批记录」的配置能力建成，再把它搬过去。
+ * 2. **紧急刹车**：`ENQUIRY_DAILY_DIGEST_PAUSED=true` 时只取数、只记回执，一封不发。
+ *    默认是发 —— PM 要的就是每天自动到，不想再多一道「打开开关」。
  *
  * ## 自己死没死要能被看见
  *
@@ -41,18 +46,32 @@ import {
 
 export const ENQUIRY_DIGEST_JOB = 'crm-enquiry-daily-digest'
 export const ENQUIRY_DIGEST_TZ = 'Pacific/Auckland'
-/** 新西兰早上 8:15 —— 上班前到；错开 8:00 那封「没人回」汇总信。 */
-export const ENQUIRY_DIGEST_CRON = '15 8 * * *'
-/** 🔴 唯一收件人。字面量，不是环境变量 —— 见文件头授权闸第 1 条。 */
-export const ENQUIRY_DIGEST_RECIPIENT = 'hello@magicengine.cloud'
+/** 新西兰早上 7:00（PM 2026-11-25 定）。 */
+export const ENQUIRY_DIGEST_CRON = '0 7 * * *'
 
-export const DISABLED_REASON = '未启用（ENQUIRY_DAILY_DIGEST_ENABLED 不是 true）'
+/** CTS Tours NZ 的客户 id。 */
+const CTS_CLIENT_ID = 'c0000000-0000-0000-0000-000000000000'
+
+/**
+ * 🔴 外发授权表。字面量，不是环境变量 —— 见文件头授权闸第 1 条。
+ * CTS → info@ctstours.co.nz：PM 2026-11-25 在对话里原话「发邮件给 info 的邮箱」。
+ */
+export const ENQUIRY_DIGEST_RECIPIENTS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  [CTS_CLIENT_ID]: Object.freeze(['info@ctstours.co.nz']),
+})
+
+export const PAUSED_REASON = '已暂停（ENQUIRY_DAILY_DIGEST_PAUSED=true）'
+export const NO_RECIPIENT_REASON = '这个客户不在早报收件人表里（只取数不发信）'
 
 export type EnquiryDigestEnv = Record<string, string | undefined>
 
-/** 开关。没配 / 不是字面 `true` 一律当没开。 */
-export function enquiryDigestEnabled(env: EnquiryDigestEnv = process.env): boolean {
-  return env.ENQUIRY_DAILY_DIGEST_ENABLED === 'true'
+/** 紧急刹车。只有字面 `true` 才算踩下。 */
+export function enquiryDigestPaused(env: EnquiryDigestEnv = process.env): boolean {
+  return env.ENQUIRY_DAILY_DIGEST_PAUSED === 'true'
+}
+
+export function recipientsFor(clientId: string): string[] {
+  return [...(ENQUIRY_DIGEST_RECIPIENTS[clientId] ?? [])]
 }
 
 /** 一个客户这一轮的回执。不带客人姓名、邮箱、电话。 */
@@ -69,14 +88,14 @@ export interface EnquiryClientReceipt {
   readonly reason?: string
   readonly recipients: string[]
   readonly provider_message_id?: string
-  /** 收件人是 ME 自己的信箱，没有外发给客户。 */
-  readonly no_publish: true
+  /** true = 这封信没有发给客户（不在收件人表里 / 暂停 / 没发出去）。 */
+  readonly no_publish: boolean
   readonly created_at: string
 }
 
 export interface EnquiryDigestReceipt {
   readonly job: string
-  readonly enabled: boolean
+  readonly paused: boolean
   readonly clients_scanned: number
   readonly emails_sent: number
   readonly results: EnquiryClientReceipt[]
@@ -124,21 +143,27 @@ async function scanClient(deps: EnquiryDigestDeps, client: DigestClient, now: Da
   }
 }
 
-/** 扫一个客户并（开关打开时）发信。永不抛异常。 */
+/** 「没发」但属于预期状态的原因 —— 不算失败。 */
+const EXPECTED_SKIPS: ReadonlySet<string> = new Set([PAUSED_REASON, NO_RECIPIENT_REASON])
+
+/** 扫一个客户并（在收件人表里、没暂停时）发信。永不抛异常。 */
 async function runForClient(
   step: EnquiryDigestStep,
   deps: EnquiryDigestDeps,
   client: DigestClient,
-  enabled: boolean,
+  paused: boolean,
   now: Date,
 ): Promise<EnquiryClientReceipt> {
-  const day = dayLabel(yesterdayWindow(now, ENQUIRY_DIGEST_TZ).startMs, ENQUIRY_DIGEST_TZ)
+  const dayStartMs = yesterdayWindow(now, ENQUIRY_DIGEST_TZ).startMs
+  const day = dayLabel(dayStartMs, ENQUIRY_DIGEST_TZ)
+  // 🔴 收件人只从字面量表里取 —— 见文件头授权闸第 1 条。
+  const recipients = recipientsFor(client.id)
   const base = {
     client_id: client.id,
     client_name: client.name,
     day,
-    recipients: [ENQUIRY_DIGEST_RECIPIENT],
-    no_publish: true as const,
+    recipients,
+    no_publish: true,
     created_at: now.toISOString(),
   }
   const scan = await step.run(`scan-${client.id}`, () => scanClient(deps, client, now))
@@ -151,9 +176,8 @@ async function runForClient(
     orphans: scan.orphans,
     test_excluded: scan.testExcluded,
   }
-  if (!enabled) {
-    return { ...base, ...counts, sent: false, reason: DISABLED_REASON }
-  }
+  if (recipients.length === 0) return { ...base, ...counts, sent: false, reason: NO_RECIPIENT_REASON }
+  if (paused) return { ...base, ...counts, sent: false, reason: PAUSED_REASON }
   return step.run(`send-${client.id}`, async () => {
     const r = await deps.send({
       clientId: client.id,
@@ -161,13 +185,15 @@ async function runForClient(
       day,
       timeZone: ENQUIRY_DIGEST_TZ,
       digest: scan.digest,
-      // 🔴 字面量常量，不读配置 —— 见文件头授权闸第 1 条。
-      recipients: [ENQUIRY_DIGEST_RECIPIENT],
+      recipients,
+      // 🔴 发信服务按这个键去重：重试在「已受理、回执没记下」之间崩掉也不会发第二封。
+      idempotencyKey: `${ENQUIRY_DIGEST_JOB}:${client.id}:${new Date(dayStartMs).toISOString()}`,
     })
     return {
       ...base,
       ...counts,
       sent: r.sent,
+      no_publish: !r.sent,
       ...(r.reason ? { reason: r.reason } : {}),
       ...(r.messageId ? { provider_message_id: r.messageId } : {}),
       recipients: r.recipients,
@@ -181,7 +207,7 @@ export async function runEnquiryDailyDigest(
   deps: EnquiryDigestDeps,
   now: Date = new Date(),
 ): Promise<EnquiryDigestReceipt> {
-  const enabled = enquiryDigestEnabled(deps.env ?? process.env)
+  const paused = enquiryDigestPaused(deps.env ?? process.env)
   const started = await step.run('log-start', async () => ({
     runId: await startCronRunId(ENQUIRY_DIGEST_JOB),
     startedAt: Date.now(),
@@ -201,11 +227,11 @@ export async function runEnquiryDailyDigest(
   }
 
   const results: EnquiryClientReceipt[] = []
-  for (const client of clients) results.push(await runForClient(step, deps, client, enabled, now))
+  for (const client of clients) results.push(await runForClient(step, deps, client, paused, now))
 
   const receipt: EnquiryDigestReceipt = {
     job: ENQUIRY_DIGEST_JOB,
-    enabled,
+    paused,
     clients_scanned: clients.length,
     emails_sent: results.filter((r) => r.sent).length,
     results,
@@ -214,8 +240,8 @@ export async function runEnquiryDailyDigest(
     await run.finish({
       processed: receipt.clients_scanned,
       completed: receipt.emails_sent,
-      // 开关关着时「没发」是预期状态，只把取数失败算失败；开着时没发出去都算。
-      failed: results.filter((r) => !r.sent && (enabled || r.reason !== DISABLED_REASON)).length,
+      // 暂停 / 不在收件人表里的「没发」是预期状态；其余没发出去的都算失败。
+      failed: results.filter((r) => !r.sent && !EXPECTED_SKIPS.has(r.reason ?? '')).length,
       summary: { ...receipt },
     })
     return null
@@ -243,11 +269,15 @@ export function createEnquiryDailyDigestFunction(deps: EnquiryDigestDeps) {
     },
     // 🔴 必须带 TZ=，否则 Inngest 按 UTC 解释，夏令时一换就漂。
     { cron: `TZ=${ENQUIRY_DIGEST_TZ} ${ENQUIRY_DIGEST_CRON}` },
-    async ({ step }): Promise<EnquiryDigestReceipt> =>
-      runEnquiryDailyDigest(
+    async ({ step }): Promise<EnquiryDigestReceipt> => {
+      // 时间也记进 step：重试 / 后台重放跨过午夜时，「昨天」不会跟着变成另一天。
+      const nowIso = await step.run('clock', async () => new Date().toISOString())
+      return runEnquiryDailyDigest(
         { run: <T>(id: string, fn: () => Promise<T>) => step.run(id, fn) as Promise<T> },
         deps,
-      ),
+        new Date(nowIso),
+      )
+    },
   )
 }
 

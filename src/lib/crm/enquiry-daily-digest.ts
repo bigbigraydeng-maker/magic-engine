@@ -29,9 +29,6 @@
 
 import { digestName, scrubContactDetails } from './digest-shared'
 
-/** 测试期标记。收件人从 ME 自己的信箱转成客户信箱时，只改这一处（和收件人常量）。 */
-export const ENQUIRY_DIGEST_TEST_PREFIX = '【测试中】'
-
 /** 算「咨询」的渠道。 */
 export const ENQUIRY_FORM_CHANNELS = ['meta_lead_form', 'web_form'] as const
 /** 单独列、不算咨询数的对话渠道。 */
@@ -109,7 +106,8 @@ export function humanizeOption(raw: string): string {
  * 地址本身没人看得懂；最后一截通常就是团名。
  */
 export function pageLabel(path: string): string {
-  const last = path.split('?')[0].split('/').filter(Boolean).pop()
+  const noHost = path.replace(/^https?:\/\/[^/]+/i, '')
+  const last = noHost.split(/[?#]/)[0].split('/').filter(Boolean).pop()
   if (!last) return 'Website page'
   return `${humanizeOption(last.replace(/-/g, ' '))} (website page)`
 }
@@ -128,8 +126,21 @@ function truncate(s: string, max: number): string {
   return s.length > max ? `${s.slice(0, max).trimEnd()}…` : s
 }
 
-/** 这条触点问的是哪个团。认不出来返回 null。 */
+/** 「问哪个团」最多显示多少字。 */
+const INTEREST_MAX = 120
+
+/**
+ * 这条触点问的是哪个团。认不出来返回 null。
+ *
+ * 🔴 结果一律过 `scrubContactDetails`：Meta 表单的自定义问题可以是自由输入框，
+ * 客人完全可能写「想去黄石，电话 021…」（同 `lead-followup-digest` 的 interest）。
+ */
 export function interestOf(row: EnquiryTouchRow): string | null {
+  const raw = rawInterestOf(row)
+  return raw ? truncate(scrubContactDetails(raw.replace(/\s+/g, ' ')), INTEREST_MAX) : null
+}
+
+function rawInterestOf(row: EnquiryTouchRow): string | null {
   const md = row.metadata ?? {}
   if (row.channel === 'meta_lead_form') {
     const opt = str(md.tour_interest_raw)
@@ -142,10 +153,18 @@ export function interestOf(row: EnquiryTouchRow): string | null {
   return null
 }
 
-/** 客人自己写的话（只有官网表单有）。脱敏后截断。 */
+/**
+ * 客人自己写的话（只有官网表单有）。脱敏后截断。
+ *
+ * 官网表单有两种存法：邮件转进来的是「兴趣: …\n留言: …」两行；官网表单接口
+ * （`web-form-lead`）直接把客人的留言原样存进 raw。回电预约（`site_callback_request`）
+ * 的 raw 是问答摘要不是留言，不当留言用。
+ */
 export function messageOf(row: EnquiryTouchRow): string | null {
-  if (row.channel !== 'web_form') return null
-  const text = rawLine(row.raw, '留言')
+  if (row.channel !== 'web_form' || row.source === 'site_callback_request') return null
+  const labelled = rawLine(row.raw, '留言')
+  const hasLabels = row.raw !== null && /(^|\n)兴趣:/.test(row.raw)
+  const text = labelled ?? (hasLabels ? null : str(row.raw))
   if (!text) return null
   return truncate(scrubContactDetails(text.replace(/\s+/g, ' ')), MESSAGE_MAX)
 }

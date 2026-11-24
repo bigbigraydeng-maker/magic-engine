@@ -58,6 +58,19 @@ describe('问的是哪个团', () => {
       .toBe('Beijing xian (website page)')
   })
 
+  it('🔴 「问哪个团」里客人写的电话邮箱也要掐掉', () => {
+    const free = row({ metadata: { tour_interest_raw: 'Yellowstone, call me 021 555 1234 or x@y.com' } })
+    const got = interestOf(free) ?? ''
+    expect(got).toContain('Yellowstone')
+    expect(got).not.toContain('555 1234')
+    expect(got).not.toContain('@y.com')
+  })
+
+  it('完整网址也说成页面名', () => {
+    expect(interestOf(row({ channel: 'web_form', raw: null, metadata: { source_url: 'https://www.ctstours.co.nz/tours/japan/explorer?x=1' } })))
+      .toBe('Explorer (website page)')
+  })
+
   it('认不出来就是 null，不编', () => {
     expect(interestOf(row({ metadata: {} }))).toBeNull()
     expect(interestOf(row({ channel: 'messenger' }))).toBeNull()
@@ -70,6 +83,19 @@ describe('🔴 留言脱敏', () => {
     expect(msg).toContain('Two of us')
     expect(msg).not.toContain('021 555 1234')
     expect(msg).not.toContain('@example.com')
+  })
+
+  it('官网表单接口存的是原样留言（没有「留言:」标签），也要读出来', () => {
+    const plain = row({ channel: 'web_form', source: 'web_form', raw: 'Do you have tours for two elderly travellers?' })
+    expect(messageOf(plain)).toBe('Do you have tours for two elderly travellers?')
+  })
+
+  it('回电预约的问答摘要不当留言', () => {
+    expect(messageOf(row({ channel: 'web_form', source: 'site_callback_request', raw: 'pace: easy' }))).toBeNull()
+  })
+
+  it('有「兴趣:」没「留言:」= 客人没写话，不把兴趣当留言', () => {
+    expect(messageOf(row({ channel: 'web_form', raw: '兴趣: General Inquiry' }))).toBeNull()
   })
 
   it('太长就截断', () => {

@@ -1,8 +1,7 @@
 /**
  * 每日咨询早报的主题行、正文和发信。判据与归类在 `enquiry-daily-digest`。
  *
- * 正文用英文：这封信最终是给客户的销售看的（CTS 是英文团、英文团队）。
- * 测试期只发 ME 自己的信箱，顶上那条测试提示用中文给 PM 看。
+ * 正文用英文：这封信是给客户的销售看的（CTS 是英文团、英文团队）。
  *
  * 发送函数永不抛异常：发信失败不该把上游那趟定时任务一起带崩。
  */
@@ -15,7 +14,6 @@ import {
   type DigestSendResult,
 } from './digest-shared'
 import {
-  ENQUIRY_DIGEST_TEST_PREFIX,
   channelCounts,
   channelLabel,
   topInterests,
@@ -51,7 +49,7 @@ export function buildEnquirySubject(clientName: string, day: string, digest: Enq
   const n = digest.enquiries.length
   const chats = digest.chats.length
   const chatPart = chats > 0 ? ` + ${plural(chats, 'chat', 'chats')}` : ''
-  return `${ENQUIRY_DIGEST_TEST_PREFIX}${clientName} · ${day}: ${plural(n, 'new enquiry', 'new enquiries')}${chatPart}`
+  return `${clientName} · ${day}: ${plural(n, 'new enquiry', 'new enquiries')}${chatPart}`
 }
 
 function renderEntry(e: EnquiryEntry, clientId: string, timeZone: string): string {
@@ -99,14 +97,6 @@ function testNote(n: number): string {
   return n > 0 ? ` ${n} internal test ${n === 1 ? 'lead was' : 'leads were'} left out.` : ''
 }
 
-function testBanner(): string {
-  return `
-    <p style="margin:0 0 18px;padding:12px 14px;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;font-size:14px;color:#92400e">
-      <b>${ENQUIRY_DIGEST_TEST_PREFIX}</b>这是 Magic Engine 每日咨询早报的测试版，现在只发给 ME 自己。
-      内容确认准了以后，才会改成发给客户的信箱。这封信不会替任何人联系客人。
-    </p>`
-}
-
 export function buildEnquiryBody(params: {
   clientId: string
   clientName: string
@@ -121,7 +111,6 @@ export function buildEnquiryBody(params: {
     .join('')
   return `
     <div style="font-family:sans-serif;max-width:620px;margin:0 auto;padding:24px;color:#0f172a">
-      ${testBanner()}
       <p style="font-size:17px;font-weight:600;margin:0 0 10px">${esc(clientName)} — enquiries on ${esc(day)}</p>
       ${renderOverview(digest)}
       ${rows}
@@ -129,6 +118,7 @@ export function buildEnquiryBody(params: {
       <p style="margin-top:20px;font-size:11px;color:#94a3b8">
         Counts Facebook lead forms and website forms only (not emails or phone calls).${testNote(digest.testExcluded)}
         Contact details are left out on purpose — open the CRM link to see them.
+        Sent automatically every morning by Magic Engine.
       </p>
     </div>`
 }
@@ -143,17 +133,20 @@ export async function sendEnquiryDailyDigest(params: {
   recipients: string[]
   apiKey?: string
   mailerFactory?: (apiKey: string) => DigestMailer
+  /** 同一客户同一天只发一封 —— 重试撞上「发信服务已受理但回执没记下」时不重发。 */
+  idempotencyKey?: string
 }): Promise<DigestSendResult> {
   const { recipients } = params
   if (recipients.length === 0) {
     return { sent: false, reason: '没有收件人（调用方必须显式指定，本函数不猜）', recipients }
   }
   return sendDigestMail({
-    fromLabel: `${ENQUIRY_DIGEST_TEST_PREFIX}Magic Engine 每日咨询早报`,
+    fromLabel: 'Magic Engine Daily Enquiries',
     recipients,
     subject: buildEnquirySubject(params.clientName, params.day, params.digest),
     html: buildEnquiryBody(params),
     apiKey: params.apiKey,
     mailerFactory: params.mailerFactory,
+    idempotencyKey: params.idempotencyKey,
   })
 }
