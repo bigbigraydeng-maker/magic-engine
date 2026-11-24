@@ -1,3 +1,4 @@
+import type { LedgerStatus } from '@/lib/ledger/types'
 import { daysBetween } from '@/lib/ledger/walk'
 import { isClosedTitle, parseDescription } from './parse-event'
 import {
@@ -12,7 +13,7 @@ import {
 
 export interface LedgerCardView {
   id: string
-  status: 'decided' | 'done' | 'verified' | 'failed'
+  status: LedgerStatus
   verifiedRef: string | null
 }
 

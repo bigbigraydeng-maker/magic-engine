@@ -80,6 +80,7 @@ function statusShapeError(raw: Record<string, unknown>, status: string): string 
     return 'status 为 decided 时不能填 done_on / done_ref / verified_ref'
   }
   if (doneOn !== null && doneOn < decidedOn) return 'done_on 不能早于 decided_on'
+  if (status === 'expired') return expiredShapeError(raw, doneOn, doneRef, verifiedRef, lastChecked)
   if (status === 'verified' || status === 'failed') {
     if (lastChecked === null) return `status 为 ${status} 时必须填 last_checked`
     if (doneOn !== null && lastChecked < doneOn) return 'last_checked 不能早于 done_on'
@@ -87,6 +88,26 @@ function statusShapeError(raw: Record<string, unknown>, status: string): string 
       return 'verified_ref 不能跟 done_ref 是同一个——证据不能是"做的那个 PR"本身'
     }
   }
+  return null
+}
+
+/**
+ * expired 卡的搭配规则：必须写 last_checked + check_note 说明为什么不再追；
+ * 不许带 verified_ref（没验就不能有证据）；done_on 与 done_ref 要么都有（做了没验）要么都没有（决定了没做）。
+ */
+function expiredShapeError(
+  raw: Record<string, unknown>,
+  doneOn: string | null,
+  doneRef: string | null,
+  verifiedRef: string | null,
+  lastChecked: string | null,
+): string | null {
+  if (lastChecked === null || str(raw, 'check_note') === null) {
+    return 'status 为 expired 时必须填 last_checked 和 check_note（写清为什么不再追）'
+  }
+  if (verifiedRef !== null) return 'status 为 expired 时不能填 verified_ref——没验就没有证据'
+  if ((doneOn === null) !== (doneRef === null)) return 'status 为 expired 时 done_on 和 done_ref 要么都填要么都不填'
+  if (doneOn !== null && lastChecked < doneOn) return 'last_checked 不能早于 done_on'
   return null
 }
 
@@ -100,7 +121,7 @@ function headerError(raw: Record<string, unknown>, file: string): string | null 
 
   const status = str(raw, 'status') as string
   if (!LEDGER_STATUSES.includes(status as LedgerStatus)) {
-    return 'status 只能是 decided/done/verified/failed'
+    return 'status 只能是 decided/done/verified/failed/expired'
   }
   const owner = str(raw, 'owner') as string
   if (!LEDGER_OWNERS.includes(owner as LedgerOwner)) {
@@ -123,7 +144,7 @@ function requiredByStatusError(raw: Record<string, unknown>, status: string): st
   const doneOn = str(raw, 'done_on')
   const doneRef = str(raw, 'done_ref')
   const verifiedRef = str(raw, 'verified_ref')
-  if (status !== 'decided' && (doneOn === null || doneRef === null)) {
+  if (status !== 'decided' && status !== 'expired' && (doneOn === null || doneRef === null)) {
     return `status 为 ${status} 时必须填 done_on 和 done_ref`
   }
   if ((status === 'verified' || status === 'failed') && verifiedRef === null) {
