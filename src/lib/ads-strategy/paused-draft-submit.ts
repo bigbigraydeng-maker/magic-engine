@@ -198,6 +198,7 @@ async function confirmAndBuild(
     ...deps,
     adAccountId: hold.payload.adAccountId,
     maxDailyBudget: pausedDraftCeiling(args.review),
+    accountLabel: hold.payload.accountLabel,
   })
 }
 
