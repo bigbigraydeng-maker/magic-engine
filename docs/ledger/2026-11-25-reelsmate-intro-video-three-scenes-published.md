@@ -5,7 +5,7 @@ status: done
 owner: pm
 decided_on: 2026-11-25
 done_on: 2026-11-25
-done_ref: pr:0
+done_ref: pr:3937
 source: session:795e3bd3
 verify_how: 打开 FB https://www.facebook.com/reel/1682739743501758/ 、IG https://www.instagram.com/reel/DgIQApvEynZ/ 、YouTube https://youtube.com/shorts/e7UjTdiQbjg ，三处都能播且有声音、字幕即算成
 ---
