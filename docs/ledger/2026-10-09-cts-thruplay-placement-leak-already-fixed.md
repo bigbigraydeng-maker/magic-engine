@@ -1,7 +1,7 @@
 ---
 id: 2026-10-09-cts-thruplay-placement-leak-already-fixed
 title: CTS 养池广告的「小游戏版位」漏钱早已堵住，不需要改在投广告
-status: done
+status: verified
 owner: agent
 decided_on: 2026-10-09
 source: session:5ca6dbb3
@@ -9,6 +9,9 @@ verify_by: 2026-10-23
 verify_how: 按版位拆开查 CTS 养池广告组近 14 天花费，第三方应用版位那一行必须是 0；只要大于 0 就是又漏了，当天报 PM 并查活动记录看谁改过版位
 done_on: 2026-10-09
 done_ref: doc:docs/audits/2026-10-09-cts-instagram-connect-and-placement-leak.md
+last_checked: 2026-11-25
+check_note: "2026-11-25 积压清理：养池广告组只在 Facebook 和 Instagram 花钱，第三方应用版位是 0。"
+verified_ref: doc:docs/ledger/evidence/2026-10-09-cts-thruplay-placement-leak-already-fixed--2026-11-25.md
 ---
 CTS 养池广告的「小游戏版位」漏钱经核查已是历史账，当前版位花费为 0，不需要改在投广告。
 花费明细、日期和各系列情况见审计文档（done_ref），台账不重复记录。

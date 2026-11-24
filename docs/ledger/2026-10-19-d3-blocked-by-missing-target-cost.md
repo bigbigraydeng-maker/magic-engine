@@ -9,6 +9,8 @@ done_ref: doc:docs/ledger/evidence/d3-target-cost-historical-record--2026-10-19.
 source: session:c668eb35
 verify_by: 2026-10-26
 verify_how: PM 给出数字后填进设置页「广告结果怎么算」，次日看 ad_health_narratives 里这个客户的 D3 还是不是 not_comparable；若变成 hit 或 healthy 即闭环。CTS 那边要等账户恢复投放有花费才谈。
+last_checked: 2026-11-25
+check_note: "2026-11-25 积压清理：目标成本已填且体检显示健康，但 D3 本身的判断结果在这张表里读不到，判不了。"
 ---
 历史调查、PM 决定及写入读回记载完整转录于 done_ref 所指文档（保留原 session 与修改前 commit）。
 本轮只修台账格式，未重新读生产、未改变历史完成状态；是否闭环仍按原 verify_how 另验。

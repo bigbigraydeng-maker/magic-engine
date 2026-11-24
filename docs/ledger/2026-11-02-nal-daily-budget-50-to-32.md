@@ -1,7 +1,7 @@
 ---
 id: 2026-11-02-nal-daily-budget-50-to-32
 title: NAL 物流广告每天预算 NZ$50 降到 NZ$32（PM 亲口定）
-status: done
+status: verified
 owner: agent
 decided_on: 2026-11-02
 done_on: 2026-11-02
@@ -9,6 +9,9 @@ done_ref: doc:docs/ledger/2026-11-02-nal-daily-budget-50-to-32.md
 source: session:90a50c3b
 verify_by: 2026-11-09
 verify_how: 11/09 在 Meta 读 NAL 广告账户 尾号4498626 广告系列 尾号1605725（物流广告组-WhatsApp）：①每天预算仍是 NZ$32（没被 ME 自动调整改回去）；②11/03–11/09 每天实际花费与开聊数、每个开聊成本，对比 10/19–11/01 的日均（花费约 NZ$50、近 7 天 68 个开聊、每个约 NZ$5.1）。开聊数掉得比花费多（每个开聊成本明显变贵）才算降预算有副作用，回 PM 决定；没掉就保持。
+last_checked: 2026-11-25
+check_note: "2026-11-25 积压清理：预算仍是 32，降预算后开聊数掉得比花费少、每个开聊成本没变贵，没有副作用。"
+verified_ref: doc:docs/ledger/evidence/2026-11-02-nal-daily-budget-50-to-32--2026-11-25.md
 ---
 PM 2026-11-02 说「NAL 日广告向下调整 20%，应该是 32 刀/每天附近，核实一下」。核实结果：Meta 里每天预算一直是 NZ$50（14 天没变），降 20% 应是 NZ$40，NZ$32 是降 36%。PM 看到后回「32」，agent 在 Meta 后台把广告系列 尾号1605725 的每天预算改成 NZ$32，读回确认 daily_budget=32、状态仍开启。
 

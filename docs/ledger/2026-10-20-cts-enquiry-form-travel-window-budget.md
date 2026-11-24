@@ -1,7 +1,7 @@
 ---
 id: 2026-10-20-cts-enquiry-form-travel-window-budget
 title: 官网咨询表单新增两个必填问题（出发时间、每人预算）已上线，等第一条真实线索验证能进客人页
-status: done
+status: verified
 owner: agent
 decided_on: 2026-10-20
 source: session:ec90bb17
@@ -9,6 +9,9 @@ verify_by: 2026-10-22
 verify_how: 10-22 查上线（10-20 22:22 NZDT）之后进来的第一条真实线索：邮件里有 Travel window 和 Budget per person (NZD) 两行，ME 客人页抽屉显示「出发时间/每人预算」一行；上线满 48 小时仍一条线索都没有，先看广告窗口读的点击到留资数有没有掉
 done_on: 2026-10-20
 done_ref: pr:2937
+last_checked: 2026-11-25
+check_note: "2026-11-25 积压清理：上线后已有 25 条真实线索同时存下出发时间和预算，链路通了。"
+verified_ref: doc:docs/ledger/evidence/2026-10-20-cts-enquiry-form-travel-window-budget--2026-11-25.md
 ---
 PM 10-20 要求咨询表单加两个必填问题：预计什么时候出发（2027 年 3-5 月 / 6-9 月 / 10-12 月 / 不确定）和每人预算（低于 3000 / 3000-5000 / 5000-8000 / 高于 8000 新西兰元）。
 ME 一侧（PR 2937：把答案存成结构化代码，并在客人页抽屉显示一行）先上线；官网仓库 PR 259（合并提交 fec34b38）10-20 22:18 NZDT 合并、22:22 NZDT 部署完成，线上读回两个必填下拉和提交脚本正常。

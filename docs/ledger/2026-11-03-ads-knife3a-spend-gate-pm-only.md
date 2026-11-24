@@ -9,6 +9,8 @@ verify_by: 2026-11-06
 verify_how: 合并部署后读 client_automation_policies，CTS 和 NAL 的 ads.scale_unit_budget / ads.budget_move_plan / ads.add_retargeting_adset 三条都是 require_approval（版本号比 11-03 的 CTS v3、NAL v1 各加 1）；Render 上 ADS_SPEND_APPROVER_EMAILS 只有 PM 本人一个邮箱；其余广告动作的策略行版本号没变
 done_on: 2026-11-03
 done_ref: pr:3567
+last_checked: 2026-11-25
+check_note: "2026-11-25 积压清理：库里三条策略都对，但 Render 上批准人名单只有 PM 一个这点读不到，所以判不了。"
 ---
 PM 11-03 回「只有 1」：名单只放 PM 本人 gmail，ADMIN_EMAILS 另外 5 个邮箱以后只能暂停和减预算。上线确认卡开新系列本单没动，已问 PM 要不要也收紧。
 设计稿 docs/specs/2026-11-03-ads-knife3-spend-gate-and-budget-buttons-design.md（§9 记了实现与设计的差异）。3b（成绩单调预算按钮）在本单合并部署后开工。
