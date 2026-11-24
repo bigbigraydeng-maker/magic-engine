@@ -96,6 +96,15 @@ function decideEvent(
       reason: '台账卡已 verified',
     }
   }
+  if (card.status === 'expired') {
+    return {
+      ...base,
+      tier: 'closed',
+      ledgerId,
+      probe: null,
+      reason: '台账卡已过期不追（PM 同意）',
+    }
+  }
   if (card.status === 'done' && card.verifiedRef !== null) {
     return {
       ...base,

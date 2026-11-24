@@ -1,5 +1,6 @@
 import { parse as parseYaml } from 'yaml'
 import { parseRef, LEDGER_REF_HELP } from './refs'
+import { shiftDate, STALE_DAYS } from './walk'
 import { LEDGER_OWNERS, LEDGER_STATUSES, REF_KINDS_BY_FIELD, type LedgerEntry, type LedgerOwner, type LedgerParseResult, type LedgerStatus, type LedgerWarning } from './types'
 
 type RefField = keyof typeof REF_KINDS_BY_FIELD
@@ -91,6 +92,9 @@ function statusShapeError(raw: Record<string, unknown>, status: string): string 
   return null
 }
 
+/** 到期后至少过这么多天才许标过期（PM 2026-11-25 批的范围就是「过期两周以上」） */
+export const EXPIRE_MIN_DAYS_OVERDUE = 14
+
 /**
  * expired 卡的搭配规则：必须写 last_checked + check_note 说明为什么不再追；
  * 不许带 verified_ref（没验就不能有证据）；done_on 与 done_ref 要么都有（做了没验）要么都没有（决定了没做）。
@@ -108,6 +112,10 @@ function expiredShapeError(
   if (verifiedRef !== null) return 'status 为 expired 时不能填 verified_ref——没验就没有证据'
   if ((doneOn === null) !== (doneRef === null)) return 'status 为 expired 时 done_on 和 done_ref 要么都填要么都不填'
   if (doneOn !== null && lastChecked < doneOn) return 'last_checked 不能早于 done_on'
+  const due = str(raw, 'verify_by') ?? shiftDate(doneOn ?? (str(raw, 'decided_on') as string), STALE_DAYS)
+  if (lastChecked < shiftDate(due, EXPIRE_MIN_DAYS_OVERDUE)) {
+    return `status 为 expired 时 last_checked 必须比到期日（${due}）晚至少 ${EXPIRE_MIN_DAYS_OVERDUE} 天——没过期够久不许标过期`
+  }
   return null
 }
 

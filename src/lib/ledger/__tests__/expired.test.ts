@@ -55,6 +55,19 @@ describe('expired 状态（过期没验）', () => {
     expect(r.ok).toBe(false)
   })
 
+  it('到期没满 14 天 → 不许标过期', () => {
+    const r = parse(['status: expired', 'last_checked: 2026-10-14', 'check_note: 不追了'])
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error.reason).toContain('14')
+    expect(parse(['status: expired', 'last_checked: 2026-10-15', 'check_note: 不追了']).ok).toBe(true)
+  })
+
+  it('没写 verify_by 时按做完日 +7 天算到期', () => {
+    const card = (lc: string) => parseLedgerFile('2026-09-24-foo.md', `---\n${BASE.filter((l) => !l.startsWith('verify_by')).join('\n')}\nstatus: expired\ndone_on: 2026-09-25\ndone_ref: pr:1\nlast_checked: ${lc}\ncheck_note: x\n---\n正文\n`)
+    expect(card('2026-10-15').ok).toBe(false)
+    expect(card('2026-10-16').ok).toBe(true)
+  })
+
   it('expired 卡不再出现在待办里', () => {
     const entry: LedgerEntry = {
       id: 'x', title: 'x', status: 'expired', owner: 'pm', decidedOn: '2026-09-01',
