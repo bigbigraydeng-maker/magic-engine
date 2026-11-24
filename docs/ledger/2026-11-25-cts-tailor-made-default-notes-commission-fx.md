@@ -2,7 +2,7 @@
 id: 2026-11-25-cts-tailor-made-default-notes-commission-fx
 title: 定制行程单新建时默认带上「净价不含佣金」和「汇率变动可调价」两条说明
 status: done
-owner: claude-code
+owner: agent
 decided_on: 2026-11-25
 source: session:366138d8
 verify_by: 2026-12-02
