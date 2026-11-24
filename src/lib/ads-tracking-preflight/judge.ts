@@ -660,6 +660,7 @@ export function judgeAccountBilling(input: Pick<JudgeInput, 'config' | 'meta' | 
     other_accounts_error: b.other_accounts_error,
     config_planned_daily_budget_cents: cfg.planned_daily_budget_cents,
     config_official_daily_cap_cents: cfg.official_daily_cap_cents,
+    checked_ad_account: cfg.spend_ad_account_id ?? cfg.ad_account_id,
   }
 
   if (!input.meta.read || acc === null) {
@@ -872,7 +873,9 @@ export function applyKnownIssues(
     const suffix = `；已知问题（${issue.observed_on} 盘点）：${issue.note}`
     const status: Light = gate.status === 'green' ? 'yellow' : gate.status
     const how = gate.how === '' ? (issue.how ?? DEFAULT_KNOWN_ISSUE_HOW) : gate.how
-    return { ...gate, status, reason: gate.reason + suffix, how }
+    // 人工登记的已知问题不能被「只因空账户才黄」的放行吞掉
+    const evidence = gate.evidence.empty_account_only === true ? { ...gate.evidence, empty_account_only: false } : gate.evidence
+    return { ...gate, status, reason: gate.reason + suffix, how, evidence }
   })
 }
 

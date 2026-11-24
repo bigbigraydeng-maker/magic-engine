@@ -12,6 +12,7 @@ import { gatesFromReceipt, type StoredGate } from './checks'
 import { goLiveSubjectKey, parsePausedDraft, reusedSpendGate, type GoLiveIds } from './draft'
 import type { InheritedAdSetSpend } from '@/lib/ads-strategy/ad-draft'
 import { buildGoLiveFacts } from './facts'
+import { canonicalAccountDigits } from '@/lib/meta/ad-account-binding'
 
 export interface GoLiveLoaded {
   readonly facts: CardFacts
@@ -54,7 +55,19 @@ async function boundLabels(sb: SupabaseClient, clientId: string): Promise<readon
   }
 }
 
-async function receiptOf(sb: SupabaseClient, clientId: string, now: Date) {
+function sameAccount(a: unknown, b: unknown): boolean {
+  if (typeof a !== 'string' || typeof b !== 'string') return false
+  const x = canonicalAccountDigits(a)
+  return x !== '' && x === canonicalAccountDigits(b)
+}
+
+function draftAccount(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null
+  const id = (payload as Record<string, unknown>).adAccountId
+  return typeof id === 'string' && id.length > 0 ? id : null
+}
+
+async function receiptOf(sb: SupabaseClient, clientId: string, now: Date, account: string | null) {
   try {
     const tracking = await loadTrackingGateFacts(sb, clientId, { now })
     if (!tracking?.receipt) return null
@@ -63,7 +76,8 @@ async function receiptOf(sb: SupabaseClient, clientId: string, now: Date) {
       status: gate.status,
       reason: gate.reason,
       na: gate.na,
-      emptyAccountOnly: gate.evidence?.empty_account_only === true,
+      // 只在回执查的就是这条草稿所在的账户时才认「空账户」
+      emptyAccountOnly: gate.evidence?.empty_account_only === true && sameAccount(gate.evidence?.checked_ad_account, account),
     }))
     return { checkedAt: tracking.receipt.checked_at, gates }
   } catch {
@@ -85,7 +99,7 @@ export async function loadGoLive(
   if (view.status !== 'awaiting_approval') {
     return failure(409, '只有还在等点头的暂停广告才能出开投卡。')
   }
-  const [labels, receipt] = await Promise.all([boundLabels(sb, clientId), receiptOf(sb, clientId, now)])
+  const [labels, receipt] = await Promise.all([boundLabels(sb, clientId), receiptOf(sb, clientId, now, draftAccount(row.payload))])
   return {
     ok: true,
     ids: view.ids,

@@ -11,7 +11,10 @@ export function chooseAccountLabel(
   bound: readonly (string | null)[] | null,
 ): { label: string } | { problem: string } {
   const fromDraft = usableLabel(draftLabel)
-  if (fromDraft) return { label: fromDraft }
+  // 多个登记账户时，草稿上的名字必须正好是其中一个账户的名字；客户名或兜底文字认不出是哪个账户
+  const multi = bound !== null && bound.length > 1
+  if (fromDraft && (!multi || bound.some((name) => usableLabel(name) === fromDraft))) return { label: fromDraft }
+  if (fromDraft && multi) return { problem: '草稿没写明是哪个广告账户' }
   if (bound === null || bound.length === 0) return { problem: '读不到广告账户' }
   if (bound.length > 1) return { problem: '草稿没写明是哪个广告账户' }
   const only = usableLabel(bound[0])

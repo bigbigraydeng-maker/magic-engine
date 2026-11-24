@@ -111,6 +111,8 @@ export interface DraftRecord {
   adIds?: string[]
   /** 确认卡上那个账户名。开投卡靠它认账户；客户登记了多个账户时没有它就开不了。 */
   accountLabel?: string
+  /** 草稿建在哪个广告账户。开投卡拿它核对检查回执查的是不是同一个账户。 */
+  adAccountId?: string
   findings?: LaunchFinding[]
   /** 买家会看到的每一句，原样存下来给人过目。 */
   buyerWillSee?: { adName: string; lines: string[] }[]
@@ -600,6 +602,7 @@ async function recordGate(
     status, draft, summary: ctx.summary, readback,
     ...publishedIds(draft, published),
     ...(deps.accountLabel ? { accountLabel: deps.accountLabel } : {}),
+    adAccountId: deps.adAccountId,
     findings: merged.findings,
     buyerWillSee: merged.buyerWillSee,
     redlinesChecked: ctx.redlinesChecked,

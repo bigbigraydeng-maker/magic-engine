@@ -85,6 +85,9 @@ describe('go-live facts', () => {
     expect(chooseAccountLabel(null, [])).toEqual({ problem: '读不到广告账户' })
     expect(chooseAccountLabel(null, ['甲', '乙'])).toEqual({ problem: '草稿没写明是哪个广告账户' })
     expect(chooseAccountLabel(null, ['act_1'])).toEqual({ problem: '账户名称没记下' })
+    // 多个登记账户：草稿上的名字必须是其中一个账户的名字
+    expect(chooseAccountLabel('甲', ['甲', '乙'])).toEqual({ label: '甲' })
+    expect(chooseAccountLabel('客户名兜底', ['甲', '乙'])).toEqual({ problem: '草稿没写明是哪个广告账户' })
 
     const facts = buildGoLiveFacts({
       draftId: 'draft-1',

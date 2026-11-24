@@ -991,6 +991,14 @@ describe('applyKnownIssues', () => {
     gate: 'tracking.lead_event_quality' as const, note: '留资事件带固定占位金额', observed_on: '2026-10-19', expires_on: '2026-11-19',
   }
 
+  it('已知问题套到「只因空账户才黄」的付款门上 → 清掉空账户标记，开投卡不再放行', () => {
+    const billing: TrackingGateReceipt = {
+      key: 'env.account_billing', status: 'yellow', reason: '空', how: 'x', evidence: { empty_account_only: true }, as_of: null, hard: true,
+    }
+    const [g] = applyKnownIssues([billing], [{ ...issue, gate: 'env.account_billing' as const }], NOW)
+    expect(g.evidence.empty_account_only).toBe(false)
+  })
+
   it('绿灯遇到还没到期的已知问题 → 压成黄，说明写进原因', () => {
     const [g] = applyKnownIssues([green], [issue], NOW)
     expect(g.status).toBe('yellow')
