@@ -199,6 +199,30 @@ describe('POST /api/cron/attribution', () => {
     })
   })
 
+  it('explicit client_id is not dropped by the external-pull allowlist', async () => {
+    delete process.env.EXTERNAL_DATA_PULL_CLIENT_IDS
+    const other = 'd5c98811-1c1d-4ded-bdf0-4cefec6afb84'
+    mockRunAttributionJob.mockResolvedValue({
+      processed: 0, written: 0, skipped: 0, failed: 0, deferred: 0, pass2ClientIds: [],
+      unattributable: 0, unattributableSamples: [], reconcileErrors: 0, reconcileErrorSamples: [],
+    })
+    await POST(makeRequest({ authorization: 'Bearer test-secret' }, `?client_id=${other}`))
+    expect(mockRunGscAttribution).toHaveBeenCalledWith(other, undefined, {})
+  })
+
+  it('scheduled roster still drops connectors outside the allowlist', async () => {
+    delete process.env.EXTERNAL_DATA_PULL_CLIENT_IDS
+    const cts = 'c0000000-0000-0000-0000-000000000000'
+    const other = 'd5c98811-1c1d-4ded-bdf0-4cefec6afb84'
+    connectorsResult = { data: [{ client_id: other }, { client_id: cts }], error: null }
+    mockRunAttributionJob.mockResolvedValue({
+      processed: 0, written: 0, skipped: 0, failed: 0, deferred: 0, pass2ClientIds: [],
+      unattributable: 0, unattributableSamples: [], reconcileErrors: 0, reconcileErrorSamples: [],
+    })
+    await POST(makeRequest({ authorization: 'Bearer test-secret' }))
+    expect(mockRunGscAttribution.mock.calls.map((call) => call[0])).toEqual([cts])
+  })
+
   // ── Pass 1 → Pass 2 window forwarding (Issue #859, Codex P2) ───────────────
   //
   // Pass 1 defers seo.gsc.* actions to the bridge, so the window pass 1 ran at

@@ -28,7 +28,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { filterRowsWithId } from '@/lib/clients/external-data-pull-allowlist'
+import { partitionExternalDataPull } from '@/lib/clients/external-data-pull-allowlist'
 import { supabaseAdmin } from '@/lib/supabase'
 import { startCronRun } from '@/lib/cron/run-logger'
 import { fetchAll } from '@/lib/supabase-paginate'
@@ -118,10 +118,12 @@ async function run(dryRun: boolean): Promise<NextResponse> {
   }
 
   const results: Array<Record<string, unknown>> = []
-
-  for (const client of filterRowsWithId(
+  const roster = partitionExternalDataPull(
     (clients ?? []) as Array<{ id: string; name: string | null; leads_config: unknown }>,
-  )) {
+    (client) => client.id,
+  )
+
+  for (const client of roster.kept) {
     const audience = await readAudienceId(client.id)
     if (!audience.ok) {
       results.push({ client: client.name, error: `读 audience id 失败: ${audience.message}` })
@@ -159,7 +161,7 @@ async function run(dryRun: boolean): Promise<NextResponse> {
     processed: results.length,
     completed: results.length - failed,
     failed,
-    summary: { dryRun, results },
+    summary: { dryRun, results, skipped_by_allowlist: roster.skippedCount },
   })
 
   return NextResponse.json({ ok: true, dryRun, results })

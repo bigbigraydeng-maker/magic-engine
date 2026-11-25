@@ -6,6 +6,6 @@ owner: agent
 decided_on: 2026-11-24
 source: pr:3928
 verify_by: 2026-12-01
-verify_how: 合并部署后任选一条已改 cron（建议 meta-leads-sync 或 google-data-pullback-daily）跑完一轮，查 cron_run_logs：非 CTS 客户 processed=0 或不在 summary.results 里；CTS 仍 processed>0。默认未设 EXTERNAL_DATA_PULL_CLIENT_IDS 时仅 CTS 过闸。
+verify_how: 合并部署后任选一条已改 cron（建议 meta-leads-sync 或 google-data-pullback-daily）跑完一轮，查 cron_run_logs.summary.skipped_by_allowlist。默认未设 EXTERNAL_DATA_PULL_CLIENT_IDS 时，这个数应等于本轮名单里非 CTS 的客户数；CTS 仍被处理。只核对数量，不在回执里找客户名。
 ---
 当场跑不了原因：改动在数十条生产 cron/Inngest roster，需要 CRON_SECRET 与生产库；云代理不能对生产发 Bearer 试跑。

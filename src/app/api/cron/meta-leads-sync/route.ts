@@ -20,7 +20,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { filterRowsWithId } from '@/lib/clients/external-data-pull-allowlist'
+import { partitionExternalDataPull } from '@/lib/clients/external-data-pull-allowlist'
 import { supabaseAdmin } from '@/lib/supabase'
 import { syncClientMetaLeads, type MetaLeadsSyncClient } from '@/lib/meta/leads-sync'
 import { abandonAfterMs } from '@/lib/cron/expected-duration'
@@ -91,8 +91,9 @@ async function run(): Promise<NextResponse> {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
+  const roster = partitionExternalDataPull((clients ?? []) as MetaLeadsSyncClient[], (client) => client.id)
   const results = []
-  for (const client of filterRowsWithId((clients ?? []) as MetaLeadsSyncClient[])) {
+  for (const client of roster.kept) {
     // syncClientMetaLeads 自己吞异常，这层 try 给它之外的意外兜底：
     // 一个客户炸掉不能让其它客户今天都不同步。
     try {
@@ -151,7 +152,16 @@ async function run(): Promise<NextResponse> {
     processed: results.length,
     completed: results.length - failed - blocked,
     failed,
-    summary: { newContacts, leadsIngested, mailchimp, blocked, receipts, results, accountStatusProbe },
+    summary: {
+      newContacts,
+      leadsIngested,
+      mailchimp,
+      blocked,
+      receipts,
+      results,
+      accountStatusProbe,
+      skipped_by_allowlist: roster.skippedCount,
+    },
     // 有客户取不到数就必须把原话带进 error_message —— 日报邮件的「错误原因」列
     // 读的就是这个字段。2026-08-21~08-30 这里一直是 null,于是日报每天照发
     // 「meta-leads-sync 4 failed —」,一屏破折号没有一个字说明是什么事,
@@ -175,6 +185,7 @@ async function run(): Promise<NextResponse> {
     receipts,
     results,
     accountStatusProbe,
+    skipped_by_allowlist: roster.skippedCount,
   })
 }
 

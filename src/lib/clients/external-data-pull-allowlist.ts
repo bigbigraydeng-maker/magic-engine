@@ -37,14 +37,24 @@ function parseAllowlistFromEnv(raw: string | undefined): ReadonlySet<string> | n
   if (ALL_TOKENS.has(trimmed.toLowerCase())) {
     return null
   }
-  const ids = trimmed
-    .split(',')
-    .map((s) => s.trim())
-    .filter((s) => UUID_RE.test(s))
-    .map(normalizeClientId)
+  const tokens = trimmed.split(',').map((s) => s.trim()).filter((s) => s.length > 0)
+  const invalidCount = tokens.filter((s) => !UUID_RE.test(s)).length
+  warnDroppedNonUuidTokens(trimmed, invalidCount)
+  const ids = tokens.filter((s) => UUID_RE.test(s)).map(normalizeClientId)
   return ids.length > 0
     ? new Set(ids)
-  : new Set([normalizeClientId(DEFAULT_EXTERNAL_DATA_PULL_CLIENT_ID)])
+    : new Set([normalizeClientId(DEFAULT_EXTERNAL_DATA_PULL_CLIENT_ID)])
+}
+
+/** Last raw env string we already warned about. Not logged. */
+let warnedInvalidAllowlistRaw: string | undefined
+
+function warnDroppedNonUuidTokens(raw: string, invalidCount: number): void {
+  if (invalidCount <= 0 || warnedInvalidAllowlistRaw === raw) return
+  warnedInvalidAllowlistRaw = raw
+  console.warn(
+    `[external-data-pull-allowlist] dropped ${invalidCount} non-UUID token(s) from EXTERNAL_DATA_PULL_CLIENT_IDS`,
+  )
 }
 
 /** `null` = unrestricted (all clients that pass upstream gates may pull). */
@@ -85,4 +95,21 @@ export function filterRowsWithClientIdCamel<T extends { clientId: string }>(rows
   const allowlist = resolveExternalDataPullAllowlist()
   if (allowlist === null) return [...rows]
   return rows.filter((row) => allowlist.has(normalizeClientId(row.clientId)))
+}
+
+/** Roster split for cron summaries. `skippedCount` is rows dropped, never names. */
+export function partitionExternalDataPull<T>(
+  rows: readonly T[],
+  clientIdOf: (row: T) => string,
+): { kept: T[]; skippedCount: number } {
+  const allowlist = resolveExternalDataPullAllowlist()
+  if (allowlist === null) return { kept: [...rows], skippedCount: 0 }
+  const kept: T[] = []
+  let skippedCount = 0
+  for (const row of rows) {
+    const id = clientIdOf(row)
+    if (typeof id === 'string' && allowlist.has(normalizeClientId(id))) kept.push(row)
+    else skippedCount += 1
+  }
+  return { kept, skippedCount }
 }

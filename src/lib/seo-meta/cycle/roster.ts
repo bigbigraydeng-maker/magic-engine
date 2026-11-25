@@ -78,7 +78,10 @@ function parseKeywordFallbackLocations(raw: unknown): number[] {
  * No client-name allowlist (same warning as loadSnapshotRoster/getClientCompetitors) —
  * to exclude a client, flip their config flag, don't add an ID list here.
  */
-export async function loadMetaCycleRoster(supabase: SupabaseClient): Promise<RosterResult> {
+export async function loadMetaCycleRoster(
+  supabase: SupabaseClient,
+  options?: { applyExternalPullAllowlist?: boolean },
+): Promise<RosterResult> {
   const { data, error } = await supabase
     .from('clients')
     .select('id, domain, semrush_db, seo_config')
@@ -93,7 +96,8 @@ export async function loadMetaCycleRoster(supabase: SupabaseClient): Promise<Ros
     return entry ? [entry] : []
   })
 
-  return { ok: true, entries: filterRowsWithClientIdCamel(entries) }
+  const applyAllowlist = options?.applyExternalPullAllowlist !== false
+  return { ok: true, entries: applyAllowlist ? filterRowsWithClientIdCamel(entries) : entries }
 }
 
 function rowToEntry(row: { id?: unknown; domain?: unknown; semrush_db?: unknown; seo_config?: unknown }): MetaCycleRosterEntry | null {
