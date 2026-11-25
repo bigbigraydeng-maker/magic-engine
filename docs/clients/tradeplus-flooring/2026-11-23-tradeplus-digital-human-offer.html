@@ -1,0 +1,249 @@
+<title>TradePlus Digital Human Trial</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=Inter:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: a trade docket — one narrow column, ruled sections like a delivery note, price docket as the single boxed object. */
+:root{
+  --bg:#F3F4F1; --paper:#FFFFFF; --ink:#1C2320; --muted:#5B655F; --rule:#D5DAD4;
+  --gum:#8A5527; --gum-soft:#F2E7DB; --euc:#2F6650; --euc-soft:#E2EEE8; --warn:#9A3B1E;
+  --f-display:"Archivo","Inter","Noto Sans SC",system-ui,sans-serif;
+  --f-body:"Inter","Noto Sans SC","PingFang SC","Hiragino Sans GB",system-ui,sans-serif;
+  --f-zh:"Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#141917; --paper:#1C2320; --ink:#E9EDEA; --muted:#A3ADA7; --rule:#33403A;
+  --gum:#D99A62; --gum-soft:#33261A; --euc:#7FC2A4; --euc-soft:#1C2E26; --warn:#E58A68; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#141917; --paper:#1C2320; --ink:#E9EDEA; --muted:#A3ADA7; --rule:#33403A;
+  --gum:#D99A62; --gum-soft:#33261A; --euc:#7FC2A4; --euc-soft:#1C2E26; --warn:#E58A68; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.6;margin:0}
+.wrap{max-width:860px;margin:0 auto;padding-block:40px 64px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.zh{font-family:var(--f-zh);color:var(--muted);display:block;font-size:.93em;line-height:1.65}
+h1,h2,h3{font-family:var(--f-display);text-wrap:balance;margin:0}
+h1{font-size:clamp(28px,5vw,40px);line-height:1.15;font-weight:800;letter-spacing:-.01em}
+h2{font-size:22px;font-weight:700}
+h2 .zh{font-family:var(--f-zh);font-size:15px;font-weight:500;margin-top:2px}
+h3{font-size:16px;font-weight:700}
+.eyebrow{font-family:var(--f-mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--gum)}
+header{display:grid;gap:14px;padding-bottom:28px;border-bottom:2px solid var(--ink)}
+.meta{display:flex;flex-wrap:wrap;gap:6px 22px;font-size:13px;color:var(--muted)}
+.meta b{color:var(--ink);font-weight:600}
+section{padding-block:32px;border-bottom:1px solid var(--rule);display:grid;gap:18px}
+section:last-of-type{border-bottom:0}
+p{margin:0;max-width:68ch}
+.lead{font-size:17px}
+/* facts */
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:12px}
+.fact{background:var(--paper);border:1px solid var(--rule);border-radius:6px;padding:14px 16px;display:grid;gap:4px;align-content:start;min-width:0}
+.fact .num{font-family:var(--f-display);font-size:24px;font-weight:800;font-variant-numeric:tabular-nums;color:var(--warn)}
+.fact .num small{font-size:13px;font-weight:600;color:var(--muted)}
+/* docket */
+.docket{background:var(--paper);border:2px solid var(--ink);border-radius:4px;overflow:hidden}
+.docket-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;padding:12px 18px;background:var(--ink);color:var(--paper)}
+.docket-head span{font-family:var(--f-mono);font-size:12px;letter-spacing:.06em}
+.tbl{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+.tbl th,.tbl td{padding:12px 18px;text-align:left;vertical-align:top;border-bottom:1px solid var(--rule)}
+.tbl th{font-family:var(--f-mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}
+.tbl td.amt,.tbl th.amt{text-align:right;white-space:nowrap}
+.tbl td.amt{font-family:var(--f-display);font-weight:700;font-size:17px}
+.tbl tr.total td{border-bottom:0;background:var(--gum-soft)}
+.tbl tr.total td.amt{font-size:20px;color:var(--gum)}
+.tbl-scroll{overflow-x:auto}
+.notes{display:grid;gap:10px;padding:14px 18px 18px;border-top:1px solid var(--rule)}
+.notes p{font-size:14px}
+.fee-eg{display:flex;flex-wrap:wrap;gap:8px}
+.chip{font-family:var(--f-mono);font-size:12px;padding:4px 10px;border-radius:999px;background:var(--euc-soft);color:var(--euc);white-space:nowrap}
+/* months */
+.months{display:grid;gap:16px}
+.month{display:grid;grid-template-columns:120px 1fr;gap:18px;background:var(--paper);border:1px solid var(--rule);border-radius:6px;padding:18px}
+.month-label{display:grid;gap:4px;align-content:start}
+.month-label .m{font-family:var(--f-display);font-weight:800;font-size:24px;color:var(--euc);line-height:1}
+.month-label .t{font-size:13px;font-weight:600}
+.month-label .t .zh{font-size:12px}
+.items{list-style:none;margin:0;padding:0;display:grid;gap:12px;min-width:0}
+.items li{display:grid;gap:2px}
+.items b{font-weight:600}
+.items .d{font-size:14px}
+@media (max-width:560px){.month{grid-template-columns:1fr;gap:10px}}
+/* lists */
+.plain{margin:0;padding-left:18px;display:grid;gap:10px}
+.plain li{padding-left:2px}
+.reels{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:12px}
+.reels .fact .num{color:var(--euc)}
+footer{padding-top:28px;font-size:13px;color:var(--muted);display:grid;gap:6px}
+:focus-visible{outline:2px solid var(--gum);outline-offset:2px}
+
+/* visuals (illustrations, all drawn in CSS) */
+.swatches{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
+.swatches figure{margin:0;display:grid;gap:4px}
+.swatches img{width:100%;aspect-ratio:3/4;object-fit:cover;border-radius:4px;display:block}
+.swatches figcaption{font-size:11px;color:var(--muted);line-height:1.3}
+@media (max-width:560px){.swatches{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.cap{font-size:12px;color:var(--muted);font-family:var(--f-mono);letter-spacing:.02em}
+.vis2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,330px),1fr));gap:14px}
+.vis{background:var(--paper);border:1px solid var(--rule);border-radius:8px;padding:14px;display:grid;gap:10px;align-content:start;min-width:0}
+.vis h3{font-size:14px}
+.vis h3 .zh{font-size:12px;font-weight:500}
+.tag{display:inline-block;font-family:var(--f-mono);font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;padding:2px 8px;border-radius:999px;background:var(--gum-soft);color:var(--gum);justify-self:start}
+.tag.goal{background:var(--euc-soft);color:var(--euc)}
+/* google-ish mocks, neutral so they read in both themes */
+.g-search{border:1px solid var(--rule);border-radius:999px;padding:7px 14px;font-size:13px;display:flex;gap:8px;align-items:center;color:var(--ink)}
+.g-search::before{content:"";width:10px;height:10px;border:2px solid var(--muted);border-radius:50%;flex:none}
+.pack{display:grid;gap:0;border:1px solid var(--rule);border-radius:8px;overflow:hidden}
+.pack .row{display:grid;grid-template-columns:1fr auto;gap:8px;padding:9px 12px;border-bottom:1px solid var(--rule);font-size:13px}
+.pack .row:last-child{border-bottom:0}
+.pack .nm{font-weight:600}
+.pack .st{color:var(--gum);font-variant-numeric:tabular-nums;white-space:nowrap}
+.pack .st.none{color:var(--warn)}
+.pack .row.you{background:var(--euc-soft)}
+.pack .row.you.today{background:transparent;outline:2px dashed var(--warn);outline-offset:-2px}
+.stars{letter-spacing:1px}
+.serp{display:grid;gap:10px}
+.serp .res{display:grid;gap:1px;font-size:13px}
+.serp .url{font-size:11.5px;color:var(--muted)}
+.serp .ttl{color:var(--euc);font-weight:600;font-size:14px}
+.serp .res.you{padding:8px 10px;border-radius:6px;background:var(--euc-soft)}
+.serp .gap{font-family:var(--f-mono);font-size:11px;color:var(--warn);text-align:center;padding:4px;border:1px dashed var(--warn);border-radius:4px}
+.dirs{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,140px),1fr));gap:8px}
+.dir{border:1px solid var(--rule);border-radius:6px;padding:9px 10px;display:grid;gap:3px;font-size:12px}
+.dir b{font-size:13px}
+.dir .ok{color:var(--euc);font-family:var(--f-mono);font-size:11px}
+.nap{font-family:var(--f-mono);font-size:11.5px;background:var(--bg);border-radius:4px;padding:8px 10px;line-height:1.5}
+/* social post mock */
+.post{border:1px solid var(--rule);border-radius:8px;overflow:hidden;display:grid}
+.post-h{display:flex;gap:10px;align-items:center;padding:10px 12px}
+.post-h .av{width:34px;height:34px;border-radius:50%;background:var(--bg);display:grid;place-items:center;overflow:hidden;flex:none;border:1px solid var(--rule)}
+.post-h .av img{width:100%;height:auto}
+.post-h small{display:block;color:var(--muted);font-size:11px}
+.post-t{padding:0 12px 10px;font-size:13px}
+.post-img{display:grid;grid-template-columns:1fr 1fr 1fr;gap:2px}
+.post-img img{width:100%;aspect-ratio:1;object-fit:cover;display:block}
+.post-f{display:flex;gap:16px;padding:8px 12px;font-size:12px;color:var(--muted);border-top:1px solid var(--rule)}
+/* phone mock for digital human */
+.dh{display:grid;grid-template-columns:minmax(0,230px) 1fr;gap:20px;align-items:center}
+@media (max-width:600px){.dh{grid-template-columns:1fr;justify-items:center}}
+.phone{width:100%;max-width:230px;aspect-ratio:9/16;border-radius:26px;border:6px solid var(--ink);background:#2B3330;position:relative;overflow:hidden}
+.phone .broll{position:absolute;inset:0 0 auto 0;height:56%;background-size:cover;background-position:center}
+.phone .person{position:absolute;left:50%;bottom:0;transform:translateX(-50%);width:78%}
+.phone .label{position:absolute;left:8%;right:8%;top:6%;background:#F7C948;color:#1C2320;font-family:var(--f-display);font-weight:800;font-size:13px;padding:5px 8px;border-radius:4px;text-align:center;line-height:1.25}
+.phone .sub{position:absolute;left:6%;right:6%;bottom:9%;text-align:center;font-weight:700;font-size:12.5px;line-height:1.35;color:#FFFFFF;text-shadow:0 1px 3px #000}
+.phone .sub .hi{color:#F7C948}
+.phone .end{position:absolute;right:8px;top:46%;background:#FFFFFF;border-radius:4px;padding:3px 5px;width:44%}
+.phone .end img{width:100%;display:block}
+.phone .ai{position:absolute;left:8px;bottom:6px;font-size:9px;color:#FFFFFF;opacity:.85;font-family:var(--f-mono)}
+/* pipeline */
+.pipe{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.pipe div{border:1px solid var(--rule);border-radius:6px;padding:8px;font-size:12px;display:grid;gap:2px;text-align:center}
+.pipe b{font-family:var(--f-display);font-size:20px;color:var(--euc);font-variant-numeric:tabular-nums}
+.chan{display:flex;flex-wrap:wrap;gap:6px}
+@media (max-width:480px){.pipe{grid-template-columns:repeat(2,minmax(0,1fr))}}
+/* review card mock */
+.qr{display:grid;grid-template-columns:96px 1fr;gap:14px;align-items:center;border:1px dashed var(--gum);border-radius:8px;padding:12px}
+.qr svg{width:96px;height:96px;display:block}
+/* footage checklist */
+.shots{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr));gap:10px}
+.shot{background:var(--paper);border:1px solid var(--rule);border-radius:6px;padding:12px;display:grid;gap:3px;font-size:13px;align-content:start}
+.shot b{font-size:14px}
+.compare{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:12px}
+.compare figure{margin:0;display:grid;gap:6px}
+.compare img{width:100%;aspect-ratio:3/2;object-fit:cover;border-radius:6px;display:block}
+.ph{aspect-ratio:3/2;border-radius:6px;border:2px dashed var(--rule);display:grid;place-items:center;text-align:center;padding:12px;font-size:13px;color:var(--muted);background:var(--bg)}
+@media print{body{background:#fff}.wrap{padding-block:12px}section{padding-block:22px}h2{break-after:avoid}.fact,.docket,.plain li,.vis,.shot,.dh,.compare,.qr{break-inside:avoid}.month{display:block;break-inside:auto}.month-label{margin-bottom:10px}.vis2{grid-template-columns:1fr 1fr}.phone{border-color:#1C2320}}
+</style>
+<style>
+.steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;counter-reset:s}
+.step{background:var(--paper);border:1px solid var(--rule);border-radius:6px;padding:14px;display:grid;gap:4px;align-content:start}
+.step .k{font-family:var(--f-mono);font-size:12px;color:var(--gum)}
+.step b{font-family:var(--f-display);font-size:17px}
+.step.free{border:2px solid var(--euc)}
+.step.free b{color:var(--euc)}
+@media (max-width:640px){.steps{grid-template-columns:1fr}}
+</style>
+
+<div class="wrap">
+<header>
+  <div class="eyebrow">ReelsMate · Digital Human Videos · Separate offer</div>
+  <h1>TradePlus Flooring<br>Your digital twin, free to try
+    <span class="zh" style="font-size:20px;font-weight:500;margin-top:6px">先免费体验你的数字分身</span></h1>
+  <div class="meta">
+    <span>Prepared for <b>TradePlus Flooring, Acacia Ridge QLD</b></span>
+    <span>Date <b>23 Nov 2026</b></span>
+    <span>Currency <b>AUD · no GST</b></span>
+  </div>
+</header>
+
+<section>
+  <h2>What it is<span class="zh">这是什么</span></h2>
+  <p class="lead">Record once and we create a digital twin of you. Each week it presents your new stock, trade prices and pick-up times in short vertical videos, so you don’t need to film every time.
+    <span class="zh">录一次，生成你的数字分身。之后由它在竖屏短视频里讲你的新货、批发价和自提时间，不用每次都亲自拍。</span></p>
+<div class="dh">
+    <div class="phone" role="img" aria-label="Illustration of a digital human video">
+      <div class="broll" style="background-image:url(quote-assets/spotted-gum.jpg)"></div>
+      <div class="label">9mm SPC HYBRID · BRISBANE STOCK<br>本周到货</div>
+      <div class="end"><img src="quote-assets/logo.png" alt=""></div>
+      <svg class="person" viewBox="0 0 200 220" aria-hidden="true"><ellipse cx="100" cy="62" rx="38" ry="44" fill="#C9A68A"/><path d="M62 52c4-30 72-36 78 2c-12-10-28-14-40-12c-14 0-28 4-38 10z" fill="#2E2622"/><path d="M20 220c6-64 40-92 80-92s74 28 80 92z" fill="#3E5C50"/><path d="M84 128l16 22l16-22z" fill="#F2F2F2"/></svg>
+      <div class="sub">This week: <span class="hi">9mm Spotted Gum</span> in stock<br>本周到货：9mm 斑点桉</div>
+      <div class="ai">AI-generated · AI 生成</div>
+    </div>
+    <ul class="plain">
+      <li><b>Top:</b> real footage of your floors and warehouse.<span class="zh">上半屏：你的地板和仓库真实画面。</span></li>
+      <li><b>Bottom:</b> your digital twin speaks, in your own recorded voice.<span class="zh">下半屏：你的数字分身讲解，用你本人录的声音。</span></li>
+      <li><b>On screen:</b> product name, stock, Saturday pick-up, with word-by-word captions in English and Chinese.<span class="zh">画面上：产品名、现货、周六自提，中英逐字字幕。</span></li>
+      <li><b>End:</b> your logo and WhatsApp number.<span class="zh">结尾：你的 logo 和 WhatsApp。</span></li>
+      <li class="cap" style="list-style:none;margin-left:-18px">Layout is an illustration; your first video is free so you can see the real result.<span class="zh">版式为示意；首条免费，可以先看真实成片。</span></li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <h2>Start with a free trial<span class="zh">先免费体验</span></h2>
+  <div class="steps">
+    <div class="step free"><span class="k">STEP 1 · 第一步</span><b>Free trial video</b>You record a short voice and video sample. We make one finished video about your stock. No cost, no commitment.<span class="zh">免费体验：你录一段声音和视频样本，我们做一条讲你现货的成片。不收钱，不用签约。</span></div>
+    <div class="step"><span class="k">STEP 2 · 第二步</span><b>You decide</b>Watch the result and post it if you like it. Then decide if you want videos every month.<span class="zh">你来决定：看过成片，满意可以直接发。再决定要不要每月做。</span></div>
+    <div class="step"><span class="k">STEP 3 · 第三步</span><b>Monthly plan</b>A$799 a month, with double credits in your first month.<span class="zh">月度套餐：每月 A$799，第一个月积分翻倍。</span></div>
+  </div>
+</section>
+
+<section>
+  <h2>Monthly plan (if you continue)<span class="zh">月度套餐（体验满意后再开始）</span></h2>
+  <div class="docket">
+    <div class="docket-head"><strong>Digital human videos · 数字人短视频</strong><span>AUD · NO GST</span></div>
+    <div class="tbl-scroll">
+    <table class="tbl">
+      <thead><tr><th>Item · 项目</th><th class="amt">Price · 价格</th></tr></thead>
+      <tbody>
+        <tr><td><b>Trial video</b><span class="zh">体验成片 1 条</span></td><td class="amt" style="color:var(--euc)">Free · 免费</td></tr>
+        <tr><td><b>Monthly plan</b><span class="zh">月度套餐，按月付</span></td><td class="amt">A$799 <small style="font-size:12px;font-weight:500">/ month · 每月</small></td></tr>
+      </tbody>
+    </table>
+    </div>
+    <div class="notes">
+      <p><b>Credits:</b> 8,000 a month, about 16 one-minute videos. In your first paid month we double it to 16,000, about 32 one-minute videos.
+        <span class="zh">积分：每月 8,000，约 16 条 1 分钟视频；第一个付费月翻倍到 16,000，约 32 条。</span></p>
+      <p><b>Included:</b> digital twin setup, word-by-word captions in English and Chinese, text graphics and B-roll, a brand outro, and vertical videos for Facebook, Instagram and TikTok.
+        <span class="zh">包含：数字分身制作、中英逐字字幕、文字贴图和 B-roll、品牌片尾、适合 Facebook / Instagram / TikTok 的竖屏成片。</span></p>
+      <p><b>No GST:</b> provided remotely by a New Zealand company, zero-rated. Billed monthly.
+        <span class="zh">不加 GST：由新西兰公司远程提供，按 0% 计。按月付。</span></p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>What we need for the trial<span class="zh">体验需要你准备的</span></h2>
+  <ul class="plain">
+    <li>About 1–2 minutes of you talking to camera, in a quiet room or at the warehouse. A phone is fine.<span class="zh">1 到 2 分钟对着镜头讲话的视频，安静的房间或仓库都行，手机拍就可以。</span></li>
+    <li>A few photos or clips of your stock or a job site.<span class="zh">几张现货或工地的照片、短视频。</span></li>
+    <li>The product and price you want the trial video to talk about.<span class="zh">体验视频要讲哪款产品、什么价格。</span></li>
+    <li>Your voice is always your own recording. Videos are labelled as AI-generated, and only prices and product facts you confirm are used.<span class="zh">声音一律用你本人录的；视频标明 AI 生成；价格和产品信息只用你确认过的。</span></li>
+  </ul>
+</section>
+
+<footer>
+  <div>ReelsMate digital human videos · offered with Magic Lab · 23 November 2026. This offer is separate from the TradePlus growth service quote.</div>
+  <div class="zh">ReelsMate 数字人短视频 · 2026 年 11 月 23 日。本报价与 TradePlus 增长服务报价分开。</div>
+</footer>
+</div>

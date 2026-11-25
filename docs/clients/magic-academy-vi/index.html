@@ -1,0 +1,381 @@
+<title>Magic Academy VI 手册</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: brand book — left rail index on desktop, single column on phone; every specimen drawn in the brand's own tokens. Single light theme by choice: the manual shows the brand as it is printed. */
+:root {
+  --orange: #f05b35;      /* 品牌橙 */
+  --orange-deep: #c4492c; /* 深橙：小字、按钮 */
+  --orange-soft: #f5a186; /* 深底上的浅橙 */
+  --peach: #ffede6;       /* 浅橙底 */
+  --ink: #171519;         /* 暖黑：正文 */
+  --ink-2: #211b1a;       /* 暖黑：深色底 */
+  --paper: #fbf9f6;       /* 米白：页面底 */
+  --card: #fffdf8;        /* 卡片底 */
+  --sand: #f2ece6;        /* 页脚底 */
+  --line: #e3ddd3;        /* 细线 */
+  --line-2: #d8d0c4;      /* 分隔线 */
+  --muted: #7a6f63;       /* 次要文字 */
+  --body: #403a3c;        /* 长段落 */
+  --font: Arial, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font); font-size: 16px; line-height: 1.75; }
+.wrap { max-width: 1180px; margin: 0 auto; padding-block: 0 80px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 56px; }
+nav.rail { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 32px); align-self: start; padding-top: 32px; font-size: 13px; }
+nav.rail ol { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 6px; counter-reset: s; }
+nav.rail li { counter-increment: s; }
+nav.rail a { color: var(--body); text-decoration: none; display: flex; gap: 10px; }
+nav.rail a::before { content: counter(s, decimal-leading-zero); color: var(--orange-deep); font-weight: 700; font-variant-numeric: tabular-nums; }
+nav.rail a:hover, nav.rail a:focus-visible { color: var(--orange-deep); }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--orange-deep); outline-offset: 2px; }
+main { min-width: 0; }
+header.cover { padding: 56px 0 48px; border-bottom: 1px solid var(--line-2); display: grid; gap: 28px; }
+.eyebrow { font-size: 12px; font-weight: 700; letter-spacing: .08em; color: var(--orange-deep); text-transform: uppercase; }
+h1 { margin: 0; font-size: clamp(2rem, 5vw, 3.4rem); line-height: 1.2; letter-spacing: -.035em; text-wrap: balance; }
+h2 { margin: 0 0 8px; font-size: clamp(1.5rem, 3vw, 2.1rem); letter-spacing: -.03em; line-height: 1.3; text-wrap: balance; }
+h3 { margin: 0 0 6px; font-size: 17px; }
+p { margin: 0; }
+.lead { max-width: 62ch; color: var(--body); font-size: 17px; }
+section { padding: 56px 0; border-bottom: 1px solid var(--line-2); scroll-margin-top: 16px; }
+section > .sub { max-width: 62ch; color: var(--body); margin-bottom: 28px; }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+.panel { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 24px; min-width: 0; }
+.note { font-size: 13px; color: var(--muted); line-height: 1.65; }
+.rule { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.rule li { display: grid; grid-template-columns: 22px minmax(0,1fr); gap: 8px; color: var(--body); font-size: 15px; }
+.rule li::before { content: "✓"; color: var(--orange-deep); font-weight: 800; }
+.rule.no li::before { content: "✕"; color: var(--ink); }
+
+/* Logo */
+.logo { display: inline-flex; align-items: center; gap: 9px; font-family: Arial, "PingFang SC", sans-serif; font-weight: 800; letter-spacing: .06em; line-height: 1.08; color: var(--ink); }
+.logo i { width: 1.42em; height: 1.42em; border-radius: 50%; background: var(--orange); flex: none; }
+.logo { gap: .75em; }
+.logo.xl { font-size: 34px; }
+.logo.xl i { width: 48px; height: 48px; }
+.stage { border-radius: 12px; min-height: 220px; display: grid; place-items: center; padding: 32px; }
+.stage.light { background: var(--paper); border: 1px solid var(--line); }
+.stage.dark { background: var(--ink-2); }
+.stage.dark .logo { color: #fff; }
+.stage.orange { background: var(--orange); }
+.stage.orange .logo { color: #fff; }
+.stage.orange .logo i { background: #fff; }
+.clear { position: relative; padding: 48px; outline: 1px dashed var(--orange-soft); outline-offset: -1px; }
+.clear::after { content: "四周留白 ≥ 1 个圆点"; position: absolute; left: 8px; top: 6px; font-size: 11px; color: var(--orange-deep); font-weight: 700; letter-spacing: 0; }
+.sizes { display: flex; align-items: flex-end; gap: 32px; flex-wrap: wrap; }
+.sizes figure { margin: 0; display: grid; gap: 10px; justify-items: start; }
+.sizes figcaption { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.dont { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 16px; }
+.dont .stage { min-height: 130px; position: relative; padding: 20px; }
+.dont p { font-size: 13px; color: var(--body); margin-top: 8px; }
+.x { position: absolute; top: 8px; right: 10px; font-weight: 800; color: var(--ink); font-size: 14px; }
+
+/* Color */
+.swatches { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 16px; }
+.sw { border-radius: 12px; overflow: hidden; border: 1px solid var(--line); background: var(--card); min-width: 0; }
+.sw .chip { height: 104px; }
+.sw .meta { padding: 14px 16px; display: grid; gap: 2px; }
+.sw b { font-size: 15px; }
+.sw code { font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: var(--body); }
+.sw span { font-size: 12px; color: var(--muted); line-height: 1.55; }
+.sw.big { grid-column: span 2; }
+.sw.big .chip { height: 160px; }
+.ratio { display: flex; height: 26px; border-radius: 6px; overflow: hidden; margin-top: 24px; }
+.ratio div { font-size: 11px; font-weight: 700; display: grid; place-items: center; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 12px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 12px; color: var(--muted); font-weight: 700; }
+td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pass { color: var(--ink); font-weight: 700; }
+.fail { color: var(--orange-deep); font-weight: 700; }
+.scroll { overflow-x: auto; }
+
+/* Type */
+.type-row { display: grid; grid-template-columns: 150px minmax(0,1fr); gap: 24px; padding: 20px 0; border-bottom: 1px solid var(--line); align-items: baseline; }
+.type-row:last-child { border-bottom: 0; }
+.type-row .spec { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; line-height: 1.6; }
+
+/* Components */
+.btn { display: inline-flex; align-items: center; justify-content: center; min-height: 48px; padding: 14px 24px; border-radius: 6px; font-weight: 700; font-size: 15px; font-family: inherit; border: 0; cursor: pointer; text-decoration: none; }
+.btn.primary { background: var(--orange-deep); color: #fff; }
+.btn.ghost { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.btn.on-dark { background: var(--orange); color: #fff; }
+.btn.ghost-dark { background: transparent; color: #fff; box-shadow: inset 0 0 0 1px rgba(255,255,255,.7); }
+.row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+.tag { display: inline-block; padding: 4px 10px; border-radius: 999px; background: var(--peach); color: var(--orange-deep); font-size: 12px; font-weight: 700; }
+.result strong { display: block; font-size: 56px; line-height: 1; font-weight: 800; color: var(--orange); letter-spacing: -.02em; margin: 6px 0 10px; }
+.result span { font-weight: 700; }
+.band { background: var(--ink-2); color: #fff; border-radius: 12px; padding: 28px; display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; align-items: center; }
+.band p { color: #dbcec7; font-size: 14px; }
+.radius { display: flex; gap: 16px; flex-wrap: wrap; }
+.radius div { width: 92px; height: 72px; background: var(--peach); border: 1px solid var(--orange-soft); display: grid; place-items: center; font-size: 12px; color: var(--orange-deep); font-weight: 700; }
+
+/* Imagery */
+.photo { margin: 0; border-radius: 20px; overflow: hidden; background: var(--sand); }
+.photo img { display: block; width: 100%; height: auto; aspect-ratio: 3 / 2; object-fit: cover; }
+
+/* Voice */
+.say { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--card); }
+.say > div { padding: 18px 20px; border-bottom: 1px solid var(--line); font-size: 15px; min-width: 0; }
+.say > div:nth-child(odd) { border-right: 1px solid var(--line); color: var(--muted); }
+.say > div.h { font-size: 12px; font-weight: 700; color: var(--orange-deep); background: var(--peach); }
+.say > div.h:nth-child(odd) { color: var(--muted); background: var(--sand); }
+.say > div:nth-last-child(-n+2) { border-bottom: 0; }
+
+/* Applications */
+.apps { display: grid; grid-template-columns: 1.1fr 1fr 1fr; gap: 20px; align-items: start; }
+.post { aspect-ratio: 1 / 1; border-radius: 12px; background: var(--paper); border: 1px solid var(--line); padding: 26px; display: flex; flex-direction: column; justify-content: space-between; max-width: 100%; }
+.post .big { font-size: clamp(22px, 2.6vw, 30px); font-weight: 800; line-height: 1.3; letter-spacing: -.03em; }
+.post .big em { font-style: normal; color: var(--orange); }
+.post.dark { background: var(--ink-2); color: #fff; border: 0; }
+.post.dark .logo { color: #fff; }
+.avatar { width: 132px; height: 132px; border-radius: 50%; background: var(--orange); display: grid; place-items: center; color: #fff; font-weight: 800; letter-spacing: .06em; font-size: 15px; line-height: 1.1; text-align: center; }
+.card-biz { aspect-ratio: 90 / 54; max-width: 100%; border-radius: 8px; background: var(--card); border: 1px solid var(--line); padding: 20px; display: flex; flex-direction: column; justify-content: space-between; font-size: 12px; }
+.card-biz b { font-size: 15px; }
+
+/* Fix list */
+.fix { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.fix li { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; display: grid; grid-template-columns: 90px minmax(0,1fr); gap: 16px; font-size: 15px; color: var(--body); }
+.fix .lv { font-size: 12px; font-weight: 700; color: var(--orange-deep); }
+
+footer.end { padding-top: 32px; font-size: 13px; color: var(--muted); }
+
+@media (max-width: 980px) {
+  .wrap { grid-template-columns: 1fr; gap: 0; }
+  nav.rail { position: static; padding-top: 24px; }
+  nav.rail ol { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .swatches { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .dont { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .apps { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 640px) {
+  .grid2, .grid3, .apps { grid-template-columns: 1fr; }
+  .type-row { grid-template-columns: 1fr; gap: 6px; }
+  .say { grid-template-columns: 1fr; }
+  .say > div:nth-child(odd) { border-right: 0; }
+  .say > div:nth-last-child(2) { border-bottom: 1px solid var(--line); }
+  .fix li { grid-template-columns: 1fr; gap: 4px; }
+  .logo.xl { font-size: 26px; }
+  .logo.xl i { width: 37px; height: 37px; }
+}
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+
+<div class="wrap">
+  <nav class="rail" aria-label="手册目录">
+    <span class="logo" style="font-size:12px"><i></i><span>MAGIC<br>ACADEMY</span></span>
+    <ol>
+      <li><a href="#brand">品牌是谁</a></li>
+      <li><a href="#logo">标志</a></li>
+      <li><a href="#color">颜色</a></li>
+      <li><a href="#type">字体</a></li>
+      <li><a href="#ui">版式与组件</a></li>
+      <li><a href="#photo">图片</a></li>
+      <li><a href="#voice">语气与文案</a></li>
+      <li><a href="#apps">应用示例</a></li>
+      <li><a href="#fix">待统一的地方</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <header class="cover">
+      <span class="eyebrow">Visual Identity · v1.0 · 2026 年 11 月</span>
+      <h1>Magic Academy 视觉识别手册</h1>
+      <p class="lead">这份手册规定 Magic Academy 在网站、社媒、海报、课件、名片上长什么样、怎么说话。内容全部取自 academy.magiclab.co.nz 现在线上用的设计；做任何对外物料前，先对照这里。</p>
+      <div class="stage light" style="min-height:260px"><span class="logo xl"><i></i><span>MAGIC<br>ACADEMY</span></span></div>
+    </header>
+
+    <section id="brand">
+      <span class="eyebrow">01</span>
+      <h2>品牌是谁</h2>
+      <p class="sub">Magic Academy 是 Magic Lab 旗下的 AI 培训品牌，带澳洲、新西兰华人，把 AI 用进生意、工作和学习。</p>
+      <div class="grid3">
+        <div class="panel"><h3>口号</h3><p style="font-size:22px;font-weight:800;letter-spacing:-.02em;line-height:1.4">学 AI，找大瑞，<br>一学就会</p><p class="note" style="margin-top:10px">只用这一种写法，不写「和大瑞学 AI」。</p></div>
+        <div class="panel"><h3>品牌架构</h3><p style="font-size:15px;color:var(--body)">Magic Lab（上级品牌）<br>├ Magic Engine：数字营销<br>└ <b style="color:var(--orange-deep)">Magic Academy：培训</b></p><p class="note" style="margin-top:10px">对外说「兄弟品牌」，不说「子公司」。</p></div>
+        <div class="panel"><h3>三个关键词</h3><div class="row" style="margin-top:6px"><span class="tag">真实项目</span><span class="tag">当场做出作品</span><span class="tag">大白话</span></div><p class="note" style="margin-top:12px">所有物料都要让人感到：这是实战，不是空讲 AI 概念。</p></div>
+      </div>
+    </section>
+
+    <section id="logo">
+      <span class="eyebrow">02</span>
+      <h2>标志</h2>
+      <p class="sub">标志由一个橙色圆点和两行字标组成：上行 MAGIC，下行 ACADEMY，全大写、粗体、字距稍开。圆点和字标是一个整体，不拆开用（头像这类正方形位置除外，见应用示例）。</p>
+      <div class="grid3">
+        <div><div class="stage light"><span class="logo xl"><i></i><span>MAGIC<br>ACADEMY</span></span></div><p class="note" style="margin-top:8px">标准版：米白或白底，字用暖黑。</p></div>
+        <div><div class="stage dark"><span class="logo xl"><i></i><span>MAGIC<br>ACADEMY</span></span></div><p class="note" style="margin-top:8px">反白版：深色底，字用白色，圆点保持橙色。</p></div>
+        <div><div class="stage orange"><span class="logo xl"><i></i><span>MAGIC<br>ACADEMY</span></span></div><p class="note" style="margin-top:8px">橙底版：只在整块橙色背景上用，圆点和字都变白。</p></div>
+      </div>
+
+      <div class="grid2" style="margin-top:28px">
+        <div class="panel">
+          <h3>构成比例</h3>
+          <p class="note">字标字号记为 1 单位：圆点直径 = 1.42 单位，圆点和字之间的空 = 0.75 单位，两行行距 1.08，字距 0.06。字体 Arial Black 风格的粗体（Arial 800）。</p>
+          <div style="margin-top:18px"><span class="clear" style="display:inline-block"><span class="logo xl"><i></i><span>MAGIC<br>ACADEMY</span></span></span></div>
+        </div>
+        <div class="panel">
+          <h3>最小尺寸</h3>
+          <p class="note">屏幕上字标不小于 11px（网站导航用 12px）；印刷品字标不小于 2.5mm 高。再小就只用圆点。</p>
+          <div class="sizes" style="margin-top:22px">
+            <figure><span class="logo" style="font-size:24px"><i></i><span>MAGIC<br>ACADEMY</span></span><figcaption>24px · 海报、封面</figcaption></figure>
+            <figure><span class="logo" style="font-size:16px"><i></i><span>MAGIC<br>ACADEMY</span></span><figcaption>16px · 课件页眉</figcaption></figure>
+            <figure><span class="logo" style="font-size:12px"><i></i><span>MAGIC<br>ACADEMY</span></span><figcaption>12px · 网站导航</figcaption></figure>
+          </div>
+        </div>
+      </div>
+
+      <h3 style="margin-top:32px">不要这样用</h3>
+      <div class="dont" style="margin-top:12px">
+        <div><div class="stage light"><span class="x">✕</span><span class="logo" style="font-size:16px"><i style="background:#2e9eff"></i><span>MAGIC<br>ACADEMY</span></span></div><p>换圆点颜色（蓝、绿都不行）</p></div>
+        <div><div class="stage light"><span class="x">✕</span><span class="logo" style="font-size:16px;transform:scaleX(1.45)"><i></i><span>MAGIC<br>ACADEMY</span></span></div><p>拉伸、压扁</p></div>
+        <div><div class="stage light"><span class="x">✕</span><span class="logo" style="font-size:16px"><i></i><span>MAGIC ACADEMY</span></span></div><p>把两行改成一行</p></div>
+        <div><div class="stage" style="background:var(--orange-soft)"><span class="x">✕</span><span class="logo" style="font-size:16px"><i></i><span>MAGIC<br>ACADEMY</span></span></div><p>放在浅橙等撞色底上，圆点看不清</p></div>
+      </div>
+    </section>
+
+    <section id="color">
+      <span class="eyebrow">03</span>
+      <h2>颜色</h2>
+      <p class="sub">品牌只有一个主色：橙。其余是暖黑和米白，都偏一点暖色，不用纯黑纯白的冷灰。<b>Magic Academy 从来不用绿色</b>，网站里残留的深绿是改版时混进来的，不属于品牌。</p>
+      <div class="swatches">
+        <div class="sw big"><div class="chip" style="background:var(--orange)"></div><div class="meta"><b>品牌橙</b><code>#F05B35 · RGB 240 91 53</code><span>标志圆点、大数字、深色底上的按钮、整块色带。白字放在它上面只能用 18px 以上的大字。</span></div></div>
+        <div class="sw"><div class="chip" style="background:var(--orange-deep)"></div><div class="meta"><b>深橙</b><code>#C4492C</code><span>浅色底上的按钮、小标题、链接、强调小字。</span></div></div>
+        <div class="sw"><div class="chip" style="background:var(--ink)"></div><div class="meta"><b>暖黑</b><code>#171519</code><span>标题、正文、标志字标。</span></div></div>
+        <div class="sw"><div class="chip" style="background:var(--ink-2)"></div><div class="meta"><b>深底暖黑</b><code>#211B1A</code><span>整块深色区域（招生条、深色海报）。</span></div></div>
+        <div class="sw"><div class="chip" style="background:var(--paper)"></div><div class="meta"><b>米白</b><code>#FBF9F6</code><span>页面底色。</span></div></div>
+        <div class="sw"><div class="chip" style="background:var(--peach)"></div><div class="meta"><b>浅橙底</b><code>#FFEDE6</code><span>标签、提示块的底色。</span></div></div>
+        <div class="sw"><div class="chip" style="background:var(--sand)"></div><div class="meta"><b>沙色</b><code>#F2ECE6</code><span>页脚、次要区块底色。</span></div></div>
+        <div class="sw"><div class="chip" style="background:var(--orange-soft)"></div><div class="meta"><b>浅橙</b><code>#F5A186</code><span>只在深色底上用，做小标题或编号。</span></div></div>
+        <div class="sw"><div class="chip" style="background:var(--muted)"></div><div class="meta"><b>次要文字</b><code>#7A6F63</code><span>说明、注释、日期。</span></div></div>
+        <div class="sw"><div class="chip" style="background:var(--line)"></div><div class="meta"><b>细线</b><code>#E3DDD3 / #D8D0C4</code><span>卡片边框、分隔线。</span></div></div>
+      </div>
+      <p class="note" style="margin-top:24px">一张物料里大约的用色比例：</p>
+      <div class="ratio" role="img" aria-label="米白 60%，暖黑 25%，品牌橙 10%，其他 5%">
+        <div style="flex:60;background:var(--paper);border:1px solid var(--line);color:var(--muted)">米白 60%</div>
+        <div style="flex:25;background:var(--ink);color:#fff">暖黑 25%</div>
+        <div style="flex:10;background:var(--orange);color:#fff">橙 10%</div>
+        <div style="flex:5;background:var(--peach)"></div>
+      </div>
+
+      <h3 style="margin-top:36px">文字和底色怎么配才看得清</h3>
+      <p class="note">按国际通行的看清标准（对比度 4.5 以上算合格）实测：</p>
+      <div class="scroll" style="margin-top:12px">
+        <table>
+          <thead><tr><th>组合</th><th>对比度</th><th>结论</th></tr></thead>
+          <tbody>
+            <tr><td>暖黑字 · 米白底</td><td class="num">17.3</td><td class="pass">任何字号都行</td></tr>
+            <tr><td>白字 · 深橙底（按钮）</td><td class="num">4.8</td><td class="pass">小字可以，按钮用这个</td></tr>
+            <tr><td>深橙字 · 米白底</td><td class="num">4.6</td><td class="pass">小字可以</td></tr>
+            <tr><td>次要文字 · 米白底</td><td class="num">4.7</td><td class="pass">小字可以</td></tr>
+            <tr><td>品牌橙字 · 深底暖黑</td><td class="num">5.1</td><td class="pass">小字可以</td></tr>
+            <tr><td>白字 · 品牌橙底</td><td class="num">3.4</td><td class="fail">只能 18px 以上的大字</td></tr>
+            <tr><td>品牌橙字 · 米白底</td><td class="num">3.2</td><td class="fail">只能做大数字、大标题</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="type">
+      <span class="eyebrow">04</span>
+      <h2>字体</h2>
+      <p class="sub">中文用苹方（PingFang SC），Windows 上换成微软雅黑；英文和数字用 Arial。不用衬线体（宋体、Georgia），不用花体。标题字距收紧一点，显得利落。</p>
+      <div class="panel" style="padding:8px 24px">
+        <div class="type-row"><div class="spec">大标题<br>48–56px · 800<br>字距 -3.5%</div><div style="font-size:clamp(28px,4.4vw,50px);font-weight:800;letter-spacing:-.035em;line-height:1.2">学 AI，找大瑞，一学就会</div></div>
+        <div class="type-row"><div class="spec">区块标题<br>32–40px · 700<br>字距 -3%</div><div style="font-size:clamp(24px,3.2vw,36px);font-weight:700;letter-spacing:-.03em;line-height:1.3">课上的方法，来自真实项目</div></div>
+        <div class="type-row"><div class="spec">小标题<br>20–22px · 700</div><div style="font-size:21px;font-weight:700">第一期数字营销实战课</div></div>
+        <div class="type-row"><div class="spec">正文<br>16px · 400<br>行高 1.75–1.85</div><div style="color:var(--body)">独立站与搜索、社媒内容、短视频、广告与数据，每节课从一个企业真实问题开始，当场做出作品。</div></div>
+        <div class="type-row"><div class="spec">标签 / 眉标<br>12px · 700<br>字距 +4–8%</div><div style="font-size:12px;font-weight:700;letter-spacing:.06em;color:var(--orange-deep)">我们做了什么</div></div>
+        <div class="type-row"><div class="spec">说明文字<br>13px · 400</div><div style="font-size:13px;color:var(--muted)">金额为纽币，均为当期实际数据。</div></div>
+      </div>
+      <p class="note" style="margin-top:14px">一行中文不超过约 35 个字；超过就分段或缩窄版心。</p>
+    </section>
+
+    <section id="ui">
+      <span class="eyebrow">05</span>
+      <h2>版式与组件</h2>
+      <p class="sub">版面以米白为底，内容左对齐，留白多。卡片只给需要单独拎出来的东西用，不是每块内容都套卡片。</p>
+      <div class="grid2">
+        <div class="panel">
+          <h3>按钮</h3>
+          <div class="row" style="margin-top:12px"><a class="btn primary" href="#ui">在线报名</a><a class="btn ghost" href="#ui">看课程详情</a></div>
+          <p class="note" style="margin-top:12px">浅色底：主按钮深橙底白字，次按钮暖黑描边。高度至少 48px，圆角 6px。一屏只放一个主按钮。</p>
+          <div class="band" style="margin-top:16px"><div><b>第一期正在招人</b><p>约 5 分钟填完报名表</p></div><div class="row"><a class="btn on-dark" href="#ui">在线报名</a><a class="btn ghost-dark" href="#ui">看课程详情</a></div></div>
+          <p class="note" style="margin-top:12px">深色底：主按钮用品牌橙，次按钮白色描边。</p>
+        </div>
+        <div class="panel">
+          <h3>结果数字</h3>
+          <div class="result"><span class="eyebrow">结果</span><strong>2.5×</strong><span>留资率从 4.7% 提到 11.9%</span><p class="note" style="margin-top:4px">每条线索约 8.5 纽币</p></div>
+          <p class="note" style="margin-top:14px">真实数字是品牌最好的图。大数字用品牌橙、56px 粗体，下面一行写清这个数是什么，再下面一行写出处或口径。数字必须来自真实后台，不估、不编。</p>
+          <h3 style="margin-top:22px">圆角</h3>
+          <div class="radius" style="margin-top:8px"><div style="border-radius:6px">6 · 按钮</div><div style="border-radius:12px">12 · 卡片</div><div style="border-radius:20px">20 · 大图</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="photo">
+      <span class="eyebrow">06</span>
+      <h2>图片</h2>
+      <p class="sub">首选真实照片：大瑞讲课、学员上课、学员做出的作品。人要在做事，不摆拍；光线自然或现场灯光。</p>
+      <div class="grid2" style="align-items:start">
+        <figure class="photo"><img src="darui-live-talk.webp" alt="大瑞在奥克兰活动现场对着台下观众演讲" width="900" height="600"></figure>
+        <div style="display:grid;gap:20px">
+          <div><h3>要</h3><ul class="rule"><li>真实活动、课堂现场，看得出是在澳新</li><li>大瑞本人的现场照，用作讲师介绍</li><li>学员作品截图（打码客户信息）</li><li>大图圆角 20px，不加滤镜、不加描边</li></ul></div>
+          <div><h3>不要</h3><ul class="rule no"><li>AI 生成的「假学员」照片冒充真实课堂</li><li>图里出现别的城市的地标（例如在奥克兰的课配墨尔本街景）</li><li>机器人、发光大脑、蓝紫色科技光效这类 AI 俗套图</li><li>客户的产品图、logo 不经同意上物料</li></ul></div>
+        </div>
+      </div>
+      <p class="note" style="margin-top:14px">实在没有真实照片时，可以先用无人物的场景图或纯排版（大字＋大数字），不要用 AI 生成的人物。</p>
+    </section>
+
+    <section id="voice">
+      <span class="eyebrow">07</span>
+      <h2>语气与文案</h2>
+      <p class="sub">像一个做过很多实战的朋友在说话：先说结论，句子短，用大白话，给具体数字和具体例子。</p>
+      <div class="say">
+        <div class="h">别这么写</div><div class="h">这么写</div>
+        <div>赋能企业数字化转型，开启 AI 新纪元</div><div>把 AI 用进你的生意、工作和学习</div>
+        <div>零基础速成，保证就业</div><div>没有技术背景也能学；结业表现好的同学有机会签合同进实习，但不保证</div>
+        <div>行业领先的 AI 课程体系</div><div>每节课从一个企业真实问题开始，当场做出作品</div>
+        <div>和大瑞学 AI</div><div>学 AI，找大瑞，一学就会</div>
+      </div>
+      <div class="grid2" style="margin-top:24px">
+        <div class="panel"><h3>规矩</h3><ul class="rule"><li>中文为主；英文名（Magic Academy、Magic Engine）保持原样不翻译</li><li>说「澳洲和新西兰」，不只说新西兰</li><li>客户名一律模糊处理，例如「一家跨境物流公司」</li><li>报名、收费、实习这类事，写清楚条件，不夸大</li></ul></div>
+        <div class="panel"><h3>不说</h3><ul class="rule no"><li>「最」「第一」「保证」「100%」</li><li>融资金额等没必要公开的数字</li><li>没核实过的成绩和学员评价</li><li>黑话：赋能、抓手、闭环、颠覆</li></ul></div>
+      </div>
+    </section>
+
+    <section id="apps">
+      <span class="eyebrow">08</span>
+      <h2>应用示例</h2>
+      <p class="sub">下面三种是最常用的物料，照这个结构做，换文字即可。</p>
+      <div class="apps">
+        <div>
+          <div class="post"><span class="logo" style="font-size:13px"><i></i><span>MAGIC<br>ACADEMY</span></span><div class="big">每节课从一个<br>企业<em>真实问题</em>开始</div><p class="note">第一期免费 · 滚动加入 · academy.magiclab.co.nz</p></div>
+          <p class="note" style="margin-top:8px">社媒方图：米白底，一句大字，一个橙色强调词。</p>
+        </div>
+        <div>
+          <div class="post dark"><span class="logo" style="font-size:13px"><i></i><span>MAGIC<br>ACADEMY</span></span><div class="big" style="color:#fff">第一期<br>正在招人</div><span class="btn on-dark" style="align-self:flex-start;min-height:40px;padding:10px 18px;font-size:14px">在线报名</span></div>
+          <p class="note" style="margin-top:8px">招生海报：深底暖黑，按钮用品牌橙。</p>
+        </div>
+        <div style="display:grid;gap:20px;justify-items:start">
+          <div class="avatar" aria-label="社媒头像示例">MAGIC<br>ACADEMY</div>
+          <p class="note">社媒头像：橙色圆底，白色两行字标，圆点省略（圆形头像本身就是圆点）。</p>
+          <div class="card-biz"><span class="logo" style="font-size:11px"><i></i><span>MAGIC<br>ACADEMY</span></span><div><b>大瑞 Ray Deng</b><br><span style="color:var(--muted)">academy.magiclab.co.nz · hello@magicengine.cloud</span></div></div>
+          <p class="note">名片 90 × 54mm：卡片底，左上标志，左下姓名和联系方式。</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="fix" style="border-bottom:0">
+      <span class="eyebrow">09</span>
+      <h2>线上还没统一的地方</h2>
+      <p class="sub">做这份手册时对照网站源码查到的不一致，按影响大小排。</p>
+      <ul class="fix">
+        <li><span class="lv">已改好</span><span>浏览器标签上的小图标原来是建站模板自带的蓝色方块，2026-11-25 已换成 Academy 的橙色圆点。</span></li>
+        <li><span class="lv">影响中</span><span>部分配图是 AI 生成的人物照，其中一张背景是墨尔本的地标，和「奥克兰的课」对不上。建议换成真实课堂照。</span></li>
+        <li><span class="lv">影响小</span><span>网站样式里残留旧版的深绿色和衬线字体（登录页等少数页面），首页已经是橙色和无衬线字体。</span></li>
+      </ul>
+    </section>
+
+    <footer class="end">Magic Academy · Magic Lab 旗下品牌 · 手册 v1.0，2026 年 11 月整理。颜色、字体、标志均取自 academy.magiclab.co.nz 线上设计。</footer>
+  </main>
+</div>

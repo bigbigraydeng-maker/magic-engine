@@ -1,0 +1,393 @@
+<title>TradePlus Flooring Growth Proposal</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=Inter:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: a trade docket — one narrow column, ruled sections like a delivery note, price docket as the single boxed object. */
+:root{
+  --bg:#F3F4F1; --paper:#FFFFFF; --ink:#1C2320; --muted:#5B655F; --rule:#D5DAD4;
+  --gum:#8A5527; --gum-soft:#F2E7DB; --euc:#2F6650; --euc-soft:#E2EEE8; --warn:#9A3B1E;
+  --f-display:"Archivo","Inter","Noto Sans SC",system-ui,sans-serif;
+  --f-body:"Inter","Noto Sans SC","PingFang SC","Hiragino Sans GB",system-ui,sans-serif;
+  --f-zh:"Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#141917; --paper:#1C2320; --ink:#E9EDEA; --muted:#A3ADA7; --rule:#33403A;
+  --gum:#D99A62; --gum-soft:#33261A; --euc:#7FC2A4; --euc-soft:#1C2E26; --warn:#E58A68; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#141917; --paper:#1C2320; --ink:#E9EDEA; --muted:#A3ADA7; --rule:#33403A;
+  --gum:#D99A62; --gum-soft:#33261A; --euc:#7FC2A4; --euc-soft:#1C2E26; --warn:#E58A68; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.6;margin:0}
+.wrap{max-width:860px;margin:0 auto;padding-block:40px 64px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.zh{font-family:var(--f-zh);color:var(--muted);display:block;font-size:.93em;line-height:1.65}
+h1,h2,h3{font-family:var(--f-display);text-wrap:balance;margin:0}
+h1{font-size:clamp(28px,5vw,40px);line-height:1.15;font-weight:800;letter-spacing:-.01em}
+h2{font-size:22px;font-weight:700}
+h2 .zh{font-family:var(--f-zh);font-size:15px;font-weight:500;margin-top:2px}
+h3{font-size:16px;font-weight:700}
+.eyebrow{font-family:var(--f-mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--gum)}
+header{display:grid;gap:14px;padding-bottom:28px;border-bottom:2px solid var(--ink)}
+.meta{display:flex;flex-wrap:wrap;gap:6px 22px;font-size:13px;color:var(--muted)}
+.meta b{color:var(--ink);font-weight:600}
+section{padding-block:32px;border-bottom:1px solid var(--rule);display:grid;gap:18px}
+section:last-of-type{border-bottom:0}
+p{margin:0;max-width:68ch}
+.lead{font-size:17px}
+/* facts */
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:12px}
+.fact{background:var(--paper);border:1px solid var(--rule);border-radius:6px;padding:14px 16px;display:grid;gap:4px;align-content:start;min-width:0}
+.fact .num{font-family:var(--f-display);font-size:24px;font-weight:800;font-variant-numeric:tabular-nums;color:var(--warn)}
+.fact .num small{font-size:13px;font-weight:600;color:var(--muted)}
+/* docket */
+.docket{background:var(--paper);border:2px solid var(--ink);border-radius:4px;overflow:hidden}
+.docket-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;padding:12px 18px;background:var(--ink);color:var(--paper)}
+.docket-head span{font-family:var(--f-mono);font-size:12px;letter-spacing:.06em}
+.tbl{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+.tbl th,.tbl td{padding:12px 18px;text-align:left;vertical-align:top;border-bottom:1px solid var(--rule)}
+.tbl th{font-family:var(--f-mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}
+.tbl td.amt,.tbl th.amt{text-align:right;white-space:nowrap}
+.tbl td.amt{font-family:var(--f-display);font-weight:700;font-size:17px}
+.tbl tr.total td{border-bottom:0;background:var(--gum-soft)}
+.tbl tr.total td.amt{font-size:20px;color:var(--gum)}
+.tbl-scroll{overflow-x:auto}
+.notes{display:grid;gap:10px;padding:14px 18px 18px;border-top:1px solid var(--rule)}
+.notes p{font-size:14px}
+.fee-eg{display:flex;flex-wrap:wrap;gap:8px}
+.chip{font-family:var(--f-mono);font-size:12px;padding:4px 10px;border-radius:999px;background:var(--euc-soft);color:var(--euc);white-space:nowrap}
+/* months */
+.months{display:grid;gap:16px}
+.month{display:grid;grid-template-columns:120px 1fr;gap:18px;background:var(--paper);border:1px solid var(--rule);border-radius:6px;padding:18px}
+.month-label{display:grid;gap:4px;align-content:start}
+.month-label .m{font-family:var(--f-display);font-weight:800;font-size:24px;color:var(--euc);line-height:1}
+.month-label .t{font-size:13px;font-weight:600}
+.month-label .t .zh{font-size:12px}
+.items{list-style:none;margin:0;padding:0;display:grid;gap:12px;min-width:0}
+.items li{display:grid;gap:2px}
+.items b{font-weight:600}
+.items .d{font-size:14px}
+@media (max-width:560px){.month{grid-template-columns:1fr;gap:10px}}
+/* lists */
+.plain{margin:0;padding-left:18px;display:grid;gap:10px}
+.plain li{padding-left:2px}
+.reels{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:12px}
+.reels .fact .num{color:var(--euc)}
+footer{padding-top:28px;font-size:13px;color:var(--muted);display:grid;gap:6px}
+:focus-visible{outline:2px solid var(--gum);outline-offset:2px}
+
+/* visuals (illustrations, all drawn in CSS) */
+.swatches{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
+.swatches figure{margin:0;display:grid;gap:4px}
+.swatches img{width:100%;aspect-ratio:3/4;object-fit:cover;border-radius:4px;display:block}
+.swatches figcaption{font-size:11px;color:var(--muted);line-height:1.3}
+@media (max-width:560px){.swatches{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.cap{font-size:12px;color:var(--muted);font-family:var(--f-mono);letter-spacing:.02em}
+.vis2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,330px),1fr));gap:14px}
+.vis{background:var(--paper);border:1px solid var(--rule);border-radius:8px;padding:14px;display:grid;gap:10px;align-content:start;min-width:0}
+.vis h3{font-size:14px}
+.vis h3 .zh{font-size:12px;font-weight:500}
+.tag{display:inline-block;font-family:var(--f-mono);font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;padding:2px 8px;border-radius:999px;background:var(--gum-soft);color:var(--gum);justify-self:start}
+.tag.goal{background:var(--euc-soft);color:var(--euc)}
+/* google-ish mocks, neutral so they read in both themes */
+.g-search{border:1px solid var(--rule);border-radius:999px;padding:7px 14px;font-size:13px;display:flex;gap:8px;align-items:center;color:var(--ink)}
+.g-search::before{content:"";width:10px;height:10px;border:2px solid var(--muted);border-radius:50%;flex:none}
+.pack{display:grid;gap:0;border:1px solid var(--rule);border-radius:8px;overflow:hidden}
+.pack .row{display:grid;grid-template-columns:1fr auto;gap:8px;padding:9px 12px;border-bottom:1px solid var(--rule);font-size:13px}
+.pack .row:last-child{border-bottom:0}
+.pack .nm{font-weight:600}
+.pack .st{color:var(--gum);font-variant-numeric:tabular-nums;white-space:nowrap}
+.pack .st.none{color:var(--warn)}
+.pack .row.you{background:var(--euc-soft)}
+.pack .row.you.today{background:transparent;outline:2px dashed var(--warn);outline-offset:-2px}
+.stars{letter-spacing:1px}
+.serp{display:grid;gap:10px}
+.serp .res{display:grid;gap:1px;font-size:13px}
+.serp .url{font-size:11.5px;color:var(--muted)}
+.serp .ttl{color:var(--euc);font-weight:600;font-size:14px}
+.serp .res.you{padding:8px 10px;border-radius:6px;background:var(--euc-soft)}
+.serp .gap{font-family:var(--f-mono);font-size:11px;color:var(--warn);text-align:center;padding:4px;border:1px dashed var(--warn);border-radius:4px}
+.dirs{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,140px),1fr));gap:8px}
+.dir{border:1px solid var(--rule);border-radius:6px;padding:9px 10px;display:grid;gap:3px;font-size:12px}
+.dir b{font-size:13px}
+.dir .ok{color:var(--euc);font-family:var(--f-mono);font-size:11px}
+.nap{font-family:var(--f-mono);font-size:11.5px;background:var(--bg);border-radius:4px;padding:8px 10px;line-height:1.5}
+/* social post mock */
+.post{border:1px solid var(--rule);border-radius:8px;overflow:hidden;display:grid}
+.post-h{display:flex;gap:10px;align-items:center;padding:10px 12px}
+.post-h .av{width:34px;height:34px;border-radius:50%;background:var(--bg);display:grid;place-items:center;overflow:hidden;flex:none;border:1px solid var(--rule)}
+.post-h .av img{width:100%;height:auto}
+.post-h small{display:block;color:var(--muted);font-size:11px}
+.post-t{padding:0 12px 10px;font-size:13px}
+.post-img{display:grid;grid-template-columns:1fr 1fr 1fr;gap:2px}
+.post-img img{width:100%;aspect-ratio:1;object-fit:cover;display:block}
+.post-f{display:flex;gap:16px;padding:8px 12px;font-size:12px;color:var(--muted);border-top:1px solid var(--rule)}
+/* phone mock for digital human */
+.dh{display:grid;grid-template-columns:minmax(0,230px) 1fr;gap:20px;align-items:center}
+@media (max-width:600px){.dh{grid-template-columns:1fr;justify-items:center}}
+.phone{width:100%;max-width:230px;aspect-ratio:9/16;border-radius:26px;border:6px solid var(--ink);background:#2B3330;position:relative;overflow:hidden}
+.phone .broll{position:absolute;inset:0 0 auto 0;height:56%;background-size:cover;background-position:center}
+.phone .person{position:absolute;left:50%;bottom:0;transform:translateX(-50%);width:78%}
+.phone .label{position:absolute;left:8%;right:8%;top:6%;background:#F7C948;color:#1C2320;font-family:var(--f-display);font-weight:800;font-size:13px;padding:5px 8px;border-radius:4px;text-align:center;line-height:1.25}
+.phone .sub{position:absolute;left:6%;right:6%;bottom:9%;text-align:center;font-weight:700;font-size:12.5px;line-height:1.35;color:#FFFFFF;text-shadow:0 1px 3px #000}
+.phone .sub .hi{color:#F7C948}
+.phone .end{position:absolute;right:8px;top:46%;background:#FFFFFF;border-radius:4px;padding:3px 5px;width:44%}
+.phone .end img{width:100%;display:block}
+.phone .ai{position:absolute;left:8px;bottom:6px;font-size:9px;color:#FFFFFF;opacity:.85;font-family:var(--f-mono)}
+/* pipeline */
+.pipe{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.pipe div{border:1px solid var(--rule);border-radius:6px;padding:8px;font-size:12px;display:grid;gap:2px;text-align:center}
+.pipe b{font-family:var(--f-display);font-size:20px;color:var(--euc);font-variant-numeric:tabular-nums}
+.chan{display:flex;flex-wrap:wrap;gap:6px}
+@media (max-width:480px){.pipe{grid-template-columns:repeat(2,minmax(0,1fr))}}
+/* review card mock */
+.qr{display:grid;grid-template-columns:96px 1fr;gap:14px;align-items:center;border:1px dashed var(--gum);border-radius:8px;padding:12px}
+.qr svg{width:96px;height:96px;display:block}
+/* footage checklist */
+.shots{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr));gap:10px}
+.shot{background:var(--paper);border:1px solid var(--rule);border-radius:6px;padding:12px;display:grid;gap:3px;font-size:13px;align-content:start}
+.shot b{font-size:14px}
+.compare{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:12px}
+.compare figure{margin:0;display:grid;gap:6px}
+.compare img{width:100%;aspect-ratio:3/2;object-fit:cover;border-radius:6px;display:block}
+.ph{aspect-ratio:3/2;border-radius:6px;border:2px dashed var(--rule);display:grid;place-items:center;text-align:center;padding:12px;font-size:13px;color:var(--muted);background:var(--bg)}
+@media print{body{background:#fff}.wrap{padding-block:12px}section{padding-block:22px}h2{break-after:avoid}.fact,.docket,.plain li,.vis,.shot,.dh,.compare,.qr{break-inside:avoid}.month{display:block;break-inside:auto}.month-label{margin-bottom:10px}.vis2{grid-template-columns:1fr 1fr}.phone{border-color:#1C2320}}
+</style>
+
+<div class="wrap">
+<header>
+  <div class="eyebrow">Magic Lab · Growth Proposal &amp; Quote</div>
+  <h1>TradePlus Flooring<br>Get found by Brisbane trades
+    <span class="zh" style="font-size:20px;font-weight:500;margin-top:6px">让布里斯班的师傅和建商找得到你</span></h1>
+  <div class="meta">
+    <span>Prepared for <b>TradePlus Flooring, Acacia Ridge QLD</b> <span class="zh" style="display:inline">· 致 TradePlus Flooring</span></span>
+    <span>Date <b>23 Nov 2026</b></span>
+    <span>Currency <b>AUD</b></span>
+  </div>
+  <div class="swatches" aria-label="TradePlus SPC range">
+    <figure><img src="quote-assets/spotted-gum.jpg" alt="Spotted Gum"><figcaption>Spotted Gum</figcaption></figure>
+    <figure><img src="quote-assets/blackbutt.jpg" alt="Blackbutt"><figcaption>Blackbutt</figcaption></figure>
+    <figure><img src="quote-assets/natural-oak.jpg" alt="Natural Oak"><figcaption>Natural Oak</figcaption></figure>
+    <figure><img src="quote-assets/pale-ash.jpg" alt="Pale Ash"><figcaption>Pale Ash</figcaption></figure>
+    <figure><img src="quote-assets/coastal-grey.jpg" alt="Coastal Grey"><figcaption>Coastal Grey (9mm)</figcaption></figure>
+    <figure><img src="quote-assets/american-walnut.jpg" alt="American Walnut"><figcaption>American Walnut (9mm)</figcaption></figure>
+  </div>
+  <div class="cap">Your SPC range, images from tradeplusflooring.com.au · 你的 SPC 色卡，图片取自你的官网</div>
+</header>
+
+<section>
+  <h2>Where you are today<span class="zh">你现在的情况</span></h2>
+  <p class="lead">You have stock in Brisbane, strong trade prices, and you are already advertising. But the paths that bring a tradesperson to you are not set up yet, so the money spent on ads is not building anything that lasts.
+    <span class="zh">你有布里斯班现货、批发价有竞争力、也已经在打广告。但师傅找到你的几条路都还没铺好，所以花出去的广告费没有积累下来。</span></p>
+  <div class="facts">
+    <div class="fact"><div class="num">~2 <small>visits / month</small></div><div>from Google search (estimate); the site ranks for 14 keywords.<span class="zh">每月从谷歌来的访客约 2 人（估计）；全站只在 14 个词上有排名。</span></div></div>
+    <div class="fact"><div class="num">#57</div><div>for “hybrid flooring brisbane”, searched about 480 times a month.<span class="zh">「hybrid flooring brisbane」排第 57 名，这个词每月约 480 次搜索。</span></div></div>
+    <div class="fact"><div class="num">480 <small>vs 20</small></div><div>Brisbane searches a month for “hybrid” vs “SPC”. Locals search “hybrid”.<span class="zh">布里斯班每月搜「hybrid」480 次，搜「SPC」只有 20 次。</span></div></div>
+    <div class="fact"><div class="num">0 <small>reviews</small></div><div>on your Google Maps listing. The two best-reviewed flooring suppliers in Acacia Ridge have 58 and 75.<span class="zh">谷歌地图 0 条评价；Acacia Ridge 评价最多的两家地板商分别有 58 和 75 条。</span></div></div>
+    <div class="fact"><div class="num">0 <small>backlinks</small></div><div>No other website links to yours. Two leading Brisbane competitors have 47 and 66 linking sites.<span class="zh">没有任何网站链向你；布里斯班两家主要对手分别有 47 和 66 个网站链向它们。</span></div></div>
+    <div class="fact"><div class="num">Empty</div><div>Google Analytics and Tag Manager IDs are blank, so website visits and enquiries are not being recorded.<span class="zh">谷歌统计和统一追踪代码都是空的，网站访问和询价都没被记录。</span></div></div>
+    <div class="fact"><div class="num">No SPF / DMARC</div><div>Your company email has no sender authentication, so quotes you email can land in spam.<span class="zh">企业邮箱没设发信认证，发出去的报价容易进垃圾箱。</span></div></div>
+    <div class="fact"><div class="num">3 <small>followers</small></div><div>on the company Facebook page. Your current ads run from a personal profile, so the audience they reach doesn't build up on the company page.<span class="zh">公司主页只有 3 个关注；现在的广告挂在个人主页下面投，看过广告的人积累不到公司身上。</span></div></div>
+  </div>
+  <div class="vis2">
+    <div class="vis">
+      <span class="tag">Today · 现在</span>
+      <h3>Google Maps: “flooring acacia ridge”<span class="zh">谷歌地图搜「flooring acacia ridge」</span></h3>
+      <div class="g-search">flooring acacia ridge</div>
+      <div class="pack">
+        <div class="row"><span class="nm">99 Home Flooring</span><span class="st"><span class="stars">★★★★★</span> 4.9 (75)</span></div>
+        <div class="row"><span class="nm">Nature Flooring 大自然地板</span><span class="st"><span class="stars">★★★★★</span> 4.9 (58)</span></div>
+        <div class="row"><span class="nm">Premium Floors</span><span class="st">3.2 (21)</span></div>
+        <div class="row you today"><span class="nm">Tradeplus Flooring</span><span class="st none">No reviews · 0 条评价</span></div>
+      </div>
+      <div class="cap">Real results collected 23 Nov 2026 · 2026-11-23 实际搜索结果</div>
+    </div>
+    <div class="vis">
+      <span class="tag">Today · 现在</span>
+      <h3>Google: “hybrid flooring brisbane”<span class="zh">谷歌搜「hybrid flooring brisbane」，每月约 480 次</span></h3>
+      <div class="g-search">hybrid flooring brisbane</div>
+      <div class="serp">
+        <div class="res"><span class="url">floorstradingandclearance.com.au</span><span class="ttl">#1 · Hybrid flooring</span></div>
+        <div class="res"><span class="url">carpetcall.com.au</span><span class="ttl">#2 · Hybrid flooring Brisbane</span></div>
+        <div class="res"><span class="url">localsearch.com.au · facebook.com · hipages.com.au</span><span class="ttl">#3 – #10 · mostly directories &amp; social pages</span></div>
+        <div class="gap">… pages 2 – 5 · 第 2 到第 5 页 …</div>
+        <div class="res"><span class="url">tradeplusflooring.com.au</span><span class="ttl" style="color:var(--warn)">#57 · page 6 · 第 6 页</span></div>
+      </div>
+      <div class="cap">Half of page 1 is directories and Facebook pages, so a well-built local page can break in.<span class="zh">第一页一半是目录站和 Facebook 页面，认真做的本地页有机会挤进去。</span></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>Your quote<span class="zh">报价</span></h2>
+  <div class="docket">
+    <div class="docket-head"><strong>Weekly · 按周付</strong><span>AUD · NO GST</span></div>
+    <div class="tbl-scroll">
+    <table class="tbl">
+      <thead><tr><th>Item · 项目</th><th class="amt">Per week · 每周</th><th class="amt">First 13 weeks · 前 13 周</th></tr></thead>
+      <tbody>
+        <tr><td><b>FDE growth service</b><span class="zh">FDE 增长服务：下面 13 项分 13 周做完，加每周社媒更新和每周进展报告</span></td><td class="amt">A$577 <small style="font-size:12px;font-weight:500">/ week · 每周</small></td><td class="amt">A$7,501</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <div class="notes">
+      <p><b>Ad management fee: 15% of actual monthly ad spend.</b> You pay the ad spend directly to Meta and Google; it never goes through us. Spend is taken from the platforms’ monthly billing.
+        <span class="zh">广告投放服务费：按当月实际广告花费的 15% 收。广告费由你直接付给 Meta 和谷歌，不经过我们；花费以平台后台的当月账单为准。</span></p>
+      <div class="fee-eg"><span class="chip">A$1,000 spend → A$150</span><span class="chip">A$2,000 → A$300</span><span class="chip">A$3,000 → A$450</span></div>
+      <p><b>No GST.</b> Magic Lab is a New Zealand company providing services remotely to an Australian business, so NZ GST is zero-rated (0%). Please provide your ABN when signing.
+        <span class="zh">不加 GST：我们是新西兰公司，远程给澳洲企业提供服务，GST 按 0% 计。签约时请提供公司 ABN。</span></p>
+      <p><b>Billing:</b> invoiced weekly, A$577 a week. The first 13 weeks cover everything below. From week 14, we agree the next stage based on the results.
+        <span class="zh">付款方式：每周开票，每周 A$577。前 13 周做完下面所有项目；第 14 周起怎么做，看成果再一起定。</span></p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>What we do in 13 weeks<span class="zh">13 周做什么</span></h2>
+  <p>Order matters: tracking goes in first, so every dollar spent afterwards can be measured.<span class="zh">顺序很重要：先装好追踪，后面花的每一块钱才量得出效果。</span></p>
+  <div class="months">
+    <div class="month">
+      <div class="month-label"><div class="m">Wk 1–4</div><div class="t">Measure &amp; connect<span class="zh">先看得见</span></div></div>
+      <ul class="items">
+        <li><b>Tag installation (Google Tag Manager)</b><span class="d">Meta Pixel and Google Ads conversion tracking. Form submits, WhatsApp clicks, phone clicks and calculator use all count as enquiries. Tested, with a screenshot as sign-off.</span><span class="zh">装好统一追踪代码，接上 Meta 和谷歌广告的询价追踪；提交表单、点 WhatsApp、点电话、用计算器都记成询价；测试通过后出截图验收。</span></li>
+        <li><b>Google Analytics 4</b><span class="d">Linked to Search Console and Google Ads, with enquiries set as conversions.</span><span class="zh">开好谷歌统计，关联 Search Console 和谷歌广告，把询价设成转化目标。</span></li>
+        <li><b>Company email setup</b><span class="d">SPF, DKIM and DMARC records, plus a new trade@ mailbox if you want one. We test that emails reach the inbox.</span><span class="zh">补齐发信认证，需要的话加一个 trade@ 邮箱，测试发信不进垃圾箱。</span></li>
+        <li><b>Online forms</b><span class="d">Trade account application (company, ABN, trade, monthly volume, area) and a free-sample request. Easy to fill in on a phone.</span><span class="zh">批发账户申请表和免费拿样表单，手机上好填。</span></li>
+        <li><b>Enquiry collection</b><span class="d">Website forms, WhatsApp and Facebook messages in one inbox, with instant alerts. Each trade customer is tracked through four stages: enquiry → sample → first order → repeat order.</span><span class="zh">表单、WhatsApp、Facebook 私信进同一个收件箱，即时提醒；每个批发客人按「询价 → 拿样 → 首单 → 复购」跟进。</span></li>
+        <li><b>Facebook clean-up</b><span class="d">Complete the company page, open and link Instagram, confirm who owns the Business Manager and ad account, and move ads onto the company page.</span><span class="zh">公司主页资料补全，开 Instagram 并关联，理清商务平台和广告账户归属，广告改用公司主页投。</span></li>
+        <li><b>Google Ads account review</b><span class="d">Structure, keywords, negative keywords and budget. We connect enquiry tracking and recommend whether to keep running or pause.</span><span class="zh">检查账户结构、关键词、否定词和预算，接上询价追踪，给出继续投还是暂停的建议。</span></li>
+        <li><b>Your growth dashboard</b><span class="d">Business profile, brand rules and FAQ set up, and your trade prospect list loaded.</span><span class="zh">在我们的系统里开好你的账户：企业资料、品牌规范、常见问答，导入批发潜在客户名单。</span></li>
+      </ul>
+    </div>
+    <div class="month">
+      <div class="month-label"><div class="m">Wk 5–9</div><div class="t">Be found &amp; trusted<span class="zh">搜得到、信得过</span></div></div>
+      <ul class="items">
+        <li><b>Competitor analysis</b><span class="d">How the main Brisbane and Gold Coast competitors rank, their reviews, the ads they run, their pricing and their backlinks. The report shows where TradePlus should compete.</span><span class="zh">布里斯班和黄金海岸主要对手的排名、评价、在投广告、价格打法、外链，报告说清楚你该从哪里切入。</span></li>
+        <li><b>Website fixes</b><span class="d">Replace placeholder figures with real ones, show prices (or trade prices after an ABN check), rebuild the Brisbane page, add search titles and descriptions, and use “hybrid / SPC hybrid” wording throughout.</span><span class="zh">首页占位数字换成真实信息，产品补价格（或凭 ABN 可见），重做布里斯班页面，补搜索标题和描述，统一用「hybrid / SPC hybrid」。</span></li>
+        <li><b>SEO keyword optimisation</b><span class="d">Keyword map for Brisbane, Gold Coast, Logan and Ipswich. Four suburb pages rewritten and the sitemap submitted, with a before/after ranking report.</span><span class="zh">四个城市的关键词表，重写 4 个地区页，提交网站地图，交付前后各一份排名对照。</span></li>
+        <li><b>Google Business Profile</b><span class="d">Categories, hours, products and photos completed. A review request process for real customers (no discounts or gifts in exchange for reviews).</span><span class="zh">谷歌地图资料补全，建立请真实老客人留评价的流程（不用折扣或赠品换评价）。</span></li>
+      </ul>
+    </div>
+    <div class="month">
+      <div class="month-label"><div class="m">Wk 10–13</div><div class="t">Build authority &amp; review<span class="zh">攒外链、看效果</span></div></div>
+      <ul class="items">
+        <li><b>Backlink building</b><span class="d">Backlink audit, then consistent listings on local and trade directories (hipages, Localsearch, Yellow Pages, True Local, Oneflare and more), plus a list of trade and supplier links worth pursuing.</span><span class="zh">外链体检，在本地和行业目录登记统一的商家信息，列出值得争取的行业和供应商链接。</span></li>
+        <li><b>90-day results review</b><span class="d">Rankings, enquiries, ad cost per enquiry and reviews, comparing day 1 with day 90. Recommendations from week 14.</span><span class="zh">排名、询价数、每个询价的广告成本、评价数，第 1 天和第 90 天并排对比，给出第 14 周起的建议。</span></li>
+      </ul>
+    </div>
+  </div>
+  <p><b>Every week:</b> social media updates (see below), a one-page weekly progress report, AI-drafted replies in your inbox that you approve before they go out, and Meta ad management. Launching ads and raising budgets always need your approval.
+    <span class="zh">每周都有：社媒更新（见下一段）；每周一页进展报告；收件箱 AI 起草回复，你确认后才发出；Meta 广告代投，开投和加预算都要你批准。</span></p>
+  <h3 style="margin-top:6px">What it looks like when it’s done<span class="zh">做完后的样子（示意）</span></h3>
+  <div class="vis2">
+    <div class="vis">
+      <span class="tag goal">Goal · 目标</span>
+      <h3>Google Maps with real reviews<span class="zh">谷歌地图有真实评价</span></h3>
+      <div class="g-search">spc flooring brisbane</div>
+      <div class="pack">
+        <div class="row you"><span class="nm">TradePlus Flooring</span><span class="st"><span class="stars">★★★★★</span> 30+ reviews</span></div>
+        <div class="row"><span class="nm">Trade prices · Saturday pick-up</span><span class="st" style="color:var(--muted)">Acacia Ridge</span></div>
+      </div>
+      <div class="cap">Illustration. 30+ reviews is our shared 90-day goal, not a guarantee.<span class="zh">示意图。30 条以上评价是我们和你共同的 90 天目标，不是保证。</span></div>
+    </div>
+    <div class="vis">
+      <span class="tag goal">Goal · 目标</span>
+      <h3>Listed on local &amp; trade directories<span class="zh">登上本地和行业目录</span></h3>
+      <div class="dirs">
+        <div class="dir"><b>hipages</b><span class="ok">✓ listed</span></div>
+        <div class="dir"><b>Localsearch</b><span class="ok">✓ listed</span></div>
+        <div class="dir"><b>Yellow Pages</b><span class="ok">✓ listed</span></div>
+        <div class="dir"><b>True Local</b><span class="ok">✓ listed</span></div>
+        <div class="dir"><b>Oneflare</b><span class="ok">✓ listed</span></div>
+        <div class="dir"><b>+ trade &amp; supplier sites</b><span class="ok">as available</span></div>
+      </div>
+      <div class="nap">TradePlus Flooring<br>1/15 Overlord Place, Acacia Ridge QLD 4110<br>07 3371 1953 · tradeplusflooring.com.au</div>
+      <div class="cap">Same name, address and phone everywhere, which Google uses to trust the listing.<span class="zh">每个目录的名称、地址、电话完全一致，谷歌靠这个信任你的商家资料。</span></div>
+    </div>
+    <div class="vis">
+      <span class="tag goal">Goal · 目标</span>
+      <h3>Every enquiry in one place<span class="zh">所有询价进同一个收件箱</span></h3>
+      <div class="chan"><span class="chip">Website form</span><span class="chip">WhatsApp</span><span class="chip">Facebook</span><span class="chip">Instagram</span><span class="chip">Email</span></div>
+      <div class="pipe">
+        <div><b>12</b>Enquiry<span class="zh">询价</span></div>
+        <div><b>6</b>Sample<span class="zh">拿样</span></div>
+        <div><b>3</b>First order<span class="zh">首单</span></div>
+        <div><b>1</b>Repeat<span class="zh">复购</span></div>
+      </div>
+      <div class="cap">Example numbers for illustration only.<span class="zh">数字为示意，不是预测。</span></div>
+    </div>
+  </div>
+</section>
+
+
+<section>
+  <h2>Social media updates<span class="zh">社媒更新</span></h2>
+  <p>We run your Facebook and Instagram so trades see TradePlus every week. We plan, write and design every post, and you approve before anything is published.
+    <span class="zh">我们帮你运营 Facebook 和 Instagram，让师傅每周都看到 TradePlus。每条帖子由我们策划、写文案、做图，你确认后才发出。</span></p>
+  <div class="dh" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr)">
+    <div class="post">
+      <div class="post-h"><span class="av"><img src="quote-assets/logo.png" alt=""></span><div><b>TradePlus Flooring</b><small>Brisbane QLD · Sponsored or organic</small></div></div>
+      <div class="post-t">New stock landed this week 🪵 9mm SPC hybrid in Coastal Grey, American Walnut and Natural Oak. Trade accounts: ask for your price. Pick up Saturday morning in Acacia Ridge.</div>
+      <div class="post-img"><img src="quote-assets/coastal-grey.jpg" alt=""><img src="quote-assets/american-walnut.jpg" alt=""><img src="quote-assets/natural-oak.jpg" alt=""></div>
+      <div class="post-f"><span>Like</span><span>Comment</span><span>Send WhatsApp</span></div>
+    </div>
+    <ul class="plain">
+      <li><b>3 posts a week</b> on Facebook and Instagram, including short videos.<span class="zh">Facebook 和 Instagram 每周 3 条，包含短视频。</span></li>
+      <li><b>Topics:</b> new stock, real job sites, trade prices, Saturday pick-up, product tips (9mm vs 6.5mm), customer stories.<span class="zh">内容：新货到店、真实工地、批发价、周六自提、产品知识（9mm 和 6.5mm 怎么选）、客人故事。</span></li>
+      <li><b>Comments and messages</b> go into your inbox, with replies drafted for you.<span class="zh">评论和私信进收件箱，回复由系统起草。</span></li>
+      <li>The best-performing posts can be boosted as ads once you approve.<span class="zh">效果最好的帖子，经你批准后可以加推成广告。</span></li>
+    </ul>
+  </div>
+  <div class="cap">Post layout is an illustration · 帖子版式为示意</div>
+</section>
+
+
+
+<section>
+  <h2>Your part: real footage &amp; real reviews<span class="zh">需要你配合：实拍素材和真实好评</span></h2>
+  <p>Two things only you can give us, and they make the biggest difference: real photos and videos, and reviews from real customers.
+    <span class="zh">有两样东西只有你能给，而且效果最大：真实的照片视频，和真实客人的好评。</span></p>
+
+  <h3>1 · Real photos and videos<span class="zh">一、实拍照片和视频</span></h3>
+  <div class="compare">
+    <figure><img src="quote-assets/interior.jpg" alt="Rendered interior image from your current website"><figcaption class="cap">Today: your homepage uses a rendered image.<span class="zh">现在：官网首页用的是效果图。</span></figcaption></figure>
+    <figure><div class="ph">Your real job site, warehouse or delivery photo goes here<br>这里换成你真实的工地、仓库或送货照片</div><figcaption class="cap">Goal: real photos tradespeople recognise and trust.<span class="zh">目标：师傅一看就认、就信的真实照片。</span></figcaption></figure>
+  </div>
+  <div class="shots">
+    <div class="shot"><b>Warehouse &amp; stock</b>Pallets, racks, new arrivals<span class="zh">仓库和现货：托盘、货架、新到货</span></div>
+    <div class="shot"><b>Job sites</b>Before / during / after, with the colour name<span class="zh">工地：铺之前、铺的过程、完工后，注明颜色</span></div>
+    <div class="shot"><b>Loading &amp; pick-up</b>Saturday pick-up, utes being loaded<span class="zh">装货和自提：周六自提、师傅装车</span></div>
+    <div class="shot"><b>Close-ups</b>Plank edges, click joints, thickness<span class="zh">特写：板边、锁扣、厚度</span></div>
+    <div class="shot"><b>You on camera</b>Short talking clips about stock and prices<span class="zh">你本人出镜：录几段讲现货和价格的短片</span></div>
+    <div class="shot"><b>Customer stories</b>Tradies or builders who agree to be shown<span class="zh">客人故事：同意露面的师傅或建商</span></div>
+  </div>
+  <p><b>How much:</b> at least 10 photos and 3 short videos (10–20 seconds, vertical) a week. Phone quality is fine. Send them by WhatsApp or to an upload link we give you.
+    <span class="zh">数量：每周至少 10 张照片、3 段 10–20 秒竖拍视频，手机拍就行。用 WhatsApp 发，或传到我们给你的上传链接。</span></p>
+
+  <h3>2 · Google reviews from real customers<span class="zh">二、真实客人的谷歌好评</span></h3>
+  <div class="qr">
+    <svg viewBox="0 0 21 21" shape-rendering="crispEdges" aria-label="Illustration of a review QR card"><rect width="21" height="21" fill="#FFFFFF"/><path fill="#1C2320" d="M0 0h7v7H0zM14 0h7v7h-7zM0 14h7v7H0z"/><path fill="#FFFFFF" d="M1 1h5v5H1zM15 1h5v5h-5zM1 15h5v5H1z"/><path fill="#1C2320" d="M2 2h3v3H2zM16 2h3v3h-3zM2 16h3v3H2zM9 1h1v2H9zM11 2h2v1h-2zM8 4h2v2H8zM12 5h1v3h-1zM9 8h3v1H9zM14 9h2v1h-2zM17 8h2v2h-2zM8 11h1v2H8zM10 12h3v1h-3zM15 12h1v3h-1zM18 12h2v1h-2zM9 15h2v2H9zM12 16h2v1h-2zM17 15h1v2h-1zM19 17h1v3h-1zM9 19h3v1H9zM14 18h2v2h-2z"/></svg>
+    <div><b>“How did we go? Leave us a Google review”</b><span class="zh">「这次合作满意吗？给我们留个谷歌评价」</span><span class="cap">Illustration: a counter card and invoice footer with your review link.<span class="zh">示意：放在柜台的卡片和发票底部的评价链接。</span></span></div>
+  </div>
+  <ul class="plain">
+    <li><b>We prepare:</b> a QR card for the counter, a line for your invoices, and a short WhatsApp message to send after each delivery.<span class="zh">我们准备：柜台二维码卡片、发票底部一句话、每次送货后发的 WhatsApp 短信模板。</span></li>
+    <li><b>You do:</b> ask every real customer after pick-up or delivery, starting with past customers who were happy.<span class="zh">你来做：每次自提或送货后，请真实客人留评价，先从满意的老客人开始。</span></li>
+    <li><b>Shared goal:</b> 30 or more Google reviews in 90 days. We reply to every review for you after you approve.<span class="zh">共同目标：90 天内 30 条以上谷歌评价。每条评价我们起草回复，你确认后发出。</span></li>
+    <li><b>Rules:</b> only real customers, no discounts or gifts in exchange for reviews, and no reviews written by staff. Google removes these and can penalise the listing.<span class="zh">规矩：只请真实客人，不用折扣或礼品换评价，不让员工自己写。谷歌查到会删评价，还可能处罚商家资料。</span></li>
+  </ul>
+
+  <h3>3 · Access and decisions<span class="zh">三、权限和决定</span></h3>
+  <ul class="plain">
+    <li>Admin access to your website, Facebook Business Manager, Google Ads, Google Business Profile and domain DNS.<span class="zh">网站后台、Facebook 商务管理平台、谷歌广告、谷歌商家资料、域名解析的管理权限。</span></li>
+    <li>Your ABN and your confirmed trade prices.<span class="zh">公司 ABN 和确认后的批发价。</span></li>
+    <li>One decision: show trade prices publicly, or only after an ABN check.<span class="zh">一个决定：批发价直接公开，还是凭 ABN 才能看。</span></li>
+    <li>If any account is owned by a third party, it needs to be transferred to your business first.<span class="zh">如果有账户在第三方名下，要先转回你公司名下。</span></li>
+  </ul>
+</section>
+
+<footer>
+  <div>Magic Lab · Prepared 23 November 2026. Search and competitor figures were collected on 23 Nov 2026 from Google search data, Google Maps and the Meta Ad Library.</div>
+  <div class="zh">Magic Lab · 2026 年 11 月 23 日。搜索和对手数据取自 2026-11-23 的谷歌搜索数据、谷歌地图和 Meta 广告资料库。</div>
+</footer>
+</div>
