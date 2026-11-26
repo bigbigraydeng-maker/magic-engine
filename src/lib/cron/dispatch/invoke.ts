@@ -55,12 +55,18 @@ const LOADERS: Record<string, () => Promise<RouteModule>> = {
   'meta-leads-sync': () => import('@/app/api/cron/meta-leads-sync/route'),
   'ad-readback-sweep': () => import('@/app/api/cron/ad-readback-sweep/route'),
   'ad-entity-snapshot': () => import('@/app/api/cron/ad-entity-snapshot/route'),
+  'ad-intraday-spend-sample': () => import('@/app/api/cron/ad-intraday-spend-sample/route'),
   'mailchimp-activity-sync': () => import('@/app/api/cron/mailchimp-activity-sync/route'),
   'mailchimp-paid-tagging': () => import('@/app/api/cron/mailchimp-paid-tagging/route'),
   'mailchimp-suppression-sync': () => import('@/app/api/cron/mailchimp-suppression-sync/route'),
   'market-intel-daily': () => import('@/app/api/cron/market-intel-daily/route'),
   'cron-run-logs-cleanup': () => import('@/app/api/cron/cron-run-logs-cleanup/route'),
   'baseline-domains-monthly': () => import('@/app/api/cron/baseline-domains-monthly/route'),
+  'telephony-direct-sweep': () => import('@/app/api/cron/telephony-direct-sweep/route'),
+  'lead-sheet-direct-sync': () => import('@/app/api/cron/lead-sheet-direct-sync/route'),
+  'maliang-direct-sweep': () => import('@/app/api/cron/maliang-direct-sweep/route'),
+  'crm-followup-stopline': () => import('@/app/api/cron/crm-followup-stopline/route'),
+  'crm-ai-pickup': () => import('@/app/api/cron/crm-ai-pickup/route'),
 }
 
 export function dispatchLoaderRoutes(): string[] {

@@ -47,7 +47,7 @@ describe('stats', () => {
   })
 })
 
-describe('core-metric', () => {
+describe('【考卷8】core-metric：每个广告组按自己的结果种类算', () => {
   it('私信目的地 + 表单目标，客户配置为开聊 → 开聊', () => {
     expect(
       resolveCoreMetric({

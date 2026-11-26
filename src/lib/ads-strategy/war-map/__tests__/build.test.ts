@@ -405,7 +405,7 @@ describe('数据新鲜度只算真在投的账户（#3322）', () => {
     const v = buildWarMap(twoAccounts({ audiences: [aud({ adAccountId: 'act_live' })] }))
     expect(v.clocks.staleDays).toBe(0)
     expect(v.clocks.dataDay).toBe('2026-10-15')
-    expect(v.clocks.note).toContain('备用号 没在投，没有新数据是正常的')
+    expect(v.clocks.note).toContain('广告账户 备用号 没在投，这个账户没有新数据是正常的')
     expect(v.accountSummaries.find(s => s.adAccountId === 'act_idle')?.dormant).toBe(true)
     expect(v.accountSummaries.find(s => s.adAccountId === 'act_live')?.dormant).toBe(false)
   })

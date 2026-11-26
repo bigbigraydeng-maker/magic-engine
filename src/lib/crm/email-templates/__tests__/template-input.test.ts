@@ -20,7 +20,7 @@ describe('parseTemplateWrite: create', () => {
       ok: true,
       templateKey: 'post-call-single-tour',
       baseVersion: null,
-      fields: { ...fields, pickFilter: { destinations: ['china'], departureMonths: [3, 5] } },
+      fields: { ...fields, pickFilter: { destinations: ['china'], departureMonths: [3, 5] }, whenToUse: null },
     })
   })
 
@@ -93,6 +93,22 @@ describe('parseTemplateWrite: fields', () => {
     const res = create({ pickFilter: undefined, changeNote: null })
     expect(res.ok && res.fields.pickFilter).toEqual({})
     expect(res.ok && res.fields.changeNote).toBeNull()
+  })
+
+  it('keeps a trimmed when-to-use note, and treats a blank one as none', () => {
+    const kept = create({ whenToUse: '  打完电话 24 小时内  ' })
+    expect(kept.ok && kept.fields.whenToUse).toBe('打完电话 24 小时内')
+    const blank = create({ whenToUse: '   ' })
+    expect(blank.ok && blank.fields.whenToUse).toBeNull()
+    const omitted = create({})
+    expect(omitted.ok && omitted.fields.whenToUse).toBeNull()
+  })
+
+  it.each([
+    ['a numeric when-to-use', { whenToUse: 5 }],
+    ['a when-to-use that is too long', { whenToUse: '字'.repeat(201) }],
+  ])('rejects %s', (_name, over) => {
+    expect(create(over).ok).toBe(false)
   })
 })
 

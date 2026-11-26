@@ -177,4 +177,44 @@ describe('buildHeadline — 一句人话', () => {
     const h = buildHeadline([], [], 'partial', null)
     expect(h).toContain('只看不动')
   })
+
+  it('单次成本连续偏高 → 写进结论', () => {
+    const h = buildHeadline([], [], 'complete', null, {
+      status: 'ok',
+      staleReason: null,
+      flags: [{ adsetId: 'a', adsetName: '组 A', adAccountId: 'act', currency: 'NZD', rollingCpl: 11, targetCpl: 9, windowEnd: '2026-11-14' }],
+      summaryLines: [],
+    })
+    expect(h).toContain('单次成本连续偏高')
+  })
+
+  it('广告体检警报 → 写进结论', () => {
+    const h = buildHeadline([], [], 'complete', null, null, {
+      insightDate: '2026-11-13',
+      overallVerdict: 'alert',
+      headline: '有广告该动手',
+      prescriptionLine: null,
+      patrolLine: '有广告该动手',
+    })
+    expect(h).toContain('广告体检')
+    expect(h).toContain('有广告该动手')
+  })
+
+  it('日趋势 Check → 写进结论', () => {
+    const h = buildHeadline([], [], 'complete', null, null, null, null, {
+      insightDate: '2026-11-05',
+      patrolLine: '趋势检查：Fixture group A：素材疲劳/走弱',
+      lines: ['Fixture group A：素材疲劳/走弱'],
+      tuneFindings: [],
+      receipt: {
+        kind: 'ads_daily_trend_check',
+        client_slug: 'x',
+        evaluation_date: '2026-11-05',
+        findings_count: 1,
+        diagnosis_codes: ['creative_fatigue'],
+        rule_ids: ['ctr_vs_self_7d'],
+      },
+    })
+    expect(h).toContain('趋势检查')
+  })
 })

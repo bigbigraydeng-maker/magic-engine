@@ -67,6 +67,24 @@ export function normalizePhone(
 }
 
 /** 姓名：去首尾空白 + 全小写。 */
+/**
+ * 已经入库的电话：入库那一步（`normalizePhone`）已经把它转成国际格式的纯数字，
+ * 认不出国别的本地号码根本不会入库。所以读出来再用时**不能再套一遍 `normalizePhone`**：
+ *   · 没配默认国家码时，纯数字会被当成「不知道哪国的本地号」直接丢掉 —— 2026-11-10 实测，
+ *     三个开了回传的客户都没配国家码，库里 847 个电话一个都没作为匹配键发出去过；
+ *   · 配了国家码时，别国的号码会被再拼一遍国家码（61412… 配 64 → 6461412…），哈希出来匹配到别人。
+ * 只有不是这种形状的值（带加号、带符号、0 开头）才退回去走 `normalizePhone`。
+ */
+export function normalizeStoredPhone(
+  raw: string | null | undefined,
+  defaultCountry: string | null | undefined,
+): string | null {
+  if (!raw) return null
+  const v = raw.trim()
+  if (/^[1-9]\d{7,14}$/.test(v)) return v
+  return normalizePhone(v, defaultCountry)
+}
+
 export function normalizeName(raw: string | null | undefined): string | null {
   if (!raw) return null
   const v = raw.trim().toLowerCase()

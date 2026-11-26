@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  ALL_PAUSED_LABEL,
   LIVE_CACHE_TTL_MS,
   buildLiveAccountView,
   clearLiveCacheForTests,
   getLiveToday,
+  liveAccountEmptyLine,
   type LiveDeps,
 } from '../live-view'
 import { readHeartbeatAccount, type HeartbeatAccountRead, type HeartbeatAdsetSample, type HeartbeatFetchers } from '../read'
@@ -147,26 +149,34 @@ describe('getLiveToday — 有没有在投系列决定「空广告组列表」�
     expect(v.accounts[0].active).toEqual([])
   })
 
-  it('有在投系列（active=true）+ 空广告组列表 → 仍判读失败（安全规则必须保住）', async () => {
+  it('有在投系列（active=true）+ 空广告组列表 → 全部暂停，不是读不到', async () => {
     const v = await getLiveToday('c1', deps(true))
-    expect(v.accounts[0].readState).toBe('unreadable')
-    expect(v.accounts[0].reason).toContain('广告组')
+    expect(v.accounts[0].readState).toBe('ok')
+    expect(v.accounts[0].reason).toBe(ALL_PAUSED_LABEL)
+    expect(v.accounts[0].active).toEqual([])
+    expect(liveAccountEmptyLine('today', v.accounts[0].reason)).toBe('全部暂停')
+    expect(liveAccountEmptyLine('new', v.accounts[0].reason)).toBe('今天没有新建或重建的广告组。')
   })
 
-  it('读不到（null）按「有在投」处理 → 空列表仍判读失败', async () => {
+  it('读不到系列快照（null）+ 成功的空广告组列表 → 全部暂停，不是读失败', async () => {
     const v = await getLiveToday('c1', deps(null))
-    expect(v.accounts[0].readState).toBe('unreadable')
+    expect(v.accounts[0].readState).toBe('ok')
+    expect(v.accounts[0].reason).toBe(ALL_PAUSED_LABEL)
   })
 
-  it('读取出错（抛错）也按「有在投」处理，不拖垮这个账户的视图', async () => {
+  it('查系列抛错仍去读广告组：成功的空列表是全部暂停，不把内部报错写到页面上', async () => {
     const v = await getLiveToday('c1', deps(new Error('db down')))
-    expect(v.accounts[0].readState).toBe('unreadable')
+    expect(v.accounts[0].readState).toBe('ok')
+    expect(v.accounts[0].reason).toBe(ALL_PAUSED_LABEL)
     expect(v.accounts[0].reason).not.toContain('db down')
   })
 
   it('读失败的文案不出现英文代号，出现中文名和下一步', async () => {
-    const v = await getLiveToday('c1', deps(true))
+    const failing = fakeFetchers(0)
+    failing.adsets = async () => ({ rows: [], complete: false, error: { status: 500, code: 1, message: 'x' } })
+    const v = await getLiveToday('c1', deps(true, failing))
     const reason = v.accounts[0].reason ?? ''
+    expect(v.accounts[0].readState).toBe('unreadable')
     expect(reason).not.toMatch(/adsets|insights|account|\bads\b/i)
     expect(reason).toContain('广告组')
     expect(reason).toContain('刷新')
@@ -186,9 +196,9 @@ describe('getLiveToday — 有没有在投系列决定「空广告组列表」�
     const v = await getLiveToday('c1', d)
     const a = v.accounts.find((x) => x.adAccountId === 'act_a')!
     const b = v.accounts.find((x) => x.adAccountId === 'act_b')!
-    // A：查询出错 → 保守当有在投 → **仍然去读了 Meta**，空列表判读失败（文案是「广告组没读到」，不是笼统的「读取出错」）
-    expect(a.readState).toBe('unreadable')
-    expect(a.reason).toContain('广告组')
+    // A：查系列出错 → 当有在投 → 仍去读广告组；成功的空列表是全部暂停，不是读失败
+    expect(a.readState).toBe('ok')
+    expect(a.reason).toBe(ALL_PAUSED_LABEL)
     expect(a.reason).not.toContain('读取出错')
     // B：只看自己的查询结果（false）→ 真零，逐字段不变
     expect(b.readState).toBe('ok')

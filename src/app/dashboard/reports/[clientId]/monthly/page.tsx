@@ -10,6 +10,7 @@ import { SearchVisibilityPanel } from './_components/SearchVisibilityPanel';
 import { LocalVisibilityPanel } from './_components/LocalVisibilityPanel';
 import { MarketBenchmarkPanel } from './_components/MarketBenchmarkPanel';
 import { DataSourceUsagePanel } from './_components/DataSourceUsagePanel';
+import { AdsMonthlyPanel } from './_components/AdsMonthlyPanel';
 import { buildExportHtml } from './_components/exportHtml';
 import type { MonthlyReportData } from '@/lib/reports/monthly-aggregator';
 
@@ -360,6 +361,9 @@ export default function MonthlyReportPage() {
           )}
         </div>
       </section>
+
+      {/* ── Paid ads (read-only monthly block) ───────────────────────── */}
+      <AdsMonthlyPanel ads={report.ads} periodScopeNote={report.period_scope_note} />
 
       {/* ── §5 Link Intelligence ─────────────────────────────────────── */}
       <section>

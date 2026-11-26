@@ -24,6 +24,8 @@ export interface GoLiveGate {
   readonly reason: string
   readonly na: boolean
   readonly stale: boolean
+  /** 付款那道门只因「账户里一个在投的都没有」出黄。 */
+  readonly emptyAccountOnly?: boolean
 }
 
 export interface StoredGate {
@@ -31,6 +33,7 @@ export interface StoredGate {
   readonly status: string
   readonly reason: string
   readonly na?: boolean
+  readonly emptyAccountOnly?: boolean
 }
 
 function isLight(value: string): value is 'green' | 'yellow' | 'red' | 'gray' {
@@ -54,6 +57,7 @@ export function gatesFromReceipt(input: {
       reason: found.reason,
       na: found.na === true,
       stale: receiptIsStale(input.receipt.checkedAt, input.now, limit),
+      ...(key === BUDGET_KEY && found.emptyAccountOnly === true ? { emptyAccountOnly: true } : {}),
     }
   })
 }
@@ -64,6 +68,11 @@ function oneGate(gate: GoLiveGate): HardCheck | null {
   if (gate.status === 'missing') return { label, state: 'unread', reason: '这道检查没有结果' }
   if (gate.stale) return { label, state: 'unread', reason: '这道检查的结果过期了' }
   if (gate.status === 'green') return { label, state: 'green', reason: plainClip(gate.reason) }
+  // 第一次开投时账户里本来就什么都没在投。load.ts 只在回执查的就是草稿所在账户时才给这个标记，
+  // 且这条草稿建成时已从同一账户回读通过，所以「空」不当读取出错。只认付款那道门、黄只因为这一条；其它黄照旧挡。
+  if (gate.status === 'yellow' && gate.key === BUDGET_KEY && gate.emptyAccountOnly === true) {
+    return { label, state: 'green', reason: '账户正常、有付款方式；检查时这个账户里没有在投的广告' }
+  }
   if (gate.status === 'gray') {
     return { label, state: 'unread', reason: plainClip(gate.reason) || '读不到' }
   }

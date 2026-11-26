@@ -7,13 +7,17 @@ vi.mock('@/lib/auth/client-access', () => ({
 vi.mock('@/lib/microsoft/mail-send-new-prod', () => ({ createMailNewDeps: vi.fn(() => ({ marker: 'deps' })) }))
 vi.mock('@/lib/microsoft/mail-send-new', () => ({ previewCompose: vi.fn() }))
 vi.mock('@/lib/crm/email-compose/ai-draft', () => ({ generateFirstEmailDraft: vi.fn(), claimDraftSlot: vi.fn(() => true) }))
+vi.mock('@/lib/crm/email-compose/follow-up-draft', () => ({ generateFollowUpDraft: vi.fn() }))
 
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { previewCompose } from '@/lib/microsoft/mail-send-new'
 import { claimDraftSlot, generateFirstEmailDraft } from '@/lib/crm/email-compose/ai-draft'
+import { generateFollowUpDraft } from '@/lib/crm/email-compose/follow-up-draft'
 import { POST } from './route'
 
 const call = () => POST(new NextRequest('http://x/api', { method: 'POST' }), { params: { id: 'client-a', cid: 'contact-1' } })
+const callWith = (body: string) =>
+  POST(new NextRequest('http://x/api', { method: 'POST', body }), { params: { id: 'client-a', cid: 'contact-1' } })
 const can = { canCompose: true, recipient: 'a@b.com', mailbox: 'i@c.nz', sentToContactLast7Days: 0 }
 
 beforeEach(() => vi.clearAllMocks())
@@ -66,5 +70,32 @@ describe('POST email/compose/draft', () => {
     const res = await call()
     expect(res.status).toBe(429)
     expect(generateFirstEmailDraft).not.toHaveBeenCalled()
+  })
+
+  it('kind follow_up → the follow-up writer, with reading list and checks; the first-email writer is not called', async () => {
+    ;(previewCompose as ReturnType<typeof vi.fn>).mockResolvedValueOnce(can)
+    const draft = { subject: 'S', body: 'B', read: [{ kind: 'system', text: 'r' }], checks: [{ id: 'links', status: 'pass', label: 'l', detail: 'd' }] }
+    ;(generateFollowUpDraft as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: true, draft })
+    const res = await callWith(JSON.stringify({ kind: 'follow_up' }))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ...draft, kind: 'follow_up' })
+    expect(generateFollowUpDraft).toHaveBeenCalledWith('client-a', 'contact-1')
+    expect(generateFirstEmailDraft).not.toHaveBeenCalled()
+  })
+
+  it('follow_up: not configured / do-not-contact → 409; AI failure → 502', async () => {
+    for (const [reason, status] of [['not_configured', 409], ['do_not_contact', 409], ['no_ai', 502]] as const) {
+      ;(previewCompose as ReturnType<typeof vi.fn>).mockResolvedValueOnce(can)
+      ;(generateFollowUpDraft as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: false, reason, message: 'm' })
+      const res = await callWith(JSON.stringify({ kind: 'follow_up' }))
+      expect(res.status).toBe(status)
+      expect((await res.json()).reason).toBe(reason)
+    }
+  })
+
+  it('unknown kind or broken body → 400 before anything else runs', async () => {
+    expect((await callWith(JSON.stringify({ kind: 'blast' }))).status).toBe(400)
+    expect((await callWith('{not json')).status).toBe(400)
+    expect(previewCompose).not.toHaveBeenCalled()
   })
 })

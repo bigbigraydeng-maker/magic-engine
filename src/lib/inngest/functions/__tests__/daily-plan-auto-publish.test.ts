@@ -33,6 +33,7 @@ const emptyDeps = (listLive: () => Promise<never[]>): AutoPublishWorkerDeps => (
   claimAttempt: async () => false,
   finishAttempt: async () => false,
   runPublish: async () => ({ status: 500, body: {} }),
+  readWeekPackApproval: async () => 'approved',
   emit: async () => undefined,
 })
 

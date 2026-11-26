@@ -58,6 +58,19 @@ describe('POST asset-accept', () => {
     expect(await res.json()).toMatchObject({ error: '只有仅素材工单可以这样入库' })
   })
 
+  it('returns the confirmation card when the video is waiting to be uploaded', async () => {
+    mocks.runAssetDualReviewById.mockResolvedValue({
+      applicable: true,
+      passed: true,
+      pooled: false,
+      status: 'awaiting_card',
+      reason: '已出上传确认卡。点确认之后才会把成片传到广告账户。',
+    })
+    const res = await call()
+    expect(res.status).toBe(202)
+    expect(await res.json()).toMatchObject({ ok: true, status: 'awaiting_confirmation' })
+  })
+
   it('does not archive when the video cannot be uploaded', async () => {
     mocks.runAssetDualReviewById.mockResolvedValue({
       applicable: true, passed: false, pooled: false, status: 'upload_failed', reason: '成片传到广告账户失败',

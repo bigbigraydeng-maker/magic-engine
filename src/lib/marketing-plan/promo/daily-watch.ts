@@ -18,6 +18,7 @@ export type WatchCode =
   | 'plan_structure_unreadable' // 已批准的计划里，推广结构读不出来（自动执行依据不了它）
   | 'daily_plan_gap'            // 未来 7 天，每日计划里排好草稿的条数少于推广计划要求的条数
   | 'daily_plan_unreadable'     // 读不到每日计划（读库失败），没法核对条数
+  | 'stage_switch_ready'        // 试投证据够了，可以另起一份放量草稿（不改正在跑的计划）
 
 export interface WatchFinding {
   code: WatchCode

@@ -160,9 +160,23 @@ describe('non-billable fixed measurement contract', () => {
     await t.fn.handler(ctx)
     expect(t.fetcher).toHaveBeenCalledTimes(1); expect(t.rpc).toHaveBeenCalledTimes(1)
     expect(t.fetcher.mock.calls[0]).toHaveLength(1) // existing Graph GET, no publish operation
+    const graphUrl = String(t.fetcher.mock.calls[0][0])
+    expect(graphUrl).toContain(`/${video}?`)
+    expect(graphUrl).not.toContain(`/${page}_${video}?`)
     expect(t.writes).toHaveLength(1)
     expect(t.writes[0]).toMatchObject({ p_window_hours: hours, p_values: { likes: 1, comments: 0 } })
     expect(t.fn.config.retries).toBe(3) // bounded retries, not a recurring poller
+  })
+  it('factory_reel without video_id still resolves bare video from composite post_id', async () => {
+    const row = action()
+    delete (row.payload as Record<string, unknown>).video_id
+    const t = measurement(row, { comments: { summary: { total_count: 5 } } })
+    expect(await t.fn.handler({ event: { data: due() }, step: t.step })).toMatchObject({ ok: true })
+    expect(String(t.fetcher.mock.calls[0][0])).toContain(`/${video}?`)
+  })
+  it('factory_reel Graph error surfaces via existing transient/permanent paths (no throw)', async () => {
+    const t = measurement(action(), { error: { code: 100, message: 'bad field' } })
+    await expect(t.fn.handler({ event: { data: due() }, step: t.step })).rejects.toThrow('transient:')
   })
   it.each(['factory_reel_publish', 'ads.launch', null])('rejects non-measurement action type %s', async action_type => {
     const t = measurement({ ...action(), action_type })

@@ -15,6 +15,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { filterRowsWithId } from '@/lib/clients/external-data-pull-allowlist'
 import { supabaseAdmin } from '@/lib/supabase'
 
 export interface ClientAdAccount {
@@ -157,5 +158,5 @@ export async function getActiveClientsWithMetaAccounts(
     extraClients = (extraData ?? []) as ActiveMetaClient[]
   }
 
-  return [...((legacyClients ?? []) as ActiveMetaClient[]), ...extraClients]
+  return filterRowsWithId([...((legacyClients ?? []) as ActiveMetaClient[]), ...extraClients])
 }

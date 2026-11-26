@@ -16,6 +16,7 @@ import {
   judgePriceClaimWithSource,
   resolveOutgoingImageSource,
   priceGateMessage,
+  outgoingPriceGateMessage,
 } from './price-claim-gate'
 
 type Row = Record<string, unknown>
@@ -158,17 +159,17 @@ describe('judgeOutgoingPost —— 拦不拦', () => {
     expect(v.blocked).toBe(false)
   })
 
-  it('🔴 没价格 → 来源不明也放行，且**一次库都不查**（不许无条件拦截）', async () => {
+  it('🔴 没价格 + 不是海报 → 来源不明也放行，只查一次素材库看是不是海报（不许无条件拦截）', async () => {
     const q: RecordedQuery[] = []
-    // 故意一张表都不建模：真去查了就会 throw，比断言 blocked=false 更锁得住
-    const db = makeSupabase({}, q)
+    // 只建模素材库：查配图槽就会 throw
+    const db = makeSupabase({ client_assets: [{ client_id: CLIENT, storage_url: IMG, source: 'unknown' }] }, q)
     const v = await judgeOutgoingPost(db, {
       clientId: CLIENT,
       caption: 'Come see our Auckland showroom, open 7 days',
       imageUrl: IMG,
     })
     expect(v).toMatchObject({ blocked: false, priceClaimed: false })
-    expect(q).toHaveLength(0)
+    expect(q.map((r) => r.table)).toEqual(['client_assets'])
   })
 
   it('没配图 → 不适用本闸（没有画面可对不上）', async () => {
@@ -186,13 +187,101 @@ describe('judgeOutgoingPost —— 拦不拦', () => {
 
   it('「100% Kiwi owned」不是价格 —— 正常文案不该被这道闸挡住', async () => {
     const q: RecordedQuery[] = []
-    const v = await judgeOutgoingPost(makeSupabase({}, q), {
+    const v = await judgeOutgoingPost(makeSupabase({ client_assets: [] }, q), {
       clientId: CLIENT,
       caption: '100% Kiwi owned and operated',
       imageUrl: IMG,
     })
     expect(v.blocked).toBe(false)
-    expect(q).toHaveLength(0)
+    expect(q.map((r) => r.table)).toEqual(['client_assets'])
+  })
+})
+
+describe('judgeOutgoingPost —— AI 海报新规矩（快速发帖那条路）', () => {
+  const PARENT = 'a1b2c3d4-0000-4000-8000-000000000001'
+  const posterRow = (signed: boolean) => ({
+    id: 'poster-1',
+    client_id: CLIENT,
+    storage_url: IMG,
+    source: 'ai_generated',
+    verified_by: signed ? 'fde@me.test' : null,
+    verified_at: signed ? '2026-11-15T01:00:00.000Z' : null,
+    vision_metadata: { poster: {
+      recipe_id: 'tour_poster_v1', recipe_version: 1, source_asset_id: PARENT, has_price: true,
+      text_lines: ['X', 'From $6,999'], cost_usd: 0.038, provider_request_id: null, created_at: '2026-11-15T00:00:00.000Z',
+    } },
+  })
+  const parentRow = (source: string, archived_at: string | null = null) =>
+    ({ id: PARENT, client_id: CLIENT, storage_url: 'https://cdn.example.com/parent.jpg', source, archived_at })
+  const UNPRICED = 'Discover China this spring'
+
+  it('未签海报 + 文案无价 → 拦（价格藏在图里也算报价），说明走海报那套', async () => {
+    const db = makeSupabase({ client_assets: [posterRow(false), parentRow('client_verified')] })
+    const v = await judgeOutgoingPost(db, { clientId: CLIENT, caption: UNPRICED, imageUrl: IMG })
+    expect(v).toMatchObject({ blocked: true, priceClaimed: true, poster: true, source: 'ai_generated' })
+    expect(outgoingPriceGateMessage(v)).toContain('已对原图，确认')
+  })
+
+  it('签字 + 原图已确认 → 放行（文案有价也放）', async () => {
+    const q: RecordedQuery[] = []
+    const db = makeSupabase({ client_assets: [posterRow(true), parentRow('client_verified')] }, q)
+    const v = await judgeOutgoingPost(db, { clientId: CLIENT, caption: 'From $6,999 pp', imageUrl: IMG })
+    expect(v).toMatchObject({ blocked: false, poster: true })
+    // 原图回查恒带 client_id
+    expect(q[1].eq).toEqual([['client_id', CLIENT], ['id', PARENT]])
+  })
+
+  it('签字但原图被降级 / 归档 / 是别的客户的 → 拦', async () => {
+    for (const parent of [
+      parentRow('client_provided'),
+      parentRow('client_verified', '2026-11-10T00:00:00.000Z'),
+      { ...parentRow('client_verified'), client_id: 'someone-else' },
+    ]) {
+      const db = makeSupabase({ client_assets: [posterRow(true), parent] })
+      const v = await judgeOutgoingPost(db, { clientId: CLIENT, caption: UNPRICED, imageUrl: IMG })
+      expect(v.blocked).toBe(true)
+    }
+  })
+
+  it('凡是海报都要签字：未签、图里也没价、文案也没价 → 照样拦', async () => {
+    const row = { ...posterRow(false), vision_metadata: { poster: { ...posterRow(false).vision_metadata.poster, has_price: false } } }
+    const v = await judgeOutgoingPost(makeSupabase({ client_assets: [row, parentRow('client_verified')] }), { clientId: CLIENT, caption: UNPRICED, imageUrl: IMG })
+    expect(v).toMatchObject({ blocked: true, priceClaimed: false, poster: true, posterSigned: false })
+    expect(outgoingPriceGateMessage(v)).toContain('还没有团队成员对过原图签字')
+    const signed = { ...row, verified_by: 'fde@me.test', verified_at: '2026-11-15T01:00:00.000Z' }
+    const ok = await judgeOutgoingPost(makeSupabase({ client_assets: [signed, parentRow('client_provided')] }), { clientId: CLIENT, caption: UNPRICED, imageUrl: IMG })
+    expect(ok.blocked).toBe(false) // signed, no price anywhere → parent source does not matter
+  })
+
+  it('🔴 查素材库报错 → 拦（文案没价也拦，不猜）', async () => {
+    const db = makeSupabase({ client_assets: [posterRow(true)] }, [], 'client_assets')
+    const v = await judgeOutgoingPost(db, { clientId: CLIENT, caption: UNPRICED, imageUrl: IMG })
+    expect(v).toMatchObject({ blocked: true, lookupFailed: true })
+    expect(outgoingPriceGateMessage(v)).toContain('核对不了')
+  })
+
+  it('网址带 ?… / #… 也认得出是那张海报', async () => {
+    const q: RecordedQuery[] = []
+    const db = makeSupabase({ client_assets: [posterRow(false), parentRow('client_verified')] }, q)
+    const v = await judgeOutgoingPost(db, { clientId: CLIENT, caption: UNPRICED, imageUrl: `${IMG}?width=800#top` })
+    expect(v).toMatchObject({ blocked: true, poster: true })
+    expect(q[0].eq).toEqual([['client_id', CLIENT], ['storage_url', IMG]])
+  })
+
+  it('🔴 地址在 /posters/ 下但素材库查不到那一行 → 拦', async () => {
+    const orphan = 'https://x.supabase.co/storage/v1/object/public/visual-assets/client-1/posters/image-v1-1.jpg'
+    const v = await judgeOutgoingPost(makeSupabase({ client_assets: [] }), { clientId: CLIENT, caption: UNPRICED, imageUrl: orphan })
+    expect(v).toMatchObject({ blocked: true, lookupFailed: true })
+  })
+
+  it('非海报 AI 图行为不变：文案有价 → 拦；文案无价 → 放', async () => {
+    const plain = { client_id: CLIENT, storage_url: IMG, source: 'ai_generated', verified_by: 'x', verified_at: '2026-11-15T00:00:00.000Z', vision_metadata: null }
+    const priced = await judgeOutgoingPost(makeSupabase({ client_assets: [plain] }), { clientId: CLIENT, caption: 'From $99', imageUrl: IMG })
+    expect(priced).toMatchObject({ blocked: true, source: 'ai_generated' })
+    expect('poster' in priced).toBe(false)
+    expect(outgoingPriceGateMessage(priced)).toBe(priceGateMessage('ai_generated'))
+    const unpriced = await judgeOutgoingPost(makeSupabase({ client_assets: [plain] }), { clientId: CLIENT, caption: UNPRICED, imageUrl: IMG })
+    expect(unpriced.blocked).toBe(false)
   })
 })
 
@@ -223,6 +312,22 @@ describe('judgePriceClaimWithSource —— 已知来源时的纯判定', () => {
   it('没价格 → 图库来源也放行', () => {
     const v = judgePriceClaimWithSource({ caption: NO_PRICE_CAPTION, source: 'stock' })
     expect(v).toMatchObject({ blocked: false, priceClaimed: false })
+  })
+  it('图里报了价（imagePriceClaim）+ 文案没价 → 按报了价判，AI 图拦下', () => {
+    const v = judgePriceClaimWithSource({ caption: NO_PRICE_CAPTION, source: 'ai_generated', imagePriceClaim: true })
+    expect(v).toMatchObject({ blocked: true, priceClaimed: true, source: 'ai_generated' })
+  })
+
+  it('backsRealPrice 覆盖只按 source 的判定（签过字的海报）', () => {
+    const v = judgePriceClaimWithSource({ caption: PRICE_CAPTION, source: 'ai_generated', backsRealPrice: true })
+    expect(v.blocked).toBe(false)
+    const w = judgePriceClaimWithSource({ caption: PRICE_CAPTION, source: 'client_verified', backsRealPrice: false })
+    expect(w.blocked).toBe(true)
+  })
+
+  it('不传新参数时与旧行为一致', () => {
+    expect(judgePriceClaimWithSource({ caption: NO_PRICE_CAPTION, source: 'ai_generated', imagePriceClaim: false }))
+      .toMatchObject({ blocked: false, priceClaimed: false })
   })
 })
 

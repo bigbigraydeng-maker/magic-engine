@@ -4,9 +4,9 @@
  * DAPE E for the ads-health dashboard: execute the one-click prescription on a
  * campaign card. Currently one executable kind:
  *
- *   refresh_creatives — trigger the winner-reel-sync engine for this client.
- *     It scans the client's organic winners and adds the best into the paid
- *     pool as NEW ads, DEFAULT PAUSED (no spend until a human activates them).
+ *   refresh_creatives — ask the winner-reel scan to raise confirmation cards.
+ *     It does not create ads. A person confirms a card before a paused ad
+ *     is created. Opening that ad is a second card.
  *     Called as a direct library import — never an internal HTTP self-call
  *     (zhangqian lesson, PR #297).
  *
@@ -24,6 +24,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requirePlanApproverAccess } from '@/lib/auth/client-access'
+import { clickerFromSession } from '@/lib/confirmation-card'
 import { syncWinnerReels } from '@/lib/winner-reel-sync/engine'
 
 export const dynamic = 'force-dynamic'
@@ -102,13 +103,19 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     )
   }
 
-  // skipFatiguePause: a button labelled "补新素材" must ONLY add — pausing other
-  // ads here would be an action beyond what the user consented to.
-  // newAdStatusOverride: the confirm dialog promises "暂停、不花钱" — hold that
-  // promise even if the client's winner-sync config defaults new ads to ACTIVE.
+  // skipFatiguePause: a button labelled "补新素材" must ONLY suggest adds.
+  // The scan no longer writes. Cards are issued in this person's name.
+  const clicker = clickerFromSession({
+    email: access.user.email ?? '',
+    role: access.role,
+    allowedClientId: access.allowedClientId,
+    clientId,
+    agentMarked: req.headers.get('x-me-actor') === 'agent',
+  })
   const result = await syncWinnerReels(clientId, {
     skipFatiguePause: true,
     newAdStatusOverride: 'PAUSED',
+    clicker,
   })
 
   if (result.status === 'error') {
@@ -120,6 +127,7 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
 
   return NextResponse.json({
     success: true,
+    proposed: true,
     status: result.status,
     postsScanned: result.postsScanned,
     adsAdded: result.adsAdded.map(a => ({ name: a.name, score: a.score })),

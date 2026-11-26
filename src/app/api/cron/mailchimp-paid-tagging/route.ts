@@ -39,6 +39,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import { partitionExternalDataPull } from '@/lib/clients/external-data-pull-allowlist'
 import { supabaseAdmin } from '@/lib/supabase'
 import { startCronRun } from '@/lib/cron/run-logger'
 import { getValidTokenForConnection } from '@/lib/platform-oauth/token-manager'
@@ -222,9 +223,18 @@ async function run(lookbackDays: number, dryRun: boolean): Promise<NextResponse>
     return NextResponse.json({ error: connErr.message }, { status: 500 })
   }
 
-  const connections = (conns ?? []) as Array<{ id: string; client_id: string; account_id: string }>
+  const mailboxRoster = partitionExternalDataPull(
+    (conns ?? []) as Array<{ id: string; client_id: string; account_id: string }>,
+    (row) => row.client_id,
+  )
+  const connections = mailboxRoster.kept
   if (connections.length === 0) {
-    await cronRun.finish({ processed: 0, completed: 0, failed: 0, summary: { note: '还没有客户连邮箱' } })
+    await cronRun.finish({
+      processed: 0,
+      completed: 0,
+      failed: 0,
+      summary: { note: '还没有客户连邮箱', skipped_by_allowlist: mailboxRoster.skippedCount },
+    })
     return NextResponse.json({ ok: true, mailboxes: 0, results: [] })
   }
 
@@ -315,7 +325,7 @@ async function run(lookbackDays: number, dryRun: boolean): Promise<NextResponse>
     completed: results.length - failed,
     failed,
     // needsReview 放进 summary —— manual-items 从这里读，下发成「今天该你动手」。
-    summary: { lookbackDays, dryRun, results, needsReview },
+    summary: { lookbackDays, dryRun, results, needsReview, skipped_by_allowlist: mailboxRoster.skippedCount },
   })
 
   return NextResponse.json({ ok: true, lookbackDays, dryRun, results, needsReview })

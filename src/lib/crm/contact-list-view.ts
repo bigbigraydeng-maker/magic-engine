@@ -17,8 +17,10 @@
  */
 
 import { buildContactModel, type ContactRowLike, type StageMetaLike, type TouchpointRowLike } from './contact-model'
-import { segmentContact, SEGMENT_META, type SegmentResult } from './segments'
+import { segmentContact, SEGMENT_META, type SegmentResult, type SiteReading } from './segments'
 import { dayRow } from './day-list'
+import { demoteForTakeover, takeoverMarkFor } from './ai-takeover/day-list-filter'
+import { toReengageTouchRow } from './ai-takeover/came-back'
 import { senderShapeOf } from './enquiry-screen/sender-shape'
 import { type IntentLevel } from './next-action'
 import {
@@ -49,6 +51,8 @@ export interface PriorityViewInput {
    * 命中的人挪到「先放着」并写明原因——只挪不删，仍在「全部客人」里看得见、点「同行」可筛出来。
    */
   tradeIds?: ReadonlySet<string>
+  /** 近 7 天谁在官网看手册 / 团页面（link-tracking/site-reading-prod）。缺省 = 没有这个信息，没人进「正在看手册」。 */
+  siteReading?: ReadonlyMap<string, SiteReading>
   /**
    * 今天从哪一刻开始（客户所在地时间，毫秒）。**传了才做「当天名单不变」**：
    * 员工今天记的笔记 / 打的电话不许把人从「今天要联系」挪走（day-list 的承诺）。
@@ -62,6 +66,11 @@ export interface PriorityViewInput {
   touchedToday?: ReadonlySet<string>
   /** 今天从「还在名单上」被推到成交 / 停止营销的人（`loadStageSuppressedTodayIds`）。 */
   stageSuppressedTodayIds?: ReadonlySet<string>
+  /**
+   * 「AI 跟进中」的客人（contactId → ai_takeover_since）。命中且客人没回来 → 从「今天要联系」挪到「先放着」，
+   * 写明「AI 跟进中」；客人回来了 → 留在原位，标「客人回来了」。不传 = 没有人在接管（旧行为）。
+   */
+  takeoverSince?: ReadonlyMap<string, string>
 }
 
 /**
@@ -123,6 +132,25 @@ function hasHumanProgressed(stage: string | null): boolean {
   return !UNTOUCHED_STAGE_KEYS.has((stage ?? '').trim().toLowerCase())
 }
 
+/** 「AI 跟进中」：没回来的挪到「先放着」，回来了的留在原位（判据见 lib/crm/ai-takeover/day-list-filter）。 */
+function applyTakeover(
+  contactId: string,
+  tps: readonly TouchpointRowLike[],
+  seg: SegmentResult,
+  input: PriorityViewInput,
+): { seg: SegmentResult; aiTakeover: boolean; customerCameBack: boolean } {
+  if (!input.takeoverSince?.has(contactId)) return { seg, aiTakeover: false, customerCameBack: false }
+  const mark = takeoverMarkFor(contactId, {
+    takeoverSince: input.takeoverSince,
+    touchesOf: () => tps.map(toReengageTouchRow),
+    // 没做当天冻结（dayStartMs 没传）就没有「今天刚交给 AI 的留在原位」这一说。
+    dayStartMs: input.dayStartMs ?? Number.POSITIVE_INFINITY,
+    now: input.now,
+  })
+  if (mark === null) return { seg: demoteForTakeover(seg), aiTakeover: true, customerCameBack: false }
+  return { seg, aiTakeover: true, customerCameBack: mark.cameBack !== null }
+}
+
 export interface PriorityViewOutput<T> {
   sections: SectionResult<T>[]
   focus: FocusResult
@@ -150,7 +178,7 @@ export function buildPriorityView<T>(
   for (const c of input.contacts) {
     byId.set(c.id, c)
     const tps = byContact.get(c.id) ?? []
-    const model = buildContactModel(c, tps, input.stageMeta)
+    const model = { ...buildContactModel(c, tps, input.stageMeta), siteReading: input.siteReading?.get(c.id) ?? null }
     // 传了 dayStartMs → 位置按「今天开工那一刻」的样子算（冻结），客人今天的动作照常实时进来。
     const day =
       input.dayStartMs !== undefined
@@ -161,10 +189,13 @@ export function buildPriorityView<T>(
           )
         : null
     const base = demoteNonEnquirySender(c, day ? day.seg : segmentContact(model, input.now))
-    const seg = input.tradeIds?.has(c.id) ? demoteTrade(base) : base
+    const traded = input.tradeIds?.has(c.id) ? demoteTrade(base) : base
+    const { seg, aiTakeover, customerCameBack } = applyTakeover(c.id, tps, traded, input)
     ranked.push({
       contactId: c.id,
       seg,
+      aiTakeover,
+      customerCameBack,
       handled: day?.handled,
       handledWhy: day?.handledWhy,
       intent: input.briefs?.get(c.id)?.intent ?? null,

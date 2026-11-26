@@ -28,7 +28,7 @@ vi.mock('@/lib/supabase', () => {
         let mode: 'select' | 'insert' | 'update' = 'select'
         let payload: Record<string, unknown> = {}
         const b: Record<string, unknown> = {}
-        for (const m of ['select', 'eq', 'gte', 'or', 'order', 'limit']) b[m] = () => b
+        for (const m of ['select', 'eq', 'in', 'gte', 'or', 'order', 'limit']) b[m] = () => b
         b.insert = (p: Record<string, unknown>) => {
           mode = 'insert'
           payload = p

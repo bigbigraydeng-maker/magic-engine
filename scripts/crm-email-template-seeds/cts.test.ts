@@ -105,6 +105,8 @@ describe('the CTS seed templates', () => {
       inputs: {},
       facts: { tours: [tour()], picks: picked.picks, settings: { urlPattern: 'https://www.ctstours.co.nz/tours/{destination}/{tier}/{slug}', allToursUrl: 'https://www.ctstours.co.nz/tours' } },
       provider,
+      catalogue: null,
+      today: '2026-11-09',
     })
     expect(out.missing).toEqual([])
     expect(out.problems).toEqual([])
@@ -131,6 +133,8 @@ describe('the CTS seed templates', () => {
       inputs: {},
       facts: { tours, picks: picked.picks, settings: { urlPattern: 'https://www.ctstours.co.nz/tours/{destination}/{tier}/{slug}', allToursUrl: 'https://www.ctstours.co.nz/tours' } },
       provider,
+      catalogue: null,
+      today: '2026-11-09',
     })
     expect(out.missing).toEqual([])
     expect(out.body).toContain('China Discovery — Best of China')

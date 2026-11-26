@@ -43,6 +43,7 @@ import { readSheetValues } from '@/lib/google-sheets/client'
 import { fetchAll } from '@/lib/supabase-paginate'
 import { normaliseEmail, normalisePhone } from './identity'
 import { classifyNote } from './note-parser'
+import { refusalMetadata } from './touchpoint-refusal'
 import { ctsNoteColumnIndex } from '@/lib/conversions/cts-crm-sheet-sync'
 
 /** 跟 2026-07 那次一次性导入同一个来源名 —— 它们是同一件事的两个阶段。 */
@@ -288,8 +289,8 @@ export async function syncSheetFollowupNotes(
           source: SHEET_FOLLOWUP_SOURCE,
           source_ref: sourceRef,
           metadata: {
-            outcome: verdict.outcome,
-            do_not_contact: verdict.do_not_contact,
+            // 同一套拒绝写法（只别打电话恒不全拦、说不清带 refusal_scope），见 touchpoint-refusal。
+            ...refusalMetadata(verdict),
             imported_from: 'sheet_员工跟进记录',
             sheet_row: n.sheetRow,
             // 🔴 表格不记打电话的时间，这里用的是进线时间。见文件头第 4 条。

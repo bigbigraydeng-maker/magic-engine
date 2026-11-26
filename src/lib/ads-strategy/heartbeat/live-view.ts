@@ -6,6 +6,8 @@
 import { readHeartbeatAccount, type HeartbeatAccountRead, type HeartbeatAdsetSample } from './read';
 
 export const LIVE_CACHE_TTL_MS = 60_000;
+/** Shown when a successful ad set read came back empty because every ad set is paused. */
+export const ALL_PAUSED_LABEL = '全部暂停';
 const ZERO_DECIMAL_CURRENCIES = new Set(['JPY', 'KRW', 'VND', 'CLP']);
 /** Statuses that count as "running today" for the main list. */
 const LIVE_STATUSES = new Set(['ACTIVE']);
@@ -90,6 +92,13 @@ const KIND_LABEL: Record<string, string> = {
   insights: '今天的花费数据',
 };
 
+export function liveAccountEmptyLine(part: 'today' | 'new', reason: string | null): string {
+  if (part === 'today' && reason === ALL_PAUSED_LABEL) return ALL_PAUSED_LABEL;
+  return part === 'today'
+    ? '现在没有状态为「投放中」的广告组。'
+    : '今天没有新建或重建的广告组。';
+}
+
 function reasonOf(read: HeartbeatAccountRead): string | null {
   const bad = read.outcomes.filter(
     (o) => o.verdict === 'read_failed' || o.verdict === 'token_expired' || o.verdict === 'rate_limited',
@@ -108,6 +117,8 @@ export function buildLiveAccountView(read: HeartbeatAccountRead): LiveAccountVie
     if (ad.adsetId) adCounts.set(ad.adsetId, (adCounts.get(ad.adsetId) ?? 0) + 1);
   }
   const all = read.adsets.map((a) => toLiveAdset(a, read, adCounts.get(a.adsetId) ?? 0));
+  const adsetsOutcome = read.outcomes.find((o) => o.kind === 'adsets');
+  const allPaused = adsetsOutcome?.verdict === 'ok' && adsetsOutcome.reason === 'all_paused';
   const adsetsOk = !read.outcomes.some(
     (o) => o.kind === 'adsets' && o.verdict !== 'ok' && o.verdict !== 'skipped',
   );
@@ -116,7 +127,7 @@ export function buildLiveAccountView(read: HeartbeatAccountRead): LiveAccountVie
   return {
     adAccountId: read.adAccountId,
     readState,
-    reason: reasonOf(read),
+    reason: allPaused && readState === 'ok' ? ALL_PAUSED_LABEL : reasonOf(read),
     currency: read.currency,
     accountDay: read.accountDay,
     active: all.filter((a) => a.status !== null && LIVE_STATUSES.has(a.status)),
@@ -161,12 +172,9 @@ export interface LiveDeps {
   getToken(clientId: string): Promise<string | null>;
   /**
    * 该账户现在有没有在投系列（读最近 14 天的快照，与定时心跳 run.ts 同口径，复用 store.hasActiveCampaigns）。
-   * 读不到 = null，调用方按「有」处理（保守：读到 0 个广告组就判读失败）。
-   *
-   * 已知取舍：快照每 6 小时一轮，「刚被打开、快照还没抓到」的系列会被当成没在投——
-   * 这时若 Meta 恰好对该账户返回空广告组列表，实时页显示「没有在投」而不是读失败。
-   * 残余风险可接受：真读失败是 read_failed（红字），不是「返回空列表」；
-   * 要求 Meta 对确有在投广告组的账户返回空列表才会漏报。
+   * 读不到 = null，调用方按「有」处理，再去读广告组。
+   * 广告组查询不含暂停状态：读成功但 0 行 = 全部暂停，不是读失败。
+   * 查询报错或结果不完整才是读失败。
    */
   hasActiveCampaigns(clientId: string, adAccountId: string): Promise<boolean | null>;
   read: typeof readHeartbeatAccount;
@@ -184,7 +192,8 @@ async function buildFresh(clientId: string, deps: LiveDeps): Promise<LiveTodayVi
       continue;
     }
     try {
-      // 与定时心跳同口径：读不到（或抛错）一律当「有在投系列」，保住「有在投却读到 0 个广告组 = 读失败」这条安全规则。
+      // 与定时心跳同口径：读不到（或抛错）一律当「有在投系列」。
+      // 广告组读成功但 0 行时，判定是「全部暂停」，不是读失败。
       const active = await deps.hasActiveCampaigns(clientId, id).catch(() => null);
       const read = await deps.read({
         adAccountId: id,

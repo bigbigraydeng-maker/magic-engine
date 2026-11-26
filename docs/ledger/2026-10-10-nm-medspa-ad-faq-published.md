@@ -1,7 +1,7 @@
 ---
 id: 2026-10-10-nm-medspa-ad-faq-published
 title: NM Medspa 私信广告三条常见问答已换成带自动回复的版本并发布
-status: done
+status: verified
 owner: pm
 decided_on: 2026-10-10
 source: pr:2402
@@ -9,6 +9,9 @@ done_on: 2026-10-10
 done_ref: pr:2402
 verify_by: 2026-10-13
 verify_how: 到期看新创意是否已通过审核、广告恢复投放、开聊数有没有变化；没过审就查被拒原因
+last_checked: 2026-11-26
+check_note: 带问答新广告 10-10 起有花费、10-12 开聊 3 次，即已过审在投；10-13 起被通用欢迎语版取代，开聊样本太小不判好坏
+verified_ref: doc:docs/ledger/evidence/2026-10-10-nm-medspa-ad-faq-published--2026-11-26.md
 ---
 PM 10/10 回「放行」「发布」。统筹在广告管理工具里改三条问答并各配自动回复，欢迎语未动，广告编号不变。
 Meta 的已发布创意不可改，发布后平台另建新创意（状态审核中），广告暂时进入审核、恢复后才继续投。

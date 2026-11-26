@@ -89,6 +89,16 @@ describe('PUT email-templates/[key]', () => {
     )
   })
 
+  it('trims the optional when-to-use note onto the new version', async () => {
+    vi.mocked(appendTemplateVersion).mockResolvedValue({ ok: true, value: { version: 4 } as never })
+    const res = await put({ ...goodBody, whenToUse: '  客人来信后  ' })
+    expect(res.status).toBe(200)
+    expect(appendTemplateVersion).toHaveBeenCalledWith(
+      { marker: 'db' },
+      expect.objectContaining({ whenToUse: '客人来信后', baseVersion: 3, templateKey: 'post-call-single-tour' }),
+    )
+  })
+
   it('saves under the key in the ADDRESS, whatever else is going on', async () => {
     vi.mocked(appendTemplateVersion).mockResolvedValue({ ok: true, value: { version: 2 } as never })
     await put(goodBody, 'spring-2027-follow-up')

@@ -1,12 +1,15 @@
 /**
  * 服务级只暂停。假依赖，不调真实广告接口，不写库。
  */
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { assertMayClick } from '@/lib/confirmation-card'
+import { ConfirmationCardError } from '@/lib/confirmation-card/errors'
 import {
   allowedCampaignsFromConfig,
   handlePauseOnlyRequest,
-  pauseCampaignOnly,
   pauseCampaignServiceOnly,
+  servicePauseClicker,
   servicePauseEnabled,
   type PauseBody,
   type PauseOnlyDeps,
@@ -29,13 +32,12 @@ const BODY: PauseBody = {
 }
 
 interface Calls {
-  pause: string[]
-  events: { id: string; data: { client_id: string; action_id: string } }[]
+  cards: string[]
   inserts: Record<string, unknown>[]
 }
 
 function harness(over: Partial<PauseOnlyDeps> = {}): { deps: PauseOnlyDeps; calls: Calls; row: { current: PauseRow | null } } {
-  const calls: Calls = { pause: [], events: [], inserts: [] }
+  const calls: Calls = { cards: [], inserts: [] }
   const row: { current: PauseRow | null } = { current: null }
   const deps: PauseOnlyDeps = {
     enabled: true,
@@ -52,12 +54,9 @@ function harness(over: Partial<PauseOnlyDeps> = {}): { deps: PauseOnlyDeps; call
     },
     resolveToken: async () => 'token-value',
     assertOwned: async () => ({ ok: true, status: 'ACTIVE' }),
-    pauseOnly: async campaignId => {
-      calls.pause.push(campaignId)
-      return true
-    },
-    sendEvent: async event => {
-      calls.events.push(event)
+    issuePauseCard: async () => {
+      calls.cards.push(BODY.campaign_id)
+      return { ok: true, runId: 'run-1' }
     },
     ...over,
   }
@@ -77,8 +76,7 @@ describe('总开关', () => {
     const { deps, calls } = harness({ enabled: false })
     const out = await pauseCampaignServiceOnly(BODY, deps)
     expect(out).toEqual({ http: 200, body: { paused: false, reason: 'switch_off' } })
-    expect(calls.pause).toEqual([])
-    expect(calls.events).toEqual([])
+    expect(calls.cards).toEqual([])
     expect(calls.inserts).toEqual([])
   })
 })
@@ -91,25 +89,18 @@ describe('只暂停', () => {
       expect(out.http).toBe(422)
       expect(out.body.reason).toBe('unexpected_field')
     }
-    expect(calls.pause).toEqual([])
-  })
-
-  it('包装函数只会把暂停交给广告接口', async () => {
-    const setStatus = vi.fn(async () => true)
-    await expect(pauseCampaignOnly('333333333333', 'token-value', setStatus)).resolves.toBe(true)
-    expect(setStatus).toHaveBeenCalledTimes(1)
-    expect(setStatus).toHaveBeenCalledWith('333333333333', 'token-value', 'PAUSED')
+    expect(calls.cards).toEqual([])
   })
 
   it('不属于这个客户 → 拒绝，不写记录，不改广告', async () => {
     const { deps, calls } = harness({ assertOwned: async () => ({ ok: false }) })
     const out = await pauseCampaignServiceOnly(BODY, deps)
     expect(out).toEqual({ http: 403, body: { paused: false, reason: 'not_owned' } })
-    expect(calls.pause).toEqual([])
+    expect(calls.cards).toEqual([])
     expect(calls.inserts).toEqual([])
   })
 
-  it('名单外系列 / 名单读不到 / 账户不符 → 拒绝，不写记录，不改广告', async () => {
+  it('名单外系列 / 名单读不到 / 账户不符 → 拒绝，不写记录，不出卡', async () => {
     const cases: Partial<PauseOnlyDeps>[] = [
       { allowedCampaigns: () => [{ campaign_id: '999999999999', ad_account_id: BODY.ad_account_id }] },
       { allowedCampaigns: () => null },
@@ -120,9 +111,8 @@ describe('只暂停', () => {
       const { deps, calls } = harness(over)
       const out = await pauseCampaignServiceOnly(BODY, deps)
       expect(out).toEqual({ http: 403, body: { paused: false, reason: 'not_allowlisted' } })
-      expect(calls.pause).toEqual([])
+      expect(calls.cards).toEqual([])
       expect(calls.inserts).toEqual([])
-      expect(calls.events).toEqual([])
     }
   })
 
@@ -130,40 +120,53 @@ describe('只暂停', () => {
     expect(allowedCampaignsFromConfig(BODY.client_id)).toBeNull()
   })
 
-  it('记录写不进去就不改广告', async () => {
+  it('记录写不进去就不出卡', async () => {
     const { deps, calls } = harness({ insert: async () => null })
     const out = await pauseCampaignServiceOnly(BODY, deps)
     expect(out.body).toMatchObject({ paused: false, reason: 'log_failed' })
-    expect(calls.pause).toEqual([])
-    expect(calls.events).toEqual([])
+    expect(calls.cards).toEqual([])
   })
 
-  it('别人已经暂停 → 只记一笔，不再改，也不发通知', async () => {
+  it('别人已经暂停 → 只记一笔，不出卡', async () => {
     const { deps, calls } = harness({ assertOwned: async () => ({ ok: true, status: 'PAUSED' }) })
     const out = await pauseCampaignServiceOnly(BODY, deps)
     expect(out.body).toMatchObject({ paused: false, reason: 'already_paused' })
-    expect(calls.pause).toEqual([])
-    expect(calls.events).toEqual([])
+    expect(calls.cards).toEqual([])
     expect(calls.inserts[0]).toMatchObject({ status: 'already_paused' })
   })
 
-  it('新暂停成功才发一次通知；同一把钥匙再来不改第二次、也不再发', async () => {
+  it('在投时只出卡，广告没有停；同一把钥匙不再出第二张', async () => {
     const { deps, calls } = harness()
     const first = await pauseCampaignServiceOnly(BODY, deps)
-    expect(first.body).toMatchObject({ paused: true, reason: 'paused', action_id: 'action-1' })
-    expect(calls.pause).toEqual(['333333333333'])
-    expect(calls.events).toEqual([{ id: 'same-key', data: { client_id: BODY.client_id, action_id: 'action-1' } }])
+    expect(first.body).toMatchObject({ paused: false, reason: 'card_issued', action_id: 'action-1', card_run_id: 'run-1' })
+    expect(first.http).toBe(202)
+    expect(calls.cards).toEqual([BODY.campaign_id])
     const second = await pauseCampaignServiceOnly(BODY, deps)
-    expect(second.body).toMatchObject({ paused: true, reason: 'paused', idempotent: true })
-    expect(calls.pause).toHaveLength(1)
-    expect(calls.events).toHaveLength(1)
+    expect(second.body).toMatchObject({ paused: false, reason: 'card_issued', idempotent: true })
+    expect(calls.cards).toHaveLength(1)
   })
 
-  it('广告接口没停成 → 不发通知', async () => {
-    const { deps, calls } = harness({ pauseOnly: async () => false })
+  it('出卡失败也不暂停', async () => {
+    const { deps, calls } = harness({ issuePauseCard: async () => ({ ok: false, reason: 'card_failed' }) })
     const out = await pauseCampaignServiceOnly(BODY, deps)
-    expect(out.body).toMatchObject({ paused: false, reason: 'meta_failed' })
-    expect(calls.events).toEqual([])
+    expect(out.body).toMatchObject({ paused: false, reason: 'card_failed' })
+    expect(calls.cards).toEqual([])
+  })
+
+  it('没卡、过期或未确认都不能从服务入口写成已暂停', () => {
+    const source = readFileSync('src/lib/meta/service-pause-only.ts', 'utf8')
+    expect(source).not.toContain('setCampaignStatus')
+    expect(source).not.toContain('confirmCampaignStatusCard')
+    const clicker = servicePauseClicker(BODY.client_id)
+    expect(clicker.kind).toBe('agent')
+    expect(() => assertMayClick(clicker, BODY.client_id)).toThrow(ConfirmationCardError)
+  })
+
+  it('把确认塞进服务请求里会被拒绝，不出卡', async () => {
+    const { deps, calls } = harness()
+    const out = await pauseCampaignServiceOnly({ ...BODY, resolution: 'confirm' }, deps)
+    expect(out.http).toBe(422)
+    expect(calls.cards).toEqual([])
   })
 })
 
@@ -178,6 +181,6 @@ describe('入口鉴权', () => {
       body: JSON.stringify(BODY),
     }), deps, 'expected-secret')
     expect(wrong.status).toBe(401)
-    expect(calls.pause).toEqual([])
+    expect(calls.cards).toEqual([])
   })
 })

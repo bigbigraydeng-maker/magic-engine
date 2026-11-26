@@ -407,6 +407,53 @@ function isUnrecognisedTourPath(pathname: string, pattern: PathPattern, facts: R
   return true
 }
 
+export interface TourLinkRef {
+  name: string
+  destination: string
+  tier: string
+  slug: string
+  /** The departure the link points at (`?date=`), when it names one the tour has. */
+  departOn: string | null
+}
+
+/**
+ * What a link to the client's own site points at, from the same URL rules the link check uses: one published tour
+ * (with its departure when the link names one), the all-tours page, or neither. Pure; used to label tracked links.
+ */
+export function classifyTourLink(url: string, facts: RenderFacts | null): { kind: 'tour'; tour: TourLinkRef } | { kind: 'all_tours' } | null {
+  if (facts === null || facts.settings === null) return null
+  const pattern = parsePathPattern(facts.settings.urlPattern)
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return null
+  }
+  const hosts = new Set([pattern?.host, ...(facts.linkHosts ?? [])].filter((h): h is string => typeof h === 'string').map(hostKey))
+  if (!hosts.has(hostKey(parsed.hostname))) return null
+  try {
+    if (trimSlashes(parsed.pathname) === trimSlashes(new URL(facts.settings.allToursUrl).pathname)) return { kind: 'all_tours' }
+  } catch {
+    // an unreadable all-tours URL just means no link is labelled as it
+  }
+  const match = pattern === null ? null : pattern.regex.exec(parsed.pathname)
+  if (pattern === null || match === null) return null
+  const captured: Partial<Record<'destination' | 'tier' | 'slug', string>> = {}
+  pattern.groupOrder.forEach((key, idx) => {
+    captured[key] = match[idx + 1]
+  })
+  const tour = facts.tours.find(
+    (t) =>
+      t.destination.toLowerCase() === captured.destination?.toLowerCase() &&
+      t.tier.toLowerCase() === captured.tier?.toLowerCase() &&
+      t.slug.toLowerCase() === captured.slug?.toLowerCase(),
+  )
+  if (tour === undefined) return null
+  const date = parsed.searchParams.get('date')
+  const departOn = date !== null && tour.departures.some((d) => d.departOn === date) ? date : null
+  return { kind: 'tour', tour: { name: tour.name, destination: tour.destination, tier: tour.tier, slug: tour.slug, departOn } }
+}
+
 function checkLinks(urls: readonly string[], facts: RenderFacts): LinkViolation[] {
   if (!facts.settings) return []
   const pattern = parsePathPattern(facts.settings.urlPattern)

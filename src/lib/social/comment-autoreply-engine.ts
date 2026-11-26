@@ -9,8 +9,8 @@
  * replied to twice even if two cron runs overlap or a later step fails.
  *
  * Send gate: before a public reply or private reply, `routeComment` must return
- * a greeting or FAQ. Price, complaint, refund, booking change, praise that is
- * not a greeting or FAQ, unknown, or a routing throw is recorded for the
+ * a greeting, FAQ or genuine praise. Price, complaint, refund, booking change,
+ * unknown, or a routing throw is recorded for the
  * existing human queue and does not call Meta. Spam the classifier marks with
  * shouldHide is still hidden, as before. If classification throws, nothing is
  * hidden or sent — the comment waits for a person.
@@ -26,7 +26,7 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
-import { fetchPagePosts, fetchPageReels, type HalvingStats } from '@/lib/meta/page-posts'
+import { fetchPagePosts, fetchPageReels, fetchPostText, type HalvingStats, type PostText } from '@/lib/meta/page-posts'
 import { authorizeConfiguredPage } from '@/lib/meta/page-sync-authorization'
 import { fetchAdStoryIds } from '@/lib/meta/ads-posts'
 import { fetchPostCommentsResult, replyToComment, sendPrivateReply, hideComment, PageComment } from '@/lib/meta/comments'
@@ -41,6 +41,8 @@ import {
 import { classifyComment, CommentDecision, CommentCategory } from './comment-classifier'
 import { ReplyContext } from './comment-guardrails'
 import { routeComment, type CommentIntent } from './comment-routing'
+import { draftTourAnswer } from './comment-tour-draft'
+import { loadSocialFactSource, type SocialFactSource } from './weekly-loop/fact-aliases'
 
 export interface CommentConfig {
   client_id: string
@@ -64,6 +66,8 @@ export interface ClientRunResult {
   private_replies?: number
   hidden?: number
   needs_human?: number
+  /** needs_human comments that got a catalog-grounded draft for a person to send. */
+  drafts?: number
   failed?: number
   error?: string
   /** Page these numbers belong to — the to-do lane needs it to name the Page. */
@@ -97,6 +101,28 @@ const TERMINAL_OR_INFLIGHT = ['processing', 'replied', 'dm_sent', 'hidden', 'ski
 /** Global kill switch — set SOCIAL_COMMENT_AUTOREPLY_KILL=1 in env to stop all runs. */
 export function isKilled(): boolean {
   return process.env.SOCIAL_COMMENT_AUTOREPLY_KILL === '1'
+}
+
+/** Stops catalog-grounded drafting only (set SOCIAL_COMMENT_TOUR_DRAFT_KILL=1). Replies are unaffected. */
+export function isTourDraftKilled(): boolean {
+  return process.env.SOCIAL_COMMENT_TOUR_DRAFT_KILL === '1'
+}
+
+/**
+ * Per-run memo for drafting: the catalog is read at most once per run, and a
+ * post's text at most once per post. Both are loaded lazily — a run with no
+ * question comments reads neither.
+ */
+interface DraftScratch {
+  clientId: string
+  pageToken: string
+  today: string
+  facts?: Promise<SocialFactSource>
+  posts: Map<string, Promise<PostText | null>>
+}
+
+function newDraftScratch(clientId: string, pageToken: string): DraftScratch {
+  return { clientId, pageToken, today: new Date().toISOString().slice(0, 10), posts: new Map() }
 }
 
 async function pageGate(
@@ -197,16 +223,18 @@ export async function processClientComments(config: CommentConfig): Promise<Clie
 
     const candidates = (await filterProcessable(comments)).slice(0, config.max_replies_per_run)
 
-    const tally = { public_replies: 0, private_replies: 0, hidden: 0, needs_human: 0, failed: 0 }
+    const tally = { public_replies: 0, private_replies: 0, hidden: 0, needs_human: 0, failed: 0, drafts: 0 }
+    const scratch = newDraftScratch(clientId, pageToken)
     for (const comment of candidates) {
       const claim = await claimComment(comment, config)
       if (!claim) continue // another run/pass owns it, or not retryable
-      const outcome = await processClaimedComment(comment, claim, config, ctxBase, pageToken)
+      const outcome = await processClaimedComment(comment, claim, config, ctxBase, pageToken, scratch)
       tally.public_replies += outcome.publicReplied ? 1 : 0
       tally.private_replies += outcome.dmSent ? 1 : 0
       tally.hidden += outcome.hidden ? 1 : 0
       tally.needs_human += outcome.needsHuman ? 1 : 0
       tally.failed += outcome.failed ? 1 : 0
+      tally.drafts += outcome.drafted ? 1 : 0
     }
 
     return {
@@ -342,7 +370,7 @@ async function claimComment(comment: PageComment, config: CommentConfig): Promis
   return updated ? { rowId: row.id, attempts: nextAttempts } : null
 }
 
-interface Outcome { publicReplied: boolean; dmSent: boolean; hidden: boolean; needsHuman: boolean; failed: boolean }
+interface Outcome { publicReplied: boolean; dmSent: boolean; hidden: boolean; needsHuman: boolean; failed: boolean; drafted?: boolean }
 
 function categoryAllowed(category: CommentCategory, config: CommentConfig): boolean {
   if (category === 'praise') return config.auto_reply_praise
@@ -357,6 +385,7 @@ const GREETING_OR_FAQ: ReadonlySet<CommentIntent> = new Set([
   'faq_itinerary',
   'faq_visa',
   'faq_signup',
+  'praise',
 ])
 
 export type CommentAutoReplyBlock = 'not_greeting_or_faq' | 'routing_error'
@@ -393,6 +422,65 @@ function handoffDecision(decision: CommentDecision, block: CommentAutoReplyBlock
   return { ...decision, needsHuman: true, shouldHide: false, guardrailFlags: flags }
 }
 
+export const TOUR_DRAFT_FLAG = 'tour_draft'
+
+/** Prefix of the flag naming the tour a draft was written from, so the reviewer can see it. */
+export const TOUR_NAME_FLAG_PREFIX = 'tour:'
+
+function withDraft(decision: CommentDecision, tourName: string): CommentDecision {
+  const flags = decision.guardrailFlags.filter((f) => f !== TOUR_DRAFT_FLAG && !f.startsWith(TOUR_NAME_FLAG_PREFIX))
+  return {
+    ...decision,
+    guardrailFlags: [...flags, TOUR_DRAFT_FLAG, `${TOUR_NAME_FLAG_PREFIX}${tourName}`],
+    replySource: 'catalog_draft',
+  }
+}
+
+/** Human-only intents never get a draft, whatever the classifier called the comment. */
+const NO_DRAFT_INTENTS: ReadonlySet<CommentIntent> = new Set(['price', 'complaint', 'refund', 'booking_change'])
+
+/**
+ * A reply draft grounded in the client's published tour catalog, or null.
+ * Null for every doubt: no catalog, post not about one sellable tour, price /
+ * complaint / refund / booking wording, model failure, or a draft that says
+ * more than the catalog does. Never throws and never calls a Meta write.
+ */
+async function tryTourDraft(
+  comment: PageComment,
+  ctx: ReplyContext,
+  scratch: DraftScratch,
+): Promise<{ reply: string; tourName: string } | null> {
+  try {
+    if (isTourDraftKilled()) return null
+    if (NO_DRAFT_INTENTS.has(routeComment({ category: 'question', comment_text: comment.message }).intent)) return null
+
+    scratch.facts ??= loadSocialFactSource(supabaseAdmin, scratch.clientId, scratch.today)
+    const facts = await scratch.facts
+    if (!facts.ok) return null
+
+    let postRead = scratch.posts.get(comment.postId)
+    if (!postRead) {
+      postRead = fetchPostText(comment.postId, scratch.pageToken)
+      scratch.posts.set(comment.postId, postRead)
+    }
+    const post = await postRead
+    if (!post) return null
+
+    const result = await draftTourAnswer({
+      commentText: comment.message,
+      authorFirstName: ctx.authorFirstName,
+      post,
+      tours: facts.tours,
+      aliasesByTourId: facts.aliasesByTourId,
+      today: scratch.today,
+    })
+    return result.ok ? { reply: result.reply, tourName: result.tourName } : null
+  } catch (err) {
+    console.error('[autoreply-engine] tour draft failed; leaving the comment to a person:', err instanceof Error ? err.message : 'unknown')
+    return null
+  }
+}
+
 /** Classification threw. Do not hide and do not guess a reply. */
 function classifierErrorDecision(): CommentDecision {
   return {
@@ -415,6 +503,7 @@ async function processClaimedComment(
   config: CommentConfig,
   ctxBase: CommentContext,
   pageToken: string,
+  scratch: DraftScratch,
 ): Promise<Outcome> {
   const ctx: ReplyContext = {
     clientName: ctxBase.clientName,
@@ -442,14 +531,20 @@ async function processClaimedComment(
     return { publicReplied: false, dmSent: false, hidden, needsHuman: false, failed: false }
   }
 
-  // Greeting/FAQ only. Praise, price, complaint, refund, unknown, and routing
-  // errors are not replied to or DM'd — they join the existing needs_human queue.
+  // Greeting, FAQ or genuine praise only. Price, complaint, refund, unknown, and
+  // routing errors are not replied to or DM'd — they join the needs_human queue.
   const gate = assessCommentAutoReply(comment.message, decision.category)
   if (!gate.send) {
-    await finalise(claim.rowId, handoffDecision(decision, gate.block), {
-      status: 'pending', hidden: false, dmSent: false, publicReplyId: null, publicText: null,
+    const handoff = handoffDecision(decision, gate.block)
+    // A question we will not auto-answer may still get a catalog-grounded DRAFT.
+    // Nothing is sent: the draft sits on the needs_human row for a person.
+    const draft = gate.block === 'not_greeting_or_faq' && decision.category === 'question'
+      ? await tryTourDraft(comment, ctx, scratch)
+      : null
+    await finalise(claim.rowId, draft ? withDraft(handoff, draft.tourName) : handoff, {
+      status: 'pending', hidden: false, dmSent: false, publicReplyId: null, publicText: draft ? draft.reply : null,
     })
-    return { publicReplied: false, dmSent: false, hidden: false, needsHuman: true, failed: false }
+    return { publicReplied: false, dmSent: false, hidden: false, needsHuman: true, failed: false, drafted: draft !== null }
   }
 
   // Category disabled → record classification, take no send action.

@@ -46,9 +46,16 @@
  * 做法：从 `conversations.page_id`（存的就是这条线程归属的邮箱地址，跟
  * `mail-ingest.ts` 落库时用的是同一列）反查 `platform_oauth_connections`，
  * 按 `client_id + account_id` 精确定位这一条连接。
+ *
+ * ## 退订邮件（P2-2b，2026-11-10）
+ *
+ * 客人点了 ME 自动信里的退订（或把它标成垃圾邮件）之后，只有一种回复会被拦：退订发生在客人**最后一封来信之后**。
+ * 客人退订后又主动来信，回他那封是在答他自己的问题，照常能发。规则和读取在 `@/lib/crm/reply-unsubscribe-gate`；
+ * 读不到一律拒发。
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
+import { checkReplyUnsubscribe } from '@/lib/crm/reply-unsubscribe-gate'
 import { getValidTokenForConnection } from '@/lib/platform-oauth/token-manager'
 import { MICROSOFT_MAIL_PROVIDER } from '@/lib/microsoft/mail-oauth'
 import { CONNECTION_STATUS } from '@/lib/platform-oauth/vocabulary'
@@ -57,7 +64,7 @@ export const GRAPH = 'https://graph.microsoft.com/v1.0'
 
 /**
  * 邮件没有 Meta 那种 24 小时/7 天窗口概念——`sendMailReply` 本身的设计就是
- * "只要客人来过信就能回"（回复对象靠 `lastInboundMessageId` 精确定位，不靠时间
+ * "只要客人来过信就能回"（回复对象靠 `lastInboundMessage` 精确定位，不靠时间
  * 窗口）。这个纯函数存在只是为了跟 `channel-dispatch.ts` 的 `CHANNEL_WINDOW`
  * 查表形状对齐（跟 `messengerWindow`/`whatsappWindow` 同一个入参/返回形状），
  * 不是邮件真的需要一套窗口判断。`msRemaining` 在 `open` 态给 `Infinity`，
@@ -84,7 +91,7 @@ export type SendMailReplyResult =
   | { ok: true; messageId: string }
   | {
       ok: false
-      status: 400 | 403 | 404 | 409 | 424 | 502
+      status: 400 | 403 | 404 | 409 | 424 | 502 | 503
       error: string
       reason:
         | 'empty_body'
@@ -95,6 +102,8 @@ export type SendMailReplyResult =
         | 'no_token'
         | 'audit_failed'
         | 'graph_failed'
+        | 'email_unsubscribed'
+        | 'unsubscribe_unverifiable'
     }
 
 interface ConversationRow {
@@ -123,16 +132,20 @@ async function findConnectionForMailbox(clientId: string, mailbox: string): Prom
 }
 
 /** 客人最后一次开口的那一封——回信只认它，回一封我们自己发的信会把客人当成收件人漏掉。 */
-async function lastInboundMessageId(conversationId: string): Promise<string | null> {
+/** The guest's latest mail in the thread: its id (what we reply to) and when it was sent (for the unsubscribe rule). */
+async function lastInboundMessage(conversationId: string): Promise<{ messageId: string; sentAt: string | null } | null> {
   const { data } = await supabaseAdmin
     .from('conversation_messages')
-    .select('message_id')
+    .select('message_id, sent_at')
     .eq('conversation_id', conversationId)
     .eq('direction', 'inbound')
     .order('sent_at', { ascending: false })
     .limit(1)
     .maybeSingle()
-  return (data?.message_id as string | undefined) ?? null
+  const messageId = (data?.message_id as string | undefined) ?? null
+  if (messageId === null) return null
+  const sentAt = typeof data?.sent_at === 'string' ? data.sent_at : null
+  return { messageId, sentAt }
 }
 
 export type GraphCallResult<T> = { ok: true; value: T } | { ok: false; status: number; error: string }
@@ -263,9 +276,19 @@ export async function sendMailReply(input: SendMailReplyInput): Promise<SendMail
     return { ok: false, status: 409, error: '这条不是邮件，不能在这里回', reason: 'wrong_channel' }
   }
 
-  const parentMessageId = await lastInboundMessageId(convo.id)
-  if (!parentMessageId) {
+  const parent = await lastInboundMessage(convo.id)
+  if (!parent) {
     return { ok: false, status: 409, error: '这条对话里没有客人发来的邮件，不能在这里回', reason: 'no_thread' }
+  }
+  const parentMessageId = parent.messageId
+
+  const unsubscribed = await checkReplyUnsubscribe({
+    clientId: convo.client_id,
+    contactId: convo.contact_id,
+    lastInboundAt: parent.sentAt,
+  })
+  if (unsubscribed.blocked) {
+    return { ok: false, status: unsubscribed.status, error: unsubscribed.error, reason: unsubscribed.reason }
   }
 
   if (!convo.page_id) {

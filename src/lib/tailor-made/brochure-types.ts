@@ -10,7 +10,7 @@
  * 改这里就必须同步改模板，反之亦然。
  */
 
-import type { TailorMadeItinerary } from './types';
+import { productEyebrow, type TailorMadeItinerary } from './types';
 
 /**
  * 图片字段可以是三种值：
@@ -132,7 +132,7 @@ export function createBlankBrochure(itinerary: TailorMadeItinerary): TailorMadeB
   return {
     cover: {
       image: '',
-      eyebrow: 'TAILOR-MADE JOURNEY',
+      eyebrow: productEyebrow(itinerary.trip.productType).toUpperCase(),
       title: itinerary.trip.title,
       cities: route.map((city) => city.toUpperCase()),
       meta: [

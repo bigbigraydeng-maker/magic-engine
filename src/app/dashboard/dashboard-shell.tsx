@@ -6,9 +6,13 @@ import { cx } from '@/components/ui/me-theme'
 import Link from 'next/link'
 import { useState } from 'react'
 import { FeatureLockModal } from '@/components/auth/FeatureLockGate'
-import { industryFeatureFlags } from '@/lib/clients/industry-features'
 import { viewerFacts } from '@/lib/auth/home-entries'
 import { WorkspaceViewerProvider } from './workspace-viewer'
+import { FdeAdminShell } from './shell/fde-admin-shell'
+import { ADMIN_SECTIONS } from './admin-sections'
+import type { NavItem, NavSection } from './shell/nav-active'
+
+export { ADMIN_SECTIONS }
 
 interface Props {
   children: React.ReactNode
@@ -23,76 +27,6 @@ interface Props {
   /** 邮箱在 ADMIN_EMAILS 里，且不是受限管理员。由服务端算好，避免把名单打进浏览器包。 */
   exactGlobalAdmin: boolean
 }
-
-// ── Nav definition ────────────────────────────────────────────────────────────
-
-type NavItem = {
-  key: string
-  label: string
-  href?: string
-  mark: string
-  soon?: boolean
-  /** Feature label shown in the upsell modal when self_serve clicks this. */
-  paidOnlyFeature?: string
-}
-type NavSection = { title?: string; items: NavItem[]; /** Folded by default; opens by itself when it holds the current page. */ collapsed?: boolean }
-
-export const ADMIN_SECTIONS: NavSection[] = [
-  {
-    items: [
-      { key: 'overview',  label: 'Overview', mark: 'OV', href: '/dashboard' },
-      { key: 'today',     label: '今日待办', mark: 'TD', href: '/dashboard/today' },
-      { key: 'learning',  label: 'Agent 学习库', mark: 'LB', href: '/dashboard/learning' },
-      { key: 'ad-approval',     label: '等你点头的广告',    mark: 'OK', href: '/dashboard/ad-approval' },
-      { key: 'kernel-approvals', label: '等你点头的动作',   mark: 'KA', href: '/dashboard/kernel-approvals' },
-      { key: 'launch-signoff',  label: '上线签字',         mark: 'SG', href: '/dashboard/launch-signoff' },
-      { key: 'clients',   label: 'Clients',  mark: 'CL', href: '/dashboard/clients' },
-    ],
-  },
-  {
-    title: '出片与内容',
-    items: [
-      // 每天高频入口:看片 + 拍板。页面早就存在,但此前全站没有任何链接指向它,
-      // 只能手敲 URL —— 等于不存在。排在本组第一位是因为它是日常最常来的地方。
-      { key: 'factory', label: '视频工厂', mark: 'VF', href: '/dashboard/factory' },
-    ],
-  },
-  {
-    title: '广告与客人',
-    items: [
-      { key: 'ad-engine',       label: '广告',             mark: 'AE', href: '/dashboard/ad-engine' },
-      { key: 'voice',            label: '电话',           mark: 'VO', href: '/dashboard/voice' },
-      { key: 'conversions',      label: '转化',           mark: 'CV', href: '/dashboard/conversions' },
-      { key: 'reports',          label: 'Reports',         mark: 'RP', href: '/dashboard/reports' },
-    ],
-  },
-  {
-    title: '账务与客户管理',
-    collapsed: true,
-    items: [
-      { key: 'mtc-overview',     label: 'MTC Overview',    mark: 'MC', href: '/dashboard/admin/mtc-overview' },
-      { key: 'prospecting',      label: 'Prospecting',     mark: 'PS', href: '/dashboard/admin/prospecting' },
-      { key: 'user-console',     label: 'User Console',    mark: 'UC', href: '/dashboard/admin/users' },
-      { key: 'commerce',        label: '选品工作台',       mark: 'PI', href: '/dashboard/commerce' },
-    ],
-  },
-  {
-    title: '系统与诊断',
-    collapsed: true,
-    items: [
-      { key: 'workflows-health', label: '自动任务健康',   mark: 'WH', href: '/dashboard/workflows-health' },
-      { key: 'cron-health',     label: 'Cron Health',     mark: 'CH', href: '/dashboard/admin/cron-health' },
-      { key: 'ai-gateway',       label: 'AI Gateway',      mark: 'AG', href: '/dashboard/admin/ai-gateway' },
-      { key: 'mcp-keys',         label: 'MCP Keys',       mark: 'MK', href: '/dashboard/admin/mcp-keys' },
-      { key: 'flywheel',         label: 'Flywheel',       mark: 'FW', href: '/dashboard/admin/flywheel' },
-      { key: 'industry-baselines', label: 'Industry Baselines', mark: 'IB', href: '/dashboard/industry-baselines' },
-      { key: 'viral-references', label: 'Viral References',mark: 'VR', href: '/dashboard/admin/viral-references' },
-      { key: 'team-memory',     label: '团队工作记忆',     mark: 'TM', href: '/dashboard/team-memory' },
-      { key: 'product-map',     label: 'ME2 产品地图',    mark: 'PM', href: '/dashboard/me2/product-map' },
-      { key: 'agents-docs',     label: 'Agent 与手册',     mark: 'AD', href: '/dashboard/admin/agents' },
-    ],
-  },
-]
 
 // ── Sidebar nav item ──────────────────────────────────────────────────────────
 
@@ -123,7 +57,7 @@ function NavLink({
       'flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[10px] font-black',
       active ? 'bg-[#C4912E]/25 text-[#EBCB8B]' : 'bg-white/[.08] text-white/40',
     )}>
-      {item.mark}
+      {item.mark ?? item.label.slice(0, 2).toUpperCase()}
     </span>
   )
   const inner = (
@@ -194,73 +128,26 @@ function buildSelfServeSections(clientId: string): NavSection[] {
   ]
 }
 
-/**
- * 受限管理员（DEMO_ADMINS）的导航。
- *
- * 给的是 FDE 视角 —— 客户工作台里该有的都有；但平台级入口（客户总览、
- * 账单、MTC、Prospecting、Cron 健康…）一律不出现，因为那些页面聚合的是
- * 全部客户的数据。middleware 已在服务端挡死，这里是不让它们出现在眼前。
- */
-function buildScopedAdminSections(clientId: string, industry: string | null): NavSection[] {
-  const at = (p: string) => `/dashboard/clients/${clientId}${p}`
-  // 行业专属入口:旅行社后台不该有地产工具,建材客户后台不该有旅游行程单
-  // (PM 2026-08-03 点名)。认不出行业就都不给 —— 见 lib/clients/industry-features 头注。
-  const feat = industryFeatureFlags(industry)
-  const industryTools: NavItem[] = [
-    ...(feat.tailor_made ? [{ key: 'tailor-made', label: '行程单', mark: 'TM', href: at('/tailor-made') }] : []),
-    // 楼盘在「房子」前面:先有楼盘,房子才挂得上去
-    ...(feat.projects ? [{ key: 'projects', label: '楼盘', mark: 'PJ', href: at('/projects') }] : []),
-    ...(feat.listings ? [{ key: 'listings', label: '房子', mark: 'LI', href: at('/listings') }] : []),
-  ]
-  return [
-    {
-      items: [
-        { key: 'client-home', label: '客户工作台', mark: 'CL', href: at('') },
-        // 演示账号可能有多个客户（不同行业长出不同的工具）。列表页对受限
-        // 管理员只返回他有权的客户，所以它天然就是切换器。
-        { key: 'clients', label: '切换客户', mark: 'SW', href: '/dashboard/clients' },
-      ],
-    },
-    {
-      title: '诊断与策略',
-      items: [
-        { key: 'zhangqian',  label: '品牌扫描', mark: 'ZQ', href: at('/zhangqian') },
-        { key: 'goals',      label: '目标',     mark: 'GO', href: at('/goals') },
-        { key: 'strategy',   label: '策略',     mark: 'ST', href: at('/strategy') },
-        { key: 'execution',  label: '执行追踪', mark: 'EX', href: at('/execution') },
-      ],
-    },
-    {
-      title: '经营工具',
-      items: [
-        ...industryTools,
-        // 中介在车里 / 开放日现场用手机开的那一页：按房子列人，点一下说清楚他到哪一步。
-        // 放在「客户跟进」前面 —— 他每天开的是这一页，不是内部那张排班表。
-        { key: 'contacts',    label: '我的客人', mark: 'MY', href: at('/contacts') },
-        // 2026-09-28 WP-B6：「今天要联系」页删了，直接指到「全部客人」——
-        // 老网址本身还在（会跳转），但天天点的主入口没理由多绕一次跳转。
-        { key: 'crm',         label: '客户跟进', mark: 'CR', href: at('/crm/all') },
-        { key: 'connectors',  label: '数据连接', mark: 'CN', href: at('/settings?tab=connect') },
-      ],
-    },
-  ]
-}
-
 export default function DashboardShell({ children, userEmail, userRole, userTier, allowedClientId, clientIndustry, roleLabel, exactGlobalAdmin }: Props) {
   const pathname = usePathname()
   const [lockModalFeature, setLockModalFeature] = useState<string | null>(null)
 
   const isClientViewer = userRole === 'client-viewer' && allowedClientId
   const isSelfServe = isClientViewer && userTier === 'self_serve'
-  // 受限管理员（DEMO_ADMINS）：FDE 视角，但只在一个客户范围内
-  const isScopedAdmin = userRole === 'admin' && Boolean(allowedClientId)
   const facts = viewerFacts(userRole, allowedClientId, exactGlobalAdmin)
+  const sections: NavSection[] | null = isSelfServe && allowedClientId
+    ? buildSelfServeSections(allowedClientId)
+    : null
 
-  const sections: NavSection[] | null = isScopedAdmin && allowedClientId
-    ? buildScopedAdminSections(allowedClientId, clientIndustry)
-    : isSelfServe && allowedClientId
-      ? buildSelfServeSections(allowedClientId)
-      : null
+  if (userRole === 'admin') {
+    return (
+      <WorkspaceViewerProvider facts={facts}>
+        <FdeAdminShell userEmail={userEmail} facts={facts} allowedClientId={allowedClientId}>
+          {children}
+        </FdeAdminShell>
+      </WorkspaceViewerProvider>
+    )
+  }
 
   // Compute the active nav key off whichever section list is in play.
   const activeKey = (() => {

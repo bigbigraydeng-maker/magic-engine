@@ -12,6 +12,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import { isClientAllowedForExternalDataPull } from '@/lib/clients/external-data-pull-allowlist'
 import { supabaseAdmin } from '@/lib/supabase'
 import { backfillSemrushKpisForPrescription, type BackfillResult } from '@/lib/case-library/outcome-recorder'
 import { startCronRun } from '@/lib/cron/run-logger'
@@ -92,7 +93,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       domain:          (client?.['domain'] as string | null) ?? null,
       semrush_db:      (client?.['semrush_db'] as string | null) ?? null,
     }
-  }).filter(r => r.approved_at && r.domain)
+  }).filter(r => r.approved_at && r.domain && isClientAllowedForExternalDataPull(r.client_id))
 
   // ── Process each prescription sequentially to avoid SEMrush rate limits ──
   const results: BackfillResult[] = []

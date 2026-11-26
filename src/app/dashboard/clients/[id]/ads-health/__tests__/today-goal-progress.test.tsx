@@ -59,6 +59,16 @@ const clientBase: ClientGrowthView = {
 }
 
 describe('TodayGoalProgress', () => {
+  it('「到今天应完成」按天比例算出的小数显示成整数', () => {
+    const state = staffState({
+      goal_pace: { ...staffState().goal_pace!, expectedToDate: 89.1891891891892 },
+    })
+    const { container } = render(<TodayGoalProgress state={state} clientId={CLIENT} />)
+    const text = container.textContent ?? ''
+    expect(text).toContain('到今天应完成 89')
+    expect(text).not.toContain('89.18')
+  })
+
   it('shows target / done / expected / day index and projection label', () => {
     const { container } = render(
       <TodayGoalProgress state={staffState()} clientId={CLIENT} todayCrmLeads={4} />,

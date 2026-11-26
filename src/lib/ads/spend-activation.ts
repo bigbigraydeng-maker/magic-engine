@@ -90,6 +90,8 @@ export interface SpendActivationReceipt {
   readonly campaign_id: string
   readonly draft_action_id: string | null
   readonly authorized_at: string
+  /** The approved ads plan this launch was checked against. Absent on older receipts. */
+  readonly plan_id?: string
 }
 
 export function buildSpendActivationReceipt(input: {
@@ -99,6 +101,7 @@ export function buildSpendActivationReceipt(input: {
   readonly campaignId: string
   readonly draftActionId?: string | null
   readonly now?: Date
+  readonly planId?: string
 }): SpendActivationReceipt {
   const receipt: SpendActivationReceipt = {
     schema: SPEND_ACTIVATION_RECEIPT_SCHEMA,
@@ -111,6 +114,7 @@ export function buildSpendActivationReceipt(input: {
     draft_action_id: input.draftActionId ?? null,
     authorized_at: (input.now ?? new Date()).toISOString(),
   }
-  if (!input.authority.cardRunId) return receipt
-  return { ...receipt, card_run_id: input.authority.cardRunId }
+  const withCard = input.authority.cardRunId ? { ...receipt, card_run_id: input.authority.cardRunId } : receipt
+  if (!input.planId) return withCard
+  return { ...withCard, plan_id: input.planId }
 }

@@ -14,15 +14,24 @@ const dnc = (s: string) => classifyNote(s).do_not_contact
 
 describe('别再联系 —— 一条都不能漏', () => {
   it.each([
-    '7.14大瑞更新， 客户明确说了不要电话，只邮件联系',
     '客户直接说不需要联系',
     'do not follow up',
     'do not want to talk about it',
     'indian no need follow up',
     'does not want to talk',
-    'follow up with best of china neve been to China but do not like phone call',
   ])('抓到: %s', (note) => {
     expect(dnc(note)).toBe(true)
+  })
+
+  /**
+   * 2026-11-09 PM 定：只说「不要电话」的人只拦电话，邮件照常（「只别打电话」第 2 刀 2B）。
+   * 这两条原来在上面那组里，是这次唯一改了预期的用例。
+   */
+  it.each([
+    '7.14大瑞更新， 客户明确说了不要电话，只邮件联系',
+    'follow up with best of china neve been to China but do not like phone call',
+  ])('只别打电话，不是别再联系: %s', (note) => {
+    expect(classifyNote(note)).toEqual({ outcome: 'do_not_call', do_not_contact: false })
   })
 
   /**

@@ -1,0 +1,225 @@
+/**
+ * Make the week's stills on one work order. Each billed image is a ledger row.
+ * The switch defaults off: nothing here runs unless factory_stills.enabled is true.
+ */
+
+import { createHash } from 'node:crypto'
+import type { SupabaseClient } from '@supabase/supabase-js'
+
+import { loadRankableClientAssets, type RankableAssetRow } from '@/lib/factory/client-asset-pool'
+import type { ComposeTourPosterResult } from '@/lib/social/image-post-poster'
+import { getActiveBrief } from '@/lib/content/brief-injector'
+import { loadPublishedTourFacts } from '@/lib/tour-catalog/store-publish'
+import type { PublishedTourFact } from '@/lib/tour-catalog/publish-contract'
+import { isoDate, nzCalendar, targetWeek } from '@/lib/social/week-pack/cadence'
+import type { WeekWindow } from '@/lib/social/image-post-week'
+
+import { loadFactoryStills, type FactoryStill } from './still-library'
+import { openStillOrder, recordStillSpend, type StillOrder } from './still-order'
+import { planStillSlots, roomForAnother, type StillSlot } from './still-plan'
+import { FACTORY_STILL_COST_ESTIMATE_USD, readFactoryStillConfig } from './still-config'
+import { composeFactoryStill } from './still-compose'
+
+export interface StillProduceReceipt {
+  drafted: number
+  skipped: string | null
+  error: string | null
+  spentUsd: number
+  note: string
+}
+
+export interface StillProduceDeps {
+  supabase: SupabaseClient
+  now?: () => Date
+  compose?: (input: {
+    clientId: string
+    date: string
+    tour: PublishedTourFact
+    asset: RankableAssetRow
+    website: string | null
+    aspect: StillSlot['aspect']
+  }) => Promise<ComposeTourPosterResult>
+  hashUrl?: (url: string) => Promise<string | null>
+}
+
+export async function produceFactoryStills(
+  clientId: string,
+  config: unknown,
+  now: Date,
+  deps: StillProduceDeps,
+): Promise<StillProduceReceipt> {
+  const settings = readFactoryStillConfig(config)
+  if (!settings.enabled) {
+    return { drafted: 0, skipped: 'factory_stills_off', error: null, spentUsd: 0, note: '静图开关关着，没有生成，也没有记账。' }
+  }
+  const cap = settings.weeklyCapUsd ?? 0
+  if (cap <= 0) {
+    return { drafted: 0, skipped: 'still_cap_zero', error: null, spentUsd: 0, note: '每周静图花费帽是 0，没有生成。' }
+  }
+  const week = targetWeek(now)
+  const slots = planStillSlots({ config, week, today: isoDate(nzCalendar(now)) })
+  if (slots.length === 0) {
+    return { drafted: 0, skipped: 'no_still_slots', error: null, spentUsd: 0, note: '这一周没有要出的静图。' }
+  }
+  return fillSlots(clientId, week, slots, cap, deps)
+}
+
+async function fillSlots(
+  clientId: string,
+  week: WeekWindow,
+  slots: StillSlot[],
+  cap: number,
+  deps: StillProduceDeps,
+): Promise<StillProduceReceipt> {
+  const have = await loadFactoryStills(deps.supabase, clientId)
+  if (have === 'unreadable') return fail('factory_stills_unreadable', '已有静图读不到，为避免重复没有再生成。')
+  const missing = slots.filter((slot) => !have.some((still) => sameSlot(still, slot)))
+  if (missing.length === 0) {
+    return { drafted: 0, skipped: 'stills_already_made', error: null, spentUsd: 0, note: '这一周的静图成片已经有了。' }
+  }
+  const order = await openStillOrder(deps.supabase, clientId, week, cap, (deps.now ?? (() => new Date()))())
+  if (typeof order === 'string') return fail(order, skipNote(order))
+  return makeMissing(clientId, missing, order, cap, deps)
+}
+
+async function makeMissing(
+  clientId: string,
+  slots: StillSlot[],
+  order: StillOrder,
+  cap: number,
+  deps: StillProduceDeps,
+): Promise<StillProduceReceipt> {
+  const tourRead = await loadPublishedTourFacts(deps.supabase, clientId, slots[0]?.date ?? '')
+  if (!tourRead.published) return fail('no_published_tours', '没有已发布的线路，没有出静图。')
+  const tour = tourRead.tours[0]
+  if (!tour) return fail('no_published_tours', '没有已发布的线路，没有出静图。')
+  const assets = await loadRankableClientAssets(clientId, deps.supabase)
+  const asset = assets.find((row) => row.storage_url)
+  if (!asset) return fail('no_base_photo', '没有可用的底图，没有出静图。')
+  const brief = await getActiveBrief(clientId).catch(() => null)
+  const website = typeof brief?.website === 'string' ? brief.website : null
+  let spent = order.spentUsd
+  let drafted = 0
+  let stopped: string | null = null
+  for (const slot of slots) {
+    if (!roomForAnother(spent, cap)) { stopped = 'weekly_cap_reached'; break }
+    const made = await makeOne(clientId, slot, tour, asset, website, order, deps)
+    if (made.spent !== null) spent = made.spent
+    if (made.ok) drafted += 1
+    if (made.stopped) { stopped = made.stopped; break }
+  }
+  return {
+    drafted,
+    skipped: stopped,
+    error: null,
+    spentUsd: spent,
+    note: stopped ? skipNote(stopped) : `静图成片新生成 ${drafted} 张。`,
+  }
+}
+
+async function makeOne(
+  clientId: string,
+  slot: StillSlot,
+  tour: PublishedTourFact,
+  asset: RankableAssetRow,
+  website: string | null,
+  order: StillOrder,
+  deps: StillProduceDeps,
+): Promise<{ ok: boolean; spent: number | null; stopped: string | null }> {
+  const compose = deps.compose ?? ((input) => composeFactoryStill(deps.supabase, input))
+  const result = await compose({ clientId, date: slot.date, tour, asset, website, aspect: slot.aspect })
+  const unknownBill = unknownProviderBill(result)
+  const billed = unknownBill ? FACTORY_STILL_COST_ESTIMATE_USD : knownBill(result)
+  const spent = await recordStillSpend(deps.supabase, order, billed, `${slot.role}-${slot.date}`)
+  if (spent === 'ledger_failed') return { ok: false, spent: null, stopped: 'ledger_failed' }
+  order.spentUsd = spent
+  if (unknownBill) return { ok: false, spent, stopped: 'provider_unknown_billing' }
+  if (!result.ok) return { ok: false, spent, stopped: null }
+  const stamped = await stampStill(deps, clientId, result.assetId, slot, order.id, website, tour.name)
+  return { ok: stamped, spent, stopped: stamped ? null : 'still_stamp_failed' }
+}
+
+async function stampStill(
+  deps: StillProduceDeps,
+  clientId: string,
+  assetId: string,
+  slot: StillSlot,
+  workOrderId: string,
+  website: string | null,
+  tourName: string,
+): Promise<boolean> {
+  const { data, error } = await deps.supabase
+    .from('client_assets')
+    .select('storage_url, vision_metadata')
+    .eq('id', assetId)
+    .eq('client_id', clientId)
+    .limit(1)
+  if (error) return false
+  const row = (data ?? [])[0] as { storage_url?: unknown; vision_metadata?: unknown } | undefined
+  const url = typeof row?.storage_url === 'string' ? row.storage_url : ''
+  const hash = await (deps.hashUrl ?? sha256OfHttps)(url)
+  const text = tourName.trim()
+  const prior = record(row?.vision_metadata) ?? {}
+  const { error: updErr } = await deps.supabase.from('client_assets').update({
+    vision_metadata: {
+      ...prior,
+      kind: 'factory_still',
+      factory_still: {
+        work_order_id: workOrderId,
+        aspect: slot.aspect,
+        role: slot.role,
+        slot_date: slot.date,
+        sha256: hash,
+        text_line: text.length >= 1 && text.length <= 200 ? text : null,
+        source_ref: website !== null && website.startsWith('https://') ? website : null,
+      },
+    },
+  }).eq('id', assetId).eq('client_id', clientId)
+  return !updErr
+}
+
+function sha256OfHttps(url: string): Promise<string | null> {
+  if (!url.startsWith('https://')) return Promise.resolve(null)
+  return fetch(url).then(async (res) => {
+    if (!res.ok) return null
+    return createHash('sha256').update(Buffer.from(await res.arrayBuffer())).digest('hex')
+  }).catch(() => null)
+}
+function unknownProviderBill(result: ComposeTourPosterResult): boolean {
+  if (result.ok || !result.reason.includes('edit_failed_maybe_billed')) return false
+  const requestId = result.receipt.provider_request_id
+  return result.receipt.cost_usd == null && (requestId === null || requestId === '')
+}
+
+function knownBill(result: ComposeTourPosterResult): number {
+  return result.receipt.cost_usd ?? (result.receipt.provider_request_id ? FACTORY_STILL_COST_ESTIMATE_USD : 0)
+}
+
+function sameSlot(still: FactoryStill, slot: StillSlot): boolean {
+  return still.role === slot.role && still.aspect === slot.aspect && still.slotDate === slot.date
+}
+
+function fail(skipped: string, note: string): StillProduceReceipt {
+  return { drafted: 0, skipped, error: null, spentUsd: 0, note }
+}
+
+function skipNote(code: string): string {
+  const notes: Record<string, string> = {
+    weekly_cap_reached: '静图花费到了本周上限，剩下的没有再生成。',
+    ledger_failed: '静图花费记不进账，停下了，避免接着花。',
+    provider_unknown_billing: '改图没有回报价，已按估价记账并停下，避免接着花。',
+    still_stamp_failed: '静图成片没有标上工单血统，停下了。',
+    daily_order_cap: '今天的工单已经到了每天上限，没有再开工单。',
+    no_factory_goal: '没有进行中的目标，没有开工单。',
+    no_master_brief: '没有在用的简报，没有开工单。',
+    order_unreadable: '工单读不到，没有生成。',
+    no_published_tours: '没有已发布的线路，没有出静图。',
+    no_base_photo: '没有可用的底图，没有出静图。',
+    factory_stills_unreadable: '已有静图读不到，为避免重复没有再生成。',
+  }
+  return notes[code] ?? code
+}
+
+function record(raw: unknown): Record<string, unknown> | null {
+  return typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? raw as Record<string, unknown> : null
+}

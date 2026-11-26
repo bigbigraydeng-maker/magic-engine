@@ -9,6 +9,7 @@ export function baseSpec(overrides: Partial<PromoSpec> = {}): PromoSpec {
   return {
     schema: 'promo_v1',
     goal_id: 'goal-1',
+    daily_total_cap_cents: 20000,
     phases: [
       {
         id: 'p1', name: '阶段 1', start_date: '2026-11-01', end_date: '2026-11-14',

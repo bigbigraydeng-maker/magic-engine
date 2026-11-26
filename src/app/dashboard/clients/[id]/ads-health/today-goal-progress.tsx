@@ -9,6 +9,7 @@ import Link from 'next/link'
 import {
   isGoalProgressPending,
   perDayNeededToHitTarget,
+  roundGoalCount,
 } from '@/lib/ads-strategy/goal-progress-display'
 import type { ClientGrowthView } from '@/lib/ads-strategy/agents/growth-client-view'
 import type { GrowthStateView, GoalPaceView } from './growth-panel'
@@ -157,7 +158,7 @@ export function TodayGoalProgress({
         {expected !== null && (
           <>
             {' · '}
-            到今天应完成 <b>{expected}</b>
+            到今天应完成 <b>{roundGoalCount(expected)}</b>
           </>
         )}
         {' · '}

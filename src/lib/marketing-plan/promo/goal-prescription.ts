@@ -328,7 +328,7 @@ async function attachLaunchCheck(
         goalId: view.goal_id,
         status: view.status,
         approvedAt,
-        kpis: view.kpis.map(kpi => ({ metric: kpi.metric, target: kpi.target_value, unit: kpi.unit })),
+        kpis: view.kpis.map(kpi => ({ metric: kpi.metric, target: kpi.target_value, unit: kpi.unit, timeframe: kpi.timeframe ?? '' })),
       },
     })
     return { ...view, launch_check }

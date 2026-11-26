@@ -11,7 +11,7 @@ import { requireOperatorAccess, requirePaidClientAccess } from '@/lib/auth/clien
 import { supabaseAdmin } from '@/lib/supabase'
 import { fetchAll } from '@/lib/supabase-paginate'
 import { loadLedger } from '@/lib/ledger/load'
-import { isDoNotContact } from '@/lib/crm/dnc'
+import { isDoNotCall, isDoNotContact, type DncTouch } from '@/lib/crm/dnc'
 import {
   callbackItems,
   currentMonthNz,
@@ -75,15 +75,14 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       const byContact = new Map<string, DncTouchRow[]>()
       for (const t of allTouches) byContact.set(t.contact_id, [...(byContact.get(t.contact_id) ?? []), t])
       for (const c of (data ?? []) as CallbackContactRow[]) {
-        const dnc = isDoNotContact(
-          c.do_not_contact,
-          (byContact.get(c.id) ?? []).map((t) => ({
-            outcome: ((t.metadata as { outcome?: unknown } | null)?.outcome as string) ?? null,
-            flagged: (t.metadata as { do_not_contact?: unknown } | null)?.do_not_contact === true,
-            occurredAt: t.occurred_at,
-          })),
-        )
-        contacts.push({ ...c, do_not_contact: dnc })
+        const dncTouches: DncTouch[] = (byContact.get(c.id) ?? []).map((t) => ({
+          outcome: ((t.metadata as { outcome?: unknown } | null)?.outcome as string) ?? null,
+          flagged: (t.metadata as { do_not_contact?: unknown } | null)?.do_not_contact === true,
+          occurredAt: t.occurred_at,
+        }))
+        const dnc = isDoNotContact(c.do_not_contact, dncTouches)
+        // 只别打电话：回电照排，但显示成「邮件跟进」（设计稿 2026-11-09 v1 修订 E）
+        contacts.push({ ...c, do_not_contact: dnc, do_not_call: isDoNotCall(c.do_not_contact, dncTouches) })
       }
     }
 

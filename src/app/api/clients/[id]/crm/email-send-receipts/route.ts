@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { listRecentReceipts } from '@/lib/crm/email-templates/receipt-store'
+import { humanClicksByRequest } from '@/lib/crm/email-templates/link-tracking/click-summary'
 import { supabaseAdmin } from '@/lib/supabase'
 
 interface RouteParams {
@@ -27,7 +28,11 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       if (error) throw new Error(`contacts: ${error.message}`)
       for (const row of (data as Array<{ id: string; display_name: string | null }> | null) ?? []) names[row.id] = row.display_name
     }
-    return NextResponse.json({ receipts: receipts.map((r) => ({ ...r, contactName: names[r.contactId] ?? null })) })
+    // Clicks are extra: when they cannot be read the table still shows, with the clicks column empty.
+    const clicks = await humanClicksByRequest(supabaseAdmin, params.id, Array.from(new Set(receipts.filter((r) => r.outcome === 'sent').map((r) => r.requestId))))
+    return NextResponse.json({
+      receipts: receipts.map((r) => ({ ...r, contactName: names[r.contactId] ?? null, clicks: clicks === null ? null : (clicks[r.requestId] ?? []) })),
+    })
   } catch (err) {
     console.error('[crm/email-send-receipts] 读取失败:', err instanceof Error ? err.message : err)
     return NextResponse.json({ error: '发送记录暂时读不到，请联系 Magic Lab 团队。' }, { status: 503 })

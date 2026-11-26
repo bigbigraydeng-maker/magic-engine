@@ -27,6 +27,7 @@ export const CONFIRMATION_HOLD_DEFINITION: ActionDefinition<typeof CONFIRMATION_
       'hard_checks',
     ],
     properties: {
+      lifetime: { type: 'string' },
       subject_key: { type: 'string' },
       content_fingerprint: { type: 'string' },
       what: { type: 'string' },

@@ -6,7 +6,7 @@
  * 因此形同虚设（子牙 2026-08-05 复审）。有了它，服务端才有能力自己换 id。
  */
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { uploadImageToMeta, uploadVideoToMeta, uploadAssetToMeta, waitForVideoReady } from '../asset-upload'
+import { uploadImageToMeta, uploadVideoToMeta, uploadAssetToMeta, readVideoInAdAccount, waitForVideoReady } from '../asset-upload'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -112,6 +112,53 @@ describe('uploadVideoToMeta', () => {
   it('回执里没有 id → 失败', async () => {
     stub(() => ({ _body: '{}' }))
     expect((await uploadVideoToMeta('act_1', 'https://s/v.mp4', 'tok')).ok).toBe(false)
+  })
+})
+
+describe('readVideoInAdAccount', () => {
+  const noWait = { sleep: async () => {} }
+
+  it('finds the uploaded id in that ad account\'s video list', async () => {
+    const calls = stub(() => ({ _body: JSON.stringify({ data: [{ id: '554' }, { id: '555' }] }) }))
+    const seen = await readVideoInAdAccount('act_1', '555', 'tok', noWait)
+    expect(seen).toEqual({ ok: true, videoId: '555' })
+    expect(calls[0].url).toContain('/act_1/advideos?')
+    expect(calls[0].url).not.toContain('/advideos/555')
+    expect(calls[0].url).not.toContain('/campaigns')
+    expect(calls[0].url).not.toContain('/adsets')
+  })
+
+  it('follows the next page when the id is not on the first one', async () => {
+    const calls = stub((url) => url.includes('after=X')
+      ? { _body: JSON.stringify({ data: [{ id: '555' }] }) }
+      : { _body: JSON.stringify({ data: [{ id: '1' }], paging: { next: 'https://graph.facebook.com/v21.0/act_1/advideos?after=X' } }) })
+    expect((await readVideoInAdAccount('act_1', '555', 'tok', noWait)).ok).toBe(true)
+    expect(calls).toHaveLength(2)
+  })
+
+  it('does not follow a next page off Graph', async () => {
+    const calls = stub(() => ({ _body: JSON.stringify({ data: [], paging: { next: 'https://evil.example/x' } }) }))
+    expect((await readVideoInAdAccount('act_1', '555', 'tok', { ...noWait, attempts: 1 })).ok).toBe(false)
+    expect(calls).toHaveLength(1)
+  })
+
+  it('looks again when a fresh upload is not listed yet', async () => {
+    let n = 0
+    stub(() => ({ _body: JSON.stringify({ data: n++ === 0 ? [] : [{ id: '555' }] }) }))
+    expect(await readVideoInAdAccount('act_1', '555', 'tok', noWait)).toEqual({ ok: true, videoId: '555' })
+  })
+
+  it('does not treat a different id as the uploaded video', async () => {
+    stub(() => ({ _body: JSON.stringify({ data: [{ id: '556' }] }) }))
+    const seen = await readVideoInAdAccount('act_1', '555', 'tok', noWait)
+    expect(seen.ok).toBe(false)
+  })
+
+  it('does not treat an error response as the uploaded video', async () => {
+    stub(() => ({ ok: false, status: 400, _body: '{"error":{"message":"no"}}' }))
+    const seen = await readVideoInAdAccount('act_1', '555', 'tok', noWait)
+    expect(seen.ok).toBe(false)
+    if (!seen.ok) expect(seen.error).not.toContain('no')
   })
 })
 

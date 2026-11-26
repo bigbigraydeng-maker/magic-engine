@@ -59,7 +59,7 @@ describe('buildAdsDraftFacts — headroom 读不全', () => {
       mkRaw({ config: { daily_budget_cap_cents: null, approved_creatives: [] } }),
     )
     expect(f.headroom.ok).toBe(false)
-    if (f.headroom.ok === false) expect(f.headroom.reason).toBe('客户日预算总上限没设置')
+    if (f.headroom.ok === false) expect(f.headroom.reason).toBe('在广告计划里填上每天的广告总上限。')
   })
 
   it('account_cap_read_failed → headroom ok:false', () => {

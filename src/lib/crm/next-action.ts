@@ -71,6 +71,7 @@ export const VERB_LABEL: Record<NextActionVerb, string> = {
 export const BASE_LIST_OF_SEGMENT: Record<Segment, NextActionList> = {
   replied: 'hot',
   callback_due: 'hot',
+  reading_site: 'hot',
   clicked_link: 'hot',
   new_untouched: 'hot',
   retry_channel: 'hot',

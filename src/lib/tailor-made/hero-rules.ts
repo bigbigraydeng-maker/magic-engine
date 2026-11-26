@@ -20,6 +20,11 @@
  */
 const RULES: Array<{ hero: string; patterns: RegExp }> = [
   // —— 景点级（排在城市前面）——
+  // 上海迪士尼单独一张封面（客户 2026-11-25 要求）：只写迪士尼的行程不再配上环球影城的拼图。
+  // 必须排在下面的亲子拼图前面，否则「disney」会先被拼图那条吃掉。
+  { hero: 'shanghai-disneyland', patterns: /disney|迪士尼/i },
+  // 亲子主题乐园：北京环球影城 / 泛指主题乐园仍用迪士尼+环球拼图（客户 2026-11-11 要求的亲子封面）
+  { hero: 'family-theme-parks', patterns: /disney|迪士尼|universal (studios|beijing|resort)|环球影城|theme park|主题乐园/i },
   { hero: 'temple-of-heaven',   patterns: /temple of heaven|天坛/i },
   { hero: 'tiananmen-square',   patterns: /tian'?anmen|天安门/i },
   { hero: 'olympic-green',      patterns: /water cube|bird'?s nest|olympic|aquatics cent|national stadium|水立方|鸟巢|奥林匹克/i },
@@ -114,6 +119,9 @@ export function pickHeroName(trip: { title?: string; route?: string[] }): string
 
 /** 供界面展示的可选清单 —— 顾问想手动换图时用 */
 export const HERO_CHOICES: Array<{ name: string; label: string }> = [
+  { name: 'shanghai-disneyland', label: '上海 · 迪士尼城堡' },
+  { name: 'family-theme-parks', label: '亲子 · 迪士尼 + 环球影城（拼图）' },
+  { name: 'family-theme-parks-portrait', label: '亲子 · 迪士尼 / 环球影城（竖版）' },
   { name: 'beijing',        label: '北京 · 长城晨雾' },
   { name: 'great-wall',     label: '长城 · 云海' },
   { name: 'forbidden-city', label: '北京 · 故宫航拍' },
@@ -121,14 +129,14 @@ export const HERO_CHOICES: Array<{ name: string; label: string }> = [
   { name: 'shanghai',       label: '上海 · 天际线' },
   { name: 'chongqing',      label: '重庆 · 洪崖洞夜景' },
   { name: 'chengdu',        label: '成都 · 大熊猫' },
-  { name: 'guilin',         label: '桂林 · 山水' },
-  { name: 'li-river',       label: '漓江 · 竹筏' },
+  { name: 'guilin',         label: '桂林 · 象鼻山' },
+  { name: 'li-river',       label: '漓江 · 竹筏夕阳' },
   { name: 'yangshuo',       label: '阳朔 · 喀斯特航拍' },
-  { name: 'zhangjiajie',    label: '张家界 · 天门山玻璃栈道' },
+  { name: 'zhangjiajie',    label: '张家界 · 袁家界峰林' },
   { name: 'suzhou',         label: '苏州 · 运河' },
   { name: 'hangzhou',       label: '杭州 · 乌镇水乡' },
   { name: 'yunnan',         label: '云南 · 梯田' },
-  { name: 'lijiang',        label: '丽江 · 古村' },
+  { name: 'lijiang',        label: '丽江 · 古城与雪山' },
   { name: 'leshan',         label: '乐山 · 大佛' },
   { name: 'the-bund',       label: '上海 · 外滩夜景' },
   { name: 'nanjing-road',   label: '上海 · 南京路步行街' },
@@ -137,12 +145,12 @@ export const HERO_CHOICES: Array<{ name: string; label: string }> = [
   { name: 'yangtze-gorges', label: '长江 · 三峡' },
   { name: 'temple-of-heaven', label: '北京 · 天坛' },
   { name: 'tiananmen-square', label: '北京 · 天安门' },
-  { name: 'beijing-hutong', label: '北京 · 胡同' },
-  { name: 'summer-palace',  label: '北京 · 颐和园' },
+  { name: 'beijing-hutong', label: '北京 · 胡同屋顶' },
+  { name: 'summer-palace',  label: '北京 · 颐和园石舫' },
   { name: 'olympic-green',  label: '北京 · 鸟巢水立方' },
   { name: 'beihai-park',    label: '北京 · 北海公园' },
-  { name: 'xian-city-wall', label: '西安 · 城墙' },
-  { name: 'wild-goose-pagoda', label: '西安 · 大雁塔' },
+  { name: 'xian-city-wall', label: '西安 · 城墙航拍' },
+  { name: 'wild-goose-pagoda', label: '西安 · 大雁塔航拍' },
   { name: 'tang-everbright-city', label: '西安 · 大唐不夜城' },
   { name: 'muslim-quarter', label: '西安 · 回民街' },
   { name: 'ciqikou',        label: '重庆 · 磁器口' },

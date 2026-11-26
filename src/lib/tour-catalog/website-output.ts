@@ -1,6 +1,7 @@
 import type { CatalogFaq } from './catalog-contract'
 import type { CatalogDeparture, CatalogTour } from './types'
 import { formatDepartureDisplay } from './dates'
+import { readRouteVariants } from './route-variants'
 
 export interface WebsiteItineraryDay {
   day: number
@@ -10,6 +11,16 @@ export interface WebsiteItineraryDay {
   accommodation?: string
   festiveLabel?: string
   operatorLogo?: { src: string; alt: string }
+}
+
+/** A second route for the departures listed in `departure_dates` (same text format as the tour's own). */
+export interface WebsiteRouteVariant {
+  id: string
+  label: string
+  note: string
+  departure_dates: string[]
+  map_slug: string | null
+  itinerary: WebsiteItineraryDay[]
 }
 
 export interface WebsiteTour {
@@ -45,6 +56,7 @@ export interface WebsiteTour {
   review_count: number | null
   review_summary: string | null
   related_blog_slugs: string[]
+  route_variants: WebsiteRouteVariant[]
   quick_answer: string | null
 }
 
@@ -114,6 +126,28 @@ function relatedBlogSlugs(tour: CatalogTour): string[] {
   return value.filter((item): item is string => typeof item === 'string')
 }
 
+/**
+ * Route variants that still have an upcoming, visible departure. Dates are in the same display
+ * format as `departure_dates`, so the site matches them by plain text.
+ */
+function websiteRouteVariants(tour: CatalogTour, visible: readonly CatalogDeparture[]): WebsiteRouteVariant[] {
+  const upcoming = new Set(visible.map((d) => d.departOn))
+  const out: WebsiteRouteVariant[] = []
+  for (const variant of readRouteVariants(tour.siteExtras)) {
+    const dates = variant.departOn.filter((iso) => upcoming.has(iso))
+    if (dates.length === 0) continue
+    out.push({
+      id: variant.id,
+      label: variant.label,
+      note: variant.note ?? '',
+      departure_dates: dates.map(formatDepartureDisplay),
+      map_slug: variant.mapSlug,
+      itinerary: variant.itinerary.map(copyItineraryDay),
+    })
+  }
+  return out
+}
+
 /** Map a single catalog tour (plus its departures) to the website shape. */
 function toWebsiteTour(
   tour: CatalogTour,
@@ -154,6 +188,7 @@ function toWebsiteTour(
     review_count: tour.reviewCount,
     review_summary: tour.reviewSummary,
     related_blog_slugs: relatedBlogSlugs(tour),
+    route_variants: websiteRouteVariants(tour, visible),
     quick_answer: tour.quickAnswer,
   }
 }

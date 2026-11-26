@@ -108,13 +108,25 @@ function makeAccountsQuery() {
   return q
 }
 
-function makeConfigQuery() {
+function makePlansQuery() {
+  const filters: Array<(row: { client_id: string; status: string }) => boolean> = []
   const q = {
     select: () => q,
-    eq: () => q,
-    maybeSingle() {
-      if (failStep === 'config') return Promise.resolve({ data: null, error: { message: '查总闸故意失败' } })
-      return Promise.resolve({ data: { daily_budget_cap_cents: configCap }, error: null })
+    eq(col: 'client_id' | 'status', value: unknown) {
+      filters.push((row) => row[col] === value)
+      return q
+    },
+    then(resolve: (v: { data: unknown[] | null; error: { message: string } | null }) => unknown) {
+      if (failStep === 'config') {
+        return Promise.resolve({ data: null, error: { message: '查总闸故意失败' } }).then(resolve)
+      }
+      const rows = configCap === null ? [] : [{
+        id: 'plan-1',
+        client_id: CLIENT,
+        status: 'approved',
+        plan_data: { promo: { daily_total_cap_cents: configCap } },
+      }]
+      return Promise.resolve({ data: rows.filter((row) => filters.every((f) => f(row))), error: null }).then(resolve)
     },
   }
   return q
@@ -124,7 +136,7 @@ vi.mock('@/lib/supabase', () => ({
   supabaseAdmin: {
     from: (table: string) => {
       if (table === 'client_meta_ad_accounts') return makeAccountsQuery()
-      if (table === 'ad_strategy_configs') return makeConfigQuery()
+      if (table === 'marketing_plans') return makePlansQuery()
       if (table === 'ad_entity_snapshots') return makeSnapshotQuery()
       throw new Error('unexpected table: ' + table)
     },
@@ -223,14 +235,16 @@ describe('账户必须先绑定过', () => {
 })
 
 describe('sum(账户上限) ≤ 客户总闸', () => {
-  it('没有客户总闸时不校验，直接放行', async () => {
+  it('计划没填每天总上限时，写入正数被拒，不当成不设上限', async () => {
     accounts = [{ id: 'r1', client_id: CLIENT, ad_account_id: 'act_1', daily_budget_cap_cents: null }]
     configCap = null
 
     const res = await PATCH(req({ daily_budget_cap_cents: 999_999 }), params('act_1'))
+    const body = await res.json() as { error?: string }
 
-    expect(res.status).toBe(200)
-    expect(accounts[0].daily_budget_cap_cents).toBe(999_999)
+    expect(res.status).toBe(409)
+    expect(body.error).toContain('广告计划')
+    expect(accounts[0].daily_budget_cap_cents).toBeNull()
   })
 
   it('单账户、新值 ≤ 总闸 → 放行', async () => {
@@ -324,7 +338,8 @@ describe('sum(账户上限) ≤ 客户总闸', () => {
       { id: 'r1', client_id: CLIENT, ad_account_id: 'act_shared', daily_budget_cap_cents: 100 },
       { id: 'r2', client_id: OTHER_CLIENT, ad_account_id: 'act_shared', daily_budget_cap_cents: 200 },
     ]
-    configCap = null
+    snapshots = [accountSnapshot('act_shared')]
+    configCap = 100_000
 
     const res = await PATCH(req({ daily_budget_cap_cents: 999 }), params('act_shared'))
 
@@ -399,14 +414,17 @@ describe('币种闸（子牙+魏征审出的 BLOCKER：读不到/不一致就不
     expect(res.status).toBe(200)
   })
 
-  it('没有配置客户总闸时 → 币种闸整个不触发（没有基准就不用管币种）', async () => {
+  it('计划没填每天总上限时，先拒绝写入，不拿币种闸代替这个原因', async () => {
     accounts = [{ id: 'r1', client_id: CLIENT, ad_account_id: 'act_1', daily_budget_cap_cents: null }]
-    snapshots = [] // 没有任何快照，如果币种闸误触发就会 409
+    snapshots = []
     configCap = null
 
     const res = await PATCH(req({ daily_budget_cap_cents: 999_999 }), params('act_1'))
+    const body = await res.json() as { error?: string }
 
-    expect(res.status).toBe(200)
+    expect(res.status).toBe(409)
+    expect(body.error).toContain('广告计划')
+    expect(accounts[0].daily_budget_cap_cents).toBeNull()
   })
 
   it('🔴 只取每个账户最新那条快照——旧快照说 NZD、最新说 AUD，结果按最新（不误判成一致）', async () => {
@@ -456,6 +474,8 @@ describe('币种闸（子牙+魏征审出的 BLOCKER：读不到/不一致就不
 describe('写入失败', () => {
   it('校验都过了但写库报错 → 500', async () => {
     accounts = [{ id: 'r1', client_id: CLIENT, ad_account_id: 'act_1', daily_budget_cap_cents: null }]
+    snapshots = [accountSnapshot('act_1')]
+    configCap = 10_000
     failStep = 'update'
     const res = await PATCH(req({ daily_budget_cap_cents: 100 }), params('act_1'))
     expect(res.status).toBe(500)

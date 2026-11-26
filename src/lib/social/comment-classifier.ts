@@ -47,7 +47,8 @@ export interface CommentDecision {
   shouldHide: boolean
   needsHuman: boolean
   guardrailFlags: string[]
-  replySource: 'llm' | 'fallback' | 'none'
+  /** 'catalog_draft' = a catalog-grounded draft stored for a person to send; never auto-sent. */
+  replySource: 'llm' | 'fallback' | 'none' | 'catalog_draft'
 }
 
 interface LlmClassification {
@@ -159,10 +160,12 @@ export function decideByCategory(llm: LlmClassification, ctx: ReplyContext, seed
         confidence: llm.confidence,
         publicReply: clean ? draft! : safePraiseReply(ctx, seed),
         publicReplyAfterDm: null,
-        // DM only on genuine purchase intent — avoids spamming every "nice pic".
-        privateReply: llm.purchase_intent ? safeQuestionPrivateReply(ctx) : null,
+        // Purchase intent in a praise comment: no automatic "an advisor will contact
+        // you" DM (nobody would be assigned to follow up). Keep the thank-you and
+        // put the comment in the human queue so a person makes the promise.
+        privateReply: null,
         shouldHide: false,
-        needsHuman: false,
+        needsHuman: !!llm.purchase_intent,
         guardrailFlags: flags,
         replySource: clean ? 'llm' : 'fallback',
       }

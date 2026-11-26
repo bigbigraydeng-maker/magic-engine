@@ -10,6 +10,8 @@
 import { supabaseAdmin } from '../supabase'
 import { isRunConclusive } from '../ai-tracker/run-conclusive'
 import type { BrandMention } from '@/types/magic-engine'
+import { collectMonthlyAdsSection, type MonthlyAdsSection } from './monthly-ads-section'
+import { resolveMonthReportPeriod } from './month-report-period'
 
 // ── Output types ──────────────────────────────────────────────────────────────
 
@@ -118,6 +120,8 @@ export interface MonthlyReportData {
   period_label: string   // e.g. "May 2026"
   period_from: string    // ISO date string
   period_to: string      // ISO date string
+  /** Plain Chinese note for date scope / timezone (ads + audit). */
+  period_scope_note: string
   overview: MonthlyOverview
   trend: TrendPoint[]    // 4 points, oldest → newest (for sparkline)
   geo: GeoDeploymentInfo
@@ -128,6 +132,8 @@ export interface MonthlyReportData {
   local: LocalVisibilityData | null
   market: MarketBenchmarkData | null
   usage: DataSourceUsageData | null
+  /** Paid social ads — null only when the collector itself failed (rare). */
+  ads: MonthlyAdsSection | null
   generated_at: string
 }
 
@@ -157,12 +163,16 @@ function sumMentions(snaps: SnapshotRow[]): number {
 export async function buildMonthlyReport(clientId: string): Promise<MonthlyReportData> {
   const now = new Date()
 
-  // Period boundaries
-  const periodTo   = now.toISOString().split('T')[0]
-  const periodFrom = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]
-  const lastFrom   = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().split('T')[0]
-  const lastTo     = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().split('T')[0]
-  const periodLabel = now.toLocaleDateString('en-AU', { month: 'long', year: 'numeric' })
+  const monthPeriod = await resolveMonthReportPeriod(clientId, now)
+  const periodTo = monthPeriod.periodTo
+  const periodFrom = monthPeriod.periodFrom
+  const periodLabel = monthPeriod.periodLabel
+  const periodScopeNote = monthPeriod.periodScopeNote
+
+  // Month-over-month for AI visibility still uses calendar month keys on week_of dates.
+  const [y, m] = periodFrom.split('-').map(Number)
+  const lastFrom = new Date(Date.UTC(y, m - 2, 1)).toISOString().split('T')[0]
+  const lastTo = new Date(Date.UTC(y, m - 1, 0)).toISOString().split('T')[0]
 
   // ── 1. Client name ─────────────────────────────────────────────────────────
   const { data: client } = await supabaseAdmin
@@ -315,6 +325,7 @@ export async function buildMonthlyReport(clientId: string): Promise<MonthlyRepor
     period_label: periodLabel,
     period_from:  periodFrom,
     period_to:    periodTo,
+    period_scope_note: periodScopeNote,
     overview: {
       this_month_avg_rank:  thisAvg,
       last_month_avg_rank:  lastAvg,
@@ -341,16 +352,21 @@ export async function buildMonthlyReport(clientId: string): Promise<MonthlyRepor
     local: null,
     market: null,
     usage: null,
+    ads: null,
   }
 
   // ── Phase 8 parallel collectors (gracefully degrade if table absent) ─────────
-  const [linksResult, searchResult, localResult, marketResult, usageResult] =
+  const [linksResult, searchResult, localResult, marketResult, usageResult, adsResult] =
     await Promise.allSettled([
       collectLinkIntelligence(clientId, periodFrom, periodTo, lastFrom, lastTo),
       collectSearchVisibility(clientId),
       collectLocalVisibility(clientId),
       collectMarketBenchmark(clientId),
       collectDataSourceUsage(clientId, now),
+      collectMonthlyAdsSection(clientId, periodFrom, periodTo, {
+        periodStartIso: monthPeriod.periodStartIso,
+        periodEndIso: monthPeriod.periodEndIso,
+      }),
     ])
 
   if (linksResult.status  === 'fulfilled') base.links  = linksResult.value
@@ -358,6 +374,7 @@ export async function buildMonthlyReport(clientId: string): Promise<MonthlyRepor
   if (localResult.status  === 'fulfilled') base.local  = localResult.value
   if (marketResult.status === 'fulfilled') base.market = marketResult.value
   if (usageResult.status  === 'fulfilled') base.usage  = usageResult.value
+  if (adsResult.status    === 'fulfilled') base.ads    = adsResult.value
 
   return base
 }

@@ -89,6 +89,16 @@ export function setGoal(spec: PromoSpec, goalId: string): PromoSpec {
   return { ...spec, goal_id: goalId }
 }
 
+/** Empty input removes the key. A leftover undefined key changes the approval fingerprint. */
+export function setDailyTotalCap(spec: PromoSpec, cents: number | undefined): PromoSpec {
+  if (cents === undefined) {
+    const next: Record<string, unknown> = { ...spec }
+    delete next.daily_total_cap_cents
+    return next as PromoSpec
+  }
+  return { ...spec, daily_total_cap_cents: cents }
+}
+
 /** 逗号 / 换行分隔的文本拆成列表，去空去重。 */
 export function splitList(text: string): string[] {
   return Array.from(new Set(text.split(/[,\n，]/).map(s => s.trim()).filter(Boolean)))
@@ -131,6 +141,14 @@ export function withAdsTargeting(step: AdsStep, targeting: AdsTargeting | undefi
   const settings: Record<string, unknown> = { ...step.settings }
   if (targeting === undefined) delete settings.targeting
   else settings.targeting = targeting
+  return { ...step, settings: settings as AdsStep['settings'] }
+}
+
+/** 标试投 / 已证明。留空时把键删掉，避免内容指纹把「没标」写成空值。 */
+export function withBudgetRole(step: AdsStep, role: 'test' | 'proven' | undefined): AdsStep {
+  const settings: Record<string, unknown> = { ...step.settings }
+  if (role === undefined) delete settings.budget_role
+  else settings.budget_role = role
   return { ...step, settings: settings as AdsStep['settings'] }
 }
 

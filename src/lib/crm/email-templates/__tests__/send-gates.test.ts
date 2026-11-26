@@ -120,6 +120,7 @@ function emptySources(): FrequencySources {
     audit: vi.fn(empty),
     touchpoints: vi.fn(empty),
     mailchimp: vi.fn(empty),
+    meSends: vi.fn(empty),
   }
 }
 
@@ -135,6 +136,7 @@ function makeData(over: Partial<SendGateData> = {}): SendGateData {
     loadSenderName: vi.fn(async () => 'Lisa Zhang'),
     sentTemplateReceiptsSince: vi.fn(async () => [] as StoredReceipt[]),
     exemptMessageIdsSince: vi.fn(async () => [] as string[]),
+    loadEmailUnsubscribed: vi.fn(async () => ({ ok: true as const, unsubscribed: false })),
     frequencySources: emptySources(),
     ...over,
   }
@@ -161,6 +163,8 @@ function renderedText(
       settings: settingsObj().providers.publishedTours ?? null,
     },
     provider,
+    catalogue: null,
+    today: '2026-10-28',
   })
   return { subject: out.subject, body: out.body }
 }
@@ -1022,5 +1026,111 @@ describe('inLock: weekly cap and exempt templates', () => {
     if (result.ok) return
     expect(result.status).toBe(409)
     expect(result.reason).toBe('frequency_cap')
+  })
+})
+
+// ---- catalogue (design 2026-11-09 §3.3) -------------------------------------
+
+describe('preLock: the catalogue gate is wired into the real send path', () => {
+  const URL = 'https://www.example.com/brochures/Brochure-2027.pdf'
+  const withCatalogue = (validUntil: string) =>
+    config({ providers: { catalogue: { templateKey: 'catalogue-send', versionLabel: 'v9', url: URL, validUntil } } })
+  const freeMail = (over: Partial<PreLockArgs> = {}) =>
+    preArgs({ template: null, subject: 'Brochure', body: `Here it is: ${URL}`, ...over })
+
+  it('a free-written mail carrying an expired catalogue link is refused, with the date in the message', async () => {
+    const result = await createSendGates(makeData()).preLock(freeMail({ config: withCatalogue('2026-10-27') }))
+    expect(result).toMatchObject({ ok: false, status: 409, reason: 'catalogue_expired' })
+    if (result.ok) return
+    expect(result.error).toContain('2026-10-27')
+    expect(result.meta.blockDetail).toBe('catalogue_expired') // the code, never the link
+  })
+
+  it('the last valid day still sends', async () => {
+    const result = await createSendGates(makeData()).preLock(freeMail({ config: withCatalogue('2026-10-28') }))
+    expect(result.ok).toBe(true)
+  })
+
+  it('"today" is the client\'s day: 12:00 UTC on 27 Oct is already the 28th in Auckland, still the 27th in Sydney', async () => {
+    const now = new Date('2026-10-27T12:00:00Z')
+    const auckland = await createSendGates(makeData()).preLock(freeMail({ config: withCatalogue('2026-10-27'), now }))
+    expect(auckland).toMatchObject({ ok: false, reason: 'catalogue_expired' })
+    const sydney = await createSendGates(makeData({ loadTimeZone: vi.fn(async () => 'Australia/Sydney') })).preLock(
+      freeMail({ config: withCatalogue('2026-10-27'), now }),
+    )
+    expect(sydney.ok).toBe(true)
+  })
+
+  it('a template that uses {{catalogue_url}} is refused when the client has no catalogue', async () => {
+    const tpl = template({ templateKey: 'catalogue-send', factSource: 'none', pickMode: 'none', subject: 'Brochure', body: 'Hi {{first_name}}, {{catalogue_url}}' })
+    const data = makeData({ loadTemplate: vi.fn(async () => tpl) })
+    const result = await createSendGates(data).preLock(
+      preArgs({ template: templateReq({ key: 'catalogue-send', catalogVersion: null, picks: [] }), subject: 'Brochure', body: 'Hi Amy, see the brochure' }),
+    )
+    expect(result).toMatchObject({ ok: false, reason: 'catalogue_unavailable' })
+  })
+})
+
+// ---- unsubscribed guests and automated-letter templates (send gate P2-2a) -------------------------------
+
+describe('inLock: a guest who unsubscribed from e-mail', () => {
+  it('is refused first, inside the lock, before any receipt or frequency source is read', async () => {
+    const data = makeData({ loadEmailUnsubscribed: vi.fn(async () => ({ ok: true as const, unsubscribed: true })) })
+    const { state, meta } = await successfulPreLock(data)
+    vi.mocked(data.sentTemplateReceiptsSince).mockClear()
+    const result = await createSendGates(data).inLock(inArgs(state, meta))
+    expect(result).toMatchObject({ ok: false, status: 409, reason: 'email_unsubscribed', error: GATE_MESSAGES.email_unsubscribed })
+    // asked by contact AND by every address of the guest (the same address can sit on another contact record)
+    expect(data.loadEmailUnsubscribed).toHaveBeenCalledWith('client-a', 'contact-1', state.addresses)
+    expect(state.addresses).toEqual(['amy@gmail.com', 'amy.lee@work.com'])
+    expect(data.sentTemplateReceiptsSince).not.toHaveBeenCalled()
+    expect(data.frequencySources.sentItems).not.toHaveBeenCalled()
+    expect(data.frequencySources.touchpoints).not.toHaveBeenCalled()
+  })
+
+  it('an unreadable unsubscribe record blocks the send (never read as "not unsubscribed")', async () => {
+    const data = makeData({ loadEmailUnsubscribed: vi.fn(async () => ({ ok: false as const, error: 'db down' })) })
+    const { state, meta } = await successfulPreLock(data)
+    const result = await createSendGates(data).inLock(inArgs(state, meta))
+    expect(result).toMatchObject({ ok: false, status: 503, reason: 'unsubscribe_unverifiable' })
+    expect(!result.ok && result.meta.blockDetail).toBe('unverifiable:db down')
+  })
+
+  it('a read that throws is a refusal too', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const data = makeData({
+      loadEmailUnsubscribed: vi.fn(async () => {
+        throw new Error('boom')
+      }),
+    })
+    const { state, meta } = await successfulPreLock(data)
+    expect((await createSendGates(data).inLock(inArgs(state, meta))).ok).toBe(false)
+  })
+
+  it('a guest who is still subscribed goes on to the other checks', async () => {
+    const data = makeData()
+    const { state, meta } = await successfulPreLock(data)
+    expect((await createSendGates(data).inLock(inArgs(state, meta))).ok).toBe(true)
+    expect(data.loadEmailUnsubscribed).toHaveBeenCalledTimes(1)
+    expect(data.frequencySources.touchpoints).toHaveBeenCalled()
+  })
+})
+
+describe('preLock: the templates of automated letters cannot be sent by hand', () => {
+  it.each(['auto-welcome', 'AUTO-Welcome', ' auto-countdown-20270106-cn15-2'])(
+    'refuses %s before even loading it',
+    async (key) => {
+      const data = makeData()
+      const result = await createSendGates(data).preLock(preArgs({ template: templateReq({ key }) }))
+      expect(result).toMatchObject({ ok: false, status: 409, reason: 'template_automated' })
+      expect(data.loadTemplate).not.toHaveBeenCalled()
+    },
+  )
+
+  it('an ordinary template whose key merely contains "auto" is not affected', async () => {
+    const data = makeData({ loadTemplate: vi.fn(async () => template({ templateKey: 'post-call-autumn-tour' })) })
+    const result = await createSendGates(data).preLock(preArgs({ template: templateReq({ key: 'post-call-autumn-tour' }) }))
+    expect(result.ok || result.reason !== 'template_automated').toBe(true)
+    expect(data.loadTemplate).toHaveBeenCalledWith('client-a', 'post-call-autumn-tour')
   })
 })

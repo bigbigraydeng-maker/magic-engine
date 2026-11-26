@@ -96,6 +96,7 @@ import { runAiAutoReviewForClient, MAX_BATCH_SIZE, type RunOptions, type RunSumm
 import { runFailedWritebackResend } from '@/lib/conversions/writeback-resend-run'
 import { metaCapiWriter } from '@/lib/meta/capi/writer'
 import { runPaymentEmailDetectionForEnabledClients } from '@/lib/conversions/payment-email-detect-wire'
+import { runCrmStageChunkForEnabledClients } from '@/lib/conversions/crm-stage-signals-run'
 
 export const CONVERSION_DAILY_PIPELINE_JOB = 'conversion-daily-pipeline'
 export const CONVERSION_DAILY_PIPELINE_TZ = 'Pacific/Auckland'
@@ -199,6 +200,12 @@ export type ConversionPipelineDeps = {
    * 可选：没传就不跑这一段（旧测试与本地试跑不受影响）。放在同步之后、AI 审核之前。
    */
   detectPayments?: (opts: { nowIso: string }) => Promise<unknown>
+  /**
+   * 线索阶段回传（2026-11-10）：对开了 `leads_config.crm_stage_signals.enabled` 的客户跑一块。
+   * 每块所有客户合计最多尝试一小批，`done:false` 就再跑一块，直到发完或到块数硬顶。
+   * 可选：没传就不跑这一段。放在最后——它只发线索阶段事件，不影响前面各段。
+   */
+  crmStageChunk?: (opts: { nowIso: string }) => Promise<{ summary: Record<string, unknown>; done: boolean }>
   /** 运行记录读写——默认真的 run-logger；本地 Inngest dev server 试跑时注入假的。 */
   runLog?: {
     start: (jobName: string) => Promise<string>
@@ -298,6 +305,35 @@ async function runReviewChunks(
   return { ok: true, summary: agg, chunks: durationMs.length, durationMs, transientRetries }
 }
 
+/** 线索阶段回传最多跑几块（每块所有客户合计 ≤ 20 条；首次打开时 CTS 约 170 条积压，10 块够）。 */
+export const MAX_CRM_STAGE_CHUNKS = 10
+
+/** 逐块推进线索阶段回传；任一块失败就停，跑满硬顶仍没发完算失败（不能悄悄留一截没发）。 */
+async function runCrmStageChunks(
+  step: PipelineStep,
+  nowIso: string,
+  runChunk: NonNullable<ConversionPipelineDeps['crmStageChunk']>,
+): Promise<ChunkedResult<Record<string, unknown>[]>> {
+  const durationMs: number[] = []
+  const summaries: Record<string, unknown>[] = []
+  let transientRetries = 0
+  for (let n = 1; n <= MAX_CRM_STAGE_CHUNKS; n++) {
+    const r = await runChunkWithBackoff(step, `crm-stage-${n}`, () => runChunk({ nowIso }))
+    durationMs.push(r.durationMs)
+    transientRetries += r.transientRetries
+    if (!r.ok) return { ok: false, error: r.error, transient: r.transient, chunks: n, durationMs, transientRetries }
+    summaries.push(r.summary.summary)
+    if (r.summary.done) return { ok: true, summary: summaries, chunks: n, durationMs, transientRetries }
+  }
+  return {
+    ok: false,
+    error: `线索阶段回传跑满 ${MAX_CRM_STAGE_CHUNKS} 块仍没发完——剩下的明天还会接着发，但要查为什么积压这么多`,
+    chunks: MAX_CRM_STAGE_CHUNKS,
+    durationMs,
+    transientRetries,
+  }
+}
+
 /**
  * 依赖注入版，便于测试注入假的同步/审核/补发实现，不碰真 Supabase/AI/Meta。
  */
@@ -374,7 +410,19 @@ export async function runConversionDailyPipeline(
     timed('resend-failed-cts', () => deps.resendFailed(CTS_CLIENT_ID, { nowIso })),
   )
 
-  const results = { nalSync, ctsSync, ...(payments ? { payments } : {}), nalReview, ctsReview, nalResend, ctsResend }
+  const crmStageChunk = deps.crmStageChunk
+  const crmStage = crmStageChunk ? await runCrmStageChunks(step, nowIso, crmStageChunk) : null
+
+  const results = {
+    nalSync,
+    ctsSync,
+    ...(payments ? { payments } : {}),
+    nalReview,
+    ctsReview,
+    nalResend,
+    ctsResend,
+    ...(crmStage ? { crmStage } : {}),
+  }
   const total = Object.keys(results).length
   const failedCount = Object.values(results).filter((r) => !r.ok).length
 
@@ -413,4 +461,10 @@ export const conversionDailyPipeline = createConversionDailyPipelineFunction({
       now: new Date(nowIso),
     }),
   detectPayments: ({ nowIso }) => runPaymentEmailDetectionForEnabledClients({ nowIso }),
+  crmStageChunk: ({ nowIso }) =>
+    runCrmStageChunkForEnabledClients({
+      supabase: supabaseAdmin,
+      sendDeps: { writer: metaCapiWriter, fetcher: fetch },
+      now: new Date(nowIso),
+    }),
 })

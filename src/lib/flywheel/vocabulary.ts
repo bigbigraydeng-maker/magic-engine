@@ -228,6 +228,12 @@ export const ADS_ACTION_TYPE = {
   /** Adjust bid for an ad set (third_party, meta) */
   ADJUST_BID: 'ads.adjust_bid',
 
+  /** Change one ad set daily budget after a person confirms the card. */
+  ADJUST_ADSET_DAILY_BUDGET: 'ads.adjust_adset_daily_budget',
+
+  /** Add one image ad into an existing ad set after a person confirms the card. */
+  ADD_AD_CREATIVE: 'ads.add_ad_creative',
+
   /** Add a negative keyword to stop wasted spend (third_party, meta) */
   ADD_NEGATIVE_KEYWORD: 'ads.add_negative_keyword',
 
@@ -236,6 +242,12 @@ export const ADS_ACTION_TYPE = {
 
   /** Re-enable a paused Google Ads / TikTok campaign (undo of PAUSE_CAMPAIGN) */
   REACTIVATE_CAMPAIGN: 'ads.reactivate_campaign',
+
+  /** Winner-sync suggestion. The row is a card, not a Meta write. */
+  WINNER_REEL_PROPOSAL: 'ads.winner_reel_proposal',
+
+  /** Creative test/scale/retire suggestion. The row is a card, not a Meta write. */
+  CREATIVE_STATE_PROPOSAL: 'ads.creative_state_proposal',
 } as const
 
 export type AdsActionType = (typeof ADS_ACTION_TYPE)[keyof typeof ADS_ACTION_TYPE]

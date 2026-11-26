@@ -6,8 +6,8 @@
  * 今日待办（pm-todo/promo-plan-watch-items.ts）读的是它写进 cron_run_logs 的回执，
  * 不再自己现算——这样只有一个真相源，每日函数挂了 / 没同步，待办也会喊出来。
  *
- * 🔴 本文件一行写库都没有：只读 marketing_plans、只调纯函数 detectWatchFindings。
- *    不发布、不扣费、不外发。回执里的 no_publish 恒为 true，提醒读的人这一点。
+ * 🔴 本文件一行写库都没有：只读 marketing_plans，试投计划再只读抓取记录和留资。
+ *    不发布、不扣费、不外发，也不新建计划。回执里的 no_publish 恒为 true。
  * 🔴 读不到计划列表不算抛错：回执 status='read_failed'、error 带原因，
  *    今日待办会据此出一条「检查没跑成」的待办，而不是安静地什么都不说。
  * 🔴 单份计划算失败（buildPromoBoard 抛错）只把该计划标 error、status 置 'partial'，
@@ -23,6 +23,7 @@ import { loadDailyPlanSnapshots, type DailyPlanRead } from './daily-plan-read'
 import { detectSlotGaps } from './slot-gaps'
 import { DEFAULT_PROMO_PLAYBOOK } from './playbooks'
 import { readPromoSpec } from './spec'
+import { stageSwitchFinding } from './stage-evidence'
 
 /** cron_run_logs 里登记的任务名。 */
 export const PROMO_WATCH_JOB = 'promo-plan-daily-watch'
@@ -157,6 +158,8 @@ export async function runPromoPlanWatch(
     try {
       const board = await buildPromoBoard(plan, now)
       const findings = detectWatchFindings(board, { title })
+      const stageFinding = await stageSwitchFinding(supabase, plan, board.today, title)
+      if (stageFinding) findings.push(stageFinding)
       // 已批准 + 已开始 + 时区已知 → 再核对「未来 7 天每日计划里排好草稿的条数够不够」（草稿 / 未开始 / 时区未知不查）
       if (plan.status === 'approved' && board.spec_valid && board.timezone_known && board.today !== null && board.reconcile !== null && board.reconcile.week_index !== null) {
         const spec = readPromoSpec(plan.plan_data)

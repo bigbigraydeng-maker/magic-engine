@@ -5,7 +5,7 @@
  */
 import React from 'react'
 import { describe, it, expect, afterEach, vi } from 'vitest'
-import { render, screen, cleanup, waitFor } from '@testing-library/react'
+import { render, screen, cleanup } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 import GrowthPanel, { type GrowthStateView } from '../growth-panel'
@@ -102,14 +102,17 @@ describe('GrowthPanel — 数据截至', () => {
 })
 
 describe('GrowthPanel — O1 提交', () => {
-  it('提交预算建议成功后通知顶部合并卡刷新', async () => {
+  it('提交加预算被拒绝，不把这次当成已经排上', async () => {
     const onPendingAdsChanged = vi.fn()
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.includes('/ad-health/war-map')) {
         return Response.json({ view: { budgetHold: false } })
       }
       if (url.includes('/o1-scale') && init?.method === 'POST') {
-        return Response.json({ ok: true })
+        return Response.json(
+          { error: '在投计划的预算不能在这里加。要加预算，请新开一份计划。这次没有改预算。', wroteMeta: false },
+          { status: 409 },
+        )
       }
       if (url.includes('/o1-scale')) {
         return Response.json({ items: [] })
@@ -129,6 +132,7 @@ describe('GrowthPanel — O1 提交', () => {
     }
     render(<GrowthPanel state={state} clientId="client-1" onPendingAdsChanged={onPendingAdsChanged} />)
     await userEvent.click(await screen.findByText('提交预算建议供审批'))
-    await waitFor(() => expect(onPendingAdsChanged).toHaveBeenCalledTimes(1))
+    expect((await screen.findByRole('status')).textContent).toContain('这次没有改预算')
+    expect(onPendingAdsChanged).not.toHaveBeenCalled()
   })
 })

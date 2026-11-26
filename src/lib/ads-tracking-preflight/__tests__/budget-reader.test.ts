@@ -45,6 +45,23 @@ function fakeDb(world: World) {
           if (world.legacy === 'error') return { data: null, error: { message: `读 ${table} 失败` } }
           return { data: { meta_ad_account_id: world.legacy ?? null }, error: null }
         }
+        if (table === 'marketing_plans') {
+          if (world.client === 'error') return { data: null, error: { message: '读已批准的计划失败' } }
+          if (world.client === 'multiple') {
+            return {
+              data: [
+                { status: 'approved', plan_data: { promo: { daily_total_cap_cents: 100 } } },
+                { status: 'approved', plan_data: { promo: { daily_total_cap_cents: 200 } } },
+              ],
+              error: null,
+            }
+          }
+          if (!world.client) return { data: [], error: null }
+          return {
+            data: [{ status: 'approved', plan_data: { promo: { daily_total_cap_cents: world.client.daily_budget_cap_cents } } }],
+            error: null,
+          }
+        }
         if (world.client === 'error') return { data: null, error: { message: `读 ${table} 失败` } }
         if (world.client === 'multiple') return { data: null, error: { message: 'JSON object requested, multiple (or no) rows returned' } }
         return { data: world.client ?? null, error: null }
@@ -163,7 +180,7 @@ describe('readBudgetFacts · 读到了', () => {
       [`${ACCOUNT}/adsets`]: 'id,campaign_id,effective_status,daily_budget,lifetime_budget',
     })
     expect(db.queries.find(q => q.table === 'client_meta_ad_accounts')?.filters).toEqual([['client_id', CLIENT]])
-    expect(db.queries.find(q => q.table === 'ad_strategy_configs')?.filters).toEqual([['client_id', CLIENT]])
+    expect(db.queries.find(q => q.table === 'marketing_plans')?.filters).toEqual([['client_id', CLIENT], ['status', 'approved']])
   })
 
   it('系列级预算（成组预算）：在投系列有日预算就算系列的，它下面的广告组不重复算', async () => {
@@ -249,7 +266,7 @@ describe('readBudgetFacts · 读不到就是读不到（绝不当成 0 或当成
 
     const clientError = await read({ db: { accounts: [{ ad_account_id: ACCOUNT, daily_budget_cap_cents: 15000 }], client: 'error' } }).result
     expect(clientError.facts.read).toBe(false)
-    expect(clientError.facts.error).toContain('ad_strategy_configs')
+    expect(clientError.facts.error).toContain('已批准的计划')
   })
 
   it('库读失败时上限一律 null（不拿读到一半的数去判）；Meta 照读，在投合计仍然给出', async () => {
@@ -315,15 +332,13 @@ describe('readBudgetFacts · 读不到就是读不到（绝不当成 0 或当成
       expect(account.facts, `账户级 ${JSON.stringify(bad)}`).toMatchObject({ read: false, account_cap_cents: null, client_cap_cents: null })
       expect(account.facts.error, `账户级 ${JSON.stringify(bad)}`).toContain('配置无效')
       const client = await read({ db: { accounts: [{ ad_account_id: ACCOUNT, daily_budget_cap_cents: 15000 }], client: { daily_budget_cap_cents: bad } } }).result
-      expect(client.facts, `客户级 ${JSON.stringify(bad)}`).toMatchObject({ read: false, account_cap_cents: null, client_cap_cents: null })
-      expect(client.facts.error, `客户级 ${JSON.stringify(bad)}`).toContain('配置无效')
+      expect(client.facts, `客户级 ${JSON.stringify(bad)}`).toMatchObject({ read: true, account_cap_cents: 15000, client_cap_cents: null })
     }
   })
 
-  it('客户级配置行有多条（maybeSingle 报错）→ 读不到，不当作「没设」', async () => {
+  it('两份已批准计划的每天总上限不一致 → 客户级缺失，不选用其中一份，账户级照读', async () => {
     const { facts } = await read({ db: { accounts: [{ ad_account_id: ACCOUNT, daily_budget_cap_cents: 15000 }], client: 'multiple' } }).result
-    expect(facts).toMatchObject({ read: false, client_cap_cents: null })
-    expect(facts.error).toContain('ad_strategy_configs')
+    expect(facts).toMatchObject({ read: true, account_cap_cents: 15000, client_cap_cents: null })
   })
 
   it('账户编号带不带 act_ 前缀都认（登记表里两种写法都见过）；对不上才是「没登记」', async () => {

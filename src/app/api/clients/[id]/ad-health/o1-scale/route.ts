@@ -1,9 +1,9 @@
 /** Staff-only O1 scale-up proposal: use the persisted finding, never request-supplied evidence. */
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { createKernel } from '@/lib/kernel'
-import { ADS_O1_BUDGET_SCALE_ACTION_KEY, requireAdsO1BudgetScaleAccess, submitAdsO1BudgetScale } from '@/lib/action-submission/ads-o1-budget-scale'
+import { ADS_O1_BUDGET_SCALE_ACTION_KEY, requireAdsO1BudgetScaleAccess } from '@/lib/action-submission/ads-o1-budget-scale'
 import { findSingleDeliveringChild } from '@/lib/ads-strategy/budget-change/cbo-single-child'
+import { LIVE_PLAN_INCREASE_REFUSED } from '@/lib/ads-strategy/live-plan-budget'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 
 export const dynamic = 'force-dynamic'
@@ -73,7 +73,6 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
 
   let campaignId: string | undefined
   let budgetMinor: number | null = snapshot.daily_budget_minor
-  let budgetCurrency: string | null = snapshot.currency
   // Adset snapshots never carry `cbo`: normalizeAdset stores null when the
   // budget belongs to its parent campaign. Confirm CBO on that campaign row.
   if (snapshot.budget_level === null && snapshot.campaign_id) {
@@ -106,7 +105,6 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
       return NextResponse.json({ error: '该系列还有其他在投广告组，不能仅凭这一组的表现提高整个系列预算' }, { status: 409 })
     }
     budgetMinor = campaign.daily_budget_minor
-    budgetCurrency = campaign.currency
   } else if (snapshot.budget_level !== 'abo') {
     return NextResponse.json({ error: '广告组预算层级无法确认；没有创建审批请求' }, { status: 409 })
   }
@@ -131,20 +129,5 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
   if (policyError) return NextResponse.json({ error: '暂时无法核对预算审批规则' }, { status: 500 })
   if (!policy) return NextResponse.json({ error: '该客户还没有为这项预算调整设置“必须人工批准”的规则，未创建请求' }, { status: 409 })
 
-  const outcome = await submitAdsO1BudgetScale(createKernel(supabaseAdmin), {
-    clientId: params.id,
-    access: auth.access,
-    goalId: goal.id,
-    cycleDate: state.date,
-    adAccountId,
-    adsetId,
-    ...(campaignId ? { campaignId } : {}),
-    beforeCents: before,
-    afterCents: after,
-    evidence: { date: state.date, currency: budgetCurrency, target_level: campaignId ? 'campaign' : 'adset', o1: finding.evidence ?? {} },
-  })
-  if (outcome.kind !== 'pending_approval') {
-    return NextResponse.json({ error: outcome.humanReason ?? '系统没有建立待审批请求', kind: outcome.kind, runId: outcome.run.id }, { status: 409 })
-  }
-  return NextResponse.json({ ok: true, runId: outcome.run.id, decisionId: outcome.run.authorization_decision_id, beforeCents: before, afterCents: after }, { status: 202 })
+  return NextResponse.json({ error: LIVE_PLAN_INCREASE_REFUSED, wroteMeta: false }, { status: 409 })
 }

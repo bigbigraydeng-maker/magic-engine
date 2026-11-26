@@ -24,6 +24,7 @@ import { reclassifyStoredOutcome } from '@/lib/crm/note-parser'
 import { asFacts } from '@/lib/crm/call-analysis-facts'
 import { normalisePhone } from '@/lib/crm/identity'
 import { dropEmailTouchesDuplicatedByMessage } from '@/lib/crm/timeline-dedupe'
+import { humanClicksForContact } from '@/lib/crm/email-templates/link-tracking/click-summary'
 import { buildTouchpointLike } from '@/lib/crm/contact-model'
 import { buildJourney, type Journey } from '@/lib/crm/returning-journey'
 import { detectReturningLead, engagementLine, returningStory, summariseEngagement } from '@/lib/crm/returning-lead'
@@ -148,6 +149,12 @@ type TimelineEntry =
        * 据此判断，认错渠道就是给销售一个错的开场依据。
        */
       channel: string | null
+    }
+  | {
+      /** A tracked mail link this guest opened (design 2026-11-10 B2 §4.6). Never counts as "what they last said". */
+      kind: 'click'
+      at: string
+      clickLabel: string
     }
   | {
       kind: 'stage'
@@ -484,7 +491,9 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   }
 
   // 同一封邮件的触点卡片和正文气泡说同一句话时只留气泡（见 timeline-dedupe）。
-  const deduped = dropEmailTouchesDuplicatedByMessage(entries)
+  const deduped: TimelineEntry[] = dropEmailTouchesDuplicatedByMessage(entries)
+  // Clicks on tracked mail links: extra lines; a failed read just leaves them out.
+  for (const c of await humanClicksForContact(supabaseAdmin, clientId, contactId)) deduped.push({ kind: 'click', at: c.at, clickLabel: c.label })
   deduped.sort((a, b) => ts(a.at) - ts(b.at))
 
   // 「回头客」和「往来一览」：用列表同一个转换函数 + 同一份判据算。读不出来就当没有 ——

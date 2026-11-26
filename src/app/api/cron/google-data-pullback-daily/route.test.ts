@@ -212,6 +212,10 @@ const MOCK_INSIGHTS = {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
+beforeEach(() => {
+  vi.stubEnv('EXTERNAL_DATA_PULL_CLIENT_IDS', '*')
+})
+
 describe('GET /api/cron/google-data-pullback-daily — P22.A.5 MetaAds flywheel接线', () => {
   beforeEach(() => {
     vi.clearAllMocks()

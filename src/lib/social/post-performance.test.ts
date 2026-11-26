@@ -331,14 +331,14 @@ describe('buildPostPerformanceReport', () => {
     expect(unknown?.posts.n).toBe(1)
   })
 
-  it('(e) factory_reel excluded and counted', () => {
+  it('(e) factory_reel included in facebook posts', () => {
     const report = buildPostPerformanceReport({
       ...emptyInput(),
       actions: [action({ id: 'a1', payload: { source: 'factory_reel', platform: 'facebook' } })],
     })
-    expect(report.reel_actions_excluded).toBe(1)
+    expect(report.reel_action_count).toBe(1)
     const fb = report.platforms.find((b) => b.platform === 'facebook')!
-    expect(fb.posts.n).toBe(0)
+    expect(fb.posts.n).toBe(1)
   })
 
   it('(f) two platforms never merged', () => {

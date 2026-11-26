@@ -92,6 +92,24 @@ describe('pushSocialReadbackItems', () => {
     expect(items[1].how).toContain('不要手工删')
   })
 
+  it('a reel signal that cannot be built shows up, without republishing', async () => {
+    const { client } = fakeSupabase([
+      row({
+        subject_ref: 'wo-contract-1',
+        outcome: 'reel_event_contract_invalid',
+        reason: 'page_id',
+      }),
+    ])
+    const items: ManualItem[] = []
+    await pushSocialReadbackItems(client as SupabaseClient, items, NOW, new Map([[CLIENT, { name: 'Acme Tours' }]]))
+    expect(items).toHaveLength(1)
+    expect(items[0].what).toContain('结构不合格')
+    expect(items[0].what).toContain('page_id')
+    expect(items[0].what).not.toContain('拒绝开始记')
+    expect(items[0].how).toContain('不要重新发布')
+    expect(items[0].href).toBe(`https://app.magicengine.com.au/dashboard/clients/${CLIENT}`)
+  })
+
   it('a subject that is not a page_video id links to the client page, not a relative path', async () => {
     const { client } = fakeSupabase([row({ subject_kind: 'story', subject_ref: 'story-item-1', outcome: 'story_refused', reason: 'page_mismatch' })])
     const items: ManualItem[] = []

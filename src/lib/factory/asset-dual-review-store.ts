@@ -1,7 +1,8 @@
 // Supabase adapter for the material dual review. Pool writes go through the existing config lock.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { admitAssetBeforeAccept } from '@/lib/ads-strategy/admit-finished-asset-run'
+import { admitAssetBeforeAccept, requestFinishedVideoUpload } from '@/lib/ads-strategy/admit-finished-asset-run'
+import { uploadOrAsk } from '@/lib/ads-strategy/video-upload-card'
 import { loadAdStrategyConfigWithSource, loadConfigVersion, writeConfigCas } from '@/lib/ads-strategy/config'
 import type { AssetOrder, DualReviewIo } from './asset-dual-review-run'
 import { readOfficialPage } from './asset-dual-review-page'
@@ -66,9 +67,11 @@ async function loadPool(clientId: string): Promise<Awaited<ReturnType<DualReview
   return { version: version.version, pool: loaded.config.creative_pool }
 }
 
-function musicOf(brief: unknown) {
+function musicOf(brief: unknown, output: unknown) {
   const remotion = isRecord(brief) ? brief.remotion : null
-  return remotionMusicClearance(remotion)
+  const probe = isRecord(output) && isRecord(output.probe) ? output.probe : null
+  const measured = probe && typeof probe.duration_seconds === 'number' ? probe.duration_seconds : undefined
+  return remotionMusicClearance(remotion, measured)
 }
 
 export function supabaseDualReviewIo(supabase: SupabaseClient): DualReviewIo {
@@ -85,11 +88,9 @@ export function supabaseDualReviewIo(supabase: SupabaseClient): DualReviewIo {
     },
     writeOrder: (id, patch, expectStatus) => writeOrder(supabase, id, patch, expectStatus),
     now: () => new Date().toISOString(),
-    attachVideo: async (order) => {
-      const uploaded = await admitAssetBeforeAccept(supabase, order.id)
-      if (!uploaded.ok) return { ok: false as const, error: uploaded.error }
-      if (uploaded.action !== 'uploaded') return { ok: true as const, videoId: null, accountId: null }
-      return { ok: true as const, videoId: uploaded.videoId, accountId: uploaded.accountId }
-    },
+    attachVideo: (order) => uploadOrAsk({
+      admit: () => admitAssetBeforeAccept(supabase, order.id),
+      ask: () => requestFinishedVideoUpload(supabase, order.id),
+    }),
   }
 }

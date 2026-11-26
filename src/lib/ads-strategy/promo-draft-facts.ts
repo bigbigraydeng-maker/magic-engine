@@ -11,6 +11,7 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
+import { FILL_PLAN_DAILY_CAP, readClientDailyTotalCap } from '@/lib/approval-source/plan-cap'
 import { loadAdStrategyConfigWithSource } from './config'
 import { accountDayKey } from './account-timezone'
 import { latestSnapshotsAsOf } from './portfolio/diagnostics/loader'
@@ -241,7 +242,7 @@ export function buildAdsDraftFacts(raw: RawDraftInput): AdsDraftFacts {
   if (config === null) {
     headroom = { ok: false, reason: '广告设置读不出来' }
   } else if (config.daily_budget_cap_cents === null) {
-    headroom = { ok: false, reason: '客户日预算总上限没设置' }
+    headroom = { ok: false, reason: FILL_PLAN_DAILY_CAP }
   } else if (raw.account_cap_read_failed) {
     headroom = { ok: false, reason: '账户日上限读不出来' }
   } else if (raw.snapshots === null) {
@@ -408,10 +409,13 @@ export async function loadAdsDraftFacts(args: {
 
   // 广告设置
   let config: RawDraftInput['config'] = null
-  const loaded = await loadAdStrategyConfigWithSource(clientId)
+  const [loaded, planCap] = await Promise.all([
+    loadAdStrategyConfigWithSource(clientId),
+    readClientDailyTotalCap(supabaseAdmin, clientId),
+  ])
   if (loaded.source !== 'fallback') {
     config = {
-      daily_budget_cap_cents: loaded.config.daily_budget_cap_cents,
+      daily_budget_cap_cents: planCap.state === 'set' ? planCap.cents : null,
       approved_creatives: loaded.config.creative_pool
         .filter((p) => p.status === 'approved')
         .map((p) => p.ref),

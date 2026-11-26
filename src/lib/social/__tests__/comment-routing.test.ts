@@ -84,6 +84,27 @@ describe('routeComment', () => {
     expect(routeComment({ category: 'question', comment_text: '你好' }).route).toBe('auto_ok')
   })
 
+  it('纯夸奖 → auto_ok praise；夸奖里带问价/投诉仍 human；agenda 算问行程', () => {
+    expect(routeComment({ category: 'praise', comment_text: 'This is best' })).toMatchObject({
+      route: 'auto_ok',
+      intent: 'praise',
+    })
+    expect(routeComment({ category: 'praise', comment_text: 'Love it, how much per person?' }).route).toBe('human')
+    expect(routeComment({ category: 'praise', comment_text: 'Great but I want a refund' }).intent).toBe('refund')
+    expect(routeComment({ category: 'praise', comment_text: '👍👍' }).route).toBe('human')
+    expect(routeComment({ category: 'question', comment_text: "What's the exact agenda please" }).intent).toBe(
+      'faq_itinerary',
+    )
+  })
+
+  it('问 cost 算问价，交给人', () => {
+    expect(routeComment({ category: 'question', comment_text: 'All inclusive cost please?' })).toMatchObject({
+      route: 'human', intent: 'price', guide_to_dm: true,
+    })
+    expect(routeComment({ category: 'question', comment_text: 'What does it cost?' }).intent).toBe('price')
+    expect(routeComment({ category: 'other', comment_text: 'We went to the Gold Coast' }).intent).toBe('unknown')
+  })
+
   it('空文本、纯表情、判不出 → human', () => {
     expect(routeComment({ category: 'other', comment_text: '' }).route).toBe('human')
     expect(routeComment({ category: 'other', comment_text: '   ' }).intent).toBe('unknown')

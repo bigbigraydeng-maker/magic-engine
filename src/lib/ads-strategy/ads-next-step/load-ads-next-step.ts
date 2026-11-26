@@ -8,12 +8,16 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ActionRun } from '@/lib/kernel/types'
 import { listPendingAdsAutoPauseForClient } from '@/lib/ads-strategy/auto-pause-pending'
+import { dedicatedApprovalEntryFor } from '@/lib/kernel/dedicated-approval-entries'
+import { ADS_AUTO_PAUSE_ACTION_KEY } from '@/lib/action-submission/ads-auto-pause-key'
 import { listPendingRunsForActionForClient } from '@/lib/kernel-approval/action-pending'
 import { ADS_O1_BUDGET_SCALE_ACTION_KEY } from '@/lib/action-submission/ads-o1-budget-scale'
 import type { Diagnosis, DiagnosisRun } from '@/lib/ads-strategy/portfolio/diagnostics/types'
 import type { Prescription } from '@/types/diagnostic'
 import { prescriptionStatusLabel } from './prescription-labels'
-import type { AdsNextStepPendingItem, AdsNextStepView, HealthRedLightsView } from './types'
+import { gatherClientImpactGapBundle } from '@/lib/weekly-report/impact-gap-gather'
+import { presentImpactGapNextStepSummary } from '@/lib/weekly-report/impact-gap-present'
+import type { AdsNextStepPendingItem, AdsNextStepView, HealthRedLightsView, ImpactGapNextStepSlice } from './types'
 
 /** D 系列命中展示优先级（越靠前越「红灯」）。 */
 const DIAGNOSIS_HIT_PRIORITY: readonly string[] = [
@@ -21,7 +25,8 @@ const DIAGNOSIS_HIT_PRIORITY: readonly string[] = [
 ]
 
 function approvalsHref(clientId: string): string {
-  return `/dashboard/clients/${clientId}/ads-health?tab=approvals`
+  const entry = dedicatedApprovalEntryFor(ADS_AUTO_PAUSE_ACTION_KEY)
+  return entry?.path(clientId) ?? `/dashboard/clients/${clientId}/ads-health`
 }
 
 function settingsHref(clientId: string): string {
@@ -171,15 +176,37 @@ async function loadPrescription(
   }
 }
 
+async function loadImpactGaps(
+  sb: SupabaseClient,
+  clientId: string,
+  staffView: boolean,
+): Promise<AdsNextStepView['impactGaps']> {
+  if (!staffView) return { kind: 'staff_only' } as const
+  try {
+    const bundle = await gatherClientImpactGapBundle(sb, clientId)
+    const text = presentImpactGapNextStepSummary(bundle)
+    const items: ImpactGapNextStepSlice[] = [
+      { code: 'M-2', title: '花费与上限', summary: text.m2, href: bundle.m2.settingsHref },
+      { code: 'I-1', title: '生意档案', summary: text.i1, href: bundle.i1.settingsHref },
+      { code: 'C-3', title: '周检结论', summary: text.c3, href: bundle.c3.adsHealthHref },
+      { code: 'C-i', title: '漏斗分段', summary: text.ci, href: bundle.ci.entityTreeHref },
+    ]
+    return { kind: 'ok', data: { items } }
+  } catch {
+    return { kind: 'unreadable' }
+  }
+}
+
 export async function loadAdsNextStepView(
   sb: SupabaseClient,
   clientId: string,
   options: { readonly staffView: boolean },
 ): Promise<AdsNextStepView> {
-  const [healthRedLights, pendingActions, prescription] = await Promise.all([
+  const [healthRedLights, pendingActions, prescription, impactGaps] = await Promise.all([
     loadHealthRedLights(sb, clientId, options.staffView),
     loadPendingActions(sb, clientId, options.staffView),
     loadPrescription(sb, clientId),
+    loadImpactGaps(sb, clientId, options.staffView),
   ])
-  return { healthRedLights, pendingActions, prescription }
+  return { healthRedLights, pendingActions, prescription, impactGaps }
 }

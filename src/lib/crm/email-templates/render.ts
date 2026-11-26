@@ -16,6 +16,23 @@ export interface RenderContext {
   inputs: Readonly<Record<string, string>>
   facts: RenderFacts | null
   provider: FactProvider | null
+  /** The client's configured catalogue (`providers.catalogue`), or null when the client has none. */
+  catalogue: { url: string; validUntil: string } | null
+  /** Today in the client's time zone, YYYY-MM-DD. A catalogue past its validUntil renders as missing. */
+  today: string
+}
+
+/** The context's catalogue fields from the client's settings: both render paths build them with this one function. */
+export function catalogueRenderFields(
+  catalogue: { url: string; validUntil: string } | undefined,
+  today: string,
+): Pick<RenderContext, 'catalogue' | 'today'> {
+  return { catalogue: catalogue === undefined ? null : { url: catalogue.url, validUntil: catalogue.validUntil }, today }
+}
+
+/** Inclusive of its last day; both sides are YYYY-MM-DD, so string order is date order. */
+export function isCatalogueExpired(validUntil: string, today: string): boolean {
+  return today > validUntil
 }
 
 export interface RenderResult {
@@ -68,6 +85,11 @@ function resolvePlaceholder(ref: PlaceholderRef, ctx: RenderContext): ProviderVa
   }
   if (name === 'call_when') {
     return ctx.callWhen === null ? missingValue('call_when') : { ok: true, value: ctx.callWhen }
+  }
+  if (name === 'catalogue_url') {
+    const cat = ctx.catalogue
+    if (cat === null || isCatalogueExpired(cat.validUntil, ctx.today)) return missingValue('catalogue_url')
+    return { ok: true, value: cat.url }
   }
   if (name.startsWith(INPUT_PREFIX)) {
     return resolveInput(name, ctx)

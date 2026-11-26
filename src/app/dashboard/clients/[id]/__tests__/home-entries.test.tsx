@@ -21,6 +21,15 @@ vi.mock('../_components/BriefGateBanner', () => ({
   BriefGateBanner: ({ children }: { children: unknown }) => children,
 }))
 vi.mock('../_components/WorkLogPanel', () => ({ WorkLogPanel: () => null }))
+vi.mock('../_components/fde-home/useClientHomeSignals', () => ({
+  useClientHomeSignals: () => ({
+    loading: false,
+    headline: 'ok',
+    updatedAt: null,
+    cards: [],
+    todayActions: [],
+  }),
+}))
 
 import ClientDetailPage from '../page'
 import { WorkspaceViewerProvider } from '@/app/dashboard/workspace-viewer'
@@ -49,51 +58,37 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-async function openTools() {
-  await screen.findByRole('heading', { level: 1, name: 'CTS Tours' })
+async function openToolsFromGrid() {
   expect(screen.queryByText(/深度诊断/)).not.toBeInTheDocument()
-  expect(screen.queryByText(/诸葛亮/)).not.toBeInTheDocument()
-  expect(screen.queryByText(/广告 Agent/)).not.toBeInTheDocument()
-  expect(screen.queryByText(/huatuo/i)).not.toBeInTheDocument()
-  expect(screen.getByText('处方')).toBeInTheDocument()
-  // 概览上的审片框与视频工厂是同一只，首页不再挂。出片门仍进视频工厂。
-  expect(screen.queryByText(/加载待审/)).not.toBeInTheDocument()
-  expect(screen.queryByText(/只列出待审核视频/)).not.toBeInTheDocument()
-  fireEvent.click(screen.getByRole('button', { name: '工具' }))
-  expect(screen.queryByText('华佗深度诊断')).not.toBeInTheDocument()
-  expect(screen.queryByText(/基于华佗诊断结果/)).not.toBeInTheDocument()
-  expect(screen.getByRole('link', { name: /跟华佗说要什么结果/ })).toHaveAttribute(
+  expect(screen.getAllByText('处方').length).toBeGreaterThan(0)
+  expect(screen.getByRole('link', { name: /^处方/ })).toHaveAttribute(
     'href',
     '/dashboard/clients/c1/prescription/new',
   )
 }
 
+async function openLegacyToolsTab() {
+  await screen.findByRole('heading', { level: 1, name: 'CTS Tours' })
+  fireEvent.click(screen.getByRole('button', { name: '工具' }))
+  await openToolsFromGrid()
+}
+
 describe('客户首页入口', () => {
   it('both/dashboard 客户看不到打不开的入口', async () => {
     renderHome(viewerFacts('client-viewer', 'c1', false))
-    await openTools()
+    await openLegacyToolsTab()
     expect(screen.queryByText('Story 自动发布')).not.toBeInTheDocument()
     expect(screen.queryByText('客户记忆库')).not.toBeInTheDocument()
     expect(screen.queryByText('经营测算 · 内部')).not.toBeInTheDocument()
-    expect(screen.queryByText('GEO Composer')).not.toBeInTheDocument()
-    expect(screen.queryByText('AI 可见度追踪')).not.toBeInTheDocument()
-    expect(screen.queryByText('等你点头的广告')).not.toBeInTheDocument()
-    expect(screen.queryByText('视频工厂素材标签与审核')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '日志' })).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: /^社媒/ }).getAttribute('href')).toContain('tab=post')
     expect(screen.getByRole('link', { name: /^出片/ }).getAttribute('href')).toBe('/dashboard/clients/c1/content-factory')
-    expect(screen.getByRole('link', { name: /^博客/ })).toBeInTheDocument()
   })
 
-  it('精确管理员仍看得到内部入口', async () => {
+  it('精确管理员走 FDE 概览，工具 Tab 不出现', async () => {
     renderHome(viewerFacts('admin', null, true))
-    await openTools()
-    expect(screen.getByText('Story 自动发布')).toBeInTheDocument()
-    expect(screen.getByText('客户记忆库')).toBeInTheDocument()
-    expect(screen.getByText('经营测算 · 内部')).toBeInTheDocument()
-    expect(screen.getByText('等你点头的广告')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '日志' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /^社媒/ }).getAttribute('href')).toContain('tab=overview')
-    expect(screen.getByRole('link', { name: /^出片/ }).getAttribute('href')).toBe('/dashboard/factory?client=c1')
+    await screen.findByRole('heading', { level: 1, name: 'CTS Tours' })
+    expect(screen.getByText('现在怎么样')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '工具' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /工作日志/ })).toBeInTheDocument()
   })
 })

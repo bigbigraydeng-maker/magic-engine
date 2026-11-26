@@ -21,6 +21,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { filterRowsWithClientId } from '@/lib/clients/external-data-pull-allowlist'
 import { judgeDomainOwnership } from '@/lib/clients/domain-match'
 
 /**
@@ -137,7 +138,7 @@ export async function retestBrokenConnections(
     return { ...r, client_domain: r.client_domain ?? joined?.domain ?? null }
   })
 
-  const due = pickConnectionsToRetest(rows, now)
+  const due = pickConnectionsToRetest(filterRowsWithClientId(rows), now)
   const outcomes: RetestOutcome[] = []
 
   for (const row of due) {

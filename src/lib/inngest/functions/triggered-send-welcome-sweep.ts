@@ -1,5 +1,5 @@
 /**
- * Magic Engine 2.0 · Inngest cloud consumers of the triggered-send SHADOW run (rehearsal).
+ * Magic Engine 2.0 · Inngest cloud consumers of the triggered-send welcome letter: the rehearsal, then real sending.
  *
  * Two functions, one dispatches and one works:
  *   · `cloud-triggered-send-welcome-dispatch` — runs at 09:00 and again at 11:00 Pacific/Auckland (two cron triggers),
@@ -8,7 +8,10 @@
  *   · `cloud-triggered-send-welcome-sweep` — takes one client and sweeps it in steps: one `prepare` step, then one
  *     step per chunk of at most CHUNK_SIZE contacts, then the run log.
  *
- * 🔴 **Nothing is ever sent**: the sweep only writes shadow rows (`no_send: true`).
+ * 🔴 **The rehearsal never sends** (it only writes shadow rows, `no_send: true`). **Real sending** runs after it in the
+ *    same order, and only when BOTH switches are on for the client (TRIGGERED_SEND_LIVE + TRIGGERED_SEND_CLIENTS), a
+ *    person's authorization holds and the order is not a dry run (`send-sweep.ts`, `send-one.ts`). Every letter is its
+ *    own step and re-checks all of that first; the run log's `summary.send` says what happened (no personal data).
  *
  * 🔴 **Why steps of a few contacts**: Render cuts a request after roughly two minutes; one step that loops over every
  *    new lead (10–30 a day) would be killed. Each chunk step writes its rows the moment they are decided and no
@@ -58,6 +61,10 @@ import {
   type SweepDeps,
 } from '@/lib/messaging/triggered-send/shadow-sweep'
 import type { ChunkResult, PrepareResult, SweepPlan, SweepReceipt } from '@/lib/messaging/triggered-send/types'
+import { finalizeSend, prepareSend, recordStale } from '@/lib/messaging/triggered-send/send-sweep'
+import { sendOne } from '@/lib/messaging/triggered-send/send-one'
+import { createProdSendDeps } from '@/lib/messaging/triggered-send/send-deps-prod'
+import type { SendOneResult, SendPlan, SendPrepareResult, SendReceipt } from '@/lib/messaging/triggered-send/send-types'
 import {
   CRM_TRIGGERED_SEND_SWEEP_REQUESTED,
   buildSweepEvent,
@@ -194,10 +201,35 @@ export interface SweepRunDeps {
   prepare(args: { clientId: string; dryRun: boolean }): Promise<PrepareResult>
   decideChunk(args: { plan: SweepPlan; kind: 'candidates' | 'stale'; contactIds: string[] }): Promise<ChunkResult>
   finalize(plan: SweepPlan, results: ChunkResult[]): SweepReceipt
+  /** Real sending (after the rehearsal): its own first step, one step for the stale guests, one step per guest. */
+  sendPrepare(args: { clientId: string; dryRun: boolean }): Promise<SendPrepareResult>
+  sendStale(plan: SendPlan): Promise<SendOneResult[]>
+  sendOne(args: { plan: SendPlan; contactId: string }): Promise<SendOneResult>
+  finalizeSend(plan: SendPlan, results: SendOneResult[]): SendReceipt
   now(): Date
 }
 
-export type SweepOrderResult = SweepReceipt | { status: 'invalid_payload'; reason: string }
+export type SweepOrderResult = (SweepReceipt & { send: SendReceipt }) | { status: 'invalid_payload'; reason: string }
+
+/**
+ * Real sending after the rehearsal. Step ids are deterministic (`send-<n>`), so a replay finds the finished letters;
+ * a letter that asks to stop (the authorization no longer holds, our own key is wrong, the day's cap is reached) ends
+ * the run for everyone after it.
+ */
+async function runSendPhase(step: Pick<StepTools, 'run'>, deps: SweepRunDeps, order: { clientId: string; dryRun: boolean }): Promise<SendReceipt> {
+  const prepared = await step.run('send-prepare', async () => deps.sendPrepare(order))
+  if (prepared.kind === 'stop') return prepared.receipt
+  const plan = prepared.plan
+  const results: SendOneResult[] = []
+  if (plan.staleIds.length > 0) results.push(...(await step.run('send-stale', async () => deps.sendStale(plan))))
+  for (let index = 0; index < plan.contactIds.length; index += 1) {
+    const contactId = plan.contactIds[index]
+    const result = await step.run(`send-${index}`, async () => deps.sendOne({ plan, contactId }))
+    results.push(result)
+    if (result.stopRun) break
+  }
+  return deps.finalizeSend(plan, results)
+}
 
 /**
  * Run one sweep order as steps: parse, prepare, one step per chunk of contacts (stale ones first), one run log.
@@ -241,29 +273,57 @@ export async function runSweepOrder(
     receipt = deps.finalize(plan, results)
   }
 
+  const send = await runSendPhase(step, deps, { clientId: parsed.clientId, dryRun: parsed.dryRun })
+
   await step.run('log-finish', async () => {
-    await deps.finishRun(started.runLogId, started.startedAtMs, sweepFinishOpts(receipt))
+    await deps.finishRun(started.runLogId, started.startedAtMs, sweepFinishOpts(receipt, send))
     return null
   })
 
-  return receipt
+  return { ...receipt, send }
 }
 
 /**
  * The sweep row's finish options: deferred contacts count as failed items; 'swept' and
  * 'no_open_proposal' are normal completions (no error), every other status carries its error.
+ * The counters are the rehearsal's; real sending is reported under `summary.send` (null when the run had none).
  */
-export function sweepFinishOpts(receipt: SweepReceipt): CronRunFinishOpts {
+export function sweepFinishOpts(receipt: SweepReceipt, send: SendReceipt | null = null): CronRunFinishOpts {
   const isNormal = receipt.status === 'swept' || receipt.status === 'no_open_proposal'
+  // The top-level `no_send` / `provider_impact` describe the whole run: false / the send's impact once a letter may have gone out.
+  const impact = send?.provider_impact ?? 'NONE'
   const opts: CronRunFinishOpts = {
     processed: receipt.to_decide,
     // Contacts that are stored now: decided by this run, or already holding a row from an earlier attempt.
     completed: receipt.decided + receipt.already_decided,
     failed: receipt.deferred,
-    summary: { ...receipt },
+    summary: { ...receipt, no_send: impact === 'NONE', provider_impact: impact, send },
   }
   if (!isNormal) opts.error = receipt.error ?? `sweep status: ${receipt.status}`
+  const problem = sendProblem(send)
+  if (problem !== null) opts.error = opts.error === undefined ? problem : `${opts.error}; ${problem}`
   return opts
+}
+
+/** Send stops that mean "switched on, but something is wrong" — not "nothing to do" (the run log must show them). */
+const SEND_PROBLEMS: ReadonlySet<string> = new Set([
+  'read_failed', 'template_unreadable', 'trial_domains_not_configured', 'trial_recipient_not_internal', 'no_account_key',
+  'no_unsubscribe_secret', 'no_app_url', 'mailbox_unreadable', 'authorization_self_revoked', 'formal_sending_not_enabled',
+])
+
+/** Single letters that went wrong without stopping the run: the run log shows them too (魏征 R2 P2-丙). */
+const LETTER_PROBLEMS = ['conflict', 'write_failed', 'read_failed'] as const
+
+function sendProblem(send: SendReceipt | null): string | null {
+  if (send === null) return null
+  if (SEND_PROBLEMS.has(send.status)) return `send: ${send.status}${send.error === null ? '' : ` (${send.error})`}`
+  const parts: string[] = []
+  // The day's cap is the rule working as meant; any other stop is a problem.
+  if (send.stopped !== null && !send.stopped.startsWith('blocked:cap_reached')) parts.push(`send stopped: ${send.stopped}`)
+  if (send.status === 'sent_run' && send.found === 0) parts.push('send: no contact carries the trial addresses')
+  const letters = LETTER_PROBLEMS.filter((k) => (send.by_outcome[k] ?? 0) > 0).map((k) => `${send.by_outcome[k]} ${k}`)
+  if (letters.length > 0) parts.push(`send letters: ${letters.join(', ')}`)
+  return parts.length === 0 ? null : parts.join('; ')
 }
 
 /** The onFailure of both functions: close exactly this run's run-log row. Never throws. */
@@ -353,7 +413,7 @@ export const triggeredSendWelcomeDispatch = inngest.createFunction(
 export const triggeredSendWelcomeSweep = inngest.createFunction(
   {
     id: TRIGGERED_SEND_SWEEP_ID,
-    name: 'Triggered send (welcome): shadow sweep of one client',
+    name: 'Triggered send (welcome): rehearsal, then real sending, of one client',
     concurrency: [{ key: 'event.data.client_id', limit: 1 }, { limit: 2 }],
     retries: 2,
     onFailure: async ({ event, error }) => {
@@ -379,6 +439,10 @@ export const triggeredSendWelcomeSweep = inngest.createFunction(
         prepare: ({ clientId, dryRun }) => prepareSweep({ clientId, dryRun, deps: createProdSweepDeps() }),
         decideChunk: ({ plan, kind, contactIds }) => decideChunk({ plan, kind, contactIds, deps: createProdSweepDeps() }),
         finalize: finalizeSweep,
+        sendPrepare: ({ clientId, dryRun }) => prepareSend({ clientId, dryRun, deps: createProdSendDeps() }),
+        sendStale: (plan) => recordStale({ plan, deps: createProdSendDeps() }),
+        sendOne: ({ plan, contactId }) => sendOne({ plan, contactId, deps: createProdSendDeps() }),
+        finalizeSend,
         now: () => new Date(),
       },
       event.data,

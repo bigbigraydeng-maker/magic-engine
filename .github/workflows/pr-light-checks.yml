@@ -192,6 +192,7 @@ jobs:
           set -euo pipefail
           npx vitest run --config src/lib/kernel/__tests__/vitest.architecture.config.ts --reporter=verbose --reporter=json --outputFile.json="$RESULTS"
           node scripts/ci/confirm-vitest-json.mjs
+          npx vitest run src/lib/kernel/__tests__/spend-approval.test.ts --reporter=verbose
 
       - name: Tour catalog boundary test
         id: tour

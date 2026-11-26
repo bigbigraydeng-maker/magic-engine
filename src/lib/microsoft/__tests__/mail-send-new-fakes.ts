@@ -5,6 +5,7 @@
 
 import { vi } from 'vitest'
 import type { ManualSendDncGate } from '@/lib/crm/manual-send-dnc-gate'
+import type { EmailUnsubscribeRead } from '@/lib/crm/email-unsubscribe'
 import type { TouchKind } from '@/lib/crm/email-compose/enquiry-record'
 import type {
   GraphSendOutcome,
@@ -41,6 +42,9 @@ export interface FakeOpts {
   identityEmails?: string[]
   touchKinds?: TouchKind[]
   dnc?: ManualSendDncGate
+  /** The unsubscribe answer; a function gets the addresses it was asked about. Default: not unsubscribed. */
+  unsubscribed?: EmailUnsubscribeRead | ((addresses: readonly string[]) => EmailUnsubscribeRead)
+  unsubscribedThrows?: boolean
   mailboxes?: MailboxChoice[]
   prior?: PriorSend | null
   pending?: PendingDraft[]
@@ -77,6 +81,12 @@ export function makeFakes(o: FakeOpts = {}) {
     checkDnc: vi.fn(async (): Promise<ManualSendDncGate> => {
       calls.push('checkDnc')
       return o.dnc ?? { blocked: false }
+    }),
+    checkEmailUnsubscribed: vi.fn(async (_clientId: string, _contactId: string, addresses: readonly string[]): Promise<EmailUnsubscribeRead> => {
+      calls.push('checkEmailUnsubscribed')
+      if (o.unsubscribedThrows) throw new Error('db down')
+      const answer = o.unsubscribed ?? { ok: true, unsubscribed: false }
+      return typeof answer === 'function' ? answer(addresses) : answer
     }),
     loadContact: vi.fn(async () => {
       calls.push('loadContact')

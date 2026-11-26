@@ -6,6 +6,7 @@
 import type { AccountCapFacts } from './budget-caps'
 import { planDraftMissingPlaysLine, planDraftNoCountryLine, planDraftNoPeriodLine } from './plan-draft-card'
 import { validatePlanDraft } from './plan-draft-validate'
+import { defaultTestDelivery } from './delivery-stage'
 import type { PromoSpec } from './spec'
 import type { PlanSeed, PlanSeedStep } from '@/lib/ads-strategy/plan-seed/types'
 
@@ -118,6 +119,7 @@ export function mapSeedToPromo(input: PlanDraftMapInput): PlanDraftMapResult {
       end_date: input.period.end_date,
       steps,
     }],
+    delivery: defaultTestDelivery(input.period.start_date),
   }, {
     accounts: input.accounts,
     clientCapCents: input.clientCapCents,

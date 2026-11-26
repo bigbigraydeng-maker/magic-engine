@@ -55,6 +55,8 @@ function baseCtx(overrides: Partial<RenderContext> = {}): RenderContext {
     inputs: {},
     facts: emptyFacts,
     provider: stubProvider,
+    catalogue: null,
+    today: '2026-11-09',
     ...overrides,
   }
 }
@@ -188,5 +190,26 @@ describe('renderTemplate', () => {
     const template = { subject: 'Hi', body: '   ', pickMode: 'none' as const }
     const result = renderTemplate(template, baseCtx())
     expect(result.problems).toContain('body_invalid')
+  })
+})
+
+describe('{{catalogue_url}}', () => {
+  const tpl: Pick<EmailTemplateVersion, 'subject' | 'body' | 'pickMode'> = {
+    subject: 'Our brochure',
+    body: 'Here it is: {{catalogue_url}}',
+    pickMode: 'none',
+  }
+  const catalogue = { url: 'https://www.example.com/b.pdf', validUntil: '2026-12-31' }
+
+  it('renders the configured url up to and including its last valid day', () => {
+    expect(renderTemplate(tpl, baseCtx({ catalogue, today: '2026-12-31' }))).toMatchObject({
+      body: 'Here it is: https://www.example.com/b.pdf',
+      missing: [],
+    })
+  })
+
+  it('is missing the day after, and when the client has no catalogue', () => {
+    expect(renderTemplate(tpl, baseCtx({ catalogue, today: '2027-01-01' })).missing).toEqual(['catalogue_url'])
+    expect(renderTemplate(tpl, baseCtx({ catalogue: null })).missing).toEqual(['catalogue_url'])
   })
 })

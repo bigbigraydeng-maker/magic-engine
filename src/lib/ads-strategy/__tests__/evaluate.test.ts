@@ -87,7 +87,7 @@ describe('buildNarrativePayload', () => {
     const short = series('a', 'A', Array.from({ length: 8 }, () => 0.03))
     const p = buildNarrativePayload(grouped(short), '2026-07-08')
     expect(p.overall_verdict).toBe('insufficient_history')
-    expect(p.headline).toContain('积累')
+    expect(p.headline).toContain('历史还不够长')
   })
 
   it('sums 7-day spend and results for the header line', () => {
@@ -143,7 +143,7 @@ describe('buildNarrativePayload', () => {
     const stopped = series('a', 'Stopped', Array.from({ length: 8 }, () => 0.03))
     const p = buildNarrativePayload(grouped(stopped), '2026-07-21')
     expect(p.headline).toContain('都已停投')
-    expect(p.headline).not.toContain('积累')
+    expect(p.headline).not.toContain('历史还不够长')
   })
 
   it('keeps a briefly-lagging campaign (2 days without data) judged, not paused', () => {

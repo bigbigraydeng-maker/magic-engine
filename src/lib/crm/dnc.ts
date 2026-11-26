@@ -22,7 +22,12 @@
  * ## 为什么是「人明确纠正」，而不是让规则自己解开
  *
  * 让正则去**解除**这个闸，方向恰好反了：万一某人原话里同时含着真正的拒绝，
- * 我们就会去骚扰一个明确说过别联系的客人。所以自动解除一律不做。
+ * 我们就会去骚扰一个明确说过别联系的客人。所以**按字面意思**自动解除一律不做。
+ *
+ * 唯一的例外（PM 2026-11-08）：客人在拒联之后**自己做了明确的动作**——又填了表、
+ * 打进来并且接通——由 `dnc-reengage.ts` 写一条 `cleared_by: system:customer-reengaged`
+ * 的 `dnc_cleared` 触点。私信和回信仍然只列出来请人看，不自动解。
+ * 设计稿 docs/specs/2026-11-08-crm-ai-takeover-and-dnc-reengage-design-v0.md §3。
  *
  * 但**人**明确说「这条判错了」是另一回事 —— 那是这套系统里最强的信号，
  * 比一句两个月前的正则判断硬得多。纠正同样写成一条触点（真相源不可变，
@@ -115,4 +120,49 @@ export function isDoNotContact(contactFlag: boolean, touches: DncTouch[]): boole
   if (latestVerdict?.outcome === DNC_CLEARED_OUTCOME) return false
 
   return contactFlag || touches.some(said)
+}
+
+/**
+ * 「只别打电话」—— 客人说过不要电话，但邮件 / 短信 / WhatsApp / Messenger 照样可以联系
+ * （PM 2026-11-09）。设计稿 docs/specs/2026-11-09-crm-do-not-call-split-design-v0.md §3。
+ *
+ * 只读这个值：写入一侧（解析器切换）在 2B。它**不是** `metadata.do_not_contact`，
+ * 也不动 `contacts.do_not_contact` 镜像列 —— 那两处在全仓约 30 处被当成「全渠道拒联」。
+ */
+export const DO_NOT_CALL_OUTCOME = 'do_not_call'
+
+/** 有效时间戳（毫秒）；空值或解析不了 → null（不当成 0，免得被误判成「更早」）。 */
+function validTs(v: string | null | undefined): number | null {
+  if (!v) return null
+  const t = new Date(v).getTime()
+  return Number.isNaN(t) ? null : t
+}
+
+/**
+ * 触点里有没有一条**还没被人推翻**的「只别打电话」。
+ *
+ * 推翻 = 有一条 `dnc_cleared`，且它**严格晚于**这条 `do_not_call`（同一个 `dnc_cleared`
+ * 也作废更早的 `do_not_contact`，不另设第二种清除）。时间相等、或任一时间戳读不出来，
+ * 一律当作没被推翻（宁可少打一通电话）。
+ */
+export function saidDoNotCall(touches: readonly DncTouch[]): boolean {
+  const cleared = touches
+    .filter((t) => t.outcome === DNC_CLEARED_OUTCOME)
+    .map((t) => validTs(t.occurredAt))
+    .filter((v): v is number => v !== null)
+  const clearedAt = cleared.length > 0 ? Math.max(...cleared) : null
+  return touches.some((t) => {
+    if (t.outcome !== DO_NOT_CALL_OUTCOME) return false
+    const at = validTs(t.occurredAt)
+    return clearedAt === null || at === null || clearedAt <= at
+  })
+}
+
+/**
+ * 这个人现在能不能**打电话**。全面拒绝（`isDoNotContact`）一定包含电话，
+ * 所以它是 `isDoNotContact` 的超集。只给电话那一侧用（拨号接口、拨号按钮、
+ * 「打电话」名单）；邮件 / WhatsApp / Messenger / Mailchimp 等继续只看 `isDoNotContact`。
+ */
+export function isDoNotCall(contactFlag: boolean, touches: DncTouch[]): boolean {
+  return isDoNotContact(contactFlag, touches) || saidDoNotCall(touches)
 }

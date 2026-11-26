@@ -5,6 +5,7 @@ const m = vi.hoisted(() => ({
   query: vi.fn(),
   submit: vi.fn(),
   listAdSets: vi.fn(),
+  issue: vi.fn(),
 }))
 
 vi.mock('@/lib/supabase', () => ({
@@ -19,6 +20,10 @@ vi.mock('@/lib/action-submission/ads-o1-budget-scale', () => ({
     ok: true, tier: 'admin', allowedClientId: null, user: { id: 'staff-1', email: 'staff@example.com' },
   }),
   submitAdsO1BudgetScale: m.submit,
+}))
+vi.mock('@/lib/action-submission/money-card', () => ({
+  issueMoneyBudget: m.issue,
+  clickerFromAccess: () => ({ kind: 'opc', email: 'staff@example.com' }),
 }))
 
 import { POST } from './route'
@@ -94,28 +99,30 @@ beforeEach(() => {
   setup()
   m.listAdSets.mockResolvedValue([{ id: ADSET_ID, name: 'Source', status: 'ACTIVE', effective_status: 'ACTIVE', account_id: '1111111111' }])
   m.submit.mockResolvedValue({ kind: 'pending_approval', run: { id: 'run-1', authorization_decision_id: 'decision-1' } })
+  m.issue.mockResolvedValue({ card: { runId: 'card-1' }, reason: null, wroteMeta: false })
 })
 
 describe('O1 campaign-budget proposal', () => {
-  it('turns a $50/day campaign budget into a $60/day approval proposal', async () => {
+  it('refuses to raise a live campaign budget and does not issue a card', async () => {
     const response = await post()
+    const body = await response.json()
 
-    expect(response.status, JSON.stringify(await response.clone().json())).toBe(202)
-    expect(await response.json()).toMatchObject({ ok: true, beforeCents: 5000, afterCents: 6000 })
-    expect(m.submit).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
-      clientId: CLIENT_ID, goalId: 'goal-1', adAccountId: ACCOUNT_ID, adsetId: ADSET_ID,
-      campaignId: CAMPAIGN_ID, beforeCents: 5000, afterCents: 6000,
-      evidence: expect.objectContaining({ currency: 'USD', target_level: 'campaign' }),
-    }))
+    expect(response.status).toBe(409)
+    expect(body).toMatchObject({ wroteMeta: false })
+    expect(body.error).toContain('新开一份计划')
+    expect(m.submit).not.toHaveBeenCalled()
+    expect(m.issue).not.toHaveBeenCalled()
   })
 
-  it('系列行是 6 小时前那一轮写的（之后几轮系列没变、没写行）→ 照常建审批', async () => {
+  it('系列行是 6 小时前那一轮写的，仍然拒绝加预算，不建审批', async () => {
     setup(undefined, { campaignAgeMs: 6 * 60 * 60 * 1000 })
 
     const response = await post()
+    const body = await response.json()
 
-    expect(response.status, JSON.stringify(await response.clone().json())).toBe(202)
-    expect(await response.json()).toMatchObject({ ok: true, beforeCents: 5000, afterCents: 6000 })
+    expect(response.status).toBe(409)
+    expect(body.wroteMeta).toBe(false)
+    expect(m.issue).not.toHaveBeenCalled()
   })
 
   it('🔴 系列最新一行超过 24 小时 → 拒，不拿旧预算建审批', async () => {
@@ -125,6 +132,7 @@ describe('O1 campaign-budget proposal', () => {
 
     expect(response.status).toBe(409)
     expect(m.submit).not.toHaveBeenCalled()
+    expect(m.issue).not.toHaveBeenCalled()
   })
 
   it('refuses to raise the whole campaign budget when another child ad set is delivering', async () => {
@@ -137,6 +145,7 @@ describe('O1 campaign-budget proposal', () => {
 
     expect(response.status).toBe(409)
     expect(m.submit).not.toHaveBeenCalled()
+    expect(m.issue).not.toHaveBeenCalled()
   })
 
   it('refuses when Meta cannot return a complete child list', async () => {
@@ -146,6 +155,7 @@ describe('O1 campaign-budget proposal', () => {
 
     expect(response.status).toBe(409)
     expect(m.submit).not.toHaveBeenCalled()
+    expect(m.issue).not.toHaveBeenCalled()
   })
 
   it('finds a delivering child beyond the first 1000 rows', async () => {
@@ -164,6 +174,7 @@ describe('O1 campaign-budget proposal', () => {
 
     expect(response.status).toBe(409)
     expect(m.submit).not.toHaveBeenCalled()
+    expect(m.issue).not.toHaveBeenCalled()
   })
 
   it('refuses if any child ad-set delivery status is unknown', async () => {
@@ -176,5 +187,6 @@ describe('O1 campaign-budget proposal', () => {
 
     expect(response.status).toBe(409)
     expect(m.submit).not.toHaveBeenCalled()
+    expect(m.issue).not.toHaveBeenCalled()
   })
 })

@@ -213,6 +213,126 @@ describe('sweepAllClients — 一个客户炸了不能拖累其他客户', () =>
   })
 })
 
+describe('sweep — 计划版位跟着每日巡检走', () => {
+  const creative = [{ adId: 'a1', adName: 'EN', texts: ['Watch the full story'] }]
+
+  function thruPlay(platforms: string[]) {
+    return {
+      id: 'as1',
+      name: '看完视频',
+      optimization_goal: 'THRUPLAY',
+      targeting: { publisher_platforms: platforms },
+    }
+  }
+
+  function planRows() {
+    return [
+      planRow('2026-10-01T00:00:00.000Z', 'as1', ['facebook', 'instagram']),
+      planRow('2026-10-15T00:00:00.000Z', 'as1', ['instagram_only']),
+      planRow('2026-10-20T00:00:00.000Z', 'as1', []),
+      planRow('2026-10-30T00:00:00.000Z', 'as-other', ['facebook']),
+    ]
+  }
+
+  it('只投 Instagram 的计划与广告组一致时不报，对不上仍报', async () => {
+    mockActiveClients.mockResolvedValue([
+      { id: 'c1', name: 'Roman', meta_ad_account_id: 'act_123' },
+    ])
+    mockCreatives.mockResolvedValue(creative)
+    mockList.mockResolvedValue([thruPlay(['instagram'])])
+
+    const ok = await sweepAllClients(planSupabase(planRows()))
+    expect(ok[0].error).toBeUndefined()
+    expect(ok[0].adSets[0].hasBlocker).toBe(false)
+    expect(codes(ok[0])).not.toContain('playback_placement_not_locked')
+    expect(codes(ok[0])).not.toContain('placement_not_as_planned')
+
+    mockList.mockResolvedValue([thruPlay(['facebook', 'instagram'])])
+    const bad = await sweepAllClients(planSupabase(planRows()))
+    expect(bad[0].adSets[0].hasBlocker).toBe(true)
+    expect(codes(bad[0])).toContain('placement_not_as_planned')
+    expect(codes(bad[0])).not.toContain('playback_placement_not_locked')
+  })
+
+  it('计划没写版位时，只投 Instagram 的看完类广告组仍按原来的检查报', async () => {
+    mockList.mockResolvedValue([thruPlay(['instagram'])])
+    mockCreatives.mockResolvedValue(creative)
+    const missing = await sweepClient(CLIENT)
+    expect(codes(missing)).toContain('playback_placement_not_locked')
+
+    const empty = await sweepClient(CLIENT, planSupabase([
+      planRow('2026-10-20T00:00:00.000Z', 'as1', []),
+    ]))
+    expect(codes(empty)).toContain('playback_placement_not_locked')
+  })
+})
+
+function codes(r: { adSets: { findings: { code: string }[] }[] }): string[] {
+  return r.adSets[0].findings.map((f) => f.code)
+}
+
+interface PlanPayload {
+  adSetId: string
+  draft: { placements: unknown }
+}
+
+interface StoredPlan {
+  created_at: string
+  client_id: string
+  action_type: string
+  payload: PlanPayload
+}
+
+function planRow(createdAt: string, adSetId: string, placements: unknown): StoredPlan {
+  return {
+    created_at: createdAt,
+    client_id: 'c1',
+    action_type: 'ads.create_ad',
+    payload: { adSetId, draft: { placements } },
+  }
+}
+
+function planSupabase(rows: StoredPlan[]): SupabaseClient {
+  return {
+    from(table: string) {
+      if (table !== 'flywheel_actions') throw new Error(`unexpected table ${table}`)
+      const filters: { kind: 'eq' | 'in'; col: string; val: unknown }[] = []
+      const builder = {
+        select() { return builder },
+        eq(col: string, val: unknown) {
+          filters.push({ kind: 'eq', col, val })
+          return builder
+        },
+        in(col: string, val: unknown) {
+          filters.push({ kind: 'in', col, val })
+          return builder
+        },
+        order() {
+          const data = rows.filter((row) => filters.every((filter) => rowMatches(row, filter)))
+          return Promise.resolve({ data, error: null })
+        },
+      }
+      return builder
+    },
+  } as unknown as SupabaseClient
+}
+
+function rowMatches(
+  row: StoredPlan,
+  filter: { kind: 'eq' | 'in'; col: string; val: unknown },
+): boolean {
+  const value = planColumn(row, filter.col)
+  if (filter.kind === 'eq') return value === filter.val
+  return Array.isArray(filter.val) && filter.val.includes(value)
+}
+
+function planColumn(row: StoredPlan, col: string): unknown {
+  if (col === 'client_id') return row.client_id
+  if (col === 'action_type') return row.action_type
+  if (col === 'payload->>adSetId') return row.payload.adSetId
+  throw new Error(`unexpected column ${col}`)
+}
+
 describe('blockerSummary', () => {
   it('没有 blocker 就返回 null（不产生一条空提醒）', () => {
     expect(

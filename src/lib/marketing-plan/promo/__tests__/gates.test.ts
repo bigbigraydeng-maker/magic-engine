@@ -31,9 +31,9 @@ describe('灰色 = 读不到 / 太旧 / 没核实，硬门灰色不能批准', (
     expect(light(baseSpec())('landing.item_live')).toBe('gray')
   })
 
-  it('广告设置整个读失败 → 上限 / 结果口径 / 素材全灰（不是红也不是绿）', () => {
+  it('广告设置整个读失败 → 结果口径 / 素材全灰；每天总上限看计划本身', () => {
     const l = light(verifiedAll(), goodFacts({ config: null }))
-    expect(l('ads.cap_set')).toBe('gray')
+    expect(l('ads.cap_set')).toBe('green')
     expect(l('ads.result_defined')).toBe('gray')
     expect(l('ads.creative_approved')).toBe('gray')
   })
@@ -68,10 +68,15 @@ describe('红色 = 确定没过', () => {
   })
 
   it('没设日预算上限 / 没定结果口径 → 红', () => {
-    const f = goodFacts({ config: { daily_budget_cap_cents: null, primary_result: null, creative_pool: [{ ref: 'vid-1', status: 'approved' }] } })
-    const l = light(verifiedAll(), f)
+    const spec = verifiedAll()
+    delete spec.daily_total_cap_cents
+    const f = goodFacts({ config: { daily_budget_cap_cents: 20000, primary_result: null, creative_pool: [{ ref: 'vid-1', status: 'approved' }] } })
+    const l = light(spec, f)
     expect(l('ads.cap_set')).toBe('red')
     expect(l('ads.result_defined')).toBe('red')
+    const over = verifiedAll()
+    over.daily_total_cap_cents = 1000
+    expect(light(over, goodFacts())('ads.budget_within_caps')).toBe('red')
   })
 
   it('素材只是候选 / 不在素材池 / 没指定 → 红', () => {

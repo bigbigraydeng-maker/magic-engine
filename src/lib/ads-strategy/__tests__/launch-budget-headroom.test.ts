@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeLaunchHeadroom, type HeadroomRow } from '../launch-budget-headroom'
+import { computeLaunchHeadroom, sumDeliveringDailyMinor, type HeadroomRow } from '../launch-budget-headroom'
 
 const AT = '2026-10-05T12:30:54.253Z'
 
@@ -80,6 +80,17 @@ describe('computeLaunchHeadroom', () => {
     ]
     const r = computeLaunchHeadroom({ rows, capMinor: 15000, committed: [] })
     expect(r.ok && r.deliveringTotalMinor).toBe(11500)
+  })
+
+  it('sums delivering daily budget, and an empty read is unknown rather than zero', () => {
+    expect(sumDeliveringDailyMinor(base)).toBe(11500)
+    expect(sumDeliveringDailyMinor([])).toBeNull()
+    const pausedOnly = [row({
+      level: 'adset', entity_id: 'paused', budget_level: 'abo', daily_budget_minor: 4000, effective_status: 'PAUSED',
+    })]
+    expect(sumDeliveringDailyMinor(pausedOnly)).toBe(0)
+    const broken = [...base, row({ level: 'adset', entity_id: 'bad', budget_level: 'abo', daily_budget_minor: null })]
+    expect(sumDeliveringDailyMinor(broken)).toBeNull()
   })
 
   it('breaks the total down per ad account', () => {

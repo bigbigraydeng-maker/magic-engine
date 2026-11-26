@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { partitionExternalDataPull } from '@/lib/clients/external-data-pull-allowlist'
 import { supabaseAdmin } from '@/lib/supabase'
 import { syncClientMessenger, type MessengerSyncClient } from '@/lib/messenger/sync'
 import { startCronRun } from '@/lib/cron/run-logger'
@@ -84,8 +85,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
+  const pageRoster = partitionExternalDataPull((clients ?? []) as MessengerSyncClient[], (client) => client.id)
   const results = []
-  for (const client of (clients ?? []) as MessengerSyncClient[]) {
+  for (const client of pageRoster.kept) {
     results.push(await syncClientMessenger(client))
   }
 
@@ -104,9 +106,12 @@ export async function GET(req: NextRequest) {
   // 整段包在 try 里：邮箱那边出任何问题都不能让私信这条报失败 ——
   // 私信已经跑完并且入库了，为邮箱把整次判失败会让人以为私信也没跑。
   let mail: Awaited<ReturnType<typeof syncMailbox>>[] = []
+  let mailSkippedClientIds: string[] = []
   let mailError: string | null = null
   try {
-    mail = await syncConnectedMailboxes()
+    const syncedMail = await syncConnectedMailboxes()
+    mail = syncedMail.results
+    mailSkippedClientIds = syncedMail.skippedClientIds
   } catch (err) {
     mailError = err instanceof Error ? err.message : String(err)
     console.error('[messenger-sync-hourly] 邮箱同步失败（不影响私信）:', mailError)
@@ -146,6 +151,10 @@ export async function GET(req: NextRequest) {
       // 🔴 写卡接力那张条子发出去没 —— 上一次事故就是这一步安静地失败了，
       //    响应被网关吞掉、监控里看着一切正常。留在 summary 里以后一眼可查。
       briefHandoff: handoff,
+      skipped_by_allowlist: uniqueClientCount([
+        ...skippedIds((clients ?? []) as MessengerSyncClient[], (client) => client.id, pageRoster.kept),
+        ...mailSkippedClientIds,
+      ]),
     },
   })
 
@@ -200,8 +209,11 @@ async function syncConnectedMailboxes() {
     .eq('provider', MICROSOFT_MAIL_PROVIDER)
     .eq('status', CONNECTION_STATUS.ACTIVE)
 
-  const connections = (conns ?? []) as { id: string; client_id: string; account_id: string }[]
-  if (connections.length === 0) return []
+  const rows = (conns ?? []) as { id: string; client_id: string; account_id: string }[]
+  const mailboxRoster = partitionExternalDataPull(rows, (row) => row.client_id)
+  const connections = mailboxRoster.kept
+  const skippedClientIds = skippedIds(rows, (row) => row.client_id, connections)
+  if (connections.length === 0) return { results: [], skippedClientIds }
 
   // leads_config 一起取回来：里面有设置页填的「客户自己的邮件域名」（关联公司），
   // 官网域名和收信域名都覆盖不到它 —— 漏了它同事来信会被当成新客人建档。
@@ -239,5 +251,24 @@ async function syncConnectedMailboxes() {
 
   const out = []
   for (const t of targets) out.push(await syncMailbox(t))
-  return out
+  return { results: out, skippedClientIds }
+}
+
+function skippedIds<T>(rows: readonly T[], idOf: (row: T) => string, kept: readonly T[]): string[] {
+  const keptIds = new Set(kept.map((row) => idOf(row).trim().toLowerCase()))
+  const skipped = new Set<string>()
+  for (const row of rows) {
+    const id = idOf(row).trim().toLowerCase()
+    if (id.length > 0 && !keptIds.has(id)) skipped.add(id)
+  }
+  return [...skipped]
+}
+
+function uniqueClientCount(ids: readonly string[]): number {
+  const seen = new Set<string>()
+  for (const id of ids) {
+    const key = id.trim().toLowerCase()
+    if (key.length > 0) seen.add(key)
+  }
+  return seen.size
 }

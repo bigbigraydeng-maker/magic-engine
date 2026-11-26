@@ -12,6 +12,7 @@
  * （联系页等其它表单的线索进得来，只算「只验证了其它表单」）。所以这里写的必须是广告真正点进去的那些页面。
  */
 
+import { filterClientIdsForExternalDataPull } from '@/lib/clients/external-data-pull-allowlist'
 import type { TrackingClientConfig } from './types'
 
 const CTS_CLIENT_ID = 'c0000000-0000-0000-0000-000000000000'
@@ -71,6 +72,7 @@ const BY_CLIENT: Readonly<Record<string, TrackingClientConfig>> = {
         { campaign_id: '52558359035473', kind: 'awareness', label: '播放量系列' },
         { campaign_id: '52558367358873', kind: 'whatsapp', label: 'WhatsApp 系列' },
         { campaign_id: '120250459565520307', kind: 'lead_form', label: '表单留资系列（7274）', ad_account_id: 'act_2775766642787274' },
+        { campaign_id: '120250648033050307', kind: 'lead_form', label: '扩量系列（Advantage+）', ad_account_id: 'act_2775766642787274' },
       ],
     },
   },
@@ -83,5 +85,5 @@ export function getTrackingClientConfig(clientId: string): TrackingClientConfig 
 
 /** 所有配置了追踪检查的客户（每日检查会逐个跑）。 */
 export function listTrackingClientIds(): string[] {
-  return Object.keys(BY_CLIENT)
+  return filterClientIdsForExternalDataPull(Object.keys(BY_CLIENT))
 }

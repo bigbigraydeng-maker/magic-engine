@@ -307,6 +307,49 @@ describe('大白话分段', () => {
     expect(still?.launch_check?.lines.join('\n')).not.toContain('达标')
   })
 
+  it('方案页把目标的时间范围带给开投后检查：每天上限、整个周期总数不算「认不出来」', async () => {
+    db.tables.prescriptions = [rx({
+      id: 'rx-1',
+      status: 'approved',
+      approved_at: '2019-11-01T00:00:00.000Z',
+      content: content({
+        kpi_targets: [
+          { metric: '一条线索的成本，继续线 $12', current_value: null, target_value: 12, unit: 'NZD', timeframe: '最近 7 天' },
+          { metric: '每天花费节奏上限 $102.8', current_value: null, target_value: 102.8, unit: 'NZD', timeframe: '每天' },
+          { metric: '整个周期总花费上限（超了先问 Ray）', current_value: null, target_value: 3700, unit: 'NZD', timeframe: '2019-12-01 至 2020-01-31' },
+        ],
+      }),
+    })]
+    db.tables.marketing_plans = [{
+      client_id: CLIENT,
+      status: 'approved',
+      approved_at: '2019-12-01T00:00:00.000Z',
+      plan_data: { promo: { goal_id: GOAL } },
+    }]
+    db.tables.flywheel_actions = [{
+      client_id: CLIENT,
+      action_type: 'ads.create_ad',
+      payload: {
+        status: 'active',
+        campaignId: 'camp-1',
+        activation: { status: 'executed', authorized_at: '2020-01-01T00:00:00.000Z' },
+      },
+    }]
+    db.tables.ad_daily_insights = Array.from({ length: 14 }, (_, i) => ({
+      client_id: CLIENT,
+      level: 'campaign',
+      entity_id: 'camp-1',
+      ad_account_id: 'act_1',
+      insight_date: `2020-01-${String(i + 1).padStart(2, '0')}`,
+      spend: i === 0 ? 80 : 0,
+      results: i === 0 ? 12 : 0,
+    }))
+    const lines = (await loadLatestGoalPrescription(CLIENT, GOAL))?.launch_check?.lines.join('\n') ?? ''
+    expect(lines).toContain('第 7 天：达标')
+    expect(lines).not.toContain('认不出来')
+    expect(lines).toContain('另有 2 项')
+  })
+
   it('正文写了起算日就用它，不用写下时间', async () => {
     db.tables.prescriptions = [rx({
       id: 'rx-1',

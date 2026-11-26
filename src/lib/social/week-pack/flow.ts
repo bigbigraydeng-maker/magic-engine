@@ -12,7 +12,7 @@ import type { WeeklyPackCadence } from './cadence'
 import { buildWeekPackFacts, scopeHasDigest, weekPackSubject } from './facts'
 import { postLine, runReelLines, runStoryLine, type ReelPromoteResult, type StoryAuthResult } from './lines'
 import { unpublishedFailures } from './persist-held'
-import type { WeekPackLine, WeekPackManifest, WeekPackReceipt } from './types'
+import type { ReelListApproval, WeekPackLine, WeekPackManifest, WeekPackReceipt } from './types'
 
 export interface RevokeStoryResult {
   ok: boolean
@@ -27,6 +27,8 @@ export interface WeekPackPorts {
   accountLabel(clientId: string): Promise<string>
   cadence(): WeeklyPackCadence
   reelGoPublic: boolean
+  /** Card confirm arms a publish-on-its-day grant instead of publishing now. */
+  reelScheduled?: boolean
   issueCard(facts: CardFacts): Promise<ConfirmationCardView>
   decideCard(input: {
     runId: string
@@ -37,6 +39,8 @@ export interface WeekPackPorts {
   authorizeStory(packId: string, contentHash: string): Promise<StoryAuthResult>
   revokeStory(packId: string, reason: string): Promise<RevokeStoryResult>
   promoteReel(workOrderId: string, previewToken: string): Promise<ReelPromoteResult>
+  /** Scheduled mode: approve the ticked reels from the server-rebuilt week list (content fingerprints, no preview tokens). */
+  approveReels?(approvals: readonly ReelListApproval[]): Promise<WeekPackLine[]>
   recordUnpublished(input: { runId: string; clientId: string; lines: WeekPackLine[] }): Promise<'saved' | 'failed'>
   voidPending(subjectKey: string): Promise<'voided' | 'failed'>
 }
@@ -76,6 +80,7 @@ export async function confirmWeekPack(args: {
   expectedDecisionId: string
   fingerprint: string
   tokens: ReadonlyMap<string, string>
+  reelApprovals?: readonly ReelListApproval[]
   ports: WeekPackPorts
 }): Promise<FlowResult> {
   const gate = gateClick(args.clicker, args.clientId, args.enabled)
@@ -95,7 +100,7 @@ export async function confirmWeekPack(args: {
     return refused(error)
   }
   if (card.status !== 'confirmed') return stopped(args.clientId, manifest, card, built.facts.subjectKey)
-  const lines = await applyConfirmed(manifest, args.ports, args.tokens)
+  const lines = await applyConfirmed(manifest, args.ports, args.tokens, args.reelApprovals ?? [])
   await rememberFailures(args.ports, args.clientId, card.runId, lines)
   return done(args.clientId, manifest, card, built.facts.subjectKey, lines)
 }
@@ -178,7 +183,7 @@ function gateClick(clicker: CardClicker, clientId: string, enabled: boolean): Fl
 
 async function factsFor(clientId: string, manifest: WeekPackManifest, ports: WeekPackPorts) {
   const accountLabel = await ports.accountLabel(clientId)
-  return buildWeekPackFacts({ manifest, accountLabel, reelGoPublic: ports.reelGoPublic })
+  return buildWeekPackFacts({ manifest, accountLabel, reelGoPublic: ports.reelGoPublic, reelScheduled: ports.reelScheduled })
 }
 
 function sameList(built: { fingerprint: string; digest: string; facts: CardFacts }, fingerprint: string): boolean {
@@ -212,8 +217,10 @@ async function applyConfirmed(
   manifest: WeekPackManifest,
   ports: WeekPackPorts,
   tokens: ReadonlyMap<string, string>,
+  reelApprovals: readonly ReelListApproval[],
 ): Promise<WeekPackLine[]> {
   const story = await runStoryLine(manifest, (packId, hash) => ports.authorizeStory(packId, hash))
+  if (ports.reelScheduled && ports.approveReels) return [story, postLine(), ...(await ports.approveReels(reelApprovals))]
   const reels = await runReelLines(
     manifest,
     ports.reelGoPublic,

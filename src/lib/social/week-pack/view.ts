@@ -24,6 +24,8 @@ export interface WeekPackPage {
   success: true
   enabled: boolean
   reel_go_public: boolean
+  /** Reels go public on their own day (switch on): the page shows the week list instead of per-reel previews. */
+  reel_scheduled: boolean
   headline: string
   lines: string[]
   posts_line: string
@@ -44,6 +46,7 @@ export function displayScope(scope: string): string {
 export function toWeekPackPage(input: {
   enabled: boolean
   reelGoPublic: boolean
+  reelScheduled?: boolean
   cadence: WeeklyPackCadence
   configReadable?: boolean
   manifest: WeekPackManifest | null
@@ -58,6 +61,7 @@ export function toWeekPackPage(input: {
     success: true,
     enabled: input.enabled,
     reel_go_public: input.reelGoPublic,
+    reel_scheduled: input.reelScheduled === true,
     headline: headline(input.enabled, input.card),
     lines,
     posts_line: POSTS_LINE,

@@ -47,3 +47,26 @@ export async function loadHeroDataUri(name: string): Promise<string | null> {
 export async function heroForTrip(trip: { title?: string; route?: string[] }): Promise<string | null> {
   return loadHeroDataUri(pickHeroName(trip))
 }
+
+/** 原始图片字节（Word 导出用）；名字不合法或读不到时返回 null。 */
+export async function loadHeroBuffer(name: string): Promise<Buffer | null> {
+  if (!/^[a-z0-9-]+$/.test(name)) return null
+  try {
+    return await readFile(path.join(HERO_DIR, `${name}.jpg`))
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 换封面面板里的小缩略图（320×200，heroes/thumbs/）。
+ * 原图每张 150–250KB，四十多张一次全拉会让面板卡好几秒，所以单独存一份小图。
+ */
+export async function loadHeroThumb(name: string): Promise<Buffer | null> {
+  if (!/^[a-z0-9-]+$/.test(name)) return null
+  try {
+    return await readFile(path.join(HERO_DIR, 'thumbs', `${name}.jpg`))
+  } catch {
+    return null
+  }
+}

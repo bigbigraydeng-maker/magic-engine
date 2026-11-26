@@ -145,6 +145,7 @@ describe('attemptPlanDraft', () => {
     if (step.kind !== 'ads_campaign') throw new Error('expected an ads step')
     expect(step.settings.audience_ref).toBe('')
     expect(step.settings.targeting?.countries).toEqual(['AU'])
+    expect(row.plan_data.promo.delivery?.stage).toBe('test')
     expect(parsePromoSpec(row.plan_data.promo).ok).toBe(true)
     expect(used.scheduleRetry).not.toHaveBeenCalled()
   })

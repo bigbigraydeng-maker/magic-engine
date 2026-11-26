@@ -16,6 +16,7 @@ export type CommentIntent =
   | 'faq_itinerary'
   | 'faq_visa'
   | 'faq_signup'
+  | 'praise'
   | 'price'
   | 'complaint'
   | 'refund'
@@ -108,6 +109,8 @@ const PRICE_ASCII = [
   'pricing',
   'priced',
   'how much',
+  'cost',
+  'costs',
   'quotation',
   'quote',
   'fee',
@@ -125,7 +128,7 @@ const PRICE_ASCII = [
 ]
 const PRICE_CJK = ['报价', '多少钱', '价格', '价钱', '费用', '收费', '团费', '怎么收', '折扣', '优惠', '订金', '押金', '人均']
 
-const FAQ_ITINERARY_ASCII = ['itinerary', 'schedule', 'day trip', 'days tour', 'what included']
+const FAQ_ITINERARY_ASCII = ['itinerary', 'schedule', 'agenda', 'day trip', 'days tour', 'what included']
 const FAQ_ITINERARY_CJK = ['行程', '几晚', '几天', '包含什么', '包括什么', '路线']
 
 const FAQ_VISA_ASCII = ['visa', 'immigration', 'entry requirement']
@@ -223,6 +226,13 @@ export function routeComment(input: CommentRoutingInput): CommentRoutingResult {
 
   if (includesAsciiPhrase(folded, GREETING_ASCII) || includesCjkPhrase(folded, GREETING_CJK)) {
     return { route: 'auto_ok', intent: 'greeting', guide_to_dm: false }
+  }
+
+  // Genuine praise (classifier category) with none of the human-only keywords
+  // above. The reply text is the guardrailed praise template/draft (no digit,
+  // link or claim), so it is safe to send without a person.
+  if (input.category === 'praise') {
+    return { route: 'auto_ok', intent: 'praise', guide_to_dm: false }
   }
 
   return { route: 'human', intent: 'unknown', guide_to_dm: false }

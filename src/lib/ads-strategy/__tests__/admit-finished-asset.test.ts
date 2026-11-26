@@ -4,6 +4,7 @@ import {
   accountUploadReceipt,
   admitFinishedAsset,
   creativePoolUploadEnabled,
+  externalUploadPath,
   factoryPublicVideoUrl,
   pickPrimaryAdAccount,
   reusableVideoId,
@@ -116,28 +117,20 @@ describe('admitFinishedAsset', () => {
     expect(remember).not.toHaveBeenCalled()
   })
 
-  it('uploads to the primary account and returns the video id without writing the pool', async () => {
-    const { d, upload, remember } = deps()
+  it('refuses a new upload because acceptance has no confirmation card', async () => {
+    const { d, upload, remember, token } = deps()
     const result = await admitFinishedAsset(order(), d)
-    expect(result).toEqual({ ok: true, action: 'uploaded', videoId: '555', accountId: ACCOUNT })
-    expect(upload).toHaveBeenCalledWith(
-      ACCOUNT,
-      'https://files.example.test/storage/v1/object/public/content-factory/renders/c-1/wo-1/final.mp4',
-      'tok',
-      'asset wo-1',
-    )
-    expect(remember).toHaveBeenCalledWith('555', ACCOUNT)
-  })
-
-  it('does not remember a non-numeric video id', async () => {
-    const { d, remember } = deps({ upload: vi.fn(async () => ({ ok: true as const, videoId: 'clip.mp4' })) })
-    const result = await admitFinishedAsset(order(), d)
-    expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.status).toBe(422)
+    expect(result).toEqual({
+      ok: false,
+      status: 409,
+      error: '成片验收不能直接传到广告账户。这里没有确认卡，没有上传。',
+    })
+    expect(upload).not.toHaveBeenCalled()
     expect(remember).not.toHaveBeenCalled()
+    expect(token).not.toHaveBeenCalled()
   })
 
-  it('refuses a path that is not this order’s render file', async () => {
+  it('refuses a path that is not this order’s render file without uploading', async () => {
     const { d, upload } = deps()
     const result = await admitFinishedAsset(order({ videoPath: 'https://evil.example/renders/c-1/wo-1/final.mp4' }), d)
     expect(result.ok).toBe(false)
@@ -169,11 +162,13 @@ describe('admitFinishedAsset', () => {
     expect(token).not.toHaveBeenCalled()
   })
 
-  it('stops before remembering when Meta rejects the upload', async () => {
-    const { d, remember } = deps({ upload: vi.fn(async () => ({ ok: false as const, error: 'HTTP 500' })) })
+  it('does not call the uploader when Meta would have rejected it', async () => {
+    const upload = vi.fn(async () => ({ ok: false as const, error: 'HTTP 500' }))
+    const { d, remember } = deps({ upload })
     const result = await admitFinishedAsset(order(), d)
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.status).toBe(502)
+    if (!result.ok) expect(result.status).toBe(409)
+    expect(upload).not.toHaveBeenCalled()
     expect(remember).not.toHaveBeenCalled()
   })
 })
@@ -199,5 +194,25 @@ describe('url and receipt helpers', () => {
     expect(reusableVideoId(ref, ACCOUNT)).toBe('555')
     expect(reusableVideoId(ref, OTHER)).toBeNull()
     expect(reusableVideoId({ ...ref, meta_video_source: 'hand' }, ACCOUNT)).toBeNull()
+  })
+})
+
+describe('finished videos admitted from outside the factory', () => {
+  it('accepts only <clientId>/external/<file> for this client', () => {
+    expect(externalUploadPath('c-1/external/bf.mp4', 'c-1')).toBe('c-1/external/bf.mp4')
+    expect(externalUploadPath('c-2/external/bf.mp4', 'c-1')).toBeNull()
+    expect(externalUploadPath('c-1/external/../x.mp4', 'c-1')).toBeNull()
+    expect(externalUploadPath('/c-1/external/bf.mp4', 'c-1')).toBeNull()
+    expect(externalUploadPath('https://x/c-1/external/bf.mp4', 'c-1')).toBeNull()
+    expect(externalUploadPath('c-1/external/', 'c-1')).toBeNull()
+    expect(externalUploadPath('c-1/renders/bf.mp4', 'c-1')).toBeNull()
+  })
+
+  it('builds the public URL for an external upload, still refusing traversal and plain http', () => {
+    expect(factoryPublicVideoUrl('c-1/external/bf.mp4', 'https://files.example.test/bucket'))
+      .toBe('https://files.example.test/bucket/c-1/external/bf.mp4')
+    expect(factoryPublicVideoUrl('c-1/external/../bf.mp4', 'https://files.example.test/bucket')).toBeNull()
+    expect(factoryPublicVideoUrl('c-1/other/bf.mp4', 'https://files.example.test/bucket')).toBeNull()
+    expect(factoryPublicVideoUrl('c-1/external/bf.mp4', 'http://files.example.test/bucket')).toBeNull()
   })
 })

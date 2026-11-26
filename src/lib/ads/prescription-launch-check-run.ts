@@ -4,8 +4,8 @@
  */
 
 import {
-  judgeLaunch, linesForCard, matchLaunch, parseExecutedLaunches, planOutcomeWrites,
-  type ActionRow, type InsightRef, type KpiRef, type LaunchAssessment, type PlanRef,
+  combineLaunchAssessments, judgeLaunch, linesForCard, matchLaunch, parseExecutedLaunches, planOutcomeWrites,
+  type ActionRow, type InsightRef, type KpiRef, type LaunchAssessment, type LaunchRef, type PlanRef,
   type PrescriptionRef, type SiblingRef,
 } from './prescription-launch-check'
 
@@ -52,6 +52,12 @@ export interface LaunchCheckReceipt {
   outcomes_skipped: number
   unsaved: number
   failed: number
+  /** Due checks that had no prescription_cases row. Not written, and not invented. */
+  missing_case: number
+  /** Due sentences kept on the receipt when the case row is missing. Bounded. */
+  held: string[]
+  /** Save errors kept so a failed write is visible on the next read of this run. Bounded. */
+  save_errors: string[]
 }
 
 interface Counts {
@@ -60,7 +66,13 @@ interface Counts {
   outcomes_skipped: number
   unsaved: number
   failed: number
+  missing_case: number
+  held: string[]
+  save_errors: string[]
 }
+
+const HELD_LIMIT = 20
+const ERROR_LIMIT = 5
 
 export async function runWithStore(store: LaunchCheckStore, now: Date): Promise<LaunchCheckReceipt> {
   const scanned = await store.listAllActions()
@@ -86,13 +98,7 @@ export async function readOneLaunch(store: LaunchCheckStore, input: {
     missingCampaign: parsed.missingCampaign > 0,
   })
   if (match.kind !== 'matched') return { lines: match.lines }
-  const assessment = judgeLaunch({
-    launch: match.launch,
-    insights: await store.listInsights(input.clientId, match.launch.campaignId),
-    kpis: input.kpis,
-    now: input.now,
-    accountTimezone: await store.readAccountTimezone(input.clientId, match.launch.campaignId),
-  })
+  const assessment = await assessLaunches(store, input.clientId, match.launches, input.kpis, input.now)
   const caseId = await store.findCaseId(input.prescription.id)
   return { lines: linesForCard(assessment, caseId !== null) }
 }
@@ -136,18 +142,32 @@ async function checkOne(
       missingCampaign: parsed.missingCampaign > 0,
     })
     if (match.kind !== 'matched') return counts
-    const assessment = judgeLaunch({
-      launch: match.launch,
-      insights: await store.listInsights(prescription.clientId, match.launch.campaignId),
-      kpis: prescription.kpis,
-      now,
-      accountTimezone: await store.readAccountTimezone(prescription.clientId, match.launch.campaignId),
-    })
+    const assessment = await assessLaunches(store, prescription.clientId, match.launches, prescription.kpis, now)
     addCounts(counts, await persist(store, prescription, assessment))
   } catch {
     counts.failed += 1
   }
   return counts
+}
+
+async function assessLaunches(
+  store: LaunchCheckStore,
+  clientId: string,
+  launches: readonly LaunchRef[],
+  kpis: readonly KpiRef[],
+  now: Date,
+): Promise<LaunchAssessment> {
+  const parts: LaunchAssessment[] = []
+  for (const launch of launches) {
+    parts.push(judgeLaunch({
+      launch,
+      insights: await store.listInsights(clientId, launch.campaignId),
+      kpis,
+      now,
+      accountTimezone: await store.readAccountTimezone(clientId, launch.campaignId),
+    }))
+  }
+  return combineLaunchAssessments(parts)
 }
 
 async function persist(
@@ -159,17 +179,32 @@ async function persist(
   const due = assessment.checkpoints.filter(point => point.due && point.verdict !== 'pending')
   const caseId = await store.findCaseId(prescription.id)
   if (!caseId) {
-    if (due.length > 0) counts.unsaved += 1
+    holdMissingCase(counts, prescription.id, due)
     return counts
   }
   const writes = planOutcomeWrites(assessment.checkpoints, await store.listOutcomes(caseId))
   counts.outcomes_skipped += due.length - writes.length
   for (const write of writes) {
-    const saved = await applyWrite(store, prescription, caseId, write)
-    if (saved) counts.outcomes_written += 1
-    else counts.failed += 1
+    const error = await applyWrite(store, prescription, caseId, write)
+    if (!error) counts.outcomes_written += 1
+    else noteSaveError(counts, error)
   }
   return counts
+}
+
+function holdMissingCase(counts: Counts, prescriptionId: string, due: LaunchAssessment['checkpoints']): void {
+  if (due.length === 0) return
+  counts.unsaved += 1
+  counts.missing_case += 1
+  for (const point of due) {
+    if (counts.held.length >= HELD_LIMIT) return
+    counts.held.push(`${prescriptionId}: ${point.sentence}`)
+  }
+}
+
+function noteSaveError(counts: Counts, error: string): void {
+  counts.failed += 1
+  if (counts.save_errors.length < ERROR_LIMIT) counts.save_errors.push(error)
 }
 
 async function applyWrite(
@@ -177,7 +212,7 @@ async function applyWrite(
   prescription: StoredPrescription,
   caseId: string,
   write: ReturnType<typeof planOutcomeWrites>[number],
-): Promise<boolean> {
+): Promise<string | null> {
   try {
     if (write.op === 'insert') {
       await store.insertOutcome({
@@ -191,9 +226,9 @@ async function applyWrite(
     } else {
       await store.updateOutcome(write.id, { unit: write.unit, dimension: write.dimension })
     }
-    return true
-  } catch {
-    return false
+    return null
+  } catch (error) {
+    return error instanceof Error ? error.message : 'launch check save failed'
   }
 }
 
@@ -217,7 +252,16 @@ function emptyReceipt(partial: boolean, launches: number): LaunchCheckReceipt {
 }
 
 function emptyCounts(): Counts {
-  return { prescriptions_checked: 0, outcomes_written: 0, outcomes_skipped: 0, unsaved: 0, failed: 0 }
+  return {
+    prescriptions_checked: 0,
+    outcomes_written: 0,
+    outcomes_skipped: 0,
+    unsaved: 0,
+    failed: 0,
+    missing_case: 0,
+    held: [],
+    save_errors: [],
+  }
 }
 
 function addCounts(target: Counts, extra: Counts): void {
@@ -226,4 +270,14 @@ function addCounts(target: Counts, extra: Counts): void {
   target.outcomes_skipped += extra.outcomes_skipped
   target.unsaved += extra.unsaved
   target.failed += extra.failed
+  target.missing_case += extra.missing_case
+  pushCapped(target.held, extra.held, HELD_LIMIT)
+  pushCapped(target.save_errors, extra.save_errors, ERROR_LIMIT)
+}
+
+function pushCapped(target: string[], extra: readonly string[], limit: number): void {
+  for (const line of extra) {
+    if (target.length >= limit) return
+    target.push(line)
+  }
 }

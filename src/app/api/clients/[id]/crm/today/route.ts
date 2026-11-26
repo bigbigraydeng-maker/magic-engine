@@ -36,6 +36,9 @@ import { WORKLIST_GROUPS, groupDisplayMeta } from '@/lib/crm/worklist-groups'
 import { contactCardTitle } from '@/lib/crm/display-name'
 import { followUpMarks } from '@/lib/crm/follow-up-marks'
 import { contactsTouchedToday, dayWorklist, localDayStartMs } from '@/lib/crm/day-list'
+import { applyTakeoverToDayList } from '@/lib/crm/ai-takeover/day-list-filter'
+import { toReengageTouchRow } from '@/lib/crm/ai-takeover/came-back'
+import { loadTakeoverSince } from '@/lib/crm/ai-takeover/prod'
 import { loadStageSuppressedTodayIds } from '@/lib/crm/day-stage-events'
 import { stageSuppressesWorklist, isMarketingAction } from '@/lib/crm/pipeline'
 import { isAutomatedTouch } from '@/lib/crm/automated-touch'
@@ -45,7 +48,9 @@ import {
   readDomainRules,
   type ContactKind,
 } from '@/lib/crm/contact-kind'
-import { fetchAll } from '@/lib/supabase-paginate'
+import { fetchAll, fetchAllParallel } from '@/lib/supabase-paginate'
+import { finishShadowCompare, readListVersion, shadowEnabled } from '@/lib/crm/list-read-shadow'
+import { loadSiteReading } from '@/lib/crm/email-templates/link-tracking/site-reading-prod'
 
 interface RouteParams {
   params: { id: string }
@@ -135,6 +140,9 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   let emailIdentities: IdentityRow[]
   let touches: TouchRow[]
   let stageRows: StageRow[]
+  // Shadow comparison (design slice 2): read the list version before any data read starts.
+  const shadow = shadowEnabled()
+  const versionBefore = shadow ? await readListVersion(supabaseAdmin, clientId) : null
   try {
     ;[contacts, emailIdentities, touches, stageRows] = await Promise.all([
       fetchAll<ContactRow>((from, to) =>
@@ -159,13 +167,18 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
           .order('contact_id', { ascending: true })
           .range(from, to),
       ),
-      fetchAll<TouchRow>((from, to) =>
-        supabaseAdmin
-          .from('contact_touchpoints')
-          .select('contact_id, channel, direction, occurred_at, summary, raw, metadata, source')
-          .eq('client_id', clientId)
-          .order('occurred_at', { ascending: false })
-          .range(from, to),
+      // Ten pages for CTS: read them at once instead of one after another.
+      // `id` is the tie-break that keeps page boundaries stable and proves completeness.
+      fetchAllParallel<TouchRow & { id: string }>(
+        (from, to, withCount) =>
+          supabaseAdmin
+            .from('contact_touchpoints')
+            .select('id, contact_id, channel, direction, occurred_at, summary, raw, metadata, source', withCount ? { count: 'exact' } : undefined)
+            .eq('client_id', clientId)
+            .order('occurred_at', { ascending: false })
+            .order('id', { ascending: false })
+            .range(from, to),
+        (row) => row.id,
       ),
       fetchAll<StageRow>((from, to) =>
         supabaseAdmin
@@ -221,6 +234,17 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     // 同上：读不到就按没配处理
   }
 
+  if (shadow) {
+    finishShadowCompare(supabaseAdmin, 'today', clientId, versionBefore, {
+      contacts,
+      identities: emailIdentities,
+      touchpoints: touches,
+      stages: stageRows,
+      quotedNames: [...quotedNames].sort(),
+      client: [clientRow],
+    })
+  }
+
   const byContact = new Map<string, TouchRow[]>()
   for (const t of touches) {
     const list = byContact.get(t.contact_id) ?? []
@@ -254,6 +278,8 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
    * 判据全在 lib/crm/contact-kind，按域名算，不存列（域名清单一改就该跟着变）。
    */
   const rules = readDomainRules(clientRow?.leads_config)
+  // 近 7 天谁在官网看手册 / 团页面 —— 读不到就是空的，名单照常出。
+  const siteReading = await loadSiteReading(supabaseAdmin, clientId, new Date())
   const emailsByContact = new Map<string, string[]>()
   for (const c of contacts) if (c.primary_email) emailsByContact.set(c.id, [c.primary_email])
   for (const i of emailIdentities) {
@@ -324,6 +350,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       hasPhone: !!c.primary_phone,
       hasEmail: !!c.primary_email,
       hasMessenger: tps.some((t) => t.channel === 'messenger'),
+      siteReading: siteReading.get(c.id) ?? null,
     }
   })
 
@@ -409,6 +436,19 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       touchedToday: (id) => touchedTodayIds.has(id),
     },
   )
+
+  // AI 接管中的客人不进「今天要联系」；接管后客人回来了才重新出现，标「客人回来了」（lib/crm/ai-takeover）。
+  // 读不到接管名单就当没有人在接管 —— 跟这个功能上线前一样，整页照常打开。
+  const takeoverSince = await loadTakeoverSince(clientId).catch((err: unknown) => {
+    console.warn('[crm/today] 读 AI 接管名单失败，按无人接管显示:', err instanceof Error ? err.message : err)
+    return new Map<string, string>()
+  })
+  const shown = applyTakeoverToDayList(ranked, {
+    takeoverSince,
+    touchesOf: (id) => (byContact.get(id) ?? []).map(toReengageTouchRow),
+    dayStartMs: localDayStartMs(now, timeZone),
+    now,
+  })
 
   /**
    * 系统提议改阶段 —— 提议，不自动改。
@@ -602,7 +642,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     }
   }
 
-  const toRow = (c: (typeof ranked)[number]) => {
+  const toRow = (c: (typeof shown)[number]) => {
     const row = contactById.get(c.id)
     const last = (byContact.get(c.id) ?? [])[0]
     // 早上打开这一页要一眼看懂：今天动过没有、上次谁跟的、聊到哪了。
@@ -666,8 +706,14 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       suggestedChannel: c.seg.suggestedChannel,
       /** 号码在库里但打不通 —— 卡片靠它把「没留电话」和「号是坏的」分开说。 */
       phoneUnusable: c.seg.phoneUnusable ?? false,
+      /** 客人说过不要电话（只关电话，邮件照常）—— 抽屉据此藏拨号、显示撤销条。 */
+      doNotCall: c.seg.doNotCall === true,
       /** 被标成「别再联系」—— 抽屉靠它给出取消入口（早前判词误判过一批人）。 */
       doNotContact: c.doNotContact === true,
+      /** AI 跟进中（接管后客人回来了才会出现在这里）。 */
+      aiTakeover: c.takeover.aiTakeover,
+      /** 接管期间客人回信 / 填表 / 来电 / 发私信了 —— 卡片标「客人回来了」。 */
+      customerCameBack: c.takeover.cameBack !== null,
       dueAt: c.seg.dueAt,
       lastTouchAt: c.seg.lastTouchAt,
       lastNote: last?.summary ?? null,
@@ -699,7 +745,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   // 展示用分桶在 lib/crm/worklist-groups 里，不在这个文件里 —— 它漏一行就会让
   // 整段客人从页面上消失（2026-08-02 的 33 人事故），必须能被测试钉住。
   const buckets = WORKLIST_GROUPS.map(({ key, members, layer }) => {
-    const all = ranked
+    const all = shown
       .filter((c) => members.includes(c.seg.segment))
       // 置顶的排最前（多个置顶按最近钉的在上）。只在桶内生效 ——
       // 跨桶置顶会让人脱离「这批该怎么办」的说明，反而不知道要干嘛。
@@ -780,6 +826,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
          * 点开它就能拨那个已知打不通的号，是这一组里最不该出现的事。
          */
         phoneUnusable: seg.phoneUnusable ?? false,
+        doNotCall: seg.doNotCall === true,
         /** 「要记住的事」—— 见上面那一处同名字段的注释，两处必须一致。 */
         important: { note: row?.important_note ?? null, dueAt: row?.important_due_at ?? null },
         /** 被标成「别再联系」—— 抽屉靠它给出取消入口。 */
@@ -849,7 +896,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     viewerEmail: access.user.email ?? null,
     counts: segmentCounts(models, now),
     totalContacts: models.length,
-    todoTotal: ranked.length,
+    todoTotal: shown.length,
     generatedAt: now.toISOString(),
   })
 }

@@ -18,7 +18,7 @@ const providerVars: Readonly<Record<string, VariableSpec>> = {
 
 describe('constants', () => {
   it('exposes common variables', () => {
-    expect(COMMON_VARIABLES).toEqual(['first_name', 'sender_name', 'call_when'])
+    expect(COMMON_VARIABLES).toEqual(['first_name', 'sender_name', 'call_when', 'catalogue_url'])
   })
 
   it('input variable regex accepts lowercase names', () => {

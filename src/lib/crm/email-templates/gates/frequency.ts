@@ -34,12 +34,16 @@ function parseAt(at: string): number | null {
 // These sources hold ONE record per mail by construction (a mailbox lists each sent mail once, every send writes one
 // audit row, every campaign is its own id). Two of their records are therefore two mails unless they carry the same id —
 // "same minute, same subject" must never fold two real mails into one, because folding can only UNDER-count.
-const ONE_RECORD_PER_MAIL: ReadonlySet<OutboundSource> = new Set(['sent_items', 'audit', 'mailchimp'])
+const ONE_RECORD_PER_MAIL: ReadonlySet<OutboundSource> = new Set(['sent_items', 'audit', 'mailchimp', 'me_send'])
 // The mailbox and our audit rows use the same id space (Graph immutable ids): equal = the same mail, different = not.
 const GRAPH_ID_SOURCES: ReadonlySet<OutboundSource> = new Set(['sent_items', 'audit'])
 
 function sameMessage(a: OutboundItem, b: OutboundItem): boolean {
   if (a.id !== null && b.id !== null && a.id === b.id) return true
+  // ME's own automated mails go out through Resend and have no copy in any other source, so only the same id makes two
+  // records one mail. Without this, the "same minute, one subject empty" rule below folds them into a sales record
+  // that carries no subject (audit rows, human touchpoints) and the guest is counted one mail short.
+  if (a.automated === true || b.automated === true) return false
   if (a.id !== null && b.id !== null && GRAPH_ID_SOURCES.has(a.source) && GRAPH_ID_SOURCES.has(b.source)) return false
   if (a.source === b.source && ONE_RECORD_PER_MAIL.has(a.source)) return false
   if (a.address.toLowerCase() !== b.address.toLowerCase()) return false
@@ -150,14 +154,15 @@ async function collect(
   },
 ): Promise<Collected | Failed> {
   const { addresses, contactId, sinceIso, sources, loadExemptIds } = args
-  const [sent, audit, touch, mail, exempt] = await Promise.all([
+  const [sent, audit, touch, mail, me, exempt] = await Promise.all([
     safeCall(() => sources.sentItems(addresses, sinceIso)),
     safeCall(() => sources.audit(contactId, sinceIso)),
     safeCall(() => sources.touchpoints(contactId, sinceIso)),
     safeCall(() => sources.mailchimp(addresses, sinceIso)),
+    safeCall(() => sources.meSends(addresses, sinceIso)),
     safeIds(loadExemptIds, sinceIso),
   ])
-  const results: SourceResult[] = [sent, audit, touch, mail]
+  const results: SourceResult[] = [sent, audit, touch, mail, me]
   const errors: string[] = []
   const items: OutboundItem[] = []
   for (const r of results) {

@@ -34,6 +34,11 @@ export function expectedIntervalHours(schedule: string): number | null {
   const minuteList = minuteListIntervalHours(min, hour, dom, dow)
   if (minuteList !== null) return minuteList
 
+  // 每月固定一天（如 0 9 1 * * 经销商月结）：按最长的月份算 31 天，免得短月份误报逾期
+  if (/^\d+$/.test(min) && /^\d+$/.test(hour) && /^([1-9]|1\d|2[0-8])$/.test(dom) && dow === '*') {
+    return 31 * 24
+  }
+
   // 固定时刻：看星期字段决定是每天还是每周
   if (/^\d+$/.test(min) && /^\d+$/.test(hour) && dom === '*') {
     if (dow === '*') return 24 // 每天

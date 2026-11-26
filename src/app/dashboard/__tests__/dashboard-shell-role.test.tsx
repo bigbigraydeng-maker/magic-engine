@@ -34,7 +34,7 @@ describe('工作区侧栏身份', () => {
     expect(screen.queryByText('视频工厂')).not.toBeInTheDocument()
   })
 
-  it('内部账号仍显示 Admin cockpit', () => {
+  it('内部账号走 FDE 壳：客户页显示客户工作台侧栏', () => {
     render(
       <DashboardShell
         {...base}
@@ -44,7 +44,8 @@ describe('工作区侧栏身份', () => {
         exactGlobalAdmin
       />,
     )
-    expect(screen.getByText('Admin cockpit')).toBeInTheDocument()
-    expect(screen.getByText('视频工厂')).toBeInTheDocument()
+    expect(screen.getAllByText('客户工作台').length).toBeGreaterThan(0)
+    expect(screen.getByRole('link', { name: /概览/ })).toBeInTheDocument()
+    expect(screen.queryByText('My client')).not.toBeInTheDocument()
   })
 })

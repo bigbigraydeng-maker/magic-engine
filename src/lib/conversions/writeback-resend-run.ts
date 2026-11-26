@@ -28,7 +28,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ClientSendConfig } from './destination-writer'
-import { sendApprovedOutcome, type SendDeps, type WritebackStatus } from './writeback-service'
+import { sendApprovedOutcome, type SendDeps, type SendOutcomeResult } from './writeback-service'
 
 /** 一次最多补发这么多条——限制单次运行的最坏影响范围（跟 AI 审核的 MAX_BATCH_SIZE 同理）。 */
 export const RESEND_MAX_PER_RUN = 50
@@ -37,7 +37,7 @@ export const RESEND_ACTOR = 'writeback-resend@system'
 /** 跟 writeback-service 的 STUCK_SENDING_MS 同值——超过这个时长的 `sending` 交给它转 in_doubt。 */
 const STUCK_SENDING_MS = 5 * 60_000
 
-export type ResendItem = { outcomeId: string; writebackId: string; status: WritebackStatus; message: string }
+export type ResendItem = { outcomeId: string; writebackId: string; status: SendOutcomeResult['status']; message: string }
 
 export type ResendSummary = {
   /** 挑出来的候选数（auth 失败 + 卡住的 sending）。 */
@@ -140,7 +140,7 @@ async function loadSendConfig(supabase: SupabaseClient, clientId: string): Promi
   return { clientId, defaultPhoneCountry: c.default_phone_country, facebookPageId: c.facebook_page_id }
 }
 
-function tally(summary: ResendSummary, status: WritebackStatus): void {
+function tally(summary: ResendSummary, status: SendOutcomeResult['status']): void {
   if (status === 'confirmed') summary.sent++
   else if (status === 'expired_no_send') summary.expired++
   else if (status === 'failed') summary.stillFailed++

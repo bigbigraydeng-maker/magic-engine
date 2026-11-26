@@ -1,5 +1,6 @@
 // 供应商回调原始事件入库口的共享类型（P1：只接 Resend 的 system 账号）。
 // 设计稿：docs/specs/2026-11-01-me-provider-event-intake-p1-design-v0.md
+import type { ProviderEventReceivedEvent } from './events'
 
 export const RESEND_ACCOUNTS = ['system'] as const
 export type ResendAccount = (typeof RESEND_ACCOUNTS)[number]
@@ -58,6 +59,11 @@ export interface ResendWebhookInput {
   svixTimestamp: string | null
   svixSignature: string | null
   env: (name: string) => string | undefined
+  /**
+   * 入库成功（或重复）之后叫醒回执消费方（P2-2b，`crm.provider_event.received`）。发不出去就让本次请求失败（500），
+   * Resend 会重试；重试时入库得「重复」，仍会再发一次（事件号相同，Inngest 去重）。
+   */
+  emit: (event: ProviderEventReceivedEvent) => Promise<void>
   /** 仅测试用；缺省取当前时间 */
   nowSec?: number
 }

@@ -9,6 +9,7 @@ import { substitute, validateTemplateText } from './placeholders'
 import { TEMPLATE_KEY_RE } from './template-store'
 import { FACT_SOURCES } from './types'
 import type { EmailSettings, FactSource, PickFilter, PickMode, TemplateStatus } from './types'
+import { normalizeWhenToUse } from './when-to-use'
 
 export interface TemplateFields {
   name: string
@@ -19,6 +20,8 @@ export interface TemplateFields {
   pickFilter: PickFilter
   status: TemplateStatus
   changeNote: string | null
+  /** Present on writes from the API. Older seed objects omit it, which stores as null. */
+  whenToUse?: string | null
 }
 
 export type ParsedTemplateWrite =
@@ -27,7 +30,7 @@ export type ParsedTemplateWrite =
 
 const PICK_MODES: readonly PickMode[] = ['none', 'one', 'many']
 const STATUSES: readonly TemplateStatus[] = ['active', 'disabled']
-const FIELD_KEYS = ['name', 'subject', 'body', 'factSource', 'pickMode', 'pickFilter', 'status', 'changeNote']
+const FIELD_KEYS = ['name', 'subject', 'body', 'factSource', 'pickMode', 'pickFilter', 'status', 'changeNote', 'whenToUse']
 const CREATE_KEYS = new Set([...FIELD_KEYS, 'templateKey'])
 const UPDATE_KEYS = new Set([...FIELD_KEYS, 'baseVersion'])
 const FILTER_KEYS = new Set(['destinations', 'tiers', 'departureMonths'])
@@ -94,6 +97,8 @@ function parseFields(raw: Record<string, unknown>, statusRequired: boolean): Tem
   const resolvedStatus = status === undefined ? 'disabled' : status
   if (typeof resolvedStatus !== 'string' || !STATUSES.includes(resolvedStatus as TemplateStatus)) return '模板状态不对。'
   if (changeNote !== undefined && changeNote !== null && typeof changeNote !== 'string') return '变更说明要是文字。'
+  const whenToUse = normalizeWhenToUse(raw.whenToUse)
+  if (!whenToUse.ok) return '「什么时候用」要是不超过 200 字的文字。'
   const pickFilter = parseFilter(raw.pickFilter)
   if (pickFilter === null) return '适用团的过滤条件格式不对。'
   return {
@@ -105,6 +110,7 @@ function parseFields(raw: Record<string, unknown>, statusRequired: boolean): Tem
     pickFilter,
     status: resolvedStatus as TemplateStatus,
     changeNote: typeof changeNote === 'string' ? changeNote : null,
+    whenToUse: whenToUse.value,
   }
 }
 

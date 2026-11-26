@@ -2,7 +2,7 @@ import React from 'react'
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react'
 
-import AutonomySettings from '../autonomy-settings'
+import AutonomySettings, { autopilotTruth } from '../autonomy-settings'
 
 afterEach(() => {
   cleanup()
@@ -24,6 +24,9 @@ function stubFetch() {
       return Response.json({
         labels: { '111': { title: 'Best of China', subtitle: '15-second reel', publishedAt: '2026-10-11T08:05:56Z', url: 'https://www.facebook.com/reel/111' } },
       })
+    }
+    if (url.endsWith('/ad-accounts')) {
+      return Response.json({ accounts: [], client_total_cap_cents: 15000 })
     }
     return Response.json({ success: true, config })
   })
@@ -63,7 +66,7 @@ describe('AutonomySettings · 每个广告账户各自的日上限', () => {
     expect(screen.getByDisplayValue('40')).toBeTruthy()
     expect(screen.getByText(/\$40 \/ 天/)).toBeTruthy()
     expect(screen.getByText('未设')).toBeTruthy()
-    expect(screen.getByText('各账户加起来不能超过客户总闸；超了保存会被拒绝')).toBeTruthy()
+    expect(screen.getByText('各账户加起来不能超过已批准计划上的每天总上限；超了保存会被拒绝')).toBeTruthy()
   })
 
   it('保存时把元换成分，PATCH 发到那个账户自己的唯一入口', async () => {
@@ -104,7 +107,7 @@ describe('AutonomySettings · 每个广告账户各自的日上限', () => {
     expect(fn.mock.calls.some(c => String(c[0]).includes('/daily-cap'))).toBe(false)
   })
 
-  it('只绑 1 个账户时，清空的确认话要说明会回落成客户总闸（这是放宽）', async () => {
+  it('只绑 1 个账户时，清空的确认话要说明会回落成已批准计划上的每天总上限（这是放宽）', async () => {
     const fn = vi.fn(async (url: string) => {
       if (url.endsWith('/labels')) return Response.json({ labels: {} })
       if (url.endsWith('/ad-accounts')) {
@@ -124,7 +127,7 @@ describe('AutonomySettings · 每个广告账户各自的日上限', () => {
     // 页面底部主面板也有一个「保存」，账户行那个在前面
     fireEvent.click(screen.getAllByText('保存')[0])
     const asked = String(confirmSpy.mock.calls[0]?.[0] ?? '')
-    expect(asked).toContain('回落成客户总闸 $150 / 天')
+    expect(asked).toContain('回落成已批准计划上的每天总上限 $150 / 天')
     expect(asked).toContain('放宽')
     expect(fn.mock.calls.some(c => String(c[0]).includes('/daily-cap'))).toBe(false)
   })
@@ -151,8 +154,7 @@ describe('AutonomySettings · 每个广告账户各自的日上限', () => {
     await waitFor(() =>
       expect(screen.getByText('读不到各账户的每天上限，没有显示输入框（怕把真实值存成空白）')).toBeTruthy(),
     )
-    // 页面上只剩客户总闸那一个输入框（占位字同样是「未设」）；账户段一个都没渲染
-    expect(screen.getAllByPlaceholderText('未设')).toHaveLength(1)
+    expect(screen.queryAllByPlaceholderText('未设')).toHaveLength(0)
     expect(fn.mock.calls.some(c => String(c[0]).includes('/daily-cap'))).toBe(false)
   })
 })
@@ -246,9 +248,9 @@ describe('AutonomySettings', () => {
     stubFetch()
     render(<AutonomySettings clientId="c1" />)
     await waitFor(() => expect(screen.getByText('可用于广告的视频')).toBeTruthy())
-    expect(screen.getByDisplayValue('150')).toBeTruthy()
     expect(screen.getByText(/\$150 \/ 天/)).toBeTruthy()
-    expect(screen.getByText('在每天上限内自动调整预算 / 暂停广告（需要先设好上面的每天上限）')).toBeTruthy()
+    expect(screen.queryByTestId('save-total-cap')).toBeNull()
+    expect(screen.getByText('在每天上限内允许系统动钱（需要先设好上面的每天上限）')).toBeTruthy()
     await waitFor(() => expect(screen.getByText('Best of China')).toBeTruthy())
     expect(screen.getByText('未能识别，请核对')).toBeTruthy()
     expect(document.body.textContent).not.toContain('素材池')
@@ -402,19 +404,14 @@ describe('AutonomySettings', () => {
     vi.stubGlobal('fetch', fn)
     render(<AutonomySettings clientId="c1" />)
     await waitFor(() => expect(screen.getByText('可用于广告的视频')).toBeTruthy())
-    // 用户改了上限但没保存
-    fireEvent.change(screen.getByDisplayValue('150'), { target: { value: '200' } })
-    fireEvent.change(screen.getByPlaceholderText('添加待批准的视频（每行填一个 Facebook 视频编号）'), {
-      target: { value: '333' },
-    })
+    const textarea = screen.getByPlaceholderText('添加待批准的视频（每行填一个 Facebook 视频编号）')
+    fireEvent.change(textarea, { target: { value: '333' } })
     fireEvent.click(screen.getByText('保存'))
     await waitFor(() => expect(screen.getByText(conflictMessage)).toBeTruthy())
-    // 刷新后上限输入框仍是用户改的值，不是服务端的 150
-    expect(screen.getByDisplayValue('200')).toBeTruthy()
-    expect(screen.queryByDisplayValue('150')).toBeNull()
+    expect((textarea as HTMLTextAreaElement).value).toBe('333')
   })
 
-  it('批准遇 409：刷新不冲掉未保存的上限', async () => {
+  it('批准遇 409：刷新不冲掉未保存的视频编号', async () => {
     const conflictMessage = '素材池刚被别处改过，请刷新页面后再试。'
     const fn = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith('/labels')) return Response.json({ labels: {} })
@@ -427,11 +424,11 @@ describe('AutonomySettings', () => {
     vi.stubGlobal('confirm', vi.fn(() => true))
     render(<AutonomySettings clientId="c1" />)
     await waitFor(() => expect(screen.getAllByText('批准').length).toBe(2))
-    fireEvent.change(screen.getByDisplayValue('150'), { target: { value: '200' } })
+    const textarea = screen.getByPlaceholderText('添加待批准的视频（每行填一个 Facebook 视频编号）')
+    fireEvent.change(textarea, { target: { value: '333' } })
     fireEvent.click(screen.getAllByText('批准')[0])
     await waitFor(() => expect(screen.getByText(conflictMessage)).toBeTruthy())
-    expect(screen.getByDisplayValue('200')).toBeTruthy()
-    expect(screen.queryByDisplayValue('150')).toBeNull()
+    expect((textarea as HTMLTextAreaElement).value).toBe('333')
   })
 
   it('新编号去重并过滤已存在的：333 只出现一次，已存在的 111 不重复添加', async () => {
@@ -535,47 +532,43 @@ describe('AutonomySettings', () => {
     expect(patch).toBeFalsy()
   })
 
-  it('版本未知 + 改了上限 + 输入新编号：只保存上限，不带 creative_pool，编号还在', async () => {
+  it('版本未知时改模式仍保存，不带每天总上限，也不带素材池', async () => {
     const fn = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith('/labels')) return Response.json({ labels: {} })
+      if (url.endsWith('/ad-accounts')) return Response.json({ accounts: [], client_total_cap_cents: 15000 })
       if (init?.method === 'PATCH') return Response.json({ success: true, config })
       return Response.json({ success: true, config })
     })
     vi.stubGlobal('fetch', fn)
     render(<AutonomySettings clientId="c1" />)
-    await waitFor(() => expect(screen.getByText('可用于广告的视频')).toBeTruthy())
-    fireEvent.change(screen.getByDisplayValue('150'), { target: { value: '200' } })
-    const textarea = screen.getByPlaceholderText('添加待批准的视频（每行填一个 Facebook 视频编号）')
-    fireEvent.change(textarea, { target: { value: '333' } })
+    await waitFor(() => expect(screen.getByText(/\$150 \/ 天/)).toBeTruthy())
+    fireEvent.click(screen.getByRole('radio', { name: /在每天上限内允许系统动钱/ }))
     fireEvent.click(screen.getByText('保存'))
-    await waitFor(() => expect(screen.getByText(/预算\/模式已保存/)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('已保存')).toBeTruthy())
     const patch = fn.mock.calls.find(c => (c[1] as RequestInit | undefined)?.method === 'PATCH')
-    expect(patch).toBeTruthy()
     const body = JSON.parse(String((patch?.[1] as RequestInit).body)) as Record<string, unknown>
-    expect(body.daily_budget_cap_cents).toBe(20000)
-    expect('creative_pool' in body).toBe(false)
-    expect((textarea as HTMLTextAreaElement).value).toBe('333')
+    expect(body).toEqual({ autonomy_mode: 'bounded_auto' })
+    expect('daily_budget_cap_cents' in body).toBe(false)
   })
 
-  it('版本已知 + 编号全是已存在的 + 改了上限：只保存上限，提示编号已存在，输入框还在', async () => {
+  it('版本已知 + 编号全是已存在的 + 改了模式：只保存模式，提示编号已存在', async () => {
     const fn = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith('/labels')) return Response.json({ labels: {} })
+      if (url.endsWith('/ad-accounts')) return Response.json({ accounts: [], client_total_cap_cents: 15000 })
       if (init?.method === 'PATCH') return Response.json({ success: true, config, version: 'v2' })
       return Response.json({ success: true, config, version: 'v1' })
     })
     vi.stubGlobal('fetch', fn)
     render(<AutonomySettings clientId="c1" />)
-    await waitFor(() => expect(screen.getByText('可用于广告的视频')).toBeTruthy())
-    fireEvent.change(screen.getByDisplayValue('150'), { target: { value: '200' } })
+    await waitFor(() => expect(screen.getByText(/\$150 \/ 天/)).toBeTruthy())
+    fireEvent.click(screen.getByRole('radio', { name: /在每天上限内允许系统动钱/ }))
     const textarea = screen.getByPlaceholderText('添加待批准的视频（每行填一个 Facebook 视频编号）')
     fireEvent.change(textarea, { target: { value: '111\n222' } })
     fireEvent.click(screen.getByText('保存'))
     await waitFor(() => expect(screen.getByText('编号已存在，预算/模式已保存')).toBeTruthy())
     const patch = fn.mock.calls.find(c => (c[1] as RequestInit | undefined)?.method === 'PATCH')
-    expect(patch).toBeTruthy()
     const body = JSON.parse(String((patch?.[1] as RequestInit).body)) as Record<string, unknown>
-    expect(body.daily_budget_cap_cents).toBe(20000)
-    expect('creative_pool' in body).toBe(false)
+    expect(body).toEqual({ autonomy_mode: 'bounded_auto' })
     expect((textarea as HTMLTextAreaElement).value).toBe('111\n222')
   })
 
@@ -600,7 +593,7 @@ describe('AutonomySettings', () => {
     expect(body.expected_version).toBeNull()
   })
 
-  it('批准成功后，同页未保存的上限修改不会被冲掉', async () => {
+  it('批准成功后，同页未保存的视频编号不会被冲掉', async () => {
     const fn = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith('/labels')) return Response.json({ labels: {} })
       if (url.endsWith('/approve') && init?.method === 'POST') {
@@ -612,11 +605,11 @@ describe('AutonomySettings', () => {
     vi.stubGlobal('confirm', vi.fn(() => true))
     render(<AutonomySettings clientId="c1" />)
     await waitFor(() => expect(screen.getAllByText('批准').length).toBe(2))
-    fireEvent.change(screen.getByDisplayValue('150'), { target: { value: '200' } })
+    const textarea = screen.getByPlaceholderText('添加待批准的视频（每行填一个 Facebook 视频编号）')
+    fireEvent.change(textarea, { target: { value: '333' } })
     fireEvent.click(screen.getAllByText('批准')[0])
     await waitFor(() => expect(fn.mock.calls.some(c => String(c[0]).includes('/approve'))).toBe(true))
-    await waitFor(() => expect(screen.getByDisplayValue('200')).toBeTruthy())
-    expect(screen.queryByDisplayValue('150')).toBeNull()
+    expect((textarea as HTMLTextAreaElement).value).toBe('333')
   })
 
   it('版本未知且输入了新编号时，显示「读不到页面版本」的提示', async () => {
@@ -631,53 +624,21 @@ describe('AutonomySettings', () => {
   })
 })
 
-describe('AutonomySettings · 客户总闸的「保存上限」按钮', () => {
-  it('点一下只 PATCH 客户总闸，不发素材池和模式字段', async () => {
-    const fn = vi.fn(async (url: string, init?: RequestInit) => {
+describe('AutonomySettings · 每天总上限只读已批准计划', () => {
+  it('计划没填时写出要去广告计划补上，旧客户总闸只当过期提示', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.endsWith('/labels')) return Response.json({ labels: {} })
-      if (init?.method === 'PATCH') {
-        return Response.json({
-          success: true,
-          config: { ...config, daily_budget_cap_cents: 20000 },
-          version: 'v2',
-        })
+      if (url.endsWith('/ad-accounts')) {
+        return Response.json({ accounts: [], client_total_cap_cents: null, client_total_cap_reason: 'missing' })
       }
       return Response.json({ success: true, config, version: 'v1' })
-    })
-    vi.stubGlobal('fetch', fn)
+    }))
     render(<AutonomySettings clientId="c1" />)
-    await waitFor(() => expect(screen.getByDisplayValue('150')).toBeTruthy())
-    fireEvent.change(screen.getByDisplayValue('150'), { target: { value: '200' } })
-    fireEvent.click(screen.getByTestId('save-total-cap'))
-    await waitFor(() => expect(screen.getByText('已保存')).toBeTruthy())
-    const patch = fn.mock.calls.find(c => (c[1] as RequestInit | undefined)?.method === 'PATCH')
-    expect(patch).toBeTruthy()
-    const body = JSON.parse(String((patch?.[1] as RequestInit).body)) as Record<string, unknown>
-    expect(body).toEqual({ daily_budget_cap_cents: 20000 })
-    // 保存成功后把回传的新值回填进输入框
-    await waitFor(() => expect(screen.getByDisplayValue('200')).toBeTruthy())
-  })
-
-  it('没改数字时点一下说「没有改动」，不发请求', async () => {
-    const fn = vi.fn(async (url: string, _init?: RequestInit) => {
-      if (url.endsWith('/labels')) return Response.json({ labels: {} })
-      return Response.json({ success: true, config, version: 'v1' })
-    })
-    vi.stubGlobal('fetch', fn)
-    render(<AutonomySettings clientId="c1" />)
-    await waitFor(() => expect(screen.getByDisplayValue('150')).toBeTruthy())
-    fireEvent.click(screen.getByTestId('save-total-cap'))
-    await waitFor(() => expect(screen.getByText('没有改动')).toBeTruthy())
-    expect(fn.mock.calls.some(c => (c[1] as RequestInit | undefined)?.method === 'PATCH')).toBe(false)
-  })
-
-  it('填 0 或负数时拦住并提示', async () => {
-    stubFetch()
-    render(<AutonomySettings clientId="c1" />)
-    await waitFor(() => expect(screen.getByDisplayValue('150')).toBeTruthy())
-    fireEvent.change(screen.getByDisplayValue('150'), { target: { value: '0' } })
-    fireEvent.click(screen.getByTestId('save-total-cap'))
-    await waitFor(() => expect(screen.getByText('每天上限要填大于 0 的金额')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('在广告计划里填上每天的广告总上限。')).toBeTruthy())
+    expect(screen.getByText('旧记录 $150 / 天，已经不再生效。')).toBeTruthy()
+    expect(screen.getByRole('link', { name: '去广告计划里改 →' }).getAttribute('href')).toBe('/dashboard/clients/c1/promo-plan')
+    expect(screen.queryByTestId('save-total-cap')).toBeNull()
+    expect(screen.getByRole('radio', { name: /在每天上限内允许系统动钱/ })).toBeDisabled()
   })
 })
 
@@ -720,5 +681,22 @@ describe('AutonomySettings · 视频缩略图', () => {
     fireEvent.error(container.querySelector('img') as HTMLImageElement)
     await waitFor(() => expect(container.querySelector('img')).toBeNull())
     expect(screen.getAllByTestId('video-thumb-placeholder')).toHaveLength(2)
+  })
+})
+
+describe('autopilotTruth：如实写「现在实际做到哪步」（PM 11-04 审计）', () => {
+  it('演练中 → 说只记下、不真停；加预算要 PM 本人批', () => {
+    expect(autopilotTruth({ autopilot_enabled: true, autopilot_dry_run: true }))
+      .toBe('自动止损：演练中，只记下会停哪些组，不真停；加预算：一律要 PM 本人批准，系统不会自己加')
+  })
+  it('真跑 → 说提交暂停申请、批了才停', () => {
+    expect(autopilotTruth({ autopilot_enabled: true, autopilot_dry_run: false })).toContain('批了才停')
+  })
+  it('没开、或读不到开关 → 说没开（不往「已经在自动做」那边猜）', () => {
+    expect(autopilotTruth({ autopilot_enabled: false, autopilot_dry_run: false })).toContain('自动止损：没开')
+    expect(autopilotTruth({})).toContain('自动止损：没开')
+  })
+  it('开了但演练标记读不到 → 按演练写（不往真跑那边猜）', () => {
+    expect(autopilotTruth({ autopilot_enabled: true })).toContain('演练中')
   })
 })

@@ -12,6 +12,8 @@ import { isAssetOnly } from '@/lib/factory/deliverable'
 import { APP_BASE } from '@/lib/pm-todo/binding-request-items'
 import { CONSENT_REASON_ZH, consentVerdict } from '@/lib/factory/talent-consent'
 import { checkReelFacts, factCheckToday, reelOverlayOf, type OkFactSource } from './reel-facts'
+import { dailyVersionDecisions, dailyWindows, type DatedRow } from './daily-schedule'
+import { dailyEntries, dailySettings, datedOutsideCandidates, outsideTourKey, rowStyler, scheduleDaily, type ExpirePort, type RecentPublishedPort } from './daily-run'
 
 /** cron_run_logs.job_name for every receipt of the weekly loop (daily fan-out and per-client runs). */
 export const WEEKLY_LOOP_JOB = 'social-weekly-draft'
@@ -35,6 +37,7 @@ export interface WeeklyLoopClient {
   name: string
   industry: string | null
   config: unknown // clients.publishing_calendar_config
+  planTier?: unknown // clients.plan_tier: daily quota default
 }
 
 export interface FactCheckRecord {
@@ -53,6 +56,7 @@ export interface WeeklyLoopDeps {
   /** Writes only `output` (with fact_check merged in) and updated_at, guarded by the read updated_at. */
   writeFactCheck(input: { clientId: string; id: string; readUpdatedAt: string; output: Record<string, unknown> }): Promise<FactCheckWriteOutcome>
   writeSchedule(args: WriteReelScheduleArgs): Promise<WriteReelScheduleResult>
+  expireUnapproved?: ExpirePort; recentPublished?: RecentPublishedPort // daily cadence: unapproved past days go back to the pool; already-public reels feed the repeat rules
 }
 
 export type WeeklyLoopTaskCode =
@@ -123,12 +127,15 @@ export interface WeeklyLoopReceipt {
   manual_tasks_delivered: boolean
   no_publish: true
   errors: string[]
+  /** Daily cadence only (social agent on): slots filled, quota, and days the undated eligible pool lasts. */
+  cadence?: 'weekly' | 'daily'; reel_per_day?: number; slot_dates?: string[]; pool_depth_days?: number | null; expired_unapproved?: string[]
 }
 
 export interface RunWeeklyLoopInput {
   clientId: string
   now: Date
   mode: WeeklyLoopMode
+  forceDaily?: boolean // manual dry runs only (caller enforces): daily cadence without the client switch
 }
 
 /** Stage signals this loop cannot compute yet. They get conservative values (starting stage, never paused). */
@@ -310,6 +317,25 @@ function pushExcluded(items: WeeklyLoopItem[], row: WeeklyLoopOrderRow, reason: 
   })
 }
 
+function keepVersionsDaily(candidates: Candidate[], outside: readonly DatedRow[], items: WeeklyLoopItem[], counts: WeeklyLoopCounts): Candidate[] {
+  const { keep, excluded } = dailyVersionDecisions([
+    ...candidates.map((c) => ({ id: c.row.id, created_at: c.row.created_at, brief: c.row.brief, overlay: reelOverlayOf(c.row.output), scheduledOn: c.scheduledOn })),
+    ...outside,
+  ])
+  const kept: Candidate[] = []
+  for (const c of candidates) {
+    const reason = excluded.get(c.row.id) ?? (keep.has(c.row.id) ? null : 'ambiguous_version')
+    if (reason === null) kept.push(c)
+    if (reason === null) continue
+    pushExcluded(items, c.row, reason)
+    bump(counts.skipped_by_reason, reason)
+    if (reason === 'superseded') counts.superseded += 1
+    if (reason === 'ambiguous_version') counts.ambiguous += 1
+  }
+  counts.groups = kept.length
+  return kept
+}
+
 // ---------- step 4: fact check one ----------
 
 function checkOne(c: Candidate, source: OkFactSource, today: string) {
@@ -428,7 +454,8 @@ const REASON_ZH: Record<string, string> = {
   ambiguous_version: '分不清是不是同一条的新旧版本',
   date_invalid: '排期日期写错了',
   publish_state_unverified: '看不出是否已经公开',
-  over_quota: '超过每周名额',
+  over_quota: '超过名额',
+  version_already_scheduled: '同一条的另一个版本已经排了日子',
   product_adjacent: '同一个团不能连着发',
   fact_check_not_persisted: '事实核对结果没存上',
 }
@@ -687,10 +714,15 @@ export async function runWeeklyLoop(
     return { ...receipt, status: 'stopped', stop_reason: 'client_not_found' }
   }
 
+  const agent = dailySettings(client.config, client.planTier, input.forceDaily === true)
+  const daily = agent.enabled ? dailyWindows(input.now) : null
+  const look = daily ? { weekStart: daily.lookStart, weekEnd: daily.lookEnd } : week
+
   const { rows, truncated } = await deps.loadOrders(input.clientId)
   if (truncated) errors.push('orders_truncated')
-  const candidates = selectCandidates(rows, week.weekStart, week.weekEnd, items, counts)
-  const kept = keepLatestVersions(candidates, items, counts)
+  const candidates = selectCandidates(rows, look.weekStart, look.weekEnd, items, counts)
+  const outside = daily ? datedOutsideCandidates(rows, new Set(candidates.map((c) => c.row.id))) : []
+  const kept = daily ? keepVersionsDaily(candidates, outside, items, counts) : keepLatestVersions(candidates, items, counts)
 
   const source = await deps.loadFactSource(input.clientId, today)
   if (source.ok === false) {
@@ -714,6 +746,28 @@ export async function runWeeklyLoop(
     const res = await writeFactChecks(deps, input.clientId, reviewed, input.now.toISOString())
     factCheckWrites = res.tally
     persistedIds = res.writtenIds
+  }
+
+  if (daily) {
+    const reelPerDay = quota.stage === 'paused' ? 0 : agent.reelPerDay
+    const { entries, notPersisted } = dailyEntries(
+      [...candidates.map((c) => ({ id: c.row.id, scheduledOn: c.scheduledOn, createdAt: c.row.created_at })), ...outside.map((o) => ({ id: o.id, scheduledOn: o.scheduledOn, createdAt: o.created_at }))],
+      reviewed.map((r) => ({ id: r.c.row.id, excluded: r.excluded, productKey: r.productKey })),
+      persistedIds,
+      (id) => outsideTourKey(rows, outside, id, source, today),
+      rowStyler(rows),
+    )
+    const plan = await scheduleDaily(deps.writeSchedule, { clientId: input.clientId, slotDates: daily.slotDates, reelPerDay, entries, dryRun: input.mode !== 'write', today: daily.today }, deps.expireUnapproved, deps.recentPublished)
+    for (let i = 0; i < notPersisted; i += 1) bump(counts.skipped_by_reason, 'fact_check_not_persisted')
+    for (const u of [...plan.unscheduled, ...plan.skipped, ...plan.relaxed.map((r) => ({ reason: `placed_despite_${r.violation}` }))]) bump(counts.skipped_by_reason, u.reason)
+    errors.push(...plan.errors)
+    counts.already_scheduled = plan.alreadyScheduled
+    counts.scheduled = plan.written.length
+    return {
+      ...baseReceipt(input, look, counts, items, errors), catalog_version: source.catalogVersion, truncated, recipe_stage: quota.stage,
+      scheduled: plan.written, fact_check_writes: factCheckWrites, manual_tasks: finalTasks(input.clientId, counts, null, errors, factCheckWrites),
+      cadence: 'daily', reel_per_day: reelPerDay, slot_dates: daily.slotDates, pool_depth_days: plan.poolDepthDays, expired_unapproved: plan.expired,
+    }
   }
 
   const scheduled = await scheduleEligible(deps, {

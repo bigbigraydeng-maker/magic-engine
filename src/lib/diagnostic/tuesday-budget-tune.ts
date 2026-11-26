@@ -6,6 +6,8 @@
  */
 
 import type { KernelDeps } from '@/lib/kernel/deps'
+import { issueTuesdayBudgetTunes as issueHeldTunes, productionTuesdayPorts, type TuesdayIssueResult } from './tuesday-budget-execute'
+import type { TuesdaySuggestion } from './tuesday-budget-recheck'
 import { issueConfirmationCard, type CardFacts, type HardCheck } from '@/lib/confirmation-card'
 import { ConfirmationCardError } from '@/lib/confirmation-card/errors'
 import { isUuid } from '@/lib/validation-utils'
@@ -37,23 +39,22 @@ export interface TuesdayBudgetTuneResult {
 
 const SUBJECT = /^[a-z0-9][a-z0-9:_-]{0,60}$/
 
-/**
- * The weekly read has progress text, not a current daily budget and a computed
- * next amount. Inventing either number would be a budget change, so there is
- * nothing to put on a card.
- */
-export function planTuesdayBudgetTunes(_summary: WeeklyCheckSummary): readonly TuesdayBudgetProposal[] {
-  return []
+/** Suggestions already carry the amount. This does not invent one. */
+export function planTuesdayBudgetTunes(summary: WeeklyCheckSummary): readonly TuesdaySuggestion[] {
+  const extra = summary as WeeklyCheckSummary & { budgetSuggestions?: TuesdaySuggestion[] }
+  return extra.budgetSuggestions ?? []
 }
 
 export async function runTuesdayBudgetTune(
   openKernel: () => KernelDeps,
   summary: WeeklyCheckSummary,
   now?: Date,
-): Promise<TuesdayBudgetTuneResult[]> {
+): Promise<TuesdayIssueResult[]> {
   const proposals = planTuesdayBudgetTunes(summary)
   if (proposals.length === 0) return []
-  return issueTuesdayBudgetTunes(openKernel(), proposals, now)
+  const kernel = openKernel()
+  const clock = now ?? kernel.now()
+  return issueHeldTunes(kernel, proposals, productionTuesdayPorts(kernel.supabase, clock), clock)
 }
 
 export async function issueTuesdayBudgetTunes(

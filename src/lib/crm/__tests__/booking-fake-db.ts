@@ -51,6 +51,20 @@ function project(row: Row, columns: string | null): Row {
   return out
 }
 
+/**
+ * The value a filter column refers to: a plain column, or a Postgres JSON text path such as
+ * `metadata->>some_key` (one level; `->>` always gives text, so numbers and booleans become strings).
+ */
+function valueAt(row: Row, col: string): unknown {
+  const arrow = col.indexOf('->>')
+  if (arrow < 0) return row[col]
+  const base = row[col.slice(0, arrow)]
+  if (typeof base !== 'object' || base === null) return undefined
+  const value = (base as Record<string, unknown>)[col.slice(arrow + 3)]
+  if (value === undefined || value === null) return value
+  return typeof value === 'object' ? JSON.stringify(value) : String(value)
+}
+
 /** Stable sort by a column, ascending or descending, with nulls last. */
 function sortRows(rows: Row[], col: string, ascending: boolean): Row[] {
   const copy = rows.slice()
@@ -140,10 +154,10 @@ class FakeQuery implements PromiseLike<QueryResult> {
 
   private matches(row: Row): boolean {
     for (const [col, val] of this.eqs) {
-      if (row[col] !== val) return false
+      if (valueAt(row, col) !== val) return false
     }
     for (const [col, values] of this.ins) {
-      if (!values.includes(row[col])) return false
+      if (!values.includes(valueAt(row, col))) return false
     }
     return true
   }

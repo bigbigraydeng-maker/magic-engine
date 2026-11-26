@@ -1,0 +1,51 @@
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
+import { describe, expect, it } from 'vitest'
+import { viewerFacts } from '@/lib/auth/home-entries'
+import { buildClientFdeSections } from '../client-fde-nav'
+import { activeNavKey } from '../nav-active'
+
+const APP_ROOT = join(__dirname, '..', '..', '..')
+const CLIENT = 'c0000000-0000-0000-0000-000000000099'
+
+describe('client FDE sidebar routes', () => {
+  it('every href maps to a real page', () => {
+    const facts = viewerFacts('admin', null, true)
+    const sections = buildClientFdeSections(CLIENT, 'travel tour', facts, `/dashboard/clients/${CLIENT}/goal/new`)
+    for (const item of sections.flatMap((s) => s.items)) {
+      if (!item.href || item.href.startsWith('/dashboard/ad-approval')) continue
+      const pathOnly = item.href.split('?')[0]
+      const segments = pathOnly.split('/').filter(Boolean)
+      const page = join(APP_ROOT, ...segments, 'page.tsx')
+      const altClientPage = join(APP_ROOT, 'dashboard', 'clients', '[id]', ...segments.slice(3), 'page.tsx')
+      const ok = existsSync(page) || existsSync(altClientPage)
+      expect(ok, `${item.key} -> ${item.href}`).toBe(true)
+    }
+  })
+
+  it('every client gets the document library entry, whatever the industry', () => {
+    const facts = viewerFacts('admin', null, false)
+    for (const industry of ['travel', 'real estate', null]) {
+      const sections = buildClientFdeSections(CLIENT, industry, facts, '/x')
+      const entry = sections.flatMap((s) => s.items).find((i) => i.key === 'documents')
+      expect(entry?.href, String(industry)).toBe(`/dashboard/clients/${CLIENT}/documents`)
+      expect(activeNavKey(`/dashboard/clients/${CLIENT}/documents`, sections), String(industry)).toBe('documents')
+    }
+  })
+
+  it('confirmation sits right under 定制行程 for travel clients only (the workbench tool cards are no longer shown, so the sidebar is the only way in)', () => {
+    const facts = viewerFacts('admin', null, false)
+    const keys = buildClientFdeSections(CLIENT, 'travel', facts, '/x').flatMap((s) => s.items).map((i) => i.key)
+    expect(keys.indexOf('confirmation')).toBe(keys.indexOf('tailor-made') + 1)
+    const other = buildClientFdeSections(CLIENT, 'real estate', facts, '/x').flatMap((s) => s.items).map((i) => i.key)
+    expect(other).not.toContain('confirmation')
+    expect(activeNavKey(`/dashboard/clients/${CLIENT}/confirmation`, buildClientFdeSections(CLIENT, 'travel', facts, '/x'))).toBe('confirmation')
+  })
+
+  it('travel industry gets tour catalog entry', () => {
+    const facts = viewerFacts('admin', null, false)
+    const items = buildClientFdeSections(CLIENT, 'travel', facts, '/x').flatMap((s) => s.items)
+    expect(items.some((i) => i.key === 'tour-catalog')).toBe(true)
+    expect(items.some((i) => i.key === 'listings')).toBe(false)
+  })
+})

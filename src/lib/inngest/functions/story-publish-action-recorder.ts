@@ -11,6 +11,11 @@ import { readRegisteredPageId } from './daily-plan-post-measurement'
 import { LITE_EVENTS } from '@/lib/social/story-lite/types'
 import { supabaseAdmin } from '@/lib/supabase'
 import {
+  scheduleStoryDmWindow,
+  storyDmWindowEnabled,
+  type StoryDmEventData,
+} from '@/lib/inngest/functions/story-dm-window'
+import {
   isLiveSentStoryAttempt,
   loadStoryItemForRegistration,
   parseLiveSentStoryAttempt,
@@ -27,6 +32,8 @@ export const STORY_PUBLISH_ACTION_RECORDER_ID = `${CLOUD_FN_PREFIX}story-publish
 export function createStoryPublishActionRecorder(deps: {
   supabase: SupabaseClient
   enabled?: () => boolean
+  dmWindowEnabled?: () => boolean
+  scheduleDmWindow?: (input: StoryDmEventData) => Promise<void>
 }) {
   return inngest.createFunction(
     {
@@ -50,7 +57,20 @@ export function createStoryPublishActionRecorder(deps: {
         return step.run('record-readback-refusal', () => recordRefusal(deps.supabase, attempt, reason))
       }
       const registration = await step.run('register-publish-action', () => recordStoryPublishAction(deps.supabase, ready.input))
-      if (registration.ok) return { ok: true as const, actionId: registration.actionId, created: registration.created }
+      if (registration.ok) {
+        if ((deps.dmWindowEnabled ?? storyDmWindowEnabled)()) {
+          const schedule = deps.scheduleDmWindow ?? scheduleStoryDmWindow
+          const input = ready.input
+          await step.run('schedule-dm-window', () => schedule({
+            client_id: input.clientId,
+            action_id: registration.actionId,
+            item_id: input.itemId,
+            sent_at: input.publishedAt,
+            channel: input.channel,
+          }))
+        }
+        return { ok: true as const, actionId: registration.actionId, created: registration.created }
+      }
       const field = `${registration.reason}:${registration.field}`
       return step.run('record-register-refusal', () => recordRefusal(deps.supabase, attempt, field))
     },

@@ -18,12 +18,16 @@ export interface ItemOutcomeSummary {
   delta_pct: number | null
   confidence: number
   computed_at: string
+  baseline: number | null
+  after_value: number | null
 }
 
 interface OutcomeJoin {
   action_id: string
   metric_key: string
   window_days: number | null
+  baseline: number | null
+  after_value: number | null
   delta: number | null
   delta_pct: number | null
   confidence: number
@@ -61,7 +65,7 @@ export async function fetchLatestOutcomesByAction(
     supabaseAdmin
       .from('flywheel_outcomes')
       .select(
-        'id, action_id, metric_key, window_days, delta, delta_pct, confidence, verdict, computed_at, ' +
+        'id, action_id, metric_key, window_days, baseline, after_value, delta, delta_pct, confidence, verdict, computed_at, ' +
         'flywheel_actions!inner(expected_metric)',
       )
       .in('action_id', actionIds)
@@ -90,6 +94,8 @@ export async function fetchLatestOutcomesByAction(
       delta_pct: row.delta_pct,
       confidence: siteLevel ? 0 : row.confidence,
       computed_at: row.computed_at,
+      baseline: row.baseline,
+      after_value: row.after_value,
     }
   }
 

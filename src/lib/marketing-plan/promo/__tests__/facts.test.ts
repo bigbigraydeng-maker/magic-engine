@@ -40,7 +40,8 @@ beforeEach(() => {
     clients: { data: { industry: null } },
     client_meta_ad_accounts: { data: [{ ad_account_id: 'act_1', daily_budget_cap_cents: 10000 }] },
     ad_entity_snapshots: { data: [{ ad_account_id: 'act_1', account_status: 1, currency: 'AUD', timezone_name: 'Australia/Sydney', captured_at: '2026-11-11T00:00:00Z' }] },
-    ad_strategy_configs: { data: { daily_budget_cap_cents: 20000, primary_result: 'leads', creative_pool: [{ kind: 'meta_video', ref: 'vid-1', status: 'approved' }] } },
+    ad_strategy_configs: { data: { daily_budget_cap_cents: 1, primary_result: 'leads', creative_pool: [{ kind: 'meta_video', ref: 'vid-1', status: 'approved' }] } },
+    marketing_plans: { data: [{ status: 'approved', plan_data: { promo: { daily_total_cap_cents: 8000 } } }] },
     social_plans: { data: [] },
     goals: { data: { status: 'active', target_value: '100', baseline_value: '0', period_start: '2026-11-01', period_end: '2026-11-30', current_value: '38', current_value_fetched_at: null } },
     ad_daily_insights: { data: [
@@ -72,7 +73,7 @@ describe('loadPromoFacts — 正常读取', () => {
     expect(f.today).toBe('2026-11-12')
     expect(f.timezone_known).toBe(true)
     expect(f.gate.accounts).toEqual([{ ad_account_id: 'act_1', currency: 'AUD', daily_cap_cents: 10000, owned_by_client: true }])
-    expect(f.gate.config).toMatchObject({ daily_budget_cap_cents: 20000, primary_result: 'leads' })
+    expect(f.gate.config).toMatchObject({ daily_budget_cap_cents: 8000, primary_result: 'leads' })
     expect(f.gate.config?.creative_pool).toEqual([{ ref: 'vid-1', status: 'approved' }])
     expect(f.recon.spend_cents_by_account_day).toEqual({ act_1: { '2026-11-04': 5000, '2026-11-05': 1235 } })
     expect(f.recon.meta_results).toBe(5)
@@ -83,7 +84,7 @@ describe('loadPromoFacts — 正常读取', () => {
 
   it('所有读取都带 client_id（目标 / 账户 / 设置 / 花费 / 内容）', async () => {
     await loadPromoFacts('client-1', baseSpec(), [], NOW)
-    for (const t of ['client_meta_ad_accounts', 'ad_strategy_configs', 'goals', 'ad_daily_insights', 'content_posts', 'social_plans', 'meta_ads_snapshots']) {
+    for (const t of ['client_meta_ad_accounts', 'ad_strategy_configs', 'marketing_plans', 'goals', 'ad_daily_insights', 'content_posts', 'social_plans', 'meta_ads_snapshots']) {
       const f = filtersOf(t)
       const ok = f.some(([k, v]) => (k === 'eq:client_id' || k === 'eq:id') && v === 'client-1')
       expect(ok, `${t} 应带 client_id`).toBe(true)
@@ -186,6 +187,7 @@ describe('loadPromoFacts — 读失败一律 null / 不放行', () => {
   })
   it('没有设置行 → 上限与结果口径为 null（红），不是读失败（灰）', async () => {
     st.results.ad_strategy_configs = { data: null, error: null }
+    st.results.marketing_plans = { data: [] }
     expect((await loadPromoFacts('client-1', baseSpec(), [], NOW)).gate.config).toEqual({
       daily_budget_cap_cents: null, primary_result: null, creative_pool: [],
     })

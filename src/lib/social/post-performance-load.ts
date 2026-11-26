@@ -1,7 +1,6 @@
 // Read-only loader for the post-performance report.
 //
-// Scope: Story + image-Post slice only. Reel publish actions are read from
-// flywheel_actions but excluded by the pure builder (buildPostPerformanceReport).
+// Scope: Story + image post + factory Reel (T+4/T+72 receipts on social.publish_post).
 // All data comes from existing tables; no new table is introduced.
 //
 // This module performs SELECT queries only. Any database error is thrown so a

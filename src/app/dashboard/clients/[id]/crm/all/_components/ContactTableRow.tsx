@@ -1,6 +1,7 @@
 'use client'
 
 import { cleanDisplayName } from '@/lib/crm/clean-display-name'
+import { AiTakeoverTag } from '../../_components/AiTakeoverTag'
 import { preserveOriginalName } from '@/lib/crm/brief-display-name'
 import {
   LIST_CLS,
@@ -108,6 +109,7 @@ function NameCell({ r, grouped }: { r: ContactRow; grouped: boolean }) {
             📞 刚聊过
           </span>
         )}
+        <AiTakeoverTag aiTakeover={r.aiTakeover} cameBack={r.customerCameBack} />
         {/* 「今天先联系」不画来源小标签：一行只留名字和「回头」这类最该先看的东西。 */}
         {!grouped && (r.sources ?? []).slice(0, 1).map((k) => (
           <span

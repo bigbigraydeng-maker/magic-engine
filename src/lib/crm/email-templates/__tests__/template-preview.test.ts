@@ -55,6 +55,12 @@ beforeEach(() => {
 })
 
 describe('previewTemplate: refusals', () => {
+  it.each(['auto-welcome', 'AUTO-countdown-20261202-15me0um-20270311-m3'])('refuses the automated-letter template %s before loading anything', async (key) => {
+    const data = makeData()
+    expect(await previewTemplate(args({ request: request({ key }) }), data)).toMatchObject({ ok: false, status: 409, reason: 'template_automated' })
+    expect(data.loadTemplate).not.toHaveBeenCalled()
+  })
+
   it.each([
     ['a missing template', null],
     ['a disabled template', template({ status: 'disabled' })],

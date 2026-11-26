@@ -166,6 +166,10 @@ describe('dayKeyIn — 按账户时区切天', () => {
 })
 
 describe('listSnapshotClients — 客户口径（魏征 B1）', () => {
+  beforeEach(() => {
+    vi.stubEnv('EXTERNAL_DATA_PULL_CLIENT_IDS', '*')
+  })
+
   it('prospect 状态但登记了广告账户的客户（生产 NAL）要抓；archived 不抓', async () => {
     tables.clients = [
       { id: 'nal', name: 'New Asian Logistics', client_status: 'prospect', meta_ad_account_id: NAL_ACT },

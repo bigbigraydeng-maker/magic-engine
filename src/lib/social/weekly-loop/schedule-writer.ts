@@ -4,6 +4,7 @@ import { toPublishedView } from '@/lib/factory/publish/publish-display'
 import { TRAFFIC_ACTION_TYPE } from '@/lib/factory/publish/promote/types'
 import { readApprovedAt, readPublishOn } from '@/lib/social/week-pack/manifest'
 import { weekPackSubject } from '@/lib/social/week-pack/facts'
+import { isExcludedByCard } from '@/lib/factory/publish/promote/scheduled-authorize-list'
 
 export type SkipReason =
   | 'not_found'
@@ -13,6 +14,7 @@ export type SkipReason =
   | 'promote_check_failed'
   | 'not_review_passed_draft'
   | 'already_scheduled'
+  | 'excluded_by_card'
   | 'concurrent_update'
   | 'write_failed'
 
@@ -21,6 +23,10 @@ export interface WriteReelScheduleArgs {
   weekStart: string
   assignments: Array<{ id: string; publishOn: string }>
   dryRun: boolean
+  /** Daily cadence: only a card still under review blocks; an approved card does not (new items need their own grant). */
+  blockOnlyPending?: boolean
+  /** Recorded on brief.weekly_pack.scheduled_by. */
+  scheduledBy?: string
 }
 
 export type WriteReelScheduleResult =
@@ -40,6 +46,12 @@ function nonEmptyPlainObject(v: unknown): boolean {
   return isPlainObject(v) && Object.keys(v).length > 0
 }
 
+/** A go-public grant that is live or may already have published. missed / stale / failed / revoked do not count. */
+const ACTIVE_GRANT = new Set(['armed', 'claimed', 'consumed', 'consumed_manual', 'unknown'])
+function activeGrant(g: unknown): boolean {
+  return isPlainObject(g) && typeof g.status === 'string' && ACTIVE_GRANT.has(g.status)
+}
+
 function hasPromoteRecord(rows: unknown): boolean {
   if (!Array.isArray(rows)) return false
   for (const row of rows) {
@@ -48,6 +60,7 @@ function hasPromoteRecord(rows: unknown): boolean {
     if (!isPlainObject(payload)) continue
     if (nonEmptyPlainObject(payload.promote_preview)) return true
     if (nonEmptyPlainObject(payload.promote_authorization)) return true
+    if (activeGrant(payload.scheduled_go_public)) return true
   }
   return false
 }
@@ -56,6 +69,7 @@ async function checkCardOpen(
   db: SupabaseClient,
   clientId: string,
   weekStart: string,
+  blockOnlyPending: boolean,
 ): Promise<'open' | 'closed' | 'failed'> {
   const subject = weekPackSubject(clientId, weekStart)
   const { data, error } = await db
@@ -63,7 +77,7 @@ async function checkCardOpen(
     .select('id, status')
     .eq('client_id', clientId)
     .eq('action_key', CONFIRMATION_ACTION_KEY)
-    .in('status', ['pending_approval', 'authorized'])
+    .in('status', blockOnlyPending ? ['pending_approval'] : ['pending_approval', 'authorized'])
     .eq('input->>subject_key', subject)
   if (error) return 'failed'
   if (Array.isArray(data) && data.length > 0) return 'open'
@@ -120,10 +134,11 @@ function refusalFor(
     (published?.video_state === 'DRAFT' && readApprovedAt(row.review_ref) !== null)
   if (!passed) return 'not_review_passed_draft'
   if (readPublishOn(row.brief) !== null) return 'already_scheduled'
+  if (isExcludedByCard(row.brief)) return 'excluded_by_card'
   return null
 }
 
-function buildNextBrief(brief: unknown, publishOn: string): Record<string, unknown> {
+function buildNextBrief(brief: unknown, publishOn: string, scheduledBy: string): Record<string, unknown> {
   const base = isPlainObject(brief) ? brief : {}
   const weekly = isPlainObject(base.weekly_pack) ? base.weekly_pack : {}
   return {
@@ -131,7 +146,7 @@ function buildNextBrief(brief: unknown, publishOn: string): Record<string, unkno
     weekly_pack: {
       ...weekly,
       publish_on: publishOn,
-      scheduled_by: 'social-weekly-loop',
+      scheduled_by: scheduledBy,
       scheduled_at: new Date().toISOString(),
     },
   }
@@ -142,8 +157,9 @@ async function applyWrite(
   clientId: string,
   row: OrderRow,
   publishOn: string,
+  scheduledBy: string,
 ): Promise<'written' | 'write_failed' | 'concurrent_update'> {
-  const next = buildNextBrief(row.brief, publishOn)
+  const next = buildNextBrief(row.brief, publishOn, scheduledBy)
   const { data: updated, error: uErr } = await db
     .from('content_work_orders')
     .update({ brief: next, updated_at: new Date().toISOString() })
@@ -160,7 +176,7 @@ export async function writeReelSchedule(
   db: SupabaseClient,
   args: WriteReelScheduleArgs,
 ): Promise<WriteReelScheduleResult> {
-  const card = await checkCardOpen(db, args.clientId, args.weekStart)
+  const card = await checkCardOpen(db, args.clientId, args.weekStart, args.blockOnlyPending === true)
   if (card === 'failed') return { ok: false, reason: 'card_check_failed' }
   if (card === 'open') return { ok: false, reason: 'card_open' }
 
@@ -183,7 +199,7 @@ export async function writeReelSchedule(
       written.push({ id: a.id, publishOn: a.publishOn })
       continue
     }
-    const outcome = await applyWrite(db, args.clientId, row, a.publishOn)
+    const outcome = await applyWrite(db, args.clientId, row, a.publishOn, args.scheduledBy ?? 'social-weekly-loop')
     if (outcome === 'written') {
       written.push({ id: a.id, publishOn: a.publishOn })
     } else {
@@ -192,4 +208,42 @@ export async function writeReelSchedule(
   }
 
   return { ok: true, dryRun: args.dryRun, written, skipped }
+}
+
+export type ExpireOutcome = 'expired' | 'kept_has_grant' | 'kept_published' | 'kept_not_past' | 'not_found' | 'check_failed' | 'concurrent_update' | 'write_failed'
+
+/**
+ * Daily cadence: a reel whose day has passed without any approval goes back to the pool (its day is removed and
+ * the old day recorded). Kept when any grant or promote record exists, so nothing approved or possibly public moves.
+ */
+export async function expireUnapproved(
+  db: SupabaseClient,
+  args: { clientId: string; ids: string[]; today: string; dryRun: boolean },
+): Promise<Array<{ id: string; outcome: ExpireOutcome }>> {
+  const out: Array<{ id: string; outcome: ExpireOutcome }> = []
+  for (const id of args.ids) {
+    const row = await readOrder(db, id)
+    if (!row || row.client_id !== args.clientId) { out.push({ id, outcome: 'not_found' }); continue }
+    const day = readPublishOn(row.brief)
+    if (typeof day !== 'string' || day === 'invalid' || day >= args.today) { out.push({ id, outcome: 'kept_not_past' }); continue }
+    if (toPublishedView(row.published_ref)?.video_state === 'PUBLISHED') { out.push({ id, outcome: 'kept_published' }); continue }
+    const promote = await checkPromoteRecord(db, args.clientId, id)
+    if (promote === 'failed') { out.push({ id, outcome: 'check_failed' }); continue }
+    if (promote === 'exists') { out.push({ id, outcome: 'kept_has_grant' }); continue }
+    if (args.dryRun) { out.push({ id, outcome: 'expired' }); continue }
+    const base = isPlainObject(row.brief) ? row.brief : {}
+    const pack = isPlainObject(base.weekly_pack) ? { ...base.weekly_pack } : {}
+    delete pack.publish_on
+    const next = { ...base, weekly_pack: { ...pack, expired_unapproved: { at: new Date().toISOString(), publish_on: day } } }
+    const { data: updated, error } = await db
+      .from('content_work_orders')
+      .update({ brief: next, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('client_id', args.clientId)
+      .eq('updated_at', row.updated_at)
+      .select('id')
+    if (error) out.push({ id, outcome: 'write_failed' })
+    else out.push({ id, outcome: Array.isArray(updated) && updated.length === 1 ? 'expired' : 'concurrent_update' })
+  }
+  return out
 }

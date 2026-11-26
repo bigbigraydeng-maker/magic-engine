@@ -6,6 +6,8 @@
  * Shows recent decisions from social_comment_engagements: what was replied /
  * DM'd / hidden / flagged for human. FDE can revert an auto-reply (deletes it
  * on Facebook) or mark a needs-human item reviewed.
+ * A needs-human row may carry a catalog-grounded draft: a person can edit it
+ * and send it as the public reply. Nothing is sent without that click.
  */
 
 import { useState, useEffect, useCallback } from 'react'
@@ -46,6 +48,7 @@ export function CommentAuditList({ clientId }: Props) {
   const [items, setItems] = useState<Engagement[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [edits, setEdits] = useState<Record<string, string>>({})
 
   const load = useCallback(async () => {
     setError(null)
@@ -61,13 +64,13 @@ export function CommentAuditList({ clientId }: Props) {
 
   useEffect(() => { void load() }, [load])
 
-  const act = async (engagementId: string, action: 'revert' | 'mark_reviewed') => {
+  const act = async (engagementId: string, action: 'revert' | 'mark_reviewed' | 'send_draft', text?: string) => {
     setBusyId(engagementId)
     try {
       const res = await fetch(`/api/clients/${clientId}/comment-engagements`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ engagement_id: engagementId, action }),
+        body: JSON.stringify({ engagement_id: engagementId, action, ...(text !== undefined ? { text } : {}) }),
       })
       if (!res.ok) {
         const { error } = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
@@ -111,6 +114,9 @@ export function CommentAuditList({ clientId }: Props) {
     <div className="space-y-2">
       {items.map(it => {
         const cat = CATEGORY_META[it.category ?? 'other'] ?? CATEGORY_META.other
+        const isDraft = it.reply_status === 'pending' && it.reply_source === 'catalog_draft' && !!it.public_reply_text
+        const draftText = edits[it.id] ?? it.public_reply_text ?? ''
+        const draftTour = (it.guardrail_flags ?? []).find(f => f.startsWith('tour:'))?.slice(5) ?? null
         return (
           <div key={it.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-center gap-2">
@@ -134,7 +140,38 @@ export function CommentAuditList({ clientId }: Props) {
               {it.comment_text || <span className="italic text-slate-400">（无文本）</span>}
             </p>
 
-            {it.public_reply_text && (
+            {isDraft && (
+              <div className="mt-3 border-t border-slate-200 pt-3">
+                <label htmlFor={`draft-${it.id}`} className="block text-xs font-bold text-amber-800">
+                  按团目录起草的回复（还没发出去，可以改）
+                </label>
+                {draftTour && (
+                  <p className="mt-0.5 text-xs text-slate-600">
+                    依据的团：<span className="font-semibold text-slate-800">{draftTour}</span>。发之前先确认这条帖子讲的确实是这个团。
+                  </p>
+                )}
+                <textarea
+                  id={`draft-${it.id}`}
+                  value={draftText}
+                  onChange={e => setEdits(prev => ({ ...prev, [it.id]: e.target.value }))}
+                  rows={3}
+                  maxLength={1000}
+                  className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:border-cyan-600 focus:outline-none focus:ring-2 focus:ring-cyan-200"
+                />
+                <div className="mt-2 flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={() => act(it.id, 'send_draft', draftText)}
+                    disabled={busyId === it.id || draftText.trim().length === 0}
+                    className="rounded-md bg-cyan-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-cyan-800 disabled:opacity-50"
+                  >
+                    {busyId === it.id ? '发送中…' : '发到 Facebook'}
+                  </button>
+                  <span className="text-xs text-slate-600">点了才会公开回复这位客人；不点就不发。</span>
+                </div>
+              </div>
+            )}
+
+            {!isDraft && it.public_reply_text && (
               <p className="mt-1 rounded-lg bg-cyan-50 px-3 py-2 text-sm text-cyan-900">
                 ↳ {it.public_reply_text}
                 {it.private_reply_sent && <span className="ml-1 text-[11px] font-semibold text-cyan-600">· 已私信</span>}

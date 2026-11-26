@@ -69,4 +69,11 @@ describe('checkBudgetWithinSafeRange', () => {
   it('exposes the ±20% ratio constant', () => {
     expect(MAX_BUDGET_ADJUSTMENT_RATIO).toBe(0.2)
   })
+
+  it('keeps a tighter ratio on an exact cent boundary', () => {
+    expect(checkBudgetWithinSafeRange(100, 110, 0.1).ok).toBe(true)
+    expect(checkBudgetWithinSafeRange(100, 111, 0.1).ok).toBe(false)
+    expect(checkBudgetWithinSafeRange(100, 90, 0.1).ok).toBe(true)
+    expect(checkBudgetWithinSafeRange(100, 89, 0.1).ok).toBe(false)
+  })
 })

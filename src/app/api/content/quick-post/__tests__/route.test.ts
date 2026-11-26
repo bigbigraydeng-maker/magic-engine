@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/auth/client-access', () => ({ requireDashboardClientAccess: mocks.requireAccess }))
 vi.mock('@/lib/content/price-claim-gate', () => ({
   judgeOutgoingPost: mocks.judge,
-  priceGateMessage: () => 'price gate',
+  outgoingPriceGateMessage: () => 'price gate',
 }))
 vi.mock('@/lib/supabase', () => ({
   supabaseAdmin: {

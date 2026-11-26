@@ -4,6 +4,7 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
+import { dailyTotalCapCents } from '@/lib/marketing-plan/promo/daily-total-cap'
 import { loadGoal, loadPromoFacts } from '@/lib/marketing-plan/promo/facts'
 import type { PromoSpec } from '@/lib/marketing-plan/promo/spec'
 import { readPlanSeedForClient } from '@/lib/ads-strategy/plan-seed/read-for-client'
@@ -32,7 +33,7 @@ async function loadBudgetFacts(clientId: string, spec: PromoSpec): Promise<Budge
     const facts = await loadPromoFacts(clientId, spec, [])
     return {
       accounts: facts.gate.accounts,
-      clientCapCents: facts.gate.config?.daily_budget_cap_cents ?? null,
+      clientCapCents: dailyTotalCapCents({ promo: spec }),
     }
   } catch {
     console.error('[agent-draft] budget facts failed')

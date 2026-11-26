@@ -1,14 +1,76 @@
 /**
- * Events of the triggered-send SHADOW run (rehearsal): the daily dispatcher sends one
- * `crm.triggered_send.sweep_requested` per client, the worker sweeps that client.
- * Nothing is ever sent. The events carry no e-mail addresses and no personal data.
+ * Events of the triggered send.
+ * - SHADOW run (rehearsal): the daily dispatcher sends one `crm.triggered_send.sweep_requested` per client, the worker
+ *   sweeps that client. Nothing is ever sent.
+ * - Standing authorization: every proposal, authorization and revocation emits `crm.triggered_send.authorization_changed`
+ *   (§8). It is the machine-readable receipt of the change; an authorization is armed only after its event went out.
+ * The events carry no e-mail addresses and no personal data (who acted is on the authorization row itself).
  */
 
+import { EMAIL_CHANNEL, WELCOME_TRIGGER, type TriggerKey } from '@/lib/messaging/triggered-send/trigger-scope'
+
 export const CRM_TRIGGERED_SEND_SWEEP_REQUESTED = 'crm.triggered_send.sweep_requested'
+export const CRM_TRIGGERED_SEND_AUTHORIZATION_CHANGED = 'crm.triggered_send.authorization_changed'
+
+export type AuthorizationChange = 'proposed' | 'authorized' | 'revoked'
+
+// A type alias (not an interface): the event sender takes `Record<string, unknown>` data, which an interface is not.
+export type TriggeredSendAuthorizationChangedData = {
+  request_id: string
+  authorization_id: string
+  client_id: string
+  /** Which kind of letter the authorization is for (the welcome letter, the AI follow-up letters, …). */
+  trigger_key: TriggerKey
+  channel: typeof EMAIL_CHANNEL
+  change: AuthorizationChange
+  /** 'person' for the PM's own click, else the system code (`SUPERSEDED`, `AUTHORIZE_FAILED`, …). */
+  actor: string
+  rule_sha256: string
+  template_version: number | null
+  template_sha256: string | null
+  daily_cap: number
+  live_from: string | null
+  expires_at: string | null
+  no_send: true
+  provider_impact: 'NONE'
+  created_at: string
+}
+
+export interface AuthorizationChangedEvent {
+  id: string
+  name: typeof CRM_TRIGGERED_SEND_AUTHORIZATION_CHANGED
+  data: TriggeredSendAuthorizationChangedData
+}
+
+/**
+ * One event per row and change: a row is proposed, authorized and revoked at most once, so the id never repeats.
+ * `trigger_key` defaults to the welcome letter (every caller before the AI follow-up letters).
+ */
+export function buildAuthorizationChangedEvent(
+  args: Omit<TriggeredSendAuthorizationChangedData, 'trigger_key' | 'channel' | 'no_send' | 'provider_impact' | 'created_at'> & {
+    now: Date
+    trigger_key?: TriggerKey
+  },
+): AuthorizationChangedEvent {
+  const { now, trigger_key: triggerKey, ...rest } = args
+  return {
+    id: `triggered_send_authorization:${args.authorization_id}:${args.change}`,
+    name: CRM_TRIGGERED_SEND_AUTHORIZATION_CHANGED,
+    data: {
+      ...rest,
+      trigger_key: triggerKey ?? WELCOME_TRIGGER,
+      channel: EMAIL_CHANNEL,
+      no_send: true,
+      provider_impact: 'NONE',
+      created_at: now.toISOString(),
+    },
+  }
+}
 
 export interface TriggeredSendSweepRequestedData {
   client_id: string
-  trigger_key: 'welcome'
+  /** The rehearsal sweep is the welcome letter's only. */
+  trigger_key: typeof WELCOME_TRIGGER
   dry_run: boolean
   requested_by: 'cron' | 'manual'
   slot: string
@@ -63,7 +125,7 @@ export function buildSweepEvent(args: { clientId: string; slot: string }): Sweep
     name: CRM_TRIGGERED_SEND_SWEEP_REQUESTED,
     data: {
       client_id: args.clientId,
-      trigger_key: 'welcome',
+      trigger_key: WELCOME_TRIGGER,
       dry_run: false,
       requested_by: 'cron',
       slot: args.slot,
@@ -89,7 +151,7 @@ export function parseSweepRequest(data: unknown): ParsedSweepRequest {
   if (typeof clientId !== 'string' || !UUID_RE.test(clientId)) {
     return { ok: false, reason: 'client_id is not a lower-case uuid' }
   }
-  if (record.trigger_key !== 'welcome') {
+  if (record.trigger_key !== WELCOME_TRIGGER) {
     return { ok: false, reason: 'trigger_key is not welcome' }
   }
   if (!('dry_run' in record)) {

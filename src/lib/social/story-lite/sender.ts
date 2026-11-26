@@ -360,7 +360,7 @@ async function sweepPack(deps: SenderDeps, pack: LitePack): Promise<SweepRecord[
   return records
 }
 
-/** The sweep. Runs every ten minutes. */
+/** The sweep. Runs every twenty minutes (see STORY_LITE_PUBLISH_CRON). */
 export async function runStorySweep(deps: SenderDeps): Promise<SweepSummary> {
   const staleExpired = await deps.store.expireStaleClaims(deps.now, deps.config.staleClaimMinutes * MINUTE_MS)
 

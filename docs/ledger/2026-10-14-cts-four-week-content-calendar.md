@@ -9,5 +9,7 @@ done_ref: doc:docs/clients/cts/2026-10-14-four-week-content-calendar-1026-1122.m
 source: session:c45254ff
 verify_by: 2026-10-17
 verify_how: 看 105 号是否回了发布人手数、YouTube 与 TikTok 的清单位置，以及 W4 新工单是否批
+last_checked: 2026-11-23
+check_note: 日历文档 10-14 后没再改；三个问题只有 W4 不新开工单已由 105 号答，发布人手数和 YouTube/TikTok 清单位置文档里仍未答；四周已于 11-22 结束。答案可能在别处，判不了
 ---
 只是计划文档。基线档不增加人手；提频档的条件写在文档里。执行单当时没拿到。

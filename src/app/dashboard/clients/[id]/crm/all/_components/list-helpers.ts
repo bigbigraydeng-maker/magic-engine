@@ -43,6 +43,7 @@ export function toDrawerRow(r: ContactRow): DrawerRow {
     suggestedChannel: r.suggestedChannel,
     phoneUnusable: r.phoneUnusable,
     doNotContact: r.doNotContact,
+    doNotCall: r.doNotCall,
     // 「该做什么」三行卡的内容 —— 跟列表那一格同一个对象，两处不会说两套话。
     nextAction: r.nextAction,
     // 只给抽屉显示一行「AI 初判（未校准）」小字，不参与任何判断。
@@ -51,6 +52,9 @@ export function toDrawerRow(r: ContactRow): DrawerRow {
     assignedTo: r.assignedTo ?? null,
     // 回头客：同一份判据，抽屉顶部的横幅靠它立刻画出来。
     returning: r.returning ?? null,
+    // AI 跟进中 / 客人回来了：抽屉名字旁的小标先用列表的值画出来，抽屉自己再读一次最新状态。
+    aiTakeover: r.aiTakeover === true,
+    customerCameBack: r.customerCameBack === true,
   }
 }
 

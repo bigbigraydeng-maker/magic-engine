@@ -17,6 +17,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { scanRedlineHits } from '@/lib/factory/worker-guard'
 import type { AdDraft, DraftProblem } from './ad-draft'
+import { allCreatives } from './ad-draft'
 
 /** 零宽空格 / 连接符 / 方向标记 / 词连接符 / BOM / 软连字符。 */
 const INVISIBLE = /[​-‏⁠﻿­]/g
@@ -83,7 +84,8 @@ export function findRedlineHits(
 /** 草案里买家会读到的、由我们传给 Meta 的所有字（正文 / 标题 / 描述）。 */
 function draftTexts(d: AdDraft): string[] {
   // 请求体形状没人保证过：条目可能是 null / 数字。形状错误由 `validateDraft` 报，这里不能抛。
-  return d.creatives.flatMap((c) =>
+  // 多个广告组：文案写在每个组上，根上的 creatives 是空的 —— 只看根会让红线检查整个落空。
+  return allCreatives(d).flatMap((c) =>
     typeof c === 'object' && c !== null ? [c.primaryText, c.headline, c.description ?? ''] : [],
   )
 }

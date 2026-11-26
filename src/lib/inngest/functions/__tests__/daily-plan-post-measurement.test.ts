@@ -11,7 +11,8 @@ import {
   measurementEventId,
   measurementSchedule,
 } from '@/lib/campaign/daily-plan-publish'
-import { checkIsolation, summariseRead } from '../daily-plan-post-measurement'
+import { checkIsolation, readActionEngagementGraphId, summariseRead } from '../daily-plan-post-measurement'
+import { resolveEngagementGraphObjectId } from '@/lib/meta/post-engagement'
 
 const CLIENT = 'c0000000-0000-0000-0000-000000000000'
 const PAGE = '1616575215312482'
@@ -198,6 +199,44 @@ describe('P1: readRegisteredPageId —— DB 错误不能塌成 client_page_unkn
 
   it('查询成功、字段有值 → 返回该值', async () => {
     expect(await readRegisteredPageId(clientsDb({ data: { facebook_page_id: PAGE } }), CLIENT)).toBe(PAGE)
+  })
+})
+
+describe('resolve graph object for measurement', () => {
+  const VIDEO = '1750835520181969'
+
+  it('readActionEngagementGraphId reads payload and picks video node for factory_reel', async () => {
+    const supabase = {
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            maybeSingle: async () => ({
+              data: {
+                payload: {
+                  source: 'factory_reel',
+                  video_id: VIDEO,
+                  post_id: `${PAGE}_${VIDEO}`,
+                  page_id: PAGE,
+                },
+              },
+              error: null,
+            }),
+          }),
+        }),
+      }),
+    }
+    const id = await readActionEngagementGraphId(supabase as never, 'action-1', `${PAGE}_${VIDEO}`, PAGE)
+    expect(id).toBe(VIDEO)
+  })
+
+  it('resolveEngagementGraphObjectId matches loader contract for daily_plan', () => {
+    expect(
+      resolveEngagementGraphObjectId({
+        postId: POST,
+        pageId: PAGE,
+        publishSource: 'daily_plan',
+      }),
+    ).toBe(POST)
   })
 })
 

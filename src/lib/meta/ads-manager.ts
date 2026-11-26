@@ -16,6 +16,8 @@ export interface AdSummary {
   ctr: number | null                      // fetched separately via insights
 }
 
+const MAX_AD_PAGES = 50
+
 interface RawAd {
   id: string
   name: string
@@ -35,13 +37,21 @@ export async function listAdsInAdSet(
   accessToken: string,
 ): Promise<AdSummary[]> {
   const fields = 'id,name,status,created_time,creative{effective_object_story_id,object_story_id}'
-  const url = `${GRAPH_BASE}/${adsetId}/ads?fields=${fields}&limit=100&access_token=${encodeURIComponent(accessToken)}`
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`listAdsInAdSet ${adsetId}: ${res.status}`)
-  const body = (await res.json()) as { data?: RawAd[]; error?: { message: string } }
-  if (body.error) throw new Error(`listAdsInAdSet ${adsetId}: ${body.error.message}`)
+  // Follow Graph's paging cursor: a post whose ad sits past the first page
+  // must still count as already promoted. Too many pages fails closed.
+  const raw: RawAd[] = []
+  let url: string | null = `${GRAPH_BASE}/${adsetId}/ads?fields=${fields}&limit=100&access_token=${encodeURIComponent(accessToken)}`
+  for (let page = 0; url; page++) {
+    if (page >= MAX_AD_PAGES) throw new Error(`listAdsInAdSet ${adsetId}: more than ${MAX_AD_PAGES * 100} ads`)
+    const res: Response = await fetch(url)
+    if (!res.ok) throw new Error(`listAdsInAdSet ${adsetId}: ${res.status}`)
+    const body = (await res.json()) as { data?: RawAd[]; paging?: { next?: string }; error?: { message: string } }
+    if (body.error) throw new Error(`listAdsInAdSet ${adsetId}: ${body.error.message}`)
+    raw.push(...(body.data ?? []))
+    url = body.paging?.next ?? null
+  }
 
-  return (body.data ?? []).map((a) => ({
+  return raw.map((a) => ({
     adId:  a.id,
     name:  a.name,
     status: (a.status as AdSummary['status']) ?? 'PAUSED',
@@ -87,6 +97,37 @@ export async function createAdFromPost(input: {
   return { adId: json.id }
 }
 
+export interface AdPlacement {
+  adId: string
+  status: string | null
+  accountId: string | null
+  campaignId: string | null
+  adsetId: string | null
+}
+
+/** Read one ad. A failed read is null — the caller must not treat that as paused. */
+export async function readAdPlacement(adId: string, accessToken: string): Promise<AdPlacement | null> {
+  const fields = 'status,account_id,campaign_id,adset_id'
+  const url = `${GRAPH_BASE}/${adId}?fields=${fields}&access_token=${encodeURIComponent(accessToken)}`
+  const res = await fetch(url)
+  if (!res.ok) return null
+  const body = (await res.json()) as {
+    status?: string
+    account_id?: string
+    campaign_id?: string
+    adset_id?: string
+    error?: { message?: string }
+  }
+  if (body.error) return null
+  return {
+    adId,
+    status: body.status ?? null,
+    accountId: body.account_id ?? null,
+    campaignId: body.campaign_id ?? null,
+    adsetId: body.adset_id ?? null,
+  }
+}
+
 /**
  * Pause an Ad (soft off — creative + insights preserved for later analysis).
  */
@@ -98,6 +139,17 @@ export async function pauseAd(adId: string, accessToken: string): Promise<void> 
     body,
   })
   if (!res.ok) throw new Error(`pauseAd ${adId}: ${res.status} ${await res.text()}`)
+}
+
+/** Turn one already-paused ad on. Does not touch the ad set or the campaign. */
+export async function activateAd(adId: string, accessToken: string): Promise<boolean> {
+  const body = new URLSearchParams({ status: 'ACTIVE', access_token: accessToken })
+  const res = await fetch(`${GRAPH_BASE}/${adId}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body,
+  })
+  return res.ok
 }
 
 /**

@@ -145,14 +145,15 @@ export interface LandPrescriptionResult {
 async function updateOneRow(
   supabase: SupabaseClient,
   patch: Record<string, unknown>,
-  where: { id: string; clientId: string; onlyIfStatus?: string },
+  where: { id: string; clientId: string; goalId?: string; onlyIfStatus?: string },
 ): Promise<{ ok: true } | { ok: false; why: string; noMatch?: boolean }> {
   let query = supabase
     .from('prescriptions')
     .update(patch)
     .eq('id', where.id)
     .eq('client_id', where.clientId)
-  // 状态条件写在 UPDATE 本身里：读到写之间状态被别人改了，就一行都命不中。
+  // 状态条件和目标写在 UPDATE 本身里：对不上的行一行都不改。
+  if (where.goalId) query = query.eq('goal_id', where.goalId)
   if (where.onlyIfStatus) query = query.eq('status', where.onlyIfStatus)
   const { data, error } = await query.select('id')
   if (error) return { ok: false, why: error.message }
@@ -227,14 +228,23 @@ export async function landPrescription(
   notes.push('不往看板上生成待办')
 
   // 归档上一版。不做的话看板会一周一层往上堆，且新旧动作长得一模一样、分不出哪条还算数。
-  if (prescription.supersedes_id) {
+  if (prescription.supersedes_id && !prescription.goal_id) {
+    notes.push('上一版没有目标可核对，没有接替')
+  } else if (prescription.supersedes_id && prescription.goal_id) {
     const archived = await updateOneRow(
       supabase,
       { status: 'superseded' },
-      { id: prescription.supersedes_id, clientId: prescription.client_id },
+      {
+        id: prescription.supersedes_id,
+        clientId: prescription.client_id,
+        goalId: prescription.goal_id,
+        onlyIfStatus: 'approved',
+      },
     )
-    if (!archived.ok) {
-      // 非致命：新方案已经落地了，旧的没归档只是界面上多一份
+    if (!archived.ok && archived.noMatch) {
+      notes.push('上一版已经不是这份已批准处方，没有改它')
+    } else if (!archived.ok) {
+      // 非致命：新方案已经落地了，旧的没归档只是界面上多一份。不把新版改回去。
       notes.push(`上一版处方归档失败（非致命）：${archived.why}`)
     } else {
       // 光归档处方不够 —— 看板查执行项时只按客户过滤，不看处方状态。

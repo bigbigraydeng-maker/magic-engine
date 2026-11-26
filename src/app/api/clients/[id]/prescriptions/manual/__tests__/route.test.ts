@@ -74,8 +74,15 @@ function request(body: unknown): NextRequest {
   })
 }
 
-function mockDb(options: { goal?: unknown; run?: unknown; version?: unknown } = {}) {
+function mockDb(options: {
+  goal?: unknown
+  run?: unknown
+  version?: unknown
+  approved?: { id: string } | null
+  approvedError?: boolean
+} = {}) {
   const inserts: Array<Record<string, unknown>> = []
+  const updates: Array<Record<string, unknown>> = []
   const tables: string[] = []
   const queries: RecordedQuery[] = []
   ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
@@ -84,14 +91,25 @@ function mockDb(options: { goal?: unknown; run?: unknown; version?: unknown } = 
     queries.push(query)
     if (table === 'goals') return chain(options.goal === undefined ? { id: 'goal-1', client_id: 'client-1' } : options.goal, query)
     if (table === 'diagnostic_runs') return chain(options.run === undefined ? { id: 'run-9' } : options.run, query)
-    const builder = chain(options.version === undefined ? { version: 4 } : options.version, query)
+    const builder = chain(null, query)
+    builder.maybeSingle = async () => {
+      if (query.select === 'id') {
+        if (options.approvedError) return { data: null, error: { message: 'down' } }
+        return { data: options.approved ?? null, error: null }
+      }
+      return { data: options.version === undefined ? { version: 4 } : options.version, error: null }
+    }
     builder.insert = (row: Record<string, unknown>) => {
       inserts.push(row)
       return { select: () => ({ single: async () => ({ data: { id: 'rx-new' }, error: null }) }) }
     }
+    builder.update = (row: Record<string, unknown>) => {
+      updates.push(row)
+      return builder
+    }
     return builder
   })
-  return { inserts, tables, queries }
+  return { inserts, tables, queries, updates }
 }
 
 beforeEach(() => {
@@ -194,6 +212,32 @@ describe('POST /prescriptions/manual', () => {
     expect(res.status).toBe(422)
     expect(inserts).toHaveLength(0)
     expect(mockLand).not.toHaveBeenCalled()
+  })
+
+  it('records the latest approved version and does not change that row', async () => {
+    const { inserts, queries, updates } = mockDb({ approved: { id: 'rx-old' } })
+    const res = await POST(request(payload()), { params })
+    expect(res.status).toBe(200)
+    expect(inserts[0].supersedes_id).toBe('rx-old')
+    expect(inserts[0].status).toBe('draft')
+    const prior = queries.filter((query) => query.table === 'prescriptions' && query.select === 'id')
+    expect(prior).toHaveLength(1)
+    expect(prior[0].filters).toEqual([
+      'client_id=client-1',
+      'goal_id=goal-1',
+      'status=approved',
+      'order:approved_at:desc',
+      'limit:1',
+    ])
+    expect(updates).toHaveLength(0)
+    expect(mockLand).not.toHaveBeenCalled()
+  })
+
+  it('does not insert a draft when the approved version cannot be read', async () => {
+    const { inserts } = mockDb({ approvedError: true })
+    const res = await POST(request(payload()), { params })
+    expect(res.status).toBe(500)
+    expect(inserts).toHaveLength(0)
   })
 
   it('returns the operator-gate status and does not write when access is denied', async () => {

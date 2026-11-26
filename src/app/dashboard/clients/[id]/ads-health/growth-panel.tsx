@@ -58,6 +58,7 @@ export interface GrowthStateView {
     goal?: { title: string; label: string; target: number; dayIndex: number; totalDays: number; primaryMetricKey?: string } | null
     /** 每日广告成绩单（2026-11-03 起写入；老行没有） */
     scorecard?: AdsScorecard | { error: string }
+    trendCheck?: { patrolLine?: string; lines?: string[] } | null
   } | null
 }
 
@@ -159,7 +160,7 @@ function O1Approval({
     try {
       const response = await fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ adset_id: adsetId }) })
       const json = await response.json() as { error?: string }
-      setMessage(response.ok ? '已提交，等待负责人核对并批准。' : json.error ?? '暂时无法提交。')
+      setMessage(response.ok ? '确认卡已出，预算还没改。请到确认卡上点确认。' : json.error ?? '暂时无法提交。')
       await refresh()
       if (response.ok) onPendingAdsChanged?.()
     } catch { setMessage('网络暂时不可用，请稍后重试。') }
@@ -171,7 +172,7 @@ function O1Approval({
     try {
       const response = await fetch(`${endpoint}/${run.id}/decision`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ resolution, expectedDecisionId: run.authorization_decision_id, historyReviewed }) })
       const json = await response.json() as { error?: string }
-      setMessage(response.ok ? (resolution === 'approve' ? '已批准，正在排队执行；完成后会记录 Meta 回读结果。' : '已驳回。') : json.error ?? '处理失败。')
+      setMessage(response.ok ? (resolution === 'approve' ? '已记下。预算要等确认卡点了确认才改。' : '已驳回。') : json.error ?? '处理失败。')
       await refresh()
       if (response.ok) onPendingAdsChanged?.()
     } catch { setMessage('网络暂时不可用，请稍后重试。') }
@@ -190,7 +191,7 @@ function O1Approval({
   const money = (cents: number) => `${currency} ${(cents / 100).toFixed(2)}`.trim()
   return (
     <div className="mt-3 rounded-lg border border-sky-200 bg-white p-3 text-xs text-gray-700">
-      <p>这是系统建议，不会自动加预算。批准后最多上调 20%，并受客户预算上限约束。</p>
+      <p>在投计划的预算不能在这里加。要加预算，请新开一份计划。</p>
       {typeof before === 'number' && typeof after === 'number' && <p className="mt-1">当前{budgetTarget}日预算 {money(before)} → 建议 {money(after)}</p>}
       {(pending ?? active ?? terminal) && (
         <ApprovalContextNotes
@@ -308,6 +309,18 @@ export default function GrowthPanel({
             </ul>
           )}
         </div>
+      )}
+
+      {state.payload?.trendCheck?.lines && state.payload.trendCheck.lines.length > 0 && (
+        <section className="rounded-xl border border-violet-200 bg-violet-50 p-4">
+          <h3 className="text-sm font-semibold text-violet-900">趋势检查（日表规则）</h3>
+          <p className="mt-1 text-xs text-violet-800">{state.payload.trendCheck.patrolLine ?? state.payload.trendCheck.lines.join('；')}</p>
+          <ul className="mt-2 list-disc pl-5 text-xs text-violet-900">
+            {state.payload.trendCheck.lines.map((line, i) => (
+              <li key={i}>{line}</li>
+            ))}
+          </ul>
+        </section>
       )}
 
       <div className="grid gap-4 md:grid-cols-2">

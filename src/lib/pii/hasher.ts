@@ -10,7 +10,7 @@
  */
 
 import { createHash } from 'crypto'
-import { normalizeEmail, normalizeName, normalizePhone } from './normalize'
+import { normalizeEmail, normalizeName, normalizePhone, normalizeStoredPhone } from './normalize'
 
 function sha256(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex')
@@ -31,6 +31,14 @@ export function hashPhone(
   defaultCountry: string | null | undefined,
 ): string | null {
   return hashNormalized(normalizePhone(raw, defaultCountry))
+}
+
+/** 哈希一个**已经入库**的电话（见 `normalizeStoredPhone`）：发送层读库里的值时用这个。 */
+export function hashStoredPhone(
+  raw: string | null | undefined,
+  defaultCountry: string | null | undefined,
+): string | null {
+  return hashNormalized(normalizeStoredPhone(raw, defaultCountry))
 }
 
 export function hashName(raw: string | null | undefined): string | null {

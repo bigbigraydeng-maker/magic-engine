@@ -8,13 +8,14 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { StoredReceipt } from '@/lib/crm/email-templates/types'
 
-type ReceiptRow = StoredReceipt & { contactName: string | null }
+/** Human clicks on this mail's links; null = clicks could not be read (shown as "—"). Absent on older servers. */
+type ReceiptRow = StoredReceipt & { contactName: string | null; clicks?: Array<{ label: string; firstClickedAt: string }> | null }
 
 interface Payload {
   receipts: ReceiptRow[]
 }
 
-const REASON_LABELS: Record<string, string> = {
+export const REASON_LABELS: Record<string, string> = {
   frequency_cap: '最近收到的邮件已达上限',
   frequency_unverifiable: '数不清他收了几封',
   content_blocked: '文字踩了红线',
@@ -25,6 +26,9 @@ const REASON_LABELS: Record<string, string> = {
   template_outdated: '模板刚更新',
   catalog_outdated: '团目录刚更新',
   template_unavailable: '模板已停用',
+  template_automated: '自动信模板不能手动发',
+  email_unsubscribed: '客人已退订邮件',
+  unsubscribe_unverifiable: '查不到有没有退订',
   tour_unavailable: '所选团已下架',
   invalid_pick: '选团不对',
   already_followed_up: '通话后已经发过',
@@ -38,6 +42,8 @@ const REASON_LABELS: Record<string, string> = {
   internal_error: '系统出错',
   graph_failed: '邮箱发送失败',
   send_unknown: '发送状态不明',
+  catalogue_expired: '手册已过期',
+  catalogue_unavailable: '没配目录或目录已过期',
   reconcile_failed: '事后确认没发出去',
 }
 
@@ -83,6 +89,12 @@ function templateText(receipt: ReceiptRow): string {
   if (receipt.templateKey === null) return '自己写的'
   if (receipt.templateVersion !== null) return `${receipt.templateKey} 第 ${receipt.templateVersion} 版`
   return receipt.templateKey
+}
+
+function clicksText(receipt: ReceiptRow): string {
+  if (receipt.outcome !== 'sent' || !receipt.clicks || receipt.clicks.length === 0) return '—'
+  const shown = receipt.clicks.slice(0, 3).map((c) => `${c.label} · ${formatTime(c.firstClickedAt)}`)
+  return receipt.clicks.length > 3 ? `${shown.join('；')}；等 ${receipt.clicks.length} 个` : shown.join('；')
 }
 
 function OutcomeBadge({ outcome }: { outcome: string }) {
@@ -169,6 +181,7 @@ export function RecentSends(props: { clientId: string }): JSX.Element {
                 <th className="py-1 pr-2 font-semibold">结果</th>
                 <th className="py-1 pr-2 font-semibold">原因</th>
                 <th className="py-1 pr-2 font-semibold">通话</th>
+                <th className="py-1 pr-2 font-semibold">点了什么</th>
               </tr>
             </thead>
             <tbody>
@@ -204,6 +217,7 @@ export function RecentSends(props: { clientId: string }): JSX.Element {
                   <td className="py-1 pr-2 text-me-charcoal/70">
                     {CALL_BASIS_LABELS[r.callBasis] ?? r.callBasis}
                   </td>
+                  <td className="py-1 pr-2 text-me-charcoal/70">{clicksText(r)}</td>
                 </tr>
               ))}
             </tbody>

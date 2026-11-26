@@ -183,15 +183,28 @@ describe('tracking.pixel_alive', () => {
     expect(gate(judge(), KEY).status).toBe('green')
   })
 
-  it('从没触发过且没有 PageView → 红', () => {
-    const g = gate(judge(i => { i.meta.datasets[0].last_fired_at = null; i.meta.datasets[0].events_24h = {} }), KEY)
+  it('从没触发过且读到 PageView 为 0 → 红', () => {
+    const g = gate(judge(i => { i.meta.datasets[0].last_fired_at = null; i.meta.datasets[0].events_24h = { PageView: 0 } }), KEY)
     expect(g.status).toBe('red')
     expect(g.hard).toBe(true)
   })
 
-  it('最后触发在 30 小时前且 24 小时内没有 PageView → 红', () => {
-    const g = gate(judge(i => { i.meta.datasets[0].last_fired_at = hoursAgo(30); i.meta.datasets[0].events_24h = {} }), KEY)
+  it('最后触发在 30 小时前且读到 PageView 为 0 → 红', () => {
+    const g = gate(judge(i => { i.meta.datasets[0].last_fired_at = hoursAgo(30); i.meta.datasets[0].events_24h = { PageView: 0 } }), KEY)
     expect(g.status).toBe('red')
+  })
+
+  it('统计读回来是空的 → 灰，不是像素已死，也不是绿；硬门灰仍挡住批准', () => {
+    const gates = judge(i => {
+      i.meta.datasets[0].events_24h = {}
+      i.meta.datasets[0].events_7d = {}
+    })
+    const g = gate(gates, KEY)
+    expect(g.status).toBe('gray')
+    expect(g.reason).toBe('读不到数据，判不了')
+    expect(g.status).not.toBe('green')
+    expect(g.hard).toBe(true)
+    expect(preconditionsMet(gates)).toBe(false)
   })
 
   it('最后触发时间显示很旧，但 24 小时内确实有 PageView → 黄（多半是 Meta 显示延迟）', () => {
@@ -216,10 +229,20 @@ describe('tracking.pixel_alive', () => {
     expect(g.status).toBe('gray')
   })
 
-  it('官网同时发两个官方数据集，一个在线一个已死 → 黄', () => {
+  it('一个在线、另一个统计是空响应 → 黄，不把空响应说成已死，也不是绿', () => {
     const g = gate(judge(i => {
       i.landing.probes[0].pixel_ids = [OFFICIAL, OTHER_OFFICIAL]
       i.meta.datasets[1].events_24h = {}
+    }), KEY)
+    expect(g.status).toBe('yellow')
+    expect(g.reason).toContain('读不到数据，判不了')
+    expect(g.status).not.toBe('green')
+  })
+
+  it('官网同时发两个官方数据集，一个在线一个已死 → 黄', () => {
+    const g = gate(judge(i => {
+      i.landing.probes[0].pixel_ids = [OFFICIAL, OTHER_OFFICIAL]
+      i.meta.datasets[1].events_24h = { PageView: 0 }
     }), KEY)
     expect(g.status).toBe('yellow')
   })
@@ -247,6 +270,24 @@ describe('tracking.lead_event_seen', () => {
   it('事件统计没读到、也没有别处能证明 → 灰', () => {
     const g = gate(judge(i => { i.meta.datasets[0].events_7d = null }), KEY)
     expect(g.status).toBe('gray')
+  })
+
+  it('7 天统计是空响应 → 灰「读不到数据，判不了」，不是没收到留资，也不是绿；仍挡住批准', () => {
+    const gates = judge(i => { i.meta.datasets[0].events_7d = {} })
+    const g = gate(gates, KEY)
+    expect(g.status).toBe('gray')
+    expect(g.reason).toBe('读不到数据，判不了')
+    expect(g.status).not.toBe('green')
+    expect(g.hard).toBe(true)
+    expect(preconditionsMet(gates)).toBe(false)
+  })
+
+  it('读回了数据且留资次数是 0 → 仍是红，挡住批准', () => {
+    const gates = judge(i => { i.meta.datasets[0].events_7d = { PageView: 4, Lead: 0 } })
+    const g = gate(gates, KEY)
+    expect(g.status).toBe('red')
+    expect(g.reason).toContain('一条留资事件都没收到')
+    expect(preconditionsMet(gates)).toBe(false)
   })
 
   it('按客户配置的留资事件名数；默认的 Lead 不再算', () => {
@@ -840,6 +881,17 @@ describe('env.account_billing', () => {
     expect(g.reason).toContain('日预算不超上限')
   })
 
+  it('空账户单独出黄时标 empty_account_only；还有别的不放心就不标', () => {
+    const only = gate(judge(budget({ live_daily_budget_cents: 0, live_entity_count: 0 })), KEY)
+    expect(only.status).toBe('yellow')
+    expect(only.evidence.empty_account_only).toBe(true)
+    const more = gate(judge(budget({ live_daily_budget_cents: 0, live_entity_count: 0, registered_account_count: 2, client_cap_cents: 30000 })), KEY)
+    expect(more.status).toBe('yellow')
+    expect(more.evidence.empty_account_only).toBe(false)
+    const other = gate(judge(budget({ registered_account_count: 2, client_cap_cents: 30000 })), KEY)
+    expect(other.evidence.empty_account_only).toBe(false)
+  })
+
   it('黄：客户有多个登记账户 → 只核对这一个账户，文案不说客户级；客户总上限是各账户加起来比的，这里没算', () => {
     const g = gate(judge(budget({ registered_account_count: 2, client_cap_cents: 30000 })), KEY)
     expect(g.status).toBe('yellow')
@@ -938,6 +990,14 @@ describe('applyKnownIssues', () => {
   const issue = {
     gate: 'tracking.lead_event_quality' as const, note: '留资事件带固定占位金额', observed_on: '2026-10-19', expires_on: '2026-11-19',
   }
+
+  it('已知问题套到「只因空账户才黄」的付款门上 → 清掉空账户标记，开投卡不再放行', () => {
+    const billing: TrackingGateReceipt = {
+      key: 'env.account_billing', status: 'yellow', reason: '空', how: 'x', evidence: { empty_account_only: true }, as_of: null, hard: true,
+    }
+    const [g] = applyKnownIssues([billing], [{ ...issue, gate: 'env.account_billing' as const }], NOW)
+    expect(g.evidence.empty_account_only).toBe(false)
+  })
 
   it('绿灯遇到还没到期的已知问题 → 压成黄，说明写进原因', () => {
     const [g] = applyKnownIssues([green], [issue], NOW)

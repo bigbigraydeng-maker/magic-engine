@@ -43,7 +43,13 @@ export type OutcomeForSend = {
   id: string
   clientId: string
   contactId: string | null
-  outcomeKind: 'purchase' | 'balance' | 'lead'
+  /**
+   * `lead_stage` = 一条即时表单线索走到了客户配置里的某个阶段（如「已报价」）。
+   * 不带金额；阶段名在 `leadStage` 里，发往客户的线索阶段数据集（见 `ClientSendConfig.crmStage`）。
+   */
+  outcomeKind: 'purchase' | 'balance' | 'lead' | 'lead_stage'
+  /** 仅 `lead_stage` 有值：发给平台的阶段名，来自客户配置，不在共享代码里写死。 */
+  leadStage: string | null
   customerEmail: string | null
   customerPhone: string | null
   customerFirst: string | null
@@ -67,7 +73,7 @@ export type OutcomeForSend = {
    * `writer.ts` 只做字段拼装，不从 `pageScopedUserId` 是否存在反推——
    * 见 `src/lib/conversions/intake.ts::actionSourceForSourceKind` 的注释。
    */
-  actionSource: 'email' | 'business_messaging'
+  actionSource: 'email' | 'business_messaging' | 'system_generated'
 }
 
 /** 客户侧配置。谁去读库是调用方的事，这一层只拿现成的值。 */
@@ -77,6 +83,12 @@ export type ClientSendConfig = {
   defaultPhoneCountry: string | null
   /** Facebook 主页 id，配合 pageScopedUserId 一起发。来自 clients.facebook_page_id。 */
   facebookPageId: string | null
+  /**
+   * 线索阶段回传的目标：客户在平台上专门建的线索阶段数据集 + 「线索来自哪个系统」的名字。
+   * 只有发 `lead_stage` 时才需要；没配就发不出去（fail-closed，绝不回落到网站数据集）。
+   * 来自 `clients.leads_config.crm_stage_signals`。
+   */
+  crmStage?: { datasetId: string; leadEventSource: string } | null
 }
 
 export interface DestinationWriter<TPayload = unknown> {

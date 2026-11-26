@@ -3,7 +3,20 @@ import {
   isGoalProgressPending,
   perDayNeededToHitTarget,
   remainingGoalDays,
+  roundGoalCount,
 } from '../goal-progress-display'
+
+describe('roundGoalCount', () => {
+  it('rounds the day-proportional expected value to a whole number', () => {
+    expect(roundGoalCount(89.1891891891892)).toBe(89)
+    expect(roundGoalCount(89.5)).toBe(90)
+  })
+
+  it('keeps whole numbers unchanged', () => {
+    expect(roundGoalCount(151)).toBe(151)
+    expect(roundGoalCount(0)).toBe(0)
+  })
+})
 
 describe('isGoalProgressPending', () => {
   it('leads_count is not pending', () => {

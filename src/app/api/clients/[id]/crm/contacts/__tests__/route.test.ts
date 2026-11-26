@@ -218,6 +218,22 @@ describe('GET contacts — 分页形状', () => {
     expect(body).not.toHaveProperty('contacts')
   })
 
+  it('「AI 跟进中」镜像列有值 → 分页行带 aiTakeover: true（全部客人名单小标）', async () => {
+    const original = CONTACTS[0].ai_takeover_since
+    CONTACTS[0].ai_takeover_since = '2026-11-10T01:59:33.874Z'
+    try {
+      const { body } = await get('client-a', '?page=1&perPage=100')
+      const items = body.items as Array<{ contactId: string; aiTakeover?: boolean }>
+      expect(items.find((r) => r.contactId === 'a1')?.aiTakeover).toBe(true)
+      expect(items.filter((r) => r.contactId !== 'a1').every((r) => r.aiTakeover === false)).toBe(true)
+      const cols = recorded.filter((r) => r.table === 'contacts').map((r) => r.columns ?? '')
+      expect(cols.some((c) => c.includes('ai_takeover_since'))).toBe(true)
+    } finally {
+      if (original === undefined) delete CONTACTS[0].ai_takeover_since
+      else CONTACTS[0].ai_takeover_since = original
+    }
+  })
+
   it('阶段营销动作无效时与阶段接口一样回退到 suppress', async () => {
     const original = STAGES[0].marketing_action
     STAGES[0].marketing_action = 'invalid'
@@ -458,34 +474,38 @@ describe('GET contacts — 筛选落到 SQL', () => {
 })
 
 describe('GET contacts — view=priority（WP3 R5 接线）', () => {
-  it('数据库批次函数可用时，使用同客户的完整触点且不再发分页触点请求', async () => {
-    ;(supabaseAdmin.rpc as ReturnType<typeof vi.fn>).mockImplementation(async (name: string, args: Record<string, unknown>) => {
-      expect(name).toBe('crm_priority_touchpoint_batch')
-      expect(args).toEqual({ p_client_id: 'cts', p_offset: 0 })
-      return { data: STALE_TOUCHES.map(({ summary: _summary, ...touch }) => ({ ...touch, created_at: touch.occurred_at })), error: null }
-    })
+  it('整批触点按本客户读取、排序稳定，且不再调用数据库批次函数', async () => {
     const { status, body } = await get('cts', '?view=priority&open=hot,cold')
     expect(status).toBe(200)
     const rows = (body.sections as Array<{ items: Array<{ contactId: string }> | null }>).flatMap((s) => s.items ?? [])
     expect(rows.some((row) => row.contactId === 'a3')).toBe(true)
-    expect(recorded.some((r) => r.table === 'contact_touchpoints')).toBe(false)
+    // 2026-11-15 线上实测批次函数没有更快，已不再调用（见 priority-touchpoints.ts）。
+    const rpcNames = (supabaseAdmin.rpc as ReturnType<typeof vi.fn>).mock.calls.map(([name]) => name)
+    expect(rpcNames).not.toContain('crm_priority_touchpoint_batch')
+    const scans = recorded.filter((r) => r.table === 'contact_touchpoints' && r.ins.length === 0)
+    expect(scans.length).toBeGreaterThan(0)
+    for (const scan of scans) {
+      expect(scan.eqs).toContainEqual(['client_id', 'cts'])
+      expect(scan.orders.map(([col]) => col)).toEqual(['occurred_at', 'id'])
+      expect(scan.columns).toContain('created_at')
+    }
   })
 
-  it('批次读取保留补记时间，最近手记按创建时间显示', async () => {
+  it('整批读取保留补记时间，最近手记按创建时间显示', async () => {
     const createdAt = new Date().toISOString()
-    ;(supabaseAdmin.rpc as ReturnType<typeof vi.fn>).mockResolvedValue({ data: [{
+    scanRows = [{
       id: 'backdated-note', contact_id: 'a2', channel: 'phone', direction: 'outbound',
       occurred_at: '2020-01-01T00:00:00Z', created_at: createdAt,
       raw: 'Recent entry', metadata: {}, source: 'me_manual',
-    }], error: null })
+    }]
     const { body } = await get('cts', '?view=priority')
     expect(body.recentNotes).toEqual(expect.arrayContaining([expect.objectContaining({ contactId: 'a2', at: createdAt })]))
-    // PR #3427 起，最近手记会按触点 id 单独读一次自己的摘要（批次函数不带 summary）。
-    // 允许的只有这一条：按 id 精确取、限定本客户；不许再出现整表扫描式的触点查询。
+    // 最近手记按触点 id 单独读一次自己的摘要（整批读取不带 summary）；其余触点查询只能是本客户的整批读取。
     const touchQueries = recorded.filter((r) => r.table === 'contact_touchpoints')
-    expect(touchQueries).toHaveLength(1)
-    expect(touchQueries[0].ins.map(([col]) => col)).toEqual(['id'])
-    expect(touchQueries[0].eqs).toContainEqual(['client_id', 'cts'])
+    const byId = touchQueries.filter((r) => r.ins.length > 0)
+    expect(byId).toHaveLength(1)
+    expect(byId[0].ins.map(([col]) => col)).toEqual(['id'])
+    for (const q of touchQueries) expect(q.eqs).toContainEqual(['client_id', 'cts'])
   })
 
   it('按电话搜索时兼容本地格式，并将触点查询限制到命中的联系人', async () => {

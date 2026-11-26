@@ -79,7 +79,7 @@ export function prescribe(input: PrescribeInput): Prescription | null {
       title: '从爆款池补新素材',
       why: '观众没被打扰过度(频次很低),但点击率持续走低 —— 是素材本身老化失效,补新素材最对症。',
       executable: true,
-      execute_hint: '把近期表现最好的内容补进账户统一的爆款广告组(不一定是这张卡这条);新素材一律先暂停、不花钱,你确认开启后才投。',
+      execute_hint: '先出确认卡。点确认后才补进账户统一的爆款广告组（不一定是这张卡这条）。建成仍暂停、不花钱。要开投再点一张卡。',
     }
   }
 

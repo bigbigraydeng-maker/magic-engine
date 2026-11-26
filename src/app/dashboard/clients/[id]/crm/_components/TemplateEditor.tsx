@@ -6,6 +6,7 @@
  */
 
 import { useCallback, useMemo, useRef, useState } from 'react'
+import { WhenToUseField } from './WhenToUseField'
 import type {
   EmailTemplateVersion,
   FactSource,
@@ -93,6 +94,7 @@ interface FormState {
   subject: string
   body: string
   changeNote: string
+  whenToUse: string
 }
 
 function initialState(initial: EmailTemplateVersion | null, prefill: EmailTemplateVersion | null | undefined): FormState {
@@ -110,6 +112,7 @@ function initialState(initial: EmailTemplateVersion | null, prefill: EmailTempla
       subject: '',
       body: '',
       changeNote: '',
+      whenToUse: '',
     }
   }
   const filter = source.pickFilter ?? {}
@@ -125,6 +128,7 @@ function initialState(initial: EmailTemplateVersion | null, prefill: EmailTempla
     subject: source.subject,
     body: source.body,
     changeNote: '',
+    whenToUse: source.whenToUse ?? '',
   }
 }
 
@@ -233,6 +237,7 @@ export function TemplateEditor(props: TemplateEditorProps): JSX.Element {
     setError(null)
     const pickFilter = buildPickFilter(form.factSource, form.destinations, form.tiers, form.months)
     const changeNote = form.changeNote.trim() === '' ? null : form.changeNote.trim()
+    const whenToUse = form.whenToUse.trim() === '' ? null : form.whenToUse.trim()
     const payload = {
       name: form.name,
       subject: form.subject,
@@ -242,6 +247,7 @@ export function TemplateEditor(props: TemplateEditorProps): JSX.Element {
       pickFilter,
       status: form.status,
       changeNote,
+      whenToUse,
     }
     try {
       const url = isNew
@@ -293,7 +299,7 @@ export function TemplateEditor(props: TemplateEditorProps): JSX.Element {
       </div>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-        <label className="block">
+        <label className="block md:col-span-2">
           <span className="mb-1 block text-xs font-semibold text-me-charcoal/70">名称</span>
           <input
             type="text"
@@ -304,6 +310,8 @@ export function TemplateEditor(props: TemplateEditorProps): JSX.Element {
             className="w-full rounded-lg border border-me-stone bg-white px-3 py-2 text-sm"
           />
         </label>
+
+        <WhenToUseField value={form.whenToUse} onChange={(value) => update('whenToUse', value)} />
 
         <label className="block">
           <span className="mb-1 block text-xs font-semibold text-me-charcoal/70">模板标识</span>

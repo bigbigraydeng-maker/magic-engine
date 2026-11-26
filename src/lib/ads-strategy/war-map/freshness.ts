@@ -52,7 +52,8 @@ function earliest(days: Array<string | null>): string | null {
 function notesOf(input: WarMapInput, names: Map<string, string>, active: string[], dormant: string[], today: string): string | null {
   const notes: string[] = []
   if (dormant.length > 0) {
-    notes.push(`${dormant.map(id => names.get(id) ?? id).join('、')} 没在投，没有新数据是正常的`)
+    // 写明是「广告账户」：账户名常跟客户同名（例如名叫 CTS 的旧账户），只写名字会被读成整个客户都没在投
+    notes.push(`广告账户 ${dormant.map(id => names.get(id) ?? id).join('、')} 没在投，这个账户没有新数据是正常的`)
   }
   if (input.accountFetchedAt) {
     for (const id of active) {

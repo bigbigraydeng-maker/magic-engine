@@ -28,8 +28,18 @@ interface InsightRow {
  * method returns the same object, and the object is awaitable (then) resolving
  * to { data, error }. Any other table is a test bug — throw.
  */
+function emptyPlans() {
+  const builder = {
+    select: () => builder,
+    eq: () => builder,
+    then: (resolve: (value: { data: []; error: null }) => unknown) => resolve({ data: [], error: null }),
+  }
+  return builder
+}
+
 function insightsTable(rows: InsightRow[]) {
   vi.mocked(supabaseAdmin.from).mockImplementation((table: string) => {
+    if (table === 'marketing_plans') return emptyPlans() as never
     if (table !== 'ad_daily_insights') {
       throw new Error(`unexpected table in test: ${table}`)
     }
@@ -70,6 +80,7 @@ function insightsError() {
     then: (resolve: (value: typeof result) => unknown) => resolve(result),
   }
   vi.mocked(supabaseAdmin.from).mockImplementation((table: string) => {
+    if (table === 'marketing_plans') return emptyPlans() as never
     if (table !== 'ad_daily_insights') {
       throw new Error(`unexpected table in test: ${table}`)
     }

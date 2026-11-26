@@ -7,7 +7,7 @@
  *
  *   · 客户参考日           → 复用 `resolveClientEvaluationDate`（不重推时区逻辑，
  *                            也不重复卫青那次"读不到时区的账户排除在取最早之外"的修复）
- *   · 客户级配置来源与上限 → 复用 `loadAdStrategyConfigWithSource`
+ *   · 客户每天总上限       → 已批准计划（`readClientDailyTotalCap`），不读旧客户总闸
  *   · 账户列表             → 复用 `getClientAdAccounts`（含它对老客户的
  *                            `meta_ad_account_id` 回落）
  *   · 每账户"在不在投"     → 复用 `isDelivering` / `DELIVERING_STATUSES`
@@ -23,7 +23,7 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { getClientAdAccounts } from '@/lib/meta/client-ad-accounts'
 import { resolveClientEvaluationDate } from './account-timezone'
-import { loadAdStrategyConfigWithSource } from './config'
+import { readClientDailyTotalCap } from '@/lib/approval-source/plan-cap'
 import { isDelivering } from './portfolio/diagnostics/context'
 import type { EntitySnapshotRow } from './portfolio/snapshot'
 import type { AccountSpendFact, DetectorConfigSource } from './circuit-detectors'
@@ -184,10 +184,12 @@ async function readAccountDeliveryAndCurrency(
 
 /** 装配判据 #2 需要的全部事实。 */
 export async function loadClientCapFacts(clientId: string): Promise<ClientCapFacts> {
-  const [clientAccounts, { config, source: configSource }] = await Promise.all([
+  const [clientAccounts, planCap] = await Promise.all([
     getClientAdAccounts(clientId),
-    loadAdStrategyConfigWithSource(clientId),
+    readClientDailyTotalCap(supabaseAdmin, clientId),
   ])
+  const configSource: DetectorConfigSource = planCap.state === 'unreadable' ? 'fallback' : 'row'
+  const capCents = planCap.state === 'set' ? planCap.cents : null
 
   const adAccountIds = clientAccounts.map((account) => account.adAccountId)
   const clientReferenceDate = await resolveClientEvaluationDate(adAccountIds)
@@ -211,7 +213,7 @@ export async function loadClientCapFacts(clientId: string): Promise<ClientCapFac
   return {
     clientReferenceDate,
     accounts,
-    capCents: config.daily_budget_cap_cents,
+    capCents,
     configSource,
   }
 }

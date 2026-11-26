@@ -10,7 +10,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { dncClearedAt, isDoNotContact, withoutClearedDnc, DNC_CLEARED_OUTCOME } from '../dnc'
+import { dncClearedAt, isDoNotCall, isDoNotContact, withoutClearedDnc, DNC_CLEARED_OUTCOME, DO_NOT_CALL_OUTCOME } from '../dnc'
 
 const at = (d: string) => `2026-08-${d}T00:00:00Z`
 const cleared = (d: string) => ({ outcome: DNC_CLEARED_OUTCOME, occurredAt: at(d) })
@@ -122,5 +122,53 @@ describe('把被推翻过的拒联触点滤掉', () => {
       cleared('02'),
     ])
     expect(kept.map((t) => t.outcome)).toContain('not_interested')
+  })
+})
+
+describe('只别打电话（do_not_call）—— 只拦电话，不拦邮件', () => {
+  const noCall = (d: string) => ({ outcome: DO_NOT_CALL_OUTCOME, occurredAt: at(d) })
+
+  it('说过不要电话 → 不能打电话', () => {
+    expect(isDoNotCall(false, [noCall('01')])).toBe(true)
+  })
+
+  it('🔴 只说过不要电话 → 不算「别再联系」（邮件照常能发）', () => {
+    expect(isDoNotContact(false, [noCall('01')])).toBe(false)
+  })
+
+  it('之后被人放回电话名单（更晚的 dnc_cleared）→ 又能打了', () => {
+    expect(isDoNotCall(false, [noCall('01'), cleared('02')])).toBe(false)
+  })
+
+  it('放回之后客人又说不要电话 → 又不能打', () => {
+    expect(isDoNotCall(false, [noCall('01'), cleared('02'), noCall('03')])).toBe(true)
+  })
+
+  it('清除和不要电话同一时刻 → 宁可不打', () => {
+    expect(isDoNotCall(false, [noCall('02'), cleared('02')])).toBe(true)
+  })
+
+  it('不要电话那条时间读不出来 → 清除证明不了更晚，宁可不打', () => {
+    expect(isDoNotCall(false, [{ outcome: DO_NOT_CALL_OUTCOME, occurredAt: 'not-a-date' }, cleared('02')])).toBe(true)
+  })
+
+  it('清除那条时间读不出来 → 不算推翻', () => {
+    expect(isDoNotCall(false, [noCall('01'), { outcome: DNC_CLEARED_OUTCOME, occurredAt: '' }])).toBe(true)
+  })
+
+  it('全面拒绝（别再联系）一定也不能打电话', () => {
+    expect(isDoNotCall(true, [])).toBe(true)
+    expect(isDoNotCall(false, [{ outcome: 'do_not_contact', occurredAt: at('01') }])).toBe(true)
+    expect(isDoNotCall(false, [{ flagged: true, occurredAt: at('01') }])).toBe(true)
+  })
+
+  it('谁都没说过 → 能打', () => {
+    expect(isDoNotCall(false, [])).toBe(false)
+    expect(isDoNotCall(false, [{ outcome: 'spoke', occurredAt: at('01') }])).toBe(false)
+  })
+
+  it('withoutClearedDnc 对 do_not_contact 的行为不变', () => {
+    const tps = [{ outcome: 'do_not_contact', occurredAt: at('01') }, noCall('01'), cleared('02')]
+    expect(withoutClearedDnc(tps).map((t) => t.outcome)).toEqual([DO_NOT_CALL_OUTCOME, DNC_CLEARED_OUTCOME])
   })
 })

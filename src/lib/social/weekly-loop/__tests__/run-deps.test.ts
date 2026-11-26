@@ -25,6 +25,7 @@ interface FakeState {
   updates: RecordedUpdate[]
   limits: number[]
   ors: string[]
+  eqs?: string[]
 }
 
 type BuilderMode = 'select' | 'update'
@@ -33,6 +34,7 @@ interface Builder {
   select: (cols?: string) => Builder
   eq: (col: string, val: unknown) => Builder
   in: (col: string, vals: unknown[]) => Builder
+  gte: (col: string, val: unknown) => Builder
   or: (filter: string) => Builder
   order: (col: string, opts?: { ascending?: boolean }) => Builder
   limit: (n: number) => Builder
@@ -74,9 +76,14 @@ function makeDb(state: FakeState): SupabaseClient {
       select: () => builder,
       eq: (col, val) => {
         filters[col] = val
+        ;(state.eqs ??= []).push(`${col}=${String(val)}`)
         return builder
       },
       in: (_col, _vals) => builder,
+      gte: (col, val) => {
+        filters[`gte:${col}`] = val
+        return builder
+      },
       or: (filter) => {
         state.ors.push(filter)
         return builder
@@ -208,6 +215,23 @@ describe('loadOrders', () => {
     expect(state.ors).toEqual([
       'published_ref->>video_state.is.null,published_ref->>video_state.neq.PUBLISHED',
     ])
+  })
+})
+
+describe('recentPublished', () => {
+  const pub = (id: string, over: Record<string, unknown> = {}) => orderRow({ id, created_at: '2026-11-01T00:00:00Z', updated_at: '2026-11-04T09:00:00Z', ...over })
+
+  it('reads only reels Facebook reports as public, since the given day, and dates them by the plan day when there is one', async () => {
+    const state = baseState({ orders: [pub('p1', { brief: { weekly_pack: { publish_on: '2026-11-04' } } }), pub('p2'), pub('old', { brief: { weekly_pack: { publish_on: '2026-10-20' } } })] })
+    const deps = createWeeklyLoopDbDeps(makeDb(state))
+    const rows = await deps.recentPublished?.({ clientId: 'c1', sinceDay: '2026-10-29' })
+    expect(rows?.map((r) => [r.id, r.publishedOn])).toEqual([['p1', '2026-11-04'], ['p2', '2026-11-04']])
+    expect(state.eqs).toContain('published_ref->>video_state=PUBLISHED')
+  })
+
+  it('a read failure throws (the scheduler turns it into a reported, non-blocking error)', async () => {
+    const deps = createWeeklyLoopDbDeps(makeDb(baseState({ readError: true })))
+    await expect(deps.recentPublished?.({ clientId: 'c1', sinceDay: '2026-10-29' })).rejects.toThrow('recent_published_read_failed')
   })
 })
 

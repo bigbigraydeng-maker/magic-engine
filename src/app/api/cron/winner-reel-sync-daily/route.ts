@@ -2,8 +2,8 @@
  * Cron: Winner Reel Auto-Sync (daily 03:00 NZST)
  *
  * Iterates every client with winner_reel_sync_config.enabled = true and runs
- * syncWinnerReels(clientId). Returns a summary so we can log run health from
- * Render's cron output.
+ * syncWinnerReels(clientId). The job still runs. It only raises cards.
+ * Returns a summary so we can log run health from Render's cron output.
  *
  * Auth: standard ME cron protocol (CRON_SECRET bearer).
  */
@@ -11,6 +11,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
+import { filterRowsWithClientId } from '@/lib/clients/external-data-pull-allowlist'
 import { syncWinnerReels } from '@/lib/winner-reel-sync/engine'
 import { startCronRun } from '@/lib/cron/run-logger'
 
@@ -51,11 +52,12 @@ export async function GET(request: Request) {
   }
 
   const results = []
-  for (const cfg of configs) {
+  for (const cfg of filterRowsWithClientId(configs as Array<{ client_id: string }>)) {
     const r = await syncWinnerReels(cfg.client_id)
     results.push({
       clientId: r.clientId,
       status: r.status,
+      mode: 'propose_only',
       added: r.adsAdded.length,
       paused: r.adsPaused.length,
       guards: r.guardsHit,

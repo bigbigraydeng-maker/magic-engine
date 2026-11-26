@@ -25,6 +25,11 @@ node templates/tailor-made-itinerary/render.mjs my-trip.json output.pdf
 
 ---
 
+> **产品类型**：`trip.productType` 取 `"tailor-made"`（默认，可不填）或 `"sic"`，只决定封面图上那行小字
+> （`Tailor-made journey` / `Seat-in-coach (SIC) journey`）。
+
+---
+
 ## 2. 文档结构（客户拿到手是什么感觉）
 
 | 页 | 内容 | 设计意图 |

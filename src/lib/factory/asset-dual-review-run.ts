@@ -28,13 +28,13 @@ export interface DualReviewIo {
   loadOrder(id: string): Promise<AssetOrder | null | 'unreadable'>
   loadHosts(clientId: string): Promise<string[] | null>
   readPage(url: string, hosts: readonly string[]): Promise<string | null>
-  musicOf(brief: unknown): RemotionMusicClearance
+  musicOf(brief: unknown, output: unknown): RemotionMusicClearance
   loadPool(clientId: string): Promise<{ version: ConfigVersion; pool: CreativePoolEntry[] } | null>
   writePool(clientId: string, pool: CreativePoolEntry[], version: ConfigVersion): Promise<'ok' | 'conflict' | 'error'>
   writeOrder(id: string, patch: Record<string, unknown>, expectStatus: string): Promise<'ok' | 'conflict' | 'error'>
   now(): string
   attachVideo?(order: AssetOrder): Promise<
-    | { ok: true; videoId: string | null; accountId: string | null }
+    | { ok: true; videoId: string | null; accountId: string | null; awaitingCard?: boolean }
     | { ok: false; error: string }
   >
 }
@@ -43,7 +43,7 @@ export interface DualReviewReceipt {
   applicable: boolean
   passed: boolean
   pooled: boolean
-  status: 'skipped' | 'recorded' | 'pooled' | 'unreadable' | 'pool_blocked' | 'conflict' | 'invalid_payload' | 'upload_failed'
+  status: 'skipped' | 'recorded' | 'pooled' | 'unreadable' | 'pool_blocked' | 'conflict' | 'invalid_payload' | 'upload_failed' | 'awaiting_card'
   reason?: string
   videoId?: string
 }
@@ -90,7 +90,7 @@ async function decideFor(io: DualReviewIo, order: AssetOrder): Promise<DualRevie
     claims,
     officialHosts: hosts,
     pages,
-    music: io.musicOf(order.brief),
+    music: io.musicOf(order.brief, order.output),
   })
 }
 
@@ -174,6 +174,15 @@ async function markEntered(io: DualReviewIo, order: AssetOrder, decision: DualRe
 async function enterPool(io: DualReviewIo, order: AssetOrder, decision: DualReviewDecision): Promise<DualReviewReceipt> {
   const attached = await resolveVideo(io, order)
   if (!attached.ok) return recordStay(io, order, decision, 'not_entered', 'upload_failed', attached.error)
+  if ('awaitingCard' in attached && attached.awaitingCard) {
+    return {
+      applicable: true,
+      passed: true,
+      pooled: false,
+      status: 'awaiting_card',
+      reason: '已出上传确认卡。点确认之后才会把成片传到广告账户。',
+    }
+  }
   const ready = withVideo(order, attached)
   const at = io.now()
   const loaded = await io.loadPool(ready.clientId)

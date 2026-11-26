@@ -6,26 +6,25 @@ const CLIENT = 'c11e0000-0000-4000-8000-00000000000a'
 const OPC: CardClicker = { kind: 'opc', email: 'opc@example.com' }
 const NOW = new Date('2026-10-27T01:00:00.000Z')
 
-function db(cap: unknown, logs: unknown): SpendEvidenceDb {
-  return {
-    from(table: string) {
-      return {
-        select() {
-          return {
-            eq() {
-              return {
-                maybeSingle: async () => ({ data: cap, error: null }),
-                order() {
-                  return { limit: async () => ({ data: logs, error: null }) }
-                },
-              }
-            },
-          }
-        },
-      } as ReturnType<SpendEvidenceDb['from']>
+function db(plans: unknown, logs: unknown): SpendEvidenceDb {
+  const chain = {
+    select() { return chain },
+    eq() { return chain },
+    order() {
+      return { limit: async () => ({ data: logs, error: null }) }
+    },
+    then(ok: (value: unknown) => unknown, bad?: (reason: unknown) => unknown) {
+      return Promise.resolve({ data: plans, error: null }).then(ok, bad)
     },
   }
+  return {
+    from() {
+      return { select: () => chain }
+    },
+  } as unknown as SpendEvidenceDb
 }
+
+const PLAN = [{ status: 'approved', plan_data: { promo: { daily_total_cap_cents: 15000 } } }]
 
 function receipt(status: 'green' | 'red' | 'gray') {
   return [{
@@ -59,7 +58,7 @@ function receipt(status: 'green' | 'red' | 'gray') {
 describe('drawer spend evidence', () => {
   it('reads a stored cap and a fresh CRM light, and leaves the rest unread', async () => {
     const evidence = await loadSpendEvidence(
-      db({ daily_budget_cap_cents: 15000 }, receipt('green')),
+      db(PLAN, receipt('green')),
       CLIENT,
       OPC,
       NOW,
@@ -72,7 +71,7 @@ describe('drawer spend evidence', () => {
   })
 
   it('keeps a red CRM light and does not turn a missing cap into zero', async () => {
-    const evidence = await loadSpendEvidence(db(null, receipt('red')), CLIENT, OPC, NOW)
+    const evidence = await loadSpendEvidence(db([], receipt('red')), CLIENT, OPC, NOW)
     expect(evidence.dailyCap).toBe('missing')
     expect(evidence.leadCrm).toBe('red')
     expect(evidence.leadCrmReason).toContain('库里没有')

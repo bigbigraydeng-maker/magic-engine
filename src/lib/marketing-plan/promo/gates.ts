@@ -15,7 +15,8 @@
 import type { CreativePoolStatus } from '@/lib/ads-strategy/config'
 import type { PromoPlaybook, PromoEvidence } from './playbooks'
 import { checkAdsBudget, type AccountCapFacts } from './budget-caps'
-import { promoContentHash } from './content-hash'
+import { dailyTotalCapCents } from './daily-total-cap'
+import { promoContentMatches } from './content-hash'
 import { allAdsSteps, type ManualCheck, type PromoPhase, type PromoSpec } from './spec'
 import { GATE_LABELS } from '@/lib/ads-tracking-preflight/judge'
 import { BUDGET_RECEIPT_STALE_HOURS, TRACKING_RECEIPT_STALE_HOURS, receiptAgeHours } from '@/lib/ads-tracking-preflight/receipt'
@@ -84,7 +85,7 @@ export interface GateFacts {
   playbook: PromoPlaybook
   accounts: AccountCapFacts[]
   snapshots: Record<string, AccountSnapshotFact>
-  /** ad_strategy_configs 读出的三项；整个读失败 = null */
+  /** 素材池和结果口径来自广告设置；每天总上限来自已批准计划。整个读失败 = null */
   config: {
     daily_budget_cap_cents: number | null
     primary_result: string | null
@@ -158,15 +159,14 @@ function accountUsable(phase: PromoPhase, f: GateFacts): GateResult[] {
     '在广告账户设置里确认账户状态正常，或等设置快照同步后再看。', pick.as_of)]
 }
 
-function configChecks(phase: PromoPhase, f: GateFacts): GateResult[] {
+function configChecks(spec: PromoSpec, phase: PromoPhase, f: GateFacts): GateResult[] {
   if (phaseAdsSteps(phase).length === 0) return []
   const cfg = f.config
   const out: GateResult[] = []
-  out.push(!cfg
-    ? make('ads.cap_set', 'tool', '广告日预算上限已设置', true, 'gray', '广告设置读不出来，上限未核实', '稍后重试；持续读不出来请找开发。')
-    : cfg.daily_budget_cap_cents === null
-      ? make('ads.cap_set', 'tool', '广告日预算上限已设置', true, 'red', '客户的广告日预算上限还没设置', '在广告设置里填写日预算上限。')
-      : make('ads.cap_set', 'tool', '广告日预算上限已设置', true, 'green', `日预算上限 ${cfg.daily_budget_cap_cents} 分`, ''))
+  const cap = dailyTotalCapCents({ promo: spec })
+  out.push(cap === null
+    ? make('ads.cap_set', 'tool', '广告日预算上限已设置', true, 'red', '这份计划还没写下这位客户一天的广告总上限', '在填写推广计划里填每天总上限，保存后再批准。')
+    : make('ads.cap_set', 'tool', '广告日预算上限已设置', true, 'green', `一天的广告总上限是 ${cap} 分`, ''))
   out.push(!cfg
     ? make('ads.result_defined', 'tool', '「一条结果」口径已定', true, 'gray', '广告设置读不出来，结果口径未核实', '稍后重试；持续读不出来请找开发。')
     : cfg.primary_result === null || cfg.primary_result === ''
@@ -182,14 +182,14 @@ function configChecks(phase: PromoPhase, f: GateFacts): GateResult[] {
     const bad = refs.filter(r => cfg.creative_pool.find(p => p.ref === r)?.status !== 'approved')
     out.push(bad.length === 0
       ? make('ads.creative_approved', 'content', '投放素材已批准', true, 'green', `${refs.length} 个素材均已批准`, '')
-      : make('ads.creative_approved', 'content', '投放素材已批准', true, 'red', `${bad.length} 个素材不在素材池或还没批准：${bad.join('、')}`, '在广告审批页批准素材，或从步骤里去掉。'))
+      : make('ads.creative_approved', 'content', '投放素材已批准', true, 'red', `${bad.length} 个素材不在素材池或还没批准：${bad.join('、')}`, '在检查清单这一行下面直接选推广期、批准素材，或从步骤里去掉。'))
   }
   return out
 }
 
-function budgetCheck(phase: PromoPhase, f: GateFacts): GateResult[] {
+function budgetCheck(spec: PromoSpec, phase: PromoPhase, f: GateFacts): GateResult[] {
   if (phaseAdsSteps(phase).length === 0) return []
-  const res = checkAdsBudget(phaseAdsSteps(phase), f.accounts, f.config?.daily_budget_cap_cents ?? null)
+  const res = checkAdsBudget(phaseAdsSteps(phase), f.accounts, dailyTotalCapCents({ promo: spec }))
   const how = '核对各广告账户的日预算和上限；币种不一致时需要人工确认。'
   if (res.verdict === 'over') return [make('ads.budget_within_caps', 'tool', '日预算不超上限', true, 'red', res.reasons.join('；'), how)]
   if (res.verdict === 'unknown') return [make('ads.budget_within_caps', 'tool', '日预算不超上限', true, 'gray', res.reasons.join('；'), how)]
@@ -206,11 +206,10 @@ function manualChecks(spec: PromoSpec, phase: PromoPhase, f: GateFacts): GateRes
       how: '把稀缺性 / 截止日等说法发给客户确认，确认后在计划里点「已核实」。' },
   ]
   // 核实记录绑内容版本：内容一改，旧核实自动失效（content_hash 对不上就不算数）。
-  const currentHash = promoContentHash(spec)
   return defs.map(d => {
     const all = f.manual_checks // 只信服务端写入的核实记录（spec.checks 是客户端可写的，不参与判定）
       .filter(c => c.phase_id === phase.id && c.check_key === d.key)
-    const valid = all.filter(c => c.content_hash === currentHash)
+    const valid = all.filter(c => typeof c.content_hash === 'string' && promoContentMatches(c.content_hash, spec))
     const rec = valid.sort((a, b) => b.verified_at.localeCompare(a.verified_at))[0]
     if (!rec) {
       if (all.length > 0) {
@@ -300,8 +299,8 @@ function trackingChecks(phase: PromoPhase, f: GateFacts): GateResult[] {
 export function evaluatePhaseGates(spec: PromoSpec, phase: PromoPhase, f: GateFacts): GateResult[] {
   return [
     ...accountUsable(phase, f),
-    ...configChecks(phase, f),
-    ...budgetCheck(phase, f),
+    ...configChecks(spec, phase, f),
+    ...budgetCheck(spec, phase, f),
     ...manualChecks(spec, phase, f),
     ...cadenceCheck(phase, f),
     ...trackingChecks(phase, f),

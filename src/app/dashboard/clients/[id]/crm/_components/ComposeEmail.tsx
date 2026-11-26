@@ -23,6 +23,35 @@ interface Payload {
   compose?: Preview
 }
 
+type DraftKind = 'first' | 'follow_up'
+
+interface ReadLine {
+  kind: string
+  text: string
+}
+
+interface CheckLine {
+  id: string
+  status: 'pass' | 'warn' | 'fail'
+  label: string
+  detail: string
+}
+
+interface DraftResponse {
+  subject?: string
+  body?: string
+  error?: string
+  read?: ReadLine[]
+  checks?: CheckLine[]
+}
+
+const CHECK_ICON: Record<CheckLine['status'], string> = { pass: '✓', warn: '⚠', fail: '✗' }
+const CHECK_TONE: Record<CheckLine['status'], string> = {
+  pass: 'text-green-700',
+  warn: 'text-amber-700',
+  fail: 'text-red-700',
+}
+
 /** 这些原因值得告诉销售（其余的，比如功能没开通，静默不渲染）。 */
 const VISIBLE_REASONS = new Set(['not_enquirer', 'do_not_contact', 'no_recipient', 'no_mailbox'])
 
@@ -49,6 +78,8 @@ export function ComposeEmail({
   const [done, setDone] = useState(false)
   const [drafting, setDrafting] = useState(false)
   const [drafted, setDrafted] = useState(false)
+  const [draftKind, setDraftKind] = useState<DraftKind>('first')
+  const [review, setReview] = useState<{ read: ReadLine[]; checks: CheckLine[] } | null>(null)
   const requestId = useRef(newRequestId())
 
   const load = useCallback(async () => {
@@ -78,20 +109,27 @@ export function ComposeEmail({
   }
 
   // AI 只起草、填进框里；发不发、改不改都是员工自己的事。已写了字就先问，别悄悄盖掉。
-  const draftWithAi = async (): Promise<void> => {
+  // 跟进信多带回「我读了什么」和检查结果，摆在框下面给员工看；检查只报告，不替员工决定发不发。
+  const draftWithAi = async (kind: DraftKind = 'first'): Promise<void> => {
     if (drafting) return
     if ((subject.trim() !== '' || body.trim() !== '') && !window.confirm('框里已经有内容，让 AI 重写会盖掉它。继续吗？')) return
     setDrafting(true)
+    setDraftKind(kind)
     setError(null)
     try {
-      const res = await fetch(`/api/clients/${clientId}/crm/contacts/${contactId}/email/compose/draft`, { method: 'POST' })
-      const json = (await res.json().catch(() => ({}))) as { subject?: string; body?: string; error?: string }
+      const url = `/api/clients/${clientId}/crm/contacts/${contactId}/email/compose/draft`
+      const res =
+        kind === 'follow_up'
+          ? await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind }) })
+          : await fetch(url, { method: 'POST' })
+      const json = (await res.json().catch(() => ({}))) as DraftResponse
       if (!res.ok || !json.subject || !json.body) {
         setError(json.error ?? 'AI 起草失败，请自己写或稍后再试')
         return
       }
       setSubject(json.subject)
       setBody(json.body)
+      setReview(kind === 'follow_up' && json.read && json.checks ? { read: json.read, checks: json.checks } : null)
       setDrafted(true)
       setDone(false)
     } catch {
@@ -121,6 +159,7 @@ export function ComposeEmail({
       setBody('')
       setDone(true)
       setDrafted(false)
+      setReview(null)
       onSent()
       void load()
     } catch {
@@ -137,19 +176,50 @@ export function ComposeEmail({
         将用 {compose.mailbox} 发给 {compose.recipient}
         {compose.sentToContactLast7Days > 0 ? `（最近 7 天已发给他 ${compose.sentToContactLast7Days} 封）` : ''}
       </p>
-      <button
-        type="button"
-        onClick={() => void draftWithAi()}
-        disabled={drafting || sending}
-        className="mb-2 rounded-lg border border-me-charcoal/20 bg-white px-3 py-1.5 text-sm font-bold text-me-charcoal disabled:opacity-40"
-        data-testid="compose-ai-draft"
-      >
-        {drafting ? 'AI 正在写…' : drafted ? '✨ 重新让 AI 写' : '✨ 让 AI 帮我写'}
-      </button>
+      <div className="mb-2 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => void draftWithAi('first')}
+          disabled={drafting || sending}
+          className="rounded-lg border border-me-charcoal/20 bg-white px-3 py-1.5 text-sm font-bold text-me-charcoal disabled:opacity-40"
+          data-testid="compose-ai-draft"
+        >
+          {drafting && draftKind === 'first' ? 'AI 正在写…' : drafted && draftKind === 'first' ? '✨ 重新让 AI 写' : '✨ 让 AI 帮我写'}
+        </button>
+        <button
+          type="button"
+          onClick={() => void draftWithAi('follow_up')}
+          disabled={drafting || sending}
+          className="rounded-lg border border-me-charcoal/20 bg-white px-3 py-1.5 text-sm font-bold text-me-charcoal disabled:opacity-40"
+          data-testid="compose-ai-follow-up"
+        >
+          {drafting && draftKind === 'follow_up' ? 'AI 正在写跟进信…' : '✨ 让 AI 写跟进信'}
+        </button>
+      </div>
       {drafted && (
         <p className="mb-2 text-xs font-semibold text-amber-700" data-testid="compose-ai-notice">
           这是 AI 起草的，请先看一遍、核对价格和日期再发送。
         </p>
+      )}
+      {review && (
+        <div className="mb-2 rounded-lg border border-me-charcoal/10 bg-white p-2 text-xs" data-testid="compose-ai-review">
+          <p className="mb-1 font-bold text-me-charcoal/70">写完当场检查（只看 AI 刚写好的版本，你改过之后请自己再看一遍）</p>
+          <ul className="mb-1 space-y-0.5">
+            {review.checks.map((c) => (
+              <li key={c.id} className={CHECK_TONE[c.status]} data-testid={`compose-check-${c.id}`}>
+                {CHECK_ICON[c.status]} <span className="font-semibold">{c.label}</span>：{c.detail}
+              </li>
+            ))}
+          </ul>
+          <details>
+            <summary className="cursor-pointer font-semibold text-me-charcoal/60">AI 读了什么</summary>
+            <ul className="mt-1 space-y-0.5 text-me-charcoal/70">
+              {review.read.map((r, i) => (
+                <li key={i}>· {r.text}</li>
+              ))}
+            </ul>
+          </details>
+        </div>
       )}
       <input
         value={subject}

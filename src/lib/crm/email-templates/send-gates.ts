@@ -7,6 +7,8 @@
  */
 
 import { createHash } from 'node:crypto'
+import type { EmailUnsubscribeRead } from '@/lib/crm/email-unsubscribe'
+import { isAutomatedTemplateKey } from './automated-template-key'
 import type { EffectiveEmailConfig } from './effective-config'
 import { getProvider } from './facts/registry'
 import type { FactProvider, PickInput, PublishedTourFact, RenderFacts } from './facts/types'
@@ -14,7 +16,9 @@ import { evaluateContentGates } from './gates/content-gates'
 import { evaluateFollowUp } from './gates/follow-up'
 import { evaluateFrequency } from './gates/frequency'
 import type { ExemptIdLoader, FrequencySources, GateViolation } from './gates/types'
-import { renderTemplate } from './render'
+import { evaluateCatalogue } from './gates/catalogue'
+import { scanPlaceholders } from './placeholders'
+import { catalogueRenderFields, renderTemplate } from './render'
 import { checkTemplateSendable } from './template-store'
 import { DEFAULT_TIME_ZONE, isValidTimeZone } from './time-zone'
 import type { CallBasis, EmailTemplateVersion, StoredReceipt } from './types'
@@ -23,6 +27,7 @@ export type GateReason =
   | 'config_invalid'
   | 'recipient_not_allowed'
   | 'template_unavailable'
+  | 'template_automated'
   | 'template_outdated'
   | 'catalog_outdated'
   | 'catalog_unreadable'
@@ -35,8 +40,12 @@ export type GateReason =
   | 'tour_page_not_on_sale'
   | 'departure_not_on_sale'
   | 'content_blocked'
+  | 'catalogue_expired'
+  | 'catalogue_unavailable'
   | 'already_followed_up'
   | 'duplicate_template'
+  | 'email_unsubscribed'
+  | 'unsubscribe_unverifiable'
   | 'frequency_cap'
   | 'frequency_unverifiable'
   | 'internal_error'
@@ -45,6 +54,7 @@ export const GATE_MESSAGES: Record<GateReason, string> = {
   config_invalid: '发信设置无效，这封没有发出，请找 Magic Lab 团队。',
   recipient_not_allowed: '试运行期间只能发给测试地址，这封没有发出。',
   template_unavailable: '这个模板已被停用或不存在，这封没有发出。',
+  template_automated: '这是系统自动发的信的模板，不能手动发。这封没有发出。',
   template_outdated: '模板刚被更新，请重新生成预览后再发。',
   catalog_outdated: '官网价格或班期刚更新，请重新生成预览后再发。',
   catalog_unreadable: '暂时读不到官网上架数据，这封没有发出，请稍后再试。',
@@ -57,8 +67,12 @@ export const GATE_MESSAGES: Record<GateReason, string> = {
   tour_page_not_on_sale: '正文里有指向已下架团页的链接，请改掉。',
   departure_not_on_sale: '正文里的链接指向一个已不在售的班期，请改掉。',
   content_blocked: '正文里有不允许写的内容，请按提示改掉。',
+  catalogue_expired: '手册已过期，这封没有发出。请等新版手册换上后再发。',
+  catalogue_unavailable: '这个客户还没配目录，或目录已过期，这封没有发出。',
   already_followed_up: '这次通话后已经发过跟进邮件了。',
   duplicate_template: '同一个模板刚给他发过，请稍后再发。',
+  email_unsubscribed: '这位客人已经退订了邮件，这封没有发出。打电话不受影响。',
+  unsubscribe_unverifiable: '暂时查不到他有没有退订邮件，先别发，稍后再试。',
   frequency_cap: '他最近收到的邮件已达上限。',
   frequency_unverifiable: '暂时数不清他这周收了几封，先别发，稍后再试。',
   internal_error: '系统内部出错，这封没有发出。',
@@ -117,6 +131,8 @@ export interface GateState {
   templateKey: string | null
   callEvidenceAt: string | null
   addresses: string[]
+  /** The published facts preLock already read (link labelling inside the lock must not read the database again). */
+  linkFacts?: RenderFacts | null
 }
 
 export type GateStatus = 403 | 409 | 503
@@ -170,6 +186,11 @@ export interface SendGateData {
   /** Provider message ids of the mails these templates sent to this guest since `sinceIso`; throws when it cannot list them all. */
   exemptMessageIdsSince(clientId: string, contactId: string, templateKeys: readonly string[], sinceIso: string): Promise<string[]>
   frequencySources: FrequencySources
+  /**
+   * Did the guest unsubscribe from e-mail (ME's one-click link), on this contact or on any of these addresses?
+   * A failed read must come back as `ok:false`.
+   */
+  loadEmailUnsubscribed(clientId: string, contactId: string, addresses: readonly string[]): Promise<EmailUnsubscribeRead>
   /** The client's own time zone ("today" differs between Sydney and Auckland). Absent = the default zone. */
   loadTimeZone?(clientId: string): Promise<string>
 }
@@ -267,6 +288,8 @@ async function templateStage(
   tz: string,
   meta: SendMeta,
 ): Promise<TemplateStage | GateFailure> {
+  // The key comes from the browser: an automated letter's template is refused here, not only hidden from the picker.
+  if (isAutomatedTemplateKey(template.key)) return fail(409, 'template_automated', meta)
   const tpl = await data.loadTemplate(args.clientId, template.key)
   const sendable = checkTemplateSendable(tpl, template.version)
   if (!sendable.ok || tpl === null) return fail(409, sendable.ok ? 'template_unavailable' : sendable.reason, meta)
@@ -328,6 +351,7 @@ async function attachRenderHash(
     inputs: template.inputs,
     facts: stage.facts,
     provider: stage.provider,
+    ...catalogueRenderFields(args.config.providers.catalogue, todayInZone(args.now, tz)),
   })
   // A render with gaps cannot be compared with what was sent: leave the edit flag unknown.
   if (rendered.missing.length > 0 || rendered.problems.length > 0) return
@@ -344,6 +368,24 @@ function contentFailure(blocks: readonly GateViolation[], meta: SendMeta): GateF
   return fail(409, reasonOf(blocks[0]), meta, blocks[0].detail)
 }
 
+function usesCatalogue(tpl: Pick<EmailTemplateVersion, 'subject' | 'body'>): boolean {
+  return [...scanPlaceholders(tpl.subject), ...scanPlaceholders(tpl.body)].some((ref) => ref.name === 'catalogue_url')
+}
+
+/** §3.3: no mail carries the link of an expired catalogue; a catalogue template is refused when there is none to send. */
+function catalogueStage(args: PreLockArgs, templateUsesCatalogue: boolean, tz: string, meta: SendMeta): GateFailure | null {
+  const verdict = evaluateCatalogue({
+    texts: args.footer ? [args.subject, args.body, args.footer] : [args.subject, args.body],
+    catalogue: args.config.providers.catalogue,
+    today: todayInZone(args.now, tz),
+    templateUsesCatalogue,
+  })
+  if (verdict.ok) return null
+  meta.blockDetail = verdict.reason
+  if (verdict.reason === 'catalogue_expired') return fail(409, 'catalogue_expired', meta, `有效期到 ${verdict.validUntil}`)
+  return fail(409, 'catalogue_unavailable', meta)
+}
+
 async function runPreLock(args: PreLockArgs, data: SendGateData, tz: string): Promise<PreLockResult> {
   const meta = emptyMeta()
   meta.finalSha256 = sha256(`${args.subject}\n${args.body}`)
@@ -358,9 +400,11 @@ async function runPreLock(args: PreLockArgs, data: SendGateData, tz: string): Pr
 
   let provider: FactProvider | null = null
   let facts: RenderFacts | null = null
+  let templateUsesCatalogue = false
   if (args.template !== null) {
     const stage = await templateStage(args, args.template, data, tz, meta)
     if (!('tpl' in stage)) return stage
+    templateUsesCatalogue = usesCatalogue(stage.tpl)
     provider = stage.provider
     facts = stage.facts
     if (provider === null) {
@@ -378,6 +422,10 @@ async function runPreLock(args: PreLockArgs, data: SendGateData, tz: string): Pr
     facts = stage.facts
   }
 
+  // Before the other content checks, so an expired catalogue is named as such rather than as a leftover placeholder.
+  const catalogue = catalogueStage(args, templateUsesCatalogue, tz, meta)
+  if (catalogue !== null) return catalogue
+
   const result = evaluateContentGates({
     subject: args.subject,
     body: args.body,
@@ -388,6 +436,7 @@ async function runPreLock(args: PreLockArgs, data: SendGateData, tz: string): Pr
   })
   meta.warnings = result.warnings.map((w) => (w.ruleId ? `${w.code}:${w.ruleId}` : w.code))
   if (result.blocks.length > 0) return contentFailure(result.blocks, meta)
+  state.linkFacts = facts
   return { ok: true, meta, state }
 }
 
@@ -455,7 +504,21 @@ async function frequencyStage(args: InLockArgs, data: SendGateData, tz: string):
   return { ...fail(409, 'frequency_cap', { ...args.meta, blockDetail: detail }), error: `${GATE_MESSAGES.frequency_cap}${text}。` }
 }
 
+// Checked inside the lock, first: an unsubscribe that arrived while the earlier checks ran still stops this mail.
+// Its own check, deliberately not part of the do-not-contact check: unsubscribing stops e-mail only, not calls.
+// Asked by address too: the same address can sit on another contact record, where the guest may have unsubscribed.
+async function unsubscribedStage(args: InLockArgs, data: SendGateData): Promise<GateFailure | null> {
+  const read = await data.loadEmailUnsubscribed(args.clientId, args.contactId, args.state.addresses)
+  if (!read.ok) {
+    return fail(503, 'unsubscribe_unverifiable', { ...args.meta, blockDetail: `unverifiable:${read.error}`.slice(0, 300) })
+  }
+  if (read.unsubscribed) return fail(409, 'email_unsubscribed', { ...args.meta, blockDetail: 'email_unsubscribed' })
+  return null
+}
+
 async function runInLock(args: InLockArgs, data: SendGateData, tz: string): Promise<InLockResult> {
+  const unsubscribed = await unsubscribedStage(args, data)
+  if (unsubscribed !== null) return unsubscribed
   const followUp = await followUpStage(args, data)
   if (followUp !== null) return followUp
   const frequency = await frequencyStage(args, data, tz)

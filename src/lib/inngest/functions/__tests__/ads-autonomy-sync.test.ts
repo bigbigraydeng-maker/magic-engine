@@ -241,8 +241,9 @@ describe('ads-autonomy-sync handler', () => {
     }
 
     expect(receipts).toHaveLength(keys.length)
+    // 加钱类三件 + 只能人点头的 D3 自动暂停（内核对它 + auto_approve 直接拒，2026-11-04）
     expect(receipts.filter((r) => r.to_mode === 'require_approval').map((r) => r.action_key).sort()).toEqual(
-      ['ads.add_retargeting_adset', 'ads.budget_move_plan', 'ads.scale_unit_budget'],
+      ['ads.add_retargeting_adset', 'ads.auto_pause_on_d3', 'ads.budget_move_plan', 'ads.scale_unit_budget'],
     )
     for (const row of receipts) {
       expect(row.client_id).toBe(CLIENT)
@@ -301,7 +302,7 @@ describe('ads-autonomy-sync handler', () => {
     expect(receipts).toHaveLength(0)
   })
 
-  it('🔴 第 3 刀 3a：部署前的旧回执写的是 auto_approve → 设置没人动也会把加钱类改成 require_approval', async () => {
+  it('🔴 第 3 刀 3a + 11-04：部署前的旧回执写的是 auto_approve → 设置没人动也会把加钱类和 D3 自动暂停改成 require_approval', async () => {
     const updatedAt = '2026-09-25T10:00:00+00:00'
     const priorReceipts: PriorReceipt[] = listAdsActionKeys().map((key) => ({
       action_key: key,
@@ -317,9 +318,9 @@ describe('ads-autonomy-sync handler', () => {
     })
     const result = (await run(sb)) as { applied: number; skipped: number }
     const rewritten = rpc.mock.calls.map((c) => (c[1] as Record<string, unknown>).p_action_key).sort()
-    expect(rewritten).toEqual(['ads.add_retargeting_adset', 'ads.budget_move_plan', 'ads.scale_unit_budget'])
+    expect(rewritten).toEqual(['ads.add_retargeting_adset', 'ads.auto_pause_on_d3', 'ads.budget_move_plan', 'ads.scale_unit_budget'])
     for (const call of rpc.mock.calls) expect((call[1] as Record<string, unknown>).p_mode).toBe('require_approval')
-    expect(result.applied).toBe(3)
+    expect(result.applied).toBe(4)
   })
 
   it('🔴 sync_failed 回执不算「已同步」—— 一次失败不能把键永久锁死', async () => {

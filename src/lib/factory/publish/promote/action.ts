@@ -71,7 +71,7 @@ export async function previewStage(deps: PromoteDeps, input: PromoteInput, t: Cl
 }
 
 /** 校验令牌:哈希匹配、同一邮箱槽、未过期、未用过、指纹一致。 */
-function checkToken(deps: PromoteDeps, input: PromoteInput, t: ClaimTarget, payload: Record<string, unknown>): Fail | null {
+export function checkToken(deps: PromoteDeps, input: PromoteInput, t: ClaimTarget, payload: Record<string, unknown>): Fail | null {
   const slot = readSlots(payload)[emailSlot(input.adminEmail)]
   if (!input.previewToken || !slot) return fail(403, '请先点「预览」拿确认令牌,不能跳过预览直接确认')
   if (!hashesEqual(slot.token_hash, hashToken(input.previewToken))) return fail(403, '确认令牌不对(只有点预览的那位管理员能用)')
@@ -117,7 +117,16 @@ async function confirmStage(deps: PromoteDeps, input: PromoteInput, ctx: Promote
   const requestId = deps.uuid()
   const claimed = await claim(deps, input, claimTargetOf(ctx), { requestId, attemptId: requestId })
   if ('ok' in claimed) return claimed
-  const facts = await decidePublished(deps, ctx, claimed.payload, requestId)
+  return executeClaimed(deps, ctx, claimed.payload, requestId)
+}
+
+/**
+ * Everything after a successful claim: call the platform (or sync an already-public reel), write the traffic
+ * row then the order, the completion books, the first comment and the close-out. Shared by the person-confirmed
+ * path above and the scheduled executor (scheduled-action.ts), which claims under a week-card grant instead.
+ */
+export async function executeClaimed(deps: PromoteDeps, ctx: PromoteContext, claimedPayload: Record<string, unknown>, requestId: string): Promise<PromoteResult> {
+  const facts = await decidePublished(deps, ctx, claimedPayload, requestId)
   if ('ok' in facts) return facts
   const trafficFail = await writeTraffic(deps, ctx, facts, requestId)
   if (trafficFail) return trafficFail

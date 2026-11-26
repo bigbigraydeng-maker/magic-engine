@@ -392,7 +392,7 @@ describe('CampaignDailyPlanPanel — inline Facebook Post review (#1308)', () =>
 
     await screen.findByText('发布队列')
     expect(screen.getByText('可排期 1/1')).toBeInTheDocument()
-    expect(screen.getByText('待排期')).toBeInTheDocument()
+    expect(screen.getByText('已批，等发')).toBeInTheDocument()
     expect(screen.getByText('未排期')).toBeInTheDocument()
     expect(screen.getByText('未发布')).toBeInTheDocument()
     expect(screen.getByText(/不写入旧运营台/)).toBeInTheDocument()
@@ -601,7 +601,7 @@ describe('CampaignDailyPlanPanel — inline Facebook Post review (#1308)', () =>
 
     await screen.findByText('已失效，需重审')
     expect(screen.getByText('Post 已通过 0/1')).toBeInTheDocument()
-    expect(screen.queryByText('已通过')).not.toBeInTheDocument()
+    expect(screen.queryByText('已批')).not.toBeInTheDocument()
   })
 
   it('does not display an unusable legacy PASS as current', async () => {
@@ -744,5 +744,66 @@ describe('CampaignDailyPlanPanel — readiness fold counts only what can be read
     await screen.findByText(/就绪检查 · 已就绪 5\/7/)
     expect(screen.getByText('证据支撑')).toBeInTheDocument()
     expect(screen.getByText('第三方服务授权')).toBeInTheDocument()
+  })
+})
+
+describe('CampaignDailyPlanPanel — expired drafts are folded, current days stay in the strip', () => {
+  it('puts days before today (NZ) into the folded expired list and lands on a current day', async () => {
+    const dayKey = (offset: number) =>
+      new Intl.DateTimeFormat('en-CA', { timeZone: 'Pacific/Auckland', year: 'numeric', month: '2-digit', day: '2-digit' })
+        .format(new Date(Date.now() + offset * 86_400_000))
+    const dates = [-3, -2, -1, 0, 1, 2, 3].map(dayKey)
+    const bundle = (date: string, hook: string) => ({
+      date,
+      post: { hook, body: 'b', cta: 'Enquire Now' },
+      story: { frames: [{ order: 1, copy: 'f' }] },
+      reel: { brief: 'br', script: 's', caption: 'c', source_asset_ids: [], media_status: 'NO_MEDIA' },
+      readiness: readiness(),
+      provenance: [],
+    })
+    mockFetchOnce({
+      success: true,
+      campaign: { id: CAMPAIGN_ID, title: 'Christmas Campaign', offer: null, primary_cta: 'Enquire Now' },
+      grounding: { status: 'OK', has_master_brief: true, has_campaign: true },
+      days: dates.map(date => ({ date, slots: { post: 'PLANNED', story: 'PLANNED', reel: 'PLANNED' } })),
+      bundles: dates.map((date, i) => bundle(date, `hook-${i}`)),
+      publishing_plan: { conversion_goal: null, destination: 'UNKNOWN', status: 'NOT_AUTHORIZED' },
+      ad_candidate: null,
+    })
+
+    const { container } = render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
+
+    await screen.findByText('hook-3')
+    expect(screen.queryByText('hook-0')).not.toBeInTheDocument()
+    const expired = container.querySelector('details[data-expired-days]')
+    expect(expired?.textContent).toContain('已过期的旧草稿（3 天）')
+    expect(expired?.textContent).toContain(dates[0].slice(5))
+  })
+
+  it('says so when no day is today or later, and keeps the old days reachable', async () => {
+    mockFetchOnce({
+      success: true,
+      campaign: { id: CAMPAIGN_ID, title: 'Christmas Campaign', offer: null, primary_cta: 'Enquire Now' },
+      grounding: { status: 'OK', has_master_brief: true, has_campaign: true },
+      days: daysGrid(['2026-08-24']),
+      bundles: [
+        {
+          date: '2026-08-24',
+          post: { hook: 'old hook', body: 'b', cta: 'Enquire Now' },
+          story: { frames: [{ order: 1, copy: 'f' }] },
+          reel: { brief: 'br', script: 's', caption: 'c', source_asset_ids: [], media_status: 'NO_MEDIA' },
+          readiness: readiness(),
+          provenance: [],
+        },
+      ],
+      publishing_plan: { conversion_goal: null, destination: 'UNKNOWN', status: 'NOT_AUTHORIZED' },
+      ad_candidate: null,
+    })
+
+    render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
+
+    await screen.findByText('old hook')
+    expect(screen.getByText('今天和之后没有排好的图文。')).toBeInTheDocument()
+    expect(screen.getByText(/已过期的旧草稿（7 天）/)).toBeInTheDocument()
   })
 })

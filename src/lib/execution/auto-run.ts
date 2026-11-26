@@ -27,7 +27,7 @@ import {
 import { deriveEndorsement, type PrescriptionAnchor, type MarketingPlanAnchor } from './endorsement'
 import { WEEKLY_COOLDOWN_DAYS } from '@/lib/blog/cadence'
 import { readPromoSpec } from '@/lib/marketing-plan/promo/spec'
-import { promoContentHash } from '@/lib/marketing-plan/promo/content-hash'
+import { promoContentHash, promoContentMatches } from '@/lib/marketing-plan/promo/content-hash'
 
 /** 一轮最多跑几件。上限低不是保守，是因为每件都会花钱、都会写东西出来。 */
 export const MAX_ITEMS_PER_RUN = 3
@@ -233,13 +233,15 @@ export async function selectAutoRunCandidates(
         m.generation_meta as { approval_receipt?: { content_hash?: string } } | null
       )?.approval_receipt
       const spec = readPromoSpec(m.plan_data)
+      const approvedHash = typeof receipt?.content_hash === 'string' ? receipt.content_hash : ''
+      const sameContent = spec !== null && approvedHash !== '' && promoContentMatches(approvedHash, spec)
       plans.set(m.id, {
         client_id: m.client_id,
         status: m.status,
         approved_at: m.approved_at,
         end_date: m.end_date,
         promo_hash_approved: receipt?.content_hash ?? null,
-        promo_hash_now: spec ? promoContentHash(spec) : null,
+        promo_hash_now: spec ? (sameContent ? approvedHash : promoContentHash(spec)) : null,
       })
     }
   }

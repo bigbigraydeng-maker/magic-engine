@@ -19,8 +19,9 @@ import { contactCardTitle } from '@/lib/crm/display-name'
 import { buildIdentities, normalisePhone, resolveContact, AmbiguousIdentityError } from '@/lib/crm/identity'
 import { contactKindOf, isSystemAccountName, normaliseDomain, readDomainRules, SYSTEM_ACCOUNT_NAMES } from '@/lib/crm/contact-kind'
 import { EMPTY_ATTRIBUTION } from '@/lib/crm/attribution'
-import { segmentContact } from '@/lib/crm/segments'
+import { segmentContact, type SiteReading } from '@/lib/crm/segments'
 import { buildContactModel } from '@/lib/crm/contact-model'
+import { loadSiteReading } from '@/lib/crm/email-templates/link-tracking/site-reading-prod'
 import { enrichContacts, type SourceKey } from '@/lib/crm/contact-enrichment'
 import { loadAllEnrichmentConversations, loadEnrichmentInputs, type EnrichmentInputs } from '@/lib/crm/contact-enrichment-loader'
 import {
@@ -40,6 +41,8 @@ import { SECTION_KEYS, type SectionKey } from '@/lib/crm/list-sections'
 import { loadLatestBriefByContact, loadLatestBriefByContactCached, type BriefByContact } from '@/lib/crm/brief-lookup'
 import { fetchAll } from '@/lib/supabase-paginate'
 import { loadPriorityTouchpoints } from '@/lib/crm/priority-touchpoints'
+import { finishShadowCompare, readListVersion, shadowEnabled } from '@/lib/crm/list-read-shadow'
+import { loadTakeoverSince } from '@/lib/crm/ai-takeover/prod'
 import { createStepTimer, type StepTimer } from '@/lib/http/step-timing'
 import { orderContactIdsByLatestTouch, scanLatestTouchContactIds, type TouchRowLite } from '@/lib/crm/contact-touch-order'
 import {
@@ -361,7 +364,7 @@ const TOUCH_SCAN_PAGE = 1000
 const TOUCH_SCAN_MAX_PAGES = 40
 
 const PAGE_CONTACT_COLUMNS =
-  'id, display_name, primary_phone, primary_email, do_not_contact, snooze_until, stage, first_seen_at, pinned_at, important_note, important_due_at, assigned_to'
+  'id, display_name, primary_phone, primary_email, do_not_contact, snooze_until, stage, first_seen_at, pinned_at, important_note, important_due_at, assigned_to, ai_takeover_since'
 
 /** 这一页的人的全部触点（带全字段，给分段与整理用）。 */
 function fetchTouchesFor(clientId: string, ids: string[]): Promise<TouchRow[]> {
@@ -458,7 +461,7 @@ async function getByIds(
     ])
     timer.step('by_ids')
     const enriched = await enrichForDisplay(clientId, pageContacts, touches, true)
-    const { out, customPerContact } = assembleRows(enriched.contacts, enriched.touches, stageRows, briefs, enriched.sources)
+    const { out, customPerContact } = assembleRows(enriched.contacts, enriched.touches, stageRows, briefs, enriched.sources, await loadSiteReading(supabaseAdmin, clientId, new Date()))
     const res = NextResponse.json({
       total: out.length,
       page: 1,
@@ -742,7 +745,7 @@ async function getPaged(
   timer.step('touches_briefs')
   const enrichedPage = await enrichForDisplay(clientId, pageContacts, touches, true, enrichInputsEarly ?? undefined)
   timer.step('enrich')
-  const { out, customPerContact } = assembleRows(enrichedPage.contacts, enrichedPage.touches, stageRows, briefs, enrichedPage.sources)
+  const { out, customPerContact } = assembleRows(enrichedPage.contacts, enrichedPage.touches, stageRows, briefs, enrichedPage.sources, await loadSiteReading(supabaseAdmin, clientId, new Date()))
   timer.step('assemble')
 
   const res = NextResponse.json({
@@ -783,9 +786,14 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
   // Enrichment reads the same tenant-wide inputs regardless of the filtered contact list.
   // Start it with the other reads instead of waiting for all of them to finish.
   // Request-local only: both consumers use this client's same conversation rows.
+  const filters = contactFilterParams(query)
+  // Shadow comparison (design slice 2): only the unfiltered view, whose reads are the whole tenant.
+  // The version must be read before any data read starts; see lib/crm/list-read-shadow.
+  const shadow = shadowEnabled() && query.q === null && filters.stages === null && filters.orExpr === null
+  const versionBefore = shadow ? await readListVersion(supabaseAdmin, clientId) : null
+  if (shadow) timer.step('list_version')
   const sharedConversations = loadAllEnrichmentConversations(supabaseAdmin, clientId)
   sharedConversations.catch(() => undefined)
-  const filters = contactFilterParams(query)
   const contactsRead = fetchAll<ContactRow>((from, to) => {
     let b = supabaseAdmin.from('contacts').select(PAGE_CONTACT_COLUMNS).eq('client_id', clientId)
     if (filters.stages !== null) b = b.in('stage', filters.stages)
@@ -819,6 +827,11 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
     ? loadEnrichmentInputs(supabaseAdmin, clientId, undefined, sharedConversations)
     : selectedContacts.then((rows) => loadEnrichmentInputs(supabaseAdmin, clientId, rows.map((row) => row.id)))
   enrichmentInputs.catch(() => undefined)
+  // 「AI 跟进中」的人（lib/crm/ai-takeover）。读不到 = 当没有人在接管，名单照旧（功能上线前的样子）。
+  const takeoverRead = loadTakeoverSince(clientId).catch((err: unknown) => {
+    console.warn('[crm/contacts] 读 AI 接管名单失败，按无人接管显示:', err instanceof Error ? err.message : err)
+    return new Map<string, string>()
+  })
   try {
     ;[contacts, touches, stageRows, briefs, { leadsConfig, country: clientCountry }, allNoteContacts] = await Promise.all([
       selectedContacts,
@@ -856,6 +869,17 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
     )
   }
   timer.step('priority_reads')
+  if (shadow) {
+    const conversations = await sharedConversations.catch(() => null)
+    finishShadowCompare(supabaseAdmin, 'contacts_priority', clientId, versionBefore, {
+      contacts,
+      touchpoints: touches,
+      stages: stageRows,
+      briefs: [...briefs.entries()],
+      client: [{ leadsConfig, country: clientCountry }],
+      ...(conversations === null ? {} : { conversations }),
+    })
+  }
 
   // 系统账号（WhatsApp Business 等）不是客人，不进「智能」视图的任何一栏。
   contacts = contacts.filter((c) => !isSystemAccountName(c.display_name))
@@ -897,6 +921,8 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
     (k) => stageMeta.get(k)?.suppressed ?? false,
   )
 
+  const takeoverSince = await takeoverRead
+  const siteReading = await loadSiteReading(supabaseAdmin, clientId, nowPri)
   const customPerContact: Array<Record<CustomColumnKey, string | null>> = []
   const { sections, focus } = buildPriorityView(
     {
@@ -910,9 +936,11 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
       focusContactId: query.focusContactId,
       briefs,
       tradeIds,
+      siteReading,
       dayStartMs: localDayStartMs(nowPri, timeZone),
       touchedToday: contactsTouchedToday(touches, nowPri, timeZone),
       stageSuppressedTodayIds,
+      takeoverSince,
     },
     (row, ranked) => {
       const tps = byContact.get(row.id) ?? []
@@ -922,6 +950,8 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
       // 今天已处理：页面就地变灰打勾，位置不动。
       built.row.handled = ranked.handled === true
       built.row.handledWhy = ranked.handledWhy ?? null
+      built.row.aiTakeover = ranked.aiTakeover === true
+      built.row.customerCameBack = ranked.customerCameBack === true
       if (ranked.handled === true) {
         // 已处理的卡片不能同时又写着「记下一步」（魏征复审 P2-b）：灰色 + 打勾那句话说明今天做了什么。
         // （afterCall 提醒本身由 dayRow 在员工记完笔记后撤掉；没记笔记时 dayRow 不会把卡片标成已处理。）
@@ -1046,7 +1076,7 @@ export async function GET(
   }
 
   const enrichedAll = await enrichForDisplay(clientId, contacts, touches, false)
-  const { out, customPerContact } = assembleRows(enrichedAll.contacts, enrichedAll.touches, stageRows, briefs, enrichedAll.sources)
+  const { out, customPerContact } = assembleRows(enrichedAll.contacts, enrichedAll.touches, stageRows, briefs, enrichedAll.sources, await loadSiteReading(supabaseAdmin, clientId, new Date()))
 
   return NextResponse.json({
     totalContacts: out.length,
@@ -1068,6 +1098,7 @@ function assembleRows(
   stageRows: StageRow[],
   briefs: BriefByContact,
   sources?: Map<string, SourceKey[]>,
+  siteReading?: ReadonlyMap<string, SiteReading>,
 ): {
   out: Array<Record<string, unknown>>
   customPerContact: Array<Record<CustomColumnKey, string | null>>
@@ -1090,13 +1121,15 @@ function assembleRows(
     const tps = byContact.get(c.id) ?? []
     // 装配形状收敛到共享 builder：全部客人 / 今天名单 / WP3 跟进表用同一个函数吃同一份数据，
     // 分段模块只有一份，喂它的形状也只能有一份。见 lib/crm/contact-model 头注。
-    const model = buildContactModel(c, tps, stageMeta)
+    const model = { ...buildContactModel(c, tps, stageMeta), siteReading: siteReading?.get(c.id) ?? null }
     const seg = segmentContact(model, now)
     // 响应行也只有一份 —— view=priority 与本路径共用 responseRowFor，
     // 否则两个入口会各自长出一套字段（2026-09-26 R5b：就是在这里发现它已经被抄了第二份）。
     const built = responseRowFor(c, tps, stageMeta, model, seg, briefs.get(c.id) ?? null)
     customPerContact.push(built.custom)
     if (sources !== undefined) built.row.sources = sources.get(c.id) ?? []
+    // 「AI 跟进中」小标：镜像列有值就标（今天名单走自己的一套，见 getPriority）。
+    built.row.aiTakeover = c.ai_takeover_since != null
     return built.row
   })
 

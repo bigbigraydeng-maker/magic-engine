@@ -1,6 +1,18 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { createFakeSupabase, type Row } from '@/lib/kernel/__tests__/fake-supabase'
 import { loadAdsNextStepView, o1PendingMatchesGrowthCycleDate } from '../load-ads-next-step'
+
+vi.mock('@/lib/weekly-report/impact-gap-gather', () => ({
+  gatherClientImpactGapBundle: vi.fn(async (_sb, clientId: string) => ({ clientId })),
+}))
+vi.mock('@/lib/weekly-report/impact-gap-present', () => ({
+  presentImpactGapNextStepSummary: () => ({
+    m2: 'm2 summary',
+    i1: 'i1 summary',
+    c3: 'c3 summary',
+    ci: 'ci summary',
+  }),
+}))
 
 const CLIENT = 'c0000000-0000-0000-0000-000000000000'
 const D3 = 'ads.auto_pause_on_d3'
@@ -316,6 +328,7 @@ describe('loadAdsNextStepView', () => {
     )
     const view = await loadAdsNextStepView(sb, CLIENT, { staffView: false })
     expect(view.healthRedLights).toEqual({ kind: 'staff_only' })
+    expect(view.impactGaps).toEqual({ kind: 'staff_only' })
   })
 
   it('staffView=true 时员工可见仅内部诊断（clientVisible:false 仍列出）', async () => {

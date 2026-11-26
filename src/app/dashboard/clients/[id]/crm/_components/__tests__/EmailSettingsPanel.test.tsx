@@ -394,3 +394,47 @@ describe('templates that do not use up a place in the weekly cap', () => {
     expect(settingsOf(sent).cap_exempt_template_keys).toEqual([])
   })
 })
+
+describe('the catalogue (one-click catalogue mail)', () => {
+  const catalogue = { template_key: 'catalogue-send', version_label: 'v9', url: 'https://www.example.com/b.pdf', valid_until: '2026-12-31' }
+  const withCatalogue = (extra: Record<string, unknown> = {}) =>
+    okPayload({ settings: stored({ providers: { ...stored().providers, catalogue, ...extra } }) })
+  const box = (label: string) => screen.getByLabelText(label) as HTMLInputElement
+
+  it('shows the stored catalogue in its four boxes', async () => {
+    routes([{ body: withCatalogue() }])
+    render(<EmailSettingsPanel clientId="c1" />)
+    await ready()
+    expect(box('目录信用哪个模板（模板代号）').value).toBe('catalogue-send')
+    expect(box('手册版本号').value).toBe('v9')
+    expect(box('手册网址').value).toBe('https://www.example.com/b.pdf')
+    expect(box('有效期到（含当天）').value).toBe('2026-12-31')
+  })
+
+  it('saving without touching it keeps the catalogue, and any provider this panel does not know about', async () => {
+    const future = { some_new_provider: { a: 1 } }
+    const { sent } = routes([{ body: withCatalogue(future) }, { body: okPayload({ version: 5 }) }], [{ body: { ok: true, version: 5 } }])
+    render(<EmailSettingsPanel clientId="c1" />)
+    await ready()
+    fireEvent.click(saveButton())
+    await waitFor(() => expect(sent).toHaveLength(1))
+    expect(settingsOf(sent).providers).toEqual({ ...stored().providers, catalogue, ...future })
+  })
+
+  it('emptying all four boxes saves no catalogue; filling one sends all four for the server to judge', async () => {
+    const { sent } = routes([{ body: withCatalogue() }, { body: okPayload({ version: 5 }) }], [{ body: { ok: true, version: 5 } }])
+    render(<EmailSettingsPanel clientId="c1" />)
+    await ready()
+    for (const label of ['目录信用哪个模板（模板代号）', '手册版本号', '手册网址', '有效期到（含当天）']) {
+      fireEvent.change(box(label), { target: { value: '' } })
+    }
+    fireEvent.click(saveButton())
+    await waitFor(() => expect(sent).toHaveLength(1))
+    expect(settingsOf(sent).providers).toEqual(stored().providers)
+
+    fireEvent.change(box('手册版本号'), { target: { value: 'v10' } })
+    fireEvent.click(saveButton())
+    await waitFor(() => expect(sent).toHaveLength(2))
+    expect((settingsOf(sent, 1).providers as Record<string, unknown>).catalogue).toEqual({ template_key: '', version_label: 'v10', url: '', valid_until: '' })
+  })
+})

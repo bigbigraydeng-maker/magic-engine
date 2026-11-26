@@ -59,6 +59,7 @@ function classifyDone(entry: LedgerEntry, today: string): LedgerFinding | null {
 function classify(entry: LedgerEntry, today: string): LedgerFinding | null {
   switch (entry.status) {
     case 'verified':
+    case 'expired':
       return null
     case 'failed':
       return { kind: 'verification_failed', entry }

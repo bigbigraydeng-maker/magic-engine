@@ -61,12 +61,28 @@ export type EvidenceRead =
   | { ok: true; items: readonly OutboundItem[]; legacy: LegacyEvidence }
   | { ok: false; error: string }
 
+/** Whether the guest unsubscribed from ME's e-mails (ME's own unsubscribe link, or a complaint). A failed read is `ok:false`. */
+export type UnsubscribeRead = { ok: true; unsubscribed: boolean } | { ok: false; error: string }
+
+/**
+ * What ME's own send ledger knows about the contact and its addresses: a complaint about one of ME's letters, or a
+ * permanent bounce of one of the addresses. A failed read is `ok:false`, never "nothing known".
+ */
+export type AddressHistoryRead = { ok: true; complained: boolean; hardBounced: boolean } | { ok: false; error: string }
+
+/** Options of the evidence read. `exemptSendId`: a letter of ME's own still in flight (its ledger row is not counted). */
+export interface EvidenceOptions {
+  exemptSendId?: string
+}
+
 /** Everything the gates read. Read-only by construction: there is no write method on purpose. */
 export interface ShadowGatePorts {
   consent(contactId: string): Promise<ConsentRead>
   dnc(contactId: string): Promise<DncRead>
   member(email: string): Promise<MemberRead>
-  evidence(contact: ShadowContact): Promise<EvidenceRead>
+  evidence(contact: ShadowContact, opts?: EvidenceOptions): Promise<EvidenceRead>
+  unsubscribed(contact: ShadowContact): Promise<UnsubscribeRead>
+  addressHistory(contact: ShadowContact): Promise<AddressHistoryRead>
 }
 
 /** Definite reasons: the decision is final and gets frozen into a `skipped` shadow row. */
@@ -81,9 +97,23 @@ export type SkipReason =
   | 'no_consent_basis'
   | 'sales_email_exists'
   | 'frequency_full'
+  /** The guest unsubscribed from ME's e-mails (design P2 §5.2 D③). */
+  | 'email_unsubscribed'
+  /** The guest complained about one of ME's letters (§5.2 D②). */
+  | 'complained'
+  /** One of the addresses bounced permanently on one of ME's letters (§5.2 C). */
+  | 'hard_bounced_address'
+  /** Real sending only: the old daily batch already welcomed them (in a rehearsal this is only noted, §5.2 D④). */
+  | 'legacy_welcomed'
 
 /** Retryable reasons: a read failed, so nothing is written now and the contact is tried again on the next sweep. */
-export type DeferReason = 'dnc_unverifiable' | 'consent_unreadable' | 'legacy_unverifiable' | 'evidence_unverifiable'
+export type DeferReason =
+  | 'dnc_unverifiable'
+  | 'consent_unreadable'
+  | 'legacy_unverifiable'
+  | 'evidence_unverifiable'
+  | 'unsubscribe_unverifiable'
+  | 'address_history_unreadable'
 
 /** Stored in triggered_sends.annotations. No personal data: booleans, counts and a day. */
 export interface ShadowAnnotations {

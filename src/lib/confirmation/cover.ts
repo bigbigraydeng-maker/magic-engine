@@ -1,0 +1,92 @@
+import { FALLBACK, HERO_CHOICES, pickHeroName } from '@/lib/tailor-made/hero-rules'
+import type { ConfirmationData } from './types'
+
+/** Unique overnight cities (falling back to day routes), in trip order. */
+export function coverRouteStops(d: ConfirmationData): string[] {
+  const stops: string[] = []
+  for (const day of d.days) {
+    const c = day.overnight.trim()
+    if (c && !stops.includes(c)) stops.push(c)
+  }
+  if (stops.length) return stops
+  for (const day of d.days) {
+    const r = day.route.trim()
+    if (r && !stops.includes(r)) stops.push(r)
+  }
+  return stops
+}
+
+/** The cover picture actually used: the staff's choice, else picked from the itinerary like Tailor-made does. */
+export function resolveHeroName(d: ConfirmationData): string {
+  const chosen = d.cover.hero
+  if (chosen !== 'auto' && HERO_CHOICES.some((c) => c.name === chosen)) return chosen
+  // Ordered search list: overnight cities first (where the trip really is), then the route split
+  // into single stops ("Beijing → Xi'an" -> Beijing, Xi'an), then the highlight lines.
+  const split = (t: string) => t.split(/\s+-\s+|\s*(?:→|->|=>|–|—|\/|,|&|;|\+| to )\s*/i).map((x) => x.trim()).filter(Boolean)
+  const search = [
+    ...d.days.map((day) => day.overnight),
+    ...d.days.flatMap((day) => split(day.route)),
+    ...d.days.flatMap((day) => day.highlights.split(/\r?\n/)),
+  ].filter((x) => x.trim())
+  return pickHeroName({ title: d.cover.title, route: search }) || FALLBACK
+}
+
+export function heroLabel(name: string): string {
+  return HERO_CHOICES.find((c) => c.name === name)?.label ?? name
+}
+
+export function coverTitle(d: ConfirmationData): string {
+  return d.cover.title.trim() || 'Welcome to China! 欢迎到中国！'
+}
+
+/** Width/height of a JPEG from its header (no image library needed); null if unreadable. */
+export function jpegSize(buf: Uint8Array): { width: number; height: number } | null {
+  let i = 2
+  while (i + 9 < buf.length) {
+    if (buf[i] !== 0xff) {
+      i++
+      continue
+    }
+    const m = buf[i + 1]
+    if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) {
+      return { height: (buf[i + 5] << 8) | buf[i + 6], width: (buf[i + 7] << 8) | buf[i + 8] }
+    }
+    i += 2 + ((buf[i + 2] << 8) | buf[i + 3])
+  }
+  return null
+}
+
+/**
+ * Conservative width of one character in em for a serif display face. Errs wide on purpose:
+ * a title that comes out a bit small is fine, one that overflows its single line is not.
+ */
+function glyphEm(ch: string): number {
+  if (/[\u2E80-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFF00-\uFFEF\u3000-\u303F]/.test(ch)) return 1.0
+  if (/[MWmw@%]/.test(ch)) return 1.0
+  if (/[A-Z]/.test(ch)) return 0.78
+  if (/[0-9]/.test(ch)) return 0.62
+  if (/[a-z]/.test(ch)) return /[iljft]/.test(ch) ? 0.35 : 0.58
+  if (/[\s.,;:!'|]/.test(ch)) return 0.3
+  if (/[\x21-\x7E]/.test(ch)) return 0.7
+  // anything else (emoji, symbols, accented or other scripts): count as a full em
+  return 1.0
+}
+
+/**
+ * Width of a title in "em-ish" units: CJK / full-width characters are about twice as wide
+ * as Latin ones. Used to pick a font size that keeps the title on ONE line (PM 2026-11-19:
+ * 「中文字必须要缩到一行」).
+ */
+export function titleUnits(t: string): number {
+  let u = 0
+  for (const ch of t) u += glyphEm(ch)
+  return Math.max(1, u)
+}
+
+/** Font size (px) for a one-line title in a box `width` px wide, never above `max`. */
+/** Cover titles are capped so they always fit one line (the form stops typing at this length). */
+export const MAX_COVER_TITLE = 40
+
+export function oneLineTitlePx(t: string, width: number, max: number, min = 9): number {
+  return Math.max(min, Math.min(max, Math.floor((width * 0.96) / titleUnits(t))))
+}

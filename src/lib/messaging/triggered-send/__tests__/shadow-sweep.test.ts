@@ -88,6 +88,8 @@ function makePorts(opts: FakePortsOptions = {}): ShadowGatePorts {
             items: [],
             legacy: { welcomed: false, batchSeen: true, campaignIds: [] },
           }),
+    unsubscribed: (contact) => wrap(contact.contactId, 'unsubscribed', { ok: true, unsubscribed: false }),
+    addressHistory: (contact) => wrap(contact.contactId, 'addressHistory', { ok: true, complained: false, hardBounced: false }),
   }
 }
 
@@ -504,6 +506,8 @@ describe('runShadowSweep - added after the mutation probe', () => {
         events.push(`end:${c.contactId}`)
         return { ok: true, items: [], legacy: { welcomed: false, batchSeen: true, campaignIds: [] } }
       },
+      unsubscribed: async () => ({ ok: true, unsubscribed: false }),
+      addressHistory: async () => ({ ok: true, complained: false, hardBounced: false }),
     }
     const f = makeDeps({
       contacts: {

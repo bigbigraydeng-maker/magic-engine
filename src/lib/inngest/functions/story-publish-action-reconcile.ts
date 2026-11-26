@@ -11,6 +11,7 @@ import { inngest, CLOUD_FN_PREFIX } from '../client'
 import { readRegisteredPageId } from './daily-plan-post-measurement'
 import { supabaseAdmin } from '@/lib/supabase'
 import { listUnregisteredSentStories } from '@/lib/social/story-publish-reconcile'
+import { scheduleStoryDmWindow, storyDmWindowEnabled } from '@/lib/inngest/functions/story-dm-window'
 import {
   STORY_PUBLISH_RECONCILE_EVENT,
   recordStoryPublishAction,
@@ -71,7 +72,18 @@ async function settleUnregisteredStory(
     return 'refused'
   }
   const registration = await recordStoryPublishAction(supabase, input)
-  if (registration.ok) return 'registered'
+  if (registration.ok) {
+    if (storyDmWindowEnabled()) {
+      await scheduleStoryDmWindow({
+        client_id: input.clientId,
+        action_id: registration.actionId,
+        item_id: input.itemId,
+        sent_at: input.publishedAt,
+        channel: input.channel,
+      })
+    }
+    return 'registered'
+  }
   await writeStoryRegisterRefusal(supabase, {
     clientId: row.client_id,
     itemId: row.item_id,

@@ -24,6 +24,9 @@ import { esc, FOCUS_CLIENT_IDS } from '@/lib/pm-todo/daily-todo'
 import { gatherSeoListWeekly, seoListLines, type SeoListWeeklyResult } from '@/lib/seo-weekly-list/report'
 import { gatherReturnLadders, type ReturnLadderSection } from './return-ladder-gather'
 import { renderLadderBlock, renderLadderUnavailable, renderOtherLadders } from './return-ladder-section'
+import { gatherClientImpactGapBundle } from './impact-gap-gather'
+import type { ClientImpactGapBundle } from './impact-gap-present'
+import { presentImpactGapBlock } from './impact-gap-present'
 
 const STALE_AFTER_DAYS = 3
 /** Keyword snapshots are WEEKLY by design — 8 days tolerance, not 3, or
@@ -112,6 +115,8 @@ export interface ClientWeekly {
     messages_7d: number | null
     freshness: FreshnessStamp
   }
+  /** IMPACT 批次 B：只读事实与缺口（读失败则为 undefined）。 */
+  impact_gap?: ClientImpactGapBundle
 }
 
 // ── Data gathering ──────────────────────────────────────────────────────────────
@@ -303,6 +308,12 @@ async function gatherClient(
   const adLatest = ads.reduce<string | null>((m, r) => (m && m > r.insight_date ? m : r.insight_date), null)
 
   const seoList = await gatherSeoListWeekly(supabase, clientId, now)
+  let impactGap: ClientImpactGapBundle | undefined
+  try {
+    impactGap = await gatherClientImpactGapBundle(supabase, clientId, now)
+  } catch {
+    impactGap = undefined
+  }
 
   return {
     client_id: clientId,
@@ -341,6 +352,7 @@ async function gatherClient(
       messages_7d: ads.length ? ads.reduce((s, r) => s + (r.messaging_conversations ?? 0), 0) : null,
       freshness: freshness(adLatest ? `${adLatest}T00:00:00Z` : null, now),
     },
+    impact_gap: impactGap,
   }
 }
 
@@ -557,6 +569,7 @@ export function renderWeeklyReport(clients: WeeklyClients, nzDateLabel: string, 
       ${block('📝', 'Blog', blogLines)}
       ${block('📱', '社媒', socialLines + reelsLine, c.social.freshness)}
       ${block('📣', '社媒广告', adsLines, c.ads.freshness)}
+      ${c.impact_gap ? presentImpactGapBlock(c.impact_gap) : ''}
       ${ladderBlockFor(c.client_id, ladders)}`
   }).join('') + renderOtherLadders(ladders, clients.map((c) => c.client_id))
 

@@ -9,6 +9,14 @@ const okView = {
   healthRedLights: { kind: 'ok' as const, data: { items: ['花钱没结果'] } },
   pendingActions: { kind: 'empty' as const },
   prescription: { kind: 'empty' as const },
+  impactGaps: {
+    kind: 'ok' as const,
+    data: {
+      items: [
+        { code: 'M-2', title: '花费与上限', summary: '测试', href: '/settings' },
+      ],
+    },
+  },
 }
 
 describe('AdsNextStepCard', () => {
@@ -26,7 +34,7 @@ describe('AdsNextStepCard', () => {
   it('加载中显示「读取中…」，不显示「没读到」', () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
     render(<AdsNextStepCard clientId="client-1" />)
-    expect(screen.getAllByText('读取中…').length).toBe(3)
+    expect(screen.getAllByText('读取中…').length).toBe(4)
     expect(screen.queryByText('没读到')).toBeNull()
   })
 
@@ -38,6 +46,7 @@ describe('AdsNextStepCard', () => {
           healthRedLights: { kind: 'unreadable' },
           pendingActions: { kind: 'empty' },
           prescription: { kind: 'ok', data: { version: 1, statusLabel: '草稿', approvedAt: null } },
+          impactGaps: { kind: 'empty' },
         },
       }),
     })))
@@ -50,13 +59,13 @@ describe('AdsNextStepCard', () => {
   it('fetch 非 ok 时三行都是「没读到」', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 403, json: async () => ({}) })))
     render(<AdsNextStepCard clientId="client-1" />)
-    await waitFor(() => expect(screen.getAllByText('没读到').length).toBe(3))
+    await waitFor(() => expect(screen.getAllByText('没读到').length).toBe(4))
   })
 
   it('fetch reject 时三行都是「没读到」', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network') }))
     render(<AdsNextStepCard clientId="client-1" />)
-    await waitFor(() => expect(screen.getAllByText('没读到').length).toBe(3))
+    await waitFor(() => expect(screen.getAllByText('没读到').length).toBe(4))
   })
 
   it('refreshKey 变化时重新拉取汇总', async () => {

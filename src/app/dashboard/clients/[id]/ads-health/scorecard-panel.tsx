@@ -112,7 +112,12 @@ function sampleText(u: ScorecardUnit): string {
   return `还差 ${u.sampleGap} 个`
 }
 
-export default function ScorecardPanel({ scorecard, clientId }: { scorecard: AdsScorecard | { error: string } | undefined; clientId?: string }) {
+export default function ScorecardPanel({ scorecard, clientId, stoppedUnitIds }: {
+  scorecard: AdsScorecard | { error: string } | undefined
+  clientId?: string
+  /** 快照里确认已停的系列 / 广告组 id；不传 = 不知道哪些停了，按钮照旧都显示 */
+  stoppedUnitIds?: ReadonlySet<string>
+}) {
   const [editing, setEditing] = React.useState<BudgetChangeDialogUnit | null>(null)
   const [refreshKey, setRefreshKey] = React.useState(0)
 
@@ -223,13 +228,17 @@ export default function ScorecardPanel({ scorecard, clientId }: { scorecard: Ads
                   <td className="pr-3 py-1 align-top text-gray-700 whitespace-nowrap">{sampleText(u)}</td>
                   {clientId && (
                     <td className="pr-3 py-1 align-top whitespace-nowrap">
-                      <button
-                        type="button"
-                        className="rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-700 hover:bg-gray-50"
-                        onClick={() => setEditing({ level: u.level, id: u.id, adAccountId: u.adAccountId, name: u.name })}
-                      >
-                        调预算
-                      </button>
+                      {stoppedUnitIds?.has(u.id) ? (
+                        <span className="text-xs text-gray-500">已停，没得调</span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-700 hover:bg-gray-50"
+                          onClick={() => setEditing({ level: u.level, id: u.id, adAccountId: u.adAccountId, name: u.name })}
+                        >
+                          调预算
+                        </button>
+                      )}
                     </td>
                   )}
                 </tr>

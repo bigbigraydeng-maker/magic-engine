@@ -92,6 +92,32 @@ describe('POST 点击外呼', () => {
     expect(start).not.toHaveBeenCalled()
   })
 
+  it('说过「只别打电话」（do_not_call 触点）→ 409 + 中文提示，不拨', async () => {
+    mockDb({ contact: { id: 'c', primary_phone: '021 000 0001', do_not_contact: false }, touches: [{ channel: 'phone', direction: 'outbound', metadata: { outcome: 'do_not_call' }, occurred_at: '2026-10-01T00:00:00Z' }], conn: CONN })
+    const res = await call()
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: '这位客人说过不要电话，请用邮件或短信。' })
+    expect(start).not.toHaveBeenCalled()
+  })
+
+  it('「只别打电话」之后被人放回电话名单（更晚的 dnc_cleared）→ 正常拨', async () => {
+    mockDb({ contact: { id: 'c', primary_phone: '021 000 0001', do_not_contact: false }, touches: [
+      { channel: 'phone', direction: 'outbound', metadata: { outcome: 'do_not_call' }, occurred_at: '2026-10-01T00:00:00Z' },
+      { channel: 'note', direction: 'outbound', metadata: { outcome: 'dnc_cleared' }, occurred_at: '2026-10-02T00:00:00Z' },
+    ], conn: CONN })
+    expect((await call()).status).toBe(200)
+    expect(start).toHaveBeenCalledTimes(1)
+  })
+
+  it('别再联系仍是 409（原文案），没有任何拒绝的人照常能拨', async () => {
+    mockDb({ contact: { id: 'c', primary_phone: '021 000 0001', do_not_contact: false }, touches: [{ metadata: { outcome: 'do_not_contact' }, occurred_at: '2026-10-01T00:00:00Z' }], conn: CONN })
+    const res = await call()
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: '这位客人说过别再联系，不能拨打' })
+    mockDb({ contact: { id: 'c', primary_phone: '021 000 0001', do_not_contact: false }, touches: [{ channel: 'phone', direction: 'outbound', metadata: { outcome: 'spoke' }, occurred_at: '2026-10-01T00:00:00Z' }], conn: CONN })
+    expect((await call()).status).toBe(200)
+  })
+
   it('员工没登记手机 / 客人号码认不出 / 没接入电话 / 令牌没配 → 拒绝，不拨', async () => {
     mockDb({ contact: { id: 'c', primary_phone: '021 000 0001', do_not_contact: false }, touches: [], conn: { ...CONN, extension_map: {} } })
     expect((await call()).status).toBe(422)

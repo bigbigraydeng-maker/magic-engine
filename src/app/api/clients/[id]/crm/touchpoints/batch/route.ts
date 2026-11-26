@@ -138,6 +138,7 @@ export async function POST(
   const parsed: NoteParse = {
     outcome: rules.outcome,
     do_not_contact: rules.do_not_contact,
+    refusal_scope: rules.refusal_scope,
     travel_window: null,
     tour_interest: null,
     competitor: null,

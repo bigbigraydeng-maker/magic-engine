@@ -26,6 +26,8 @@ import { PostCallEmailBar } from './PostCallEmailBar'
 import { ProfileCard } from './ProfileCard'
 import { ReturnLeadPanel } from './ReturnLeadPanel'
 import { DncBanner } from './DncBanner'
+import { AiTakeoverTag } from './AiTakeoverTag'
+import { CatalogueTakeoverPanel } from './CatalogueTakeoverPanel'
 import { MarkWonPanel } from './MarkWonPanel'
 import { ImportantMarkerEditor } from './ImportantMarkerEditor'
 import { BookingsBlock } from './bookings/BookingsBlock'
@@ -80,6 +82,11 @@ export interface DrawerRow {
    * （见 `lib/crm/dnc` 与 `api/.../dnc` 路由）。
    */
   doNotContact?: boolean
+  /** 客人说过不要电话（只关电话，邮件 / 私信照常）—— 不给拨号，给「放回电话名单」。 */
+  doNotCall?: boolean
+  /** 「AI 跟进中」/「客人回来了」—— 名字旁的小标（列表接口给；抽屉的目录块会再读一次最新状态）。 */
+  aiTakeover?: boolean
+  customerCameBack?: boolean
   /**
    * 「该做什么」—— 阶段 / 冷热 / 意向合成的那一个概念（PM 2026-10-10）。
    * 列表接口算好传进来；没有（老调用方）就退回只显示阶段按钮。
@@ -146,6 +153,8 @@ export function PersonDrawer({
   /** 一打开就滚到「订单与付款」（付款总览页原地弹出时用）。 */
   scrollToBookings?: boolean
 }) {
+  /** 只别打电话、但没被全面拒绝 —— 全面拒绝时只出那一条更重的黄条。 */
+  const noCallOnly = row.doNotCall === true && !row.doNotContact
   const [composing, setComposing] = useState(false)
   const [changingStage, setChangingStage] = useState(false)
   /** NAL 专属：标「已成交」前先录金额。 */
@@ -291,7 +300,15 @@ export function PersonDrawer({
         <header className="flex items-start justify-between gap-3 border-b border-me-charcoal/10 bg-white px-4 py-3">
           <div className="min-w-0">
             <BackToPayments key={row.contactId} clientId={clientId} />
-            <h2 className="truncate text-lg font-black text-me-charcoal">{row.name}</h2>
+            <div className="flex min-w-0 items-center gap-2">
+              <h2 className="truncate text-lg font-black text-me-charcoal">{row.name}</h2>
+              <AiTakeoverTag aiTakeover={row.aiTakeover} cameBack={row.customerCameBack} />
+              {noCallOnly && (
+                <span className="shrink-0 rounded-full bg-me-ochre/12 px-2 py-0.5 text-[11px] font-bold text-me-ochre">
+                  只别打电话
+                </span>
+              )}
+            </div>
           </div>
           <button
             onClick={onClose}
@@ -484,7 +501,17 @@ export function PersonDrawer({
                 ⚠️ 这个号打不通 —— 用下面的邮箱 / 私信联系，顺便问他要个新号
               </span>
             )}
-            {row.phone && !row.phoneUnusable && (
+            {row.phone && !row.phoneUnusable && row.doNotCall && (
+              <span className="rounded-lg border border-me-stone bg-black/[0.04] px-3 py-2 text-sm font-semibold text-me-charcoal/45">
+                📞 {row.phone}
+              </span>
+            )}
+            {row.phone && !row.phoneUnusable && row.doNotCall && (
+              <span className="w-full text-xs font-semibold text-me-charcoal/55">
+                拨号已关闭：这位客人说过不要电话，请用邮件或短信。
+              </span>
+            )}
+            {row.phone && !row.phoneUnusable && !row.doNotCall && (
               <a
                 href={`tel:${row.phone}`}
                 className="rounded-lg border border-me-stone bg-white px-3 py-2 text-sm font-semibold text-me-charcoal"
@@ -497,7 +524,7 @@ export function PersonDrawer({
                 )}
               </a>
             )}
-            {row.phone && !row.phoneUnusable && !row.doNotContact && (
+            {row.phone && !row.phoneUnusable && !row.doNotContact && !row.doNotCall && (
               <CallButton
                 clientId={clientId}
                 contactId={row.contactId}
@@ -523,10 +550,16 @@ export function PersonDrawer({
             {row.doNotContact && (
               <DncBanner clientId={clientId} contactId={row.contactId} name={row.name} onSaved={onSaved} />
             )}
+            {noCallOnly && (
+              <DncBanner clientId={clientId} contactId={row.contactId} name={row.name} onSaved={onSaved} variant="doNotCall" />
+            )}
             {!row.phone && !row.email && (
               <span className="text-xs text-me-charcoal/45">没留电话和邮箱，只能在私信里回他</span>
             )}
           </div>
+
+          {/* 发目录 + 「AI 跟进中 / 收回人工」（设计稿 2026-11-08 §4）。共享组件不写死哪一版目录，版本从发信设置读。 */}
+          <CatalogueTakeoverPanel key={row.contactId} clientId={clientId} contactId={row.contactId} name={row.name} onSaved={onSaved} />
 
           {/* 客人档案：名字（可改）/ 昵称 / 邮箱 / 电话（可加）。PM 2026-10-22：先把字段做好，以后有机会再完善。 */}
           <ProfileCard clientId={clientId} contactId={row.contactId} onChanged={() => onSaved('✓ 档案已保存', true)} />
@@ -763,7 +796,7 @@ export function PersonDrawer({
             contactId={row.contactId}
             customerName={row.name}
             viewerEmail={viewerEmail}
-            phone={row.phoneUnusable ? null : row.phone}
+            phone={row.phoneUnusable || row.doNotCall ? null : row.phone}
             email={row.email}
             onSent={() => {
               setTimelineKey((k) => k + 1)
@@ -781,7 +814,7 @@ export function PersonDrawer({
             contactId={row.contactId}
             customerName={row.name}
             viewerEmail={viewerEmail}
-            phone={row.phoneUnusable ? null : row.phone}
+            phone={row.phoneUnusable || row.doNotCall ? null : row.phone}
             email={row.email}
             onSent={(kind) => {
               setTimelineKey((k) => k + 1)

@@ -35,8 +35,10 @@ import {
  */
 
 export interface TimelineEntry {
-  kind: 'touch' | 'stage' | 'message'
+  kind: 'touch' | 'stage' | 'message' | 'click'
   at: string
+  /** kind 'click': which tracked mail link the guest opened, e.g. "目录". Never counts as what they last said. */
+  clickLabel?: string
   // touch
   channel?: string | null
   direction?: 'inbound' | 'outbound'
@@ -182,6 +184,12 @@ const VERDICT_ROW: Record<string, { icon: string; text: string; tone: 'stop' | '
     text: '有人判断上面那次是误判，把他放回了名单 —— 现在可以正常联系',
     tone: 'clear',
   },
+  // 只别打电话（PM 2026-11-09）：只关电话，所以不用「停了他」的红色那一档。
+  do_not_call: {
+    icon: '📵',
+    text: '就是这一句让系统关了电话 —— 从这天起不再给他打电话，邮件 / 私信照常',
+    tone: 'clear',
+  },
 }
 
 /**
@@ -301,6 +309,7 @@ function summarise(
 function verdictOf(e: TimelineEntry): (typeof VERDICT_ROW)[string] | undefined {
   if (e.outcome === 'dnc_cleared') return VERDICT_ROW.dnc_cleared
   if (e.outcome === 'do_not_contact' || e.dncFlag) return VERDICT_ROW.do_not_contact
+  if (e.outcome === 'do_not_call') return VERDICT_ROW.do_not_call
   return undefined
 }
 
@@ -494,7 +503,16 @@ function TouchRow({ e, clientId }: { e: TimelineEntry; clientId: string }) {
   )
 }
 
+function ClickRow({ e }: { e: TimelineEntry }) {
+  return (
+    <p className="text-xs text-me-charcoal/55" data-testid="timeline-click">
+      🔗 客人点了邮件里的「{e.clickLabel}」 · {when(e.at)}
+    </p>
+  )
+}
+
 function Row({ e, clientId }: { e: TimelineEntry; clientId: string }) {
+  if (e.kind === 'click') return <ClickRow e={e} />
   if (e.kind === 'message') return <MessageRow e={e} />
   if (e.kind === 'stage') return <StageRow e={e} />
   return <TouchRow e={e} clientId={clientId} />

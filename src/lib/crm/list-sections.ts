@@ -57,6 +57,10 @@ export interface RankedContact {
   handled?: boolean
   /** 已处理的话，一句人话说明做了什么。 */
   handledWhy?: string | null
+  /** 「AI 跟进中」（lib/crm/ai-takeover）。不传 = 不在接管中。 */
+  aiTakeover?: boolean
+  /** 接管期间客人回来了（回信 / 填表 / 来电 / 私信）—— 名单上标「客人回来了」。 */
+  customerCameBack?: boolean
 }
 
 export interface SectionResult<T> {

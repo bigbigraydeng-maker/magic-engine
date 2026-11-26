@@ -128,6 +128,15 @@ describe('classifyEvents tiers', () => {
     expect(out.decisions[0].reason).toBe('台账卡已 verified')
   })
 
+  it('(d) expired card -> closed, not counted as overdue', () => {
+    const id = '2026-10-01-expired'
+    const event = makeEvent({ id: 'e-expired', description: humanDescription(id) })
+    const cards = new Map([[id, makeCard({ id, status: 'expired' })]])
+    const out = classifyEvents(makeInput({ events: [event], cards }))
+    expect(out.decisions[0].tier).toBe('closed')
+    expect(out.decisions[0].reason).toBe('台账卡已过期不追（PM 同意）')
+  })
+
   it('(d) done card with verifiedRef -> closed', () => {
     const id = '2026-10-01-done'
     const event = makeEvent({ id: 'e-done', description: humanDescription(id) })

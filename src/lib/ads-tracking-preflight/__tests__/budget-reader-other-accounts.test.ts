@@ -21,7 +21,7 @@ const noSleep = async (): Promise<void> => {}
 type Row = Record<string, unknown>
 type TableName =
   | 'client_meta_ad_accounts'
-  | 'ad_strategy_configs'
+  | 'marketing_plans'
   | 'clients'
   | 'ad_snapshot_captures'
   | 'ad_entity_snapshots'
@@ -160,7 +160,7 @@ const REGISTRY_TWO: Row[] = [
   { ad_account_id: ACCOUNT, label: 'Official', hidden_from_ad_health: false, daily_budget_cap_cents: 15000 },
   { ad_account_id: OTHER, label: 'Old main', hidden_from_ad_health: true, daily_budget_cap_cents: null },
 ]
-const CLIENT_CONFIG: Row[] = [{ daily_budget_cap_cents: 15000 }]
+const CLIENT_PLAN: Row[] = [{ status: 'approved', plan_data: { promo: { daily_total_cap_cents: 15000 } } }]
 
 /**
  * 其它账户：欠费（account_status 3），两个在投系列，系列级日预算 4000 + 6000，系列 7001 下还有一个没写预算的广告组（钱在系列那一层，不重复算）。
@@ -204,7 +204,7 @@ function read(over: { world?: World; routes?: Record<string, GraphRoute> } = {})
 describe('readBudgetFacts · 其它登记账户', () => {
   it('只有一个登记账户：没有「其它」，快照表一次都不读', async () => {
     const { result, db } = read({
-      world: { tables: { client_meta_ad_accounts: REGISTRY_ONE, ad_strategy_configs: CLIENT_CONFIG } },
+      world: { tables: { client_meta_ad_accounts: REGISTRY_ONE, marketing_plans: CLIENT_PLAN } },
     })
     const { facts } = await result
     expect(facts.read).toBe(true)
@@ -220,7 +220,7 @@ describe('readBudgetFacts · 其它登记账户', () => {
       world: {
         tables: {
           client_meta_ad_accounts: REGISTRY_TWO,
-          ad_strategy_configs: CLIENT_CONFIG,
+          marketing_plans: CLIENT_PLAN,
           ad_snapshot_captures: otherAccountSnapshots(capturedAt),
           ad_entity_snapshots: otherAccountSnapshots(capturedAt),
         },
@@ -249,7 +249,7 @@ describe('readBudgetFacts · 其它登记账户', () => {
       world: {
         tables: {
           client_meta_ad_accounts: REGISTRY_TWO,
-          ad_strategy_configs: CLIENT_CONFIG,
+          marketing_plans: CLIENT_PLAN,
           ad_snapshot_captures: otherAccountSnapshots(staleAt),
           ad_entity_snapshots: otherAccountSnapshots(staleAt),
         },
@@ -265,7 +265,7 @@ describe('readBudgetFacts · 其它登记账户', () => {
   it('登记表本身读失败：整份读不到，其它账户这一项也是 null（上限都没读到，没资格谈其它账户），快照表不读', async () => {
     const { result, db } = read({
       world: {
-        tables: { client_meta_ad_accounts: REGISTRY_TWO, ad_strategy_configs: CLIENT_CONFIG },
+        tables: { client_meta_ad_accounts: REGISTRY_TWO, marketing_plans: CLIENT_PLAN },
         errors: { client_meta_ad_accounts: 'boom' },
       },
     })
@@ -282,7 +282,7 @@ describe('readBudgetFacts · 其它登记账户', () => {
       world: {
         tables: {
           client_meta_ad_accounts: REGISTRY_TWO,
-          ad_strategy_configs: CLIENT_CONFIG,
+          marketing_plans: CLIENT_PLAN,
           ad_snapshot_captures: otherAccountSnapshots(capturedAt),
           ad_entity_snapshots: otherAccountSnapshots(capturedAt),
         },
@@ -304,7 +304,7 @@ describe('readBudgetFacts · 其它登记账户', () => {
       world: {
         tables: {
           client_meta_ad_accounts: REGISTRY_TWO,
-          ad_strategy_configs: CLIENT_CONFIG,
+          marketing_plans: CLIENT_PLAN,
           ad_snapshot_captures: otherAccountSnapshots(capturedAt),
           ad_entity_snapshots: otherAccountSnapshots(capturedAt),
         },

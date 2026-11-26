@@ -37,8 +37,15 @@ function hrefFor(clientId: string, subjectRef: string): string {
   return `${APP_BASE}/dashboard/clients/${clientId}`
 }
 
-function copyFor(code: string, clientName: string, subjectRef: string): { what: string; how: string } {
+function copyFor(outcome: string, code: string, clientName: string, subjectRef: string): { what: string; how: string } {
   const handoff = `把这条待办转给开发，附上编号 ${subjectRef}`
+  if (outcome === 'reel_event_contract_invalid') {
+    const field = /^[a-z0-9_.,]{1,80}$/.test(code) && !/\d{5,}/.test(code) ? code : '字段不合格'
+    return {
+      what: `${clientName} 有一条短视频已经发出，但「已发布」信号的结构不合格（${field}），后面接广告的那一步收不到。`,
+      how: `${handoff}。不要重新发布。`,
+    }
+  }
   if (code === 'not_published') {
     return {
       what: `${clientName} 有一条短视频，系统拒绝开始记它的成绩：流量记录还不是已公开。点赞、评论、转发不会被自动记下来，后面「该不该照这个再发」也会缺这一条。`,
@@ -93,7 +100,7 @@ export async function pushSocialReadbackItems(
     seen.add(dedup)
     if (seen.size > MAX_ITEMS) break
     const clientName = clientNames.get(clientId)?.name ?? '未知客户'
-    const copy = copyFor(code, clientName, subjectRef)
+    const copy = copyFor(outcome, code, clientName, subjectRef)
     items.push({
       kind: 'social_readback_refused',
       client_id: clientId,

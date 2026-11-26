@@ -2,7 +2,7 @@
 
 import type { PromoStep } from '@/lib/marketing-plan/promo/spec'
 import type { PromoAccountOption } from '@/lib/marketing-plan/promo/options'
-import { ageOrUndefined, centsToYuan, newAdsTargeting, splitCountries, splitList, withAdsTargeting, withTargetingAge, yuanToCents } from '@/lib/marketing-plan/promo/form'
+import { ageOrUndefined, centsToYuan, newAdsTargeting, splitCountries, splitList, withAdsTargeting, withBudgetRole, withTargetingAge, yuanToCents } from '@/lib/marketing-plan/promo/form'
 import { publicAdAccountName } from '@/lib/ads/spend-figures'
 import { Field, LocalInput, inputCls } from './Field'
 
@@ -29,6 +29,17 @@ export function AdsFields({ step, onChange, accounts }: Props<'ads_campaign'> & 
               <option value={s.ad_account_id}>{publicAdAccountName(null, s.ad_account_id)}（不在这个客户名下，请重选）</option>
             )}
             {(accounts ?? []).map(a => <option key={a.id} value={a.id}>{publicAdAccountName(a.label, a.id)}</option>)}
+          </select>
+        </Field>
+        <Field label="这笔预算算哪一类" hint="不填也可以保存。填了才按试投 30%、已证明 70% 来提醒，提醒不拦住批准。">
+          <select
+            className={inputCls}
+            value={s.budget_role ?? ''}
+            onChange={e => onChange(withBudgetRole(step, e.target.value === 'test' || e.target.value === 'proven' ? e.target.value : undefined))}
+          >
+            <option value="">还没标</option>
+            <option value="test">试投</option>
+            <option value="proven">已证明</option>
           </select>
         </Field>
         <Field label="每天预算（元，按账户币种）" hint={cap ? `这个账户每天最多 ${cap / 100} 元，超了保存不了` : undefined}>

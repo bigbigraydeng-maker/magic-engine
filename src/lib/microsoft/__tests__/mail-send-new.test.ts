@@ -201,6 +201,37 @@ describe('sendMailNew', () => {
     expect(f.graph.sendDraft).not.toHaveBeenCalled()
   })
 
+  it('unsubscribed from e-mail (P2-2b): refused for every client, before any mailbox or Graph call', async () => {
+    // Legacy config (no versioned settings): the in-lock gates never run, so this check is the only one.
+    const f = makeFakes({ unsubscribed: { ok: true, unsubscribed: true } })
+    const r = await sendMailNew(baseInput(), f.deps)
+    expect(r).toMatchObject({ ok: false, status: 409, reason: 'email_unsubscribed' })
+    if (r.ok) return
+    expect(r.error).toContain('退订')
+    expect(f.store.listActiveMailboxes).not.toHaveBeenCalled()
+    expect(f.graph.whoAmI).not.toHaveBeenCalled()
+    expect(f.graph.createDraft).not.toHaveBeenCalled()
+    expect(f.calls.indexOf('checkDnc')).toBeLessThan(f.calls.indexOf('checkEmailUnsubscribed'))
+  })
+
+  it('unsubscribe unreadable (or throwing): refused, never "not unsubscribed"', async () => {
+    for (const opts of [{ unsubscribed: { ok: false as const, error: 'down' } }, { unsubscribedThrows: true }]) {
+      const f = makeFakes(opts)
+      const r = await sendMailNew(baseInput(), f.deps)
+      expect(r).toMatchObject({ ok: false, status: 503, reason: 'unsubscribe_unverifiable' })
+      expect(f.graph.createDraft).not.toHaveBeenCalled()
+    }
+  })
+
+  it('asks about the recipient and every address of the contact', async () => {
+    const f = makeFakes({
+      contact: { id: 'contact-1', primaryEmail: 'amy@gmail.com' },
+      identityEmails: ['amy.lee@work.com'],
+    })
+    await sendMailNew(baseInput(), f.deps)
+    expect(f.store.checkEmailUnsubscribed).toHaveBeenCalledWith('client-a', 'contact-1', ['amy@gmail.com', 'amy@gmail.com', 'amy.lee@work.com'])
+  })
+
   it('DNC check failed', async () => {
     const f = makeFakes({ dnc: { blocked: true, status: 503, reason: 'dnc_check_failed', error: 'x' } })
     const r = await sendMailNew(baseInput(), f.deps)
@@ -574,6 +605,8 @@ describe('previewCompose（抽屉打开时的只读预览：和真发同一套�
       [{ leadsConfig: {} }, 'disabled'],
       [{ touchKinds: [{ channel: 'email', source: 'mailchimp', direction: 'inbound' }] }, 'not_enquirer'],
       [{ dnc: { blocked: true, status: 403, reason: 'do_not_contact', error: 'x' } }, 'do_not_contact'],
+      [{ unsubscribed: { ok: true, unsubscribed: true } }, 'email_unsubscribed'],
+      [{ unsubscribed: { ok: false, error: 'down' } }, 'unsubscribe_unverifiable'],
       [{ contact: { id: 'contact-1', primaryEmail: null } }, 'no_recipient'],
       [{ contact: null }, 'not_found'],
       [{ mailboxes: [] }, 'no_mailbox'],

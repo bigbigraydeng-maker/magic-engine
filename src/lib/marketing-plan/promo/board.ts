@@ -9,7 +9,7 @@ import {
   type ApprovalVerdict, type GateResult, type Light,
 } from './gates'
 import { reconcileWeek, type Reconciliation } from './reconcile'
-import { promoContentHash } from './content-hash'
+import { promoContentMatches } from './content-hash'
 import { hasPromoField, nextPhaseFrom, parsePromoSpec, type PromoPhase, type PromoSpec, type PromoValidationIssue } from './spec'
 
 export interface PhaseGateView {
@@ -73,8 +73,8 @@ export async function buildPromoBoard(plan: MarketingPlan, now: Date = new Date(
 
   const receiptHash = plan.generation_meta?.approval_receipt?.content_hash
   // 已批准却没有批准指纹（绕过批准接口批的，或指纹上线前批的）按「没法确认」处理，和自动执行那边的口径一致（那边也会停）
-  const hasFingerprint = typeof receiptHash === 'string' && receiptHash !== ''
-  const contentChanged = plan.status === 'approved' && (!hasFingerprint || receiptHash !== promoContentHash(spec))
+  const contentChanged = plan.status === 'approved'
+    && (typeof receiptHash !== 'string' || receiptHash === '' || !promoContentMatches(receiptHash, spec))
 
   return {
     plan_id: plan.id, plan_status: plan.status, updated_at: plan.updated_at ?? null, has_promo: true, spec_valid: true, issues: [],

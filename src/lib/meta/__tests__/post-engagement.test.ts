@@ -9,12 +9,67 @@ import { describe, it, expect, vi } from 'vitest'
 import {
   classifyGraphError,
   fetchPostEngagement,
+  reelBareVideoId,
+  resolveEngagementGraphObjectId,
   readShareCount,
   readSummaryCount,
 } from '../post-engagement'
 
 const POST = '1616575215312482_1750182150247306'
+const PAGE = '1616575215312482'
+const VIDEO = '1750182150247306'
 const TOKEN = 'page-token'
+
+describe('resolveEngagementGraphObjectId', () => {
+  it('factory_reel uses explicit video_id when present', () => {
+    expect(
+      resolveEngagementGraphObjectId({
+        postId: POST,
+        pageId: PAGE,
+        publishSource: 'factory_reel',
+        payloadVideoId: '999',
+      }),
+    ).toBe('999')
+  })
+
+  it('factory_reel splits composite post_id when video_id missing', () => {
+    expect(
+      resolveEngagementGraphObjectId({
+        postId: POST,
+        pageId: PAGE,
+        publishSource: 'factory_reel',
+      }),
+    ).toBe(VIDEO)
+  })
+
+  it('factory_reel falls back to composite post_id when video cannot be parsed', () => {
+    expect(
+      resolveEngagementGraphObjectId({
+        postId: 'not-a-composite',
+        pageId: PAGE,
+        publishSource: 'factory_reel',
+      }),
+    ).toBe('not-a-composite')
+  })
+
+  it('daily_plan always uses post id', () => {
+    expect(
+      resolveEngagementGraphObjectId({
+        postId: POST,
+        pageId: PAGE,
+        publishSource: 'daily_plan',
+        payloadVideoId: VIDEO,
+      }),
+    ).toBe(POST)
+  })
+})
+
+describe('reelBareVideoId', () => {
+  it('extracts bare id after page prefix', () => {
+    expect(reelBareVideoId(POST, PAGE)).toBe(VIDEO)
+    expect(reelBareVideoId('wrong', PAGE)).toBeNull()
+  })
+})
 
 describe('classifyGraphError', () => {
   it('令牌坏 / 权限不足 是永久的 —— 重试没有意义', () => {
@@ -86,6 +141,20 @@ function res(body: unknown, status = 200): typeof fetch {
 }
 
 describe('fetchPostEngagement', () => {
+  it('video node id uses same read path (comments.summary on Reel video object)', async () => {
+    const r = await fetchPostEngagement(
+      VIDEO,
+      TOKEN,
+      res({
+        reactions: { summary: { total_count: 1 } },
+        comments: { summary: { total_count: 7 } },
+        shares: { count: 0 },
+      }),
+    )
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.read.comments).toEqual({ kind: 'value', value: 7 })
+  })
+
   it('完整成功 → 三个字段都是数字', async () => {
     const r = await fetchPostEngagement(
       POST,

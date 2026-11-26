@@ -11,6 +11,7 @@ import type { ReceiptSummaryRow } from '@/lib/crm/email-templates/receipt-store'
 import type { FeatureState } from '@/lib/crm/email-templates/feature-state'
 import { EMAIL_SETTINGS_SAVED_EVENT } from '@/lib/crm/email-templates/settings-events'
 import { TemplateEditor, type TemplateVariables } from './TemplateEditor'
+import { WhenToUsePreview } from './WhenToUsePreview'
 
 interface ListPayload {
   featureState: FeatureState
@@ -275,6 +276,7 @@ export function TemplatesAdmin(props: { clientId: string }): JSX.Element {
               pickFilter: row.pickFilter,
               status: nextStatus,
               changeNote: note,
+              whenToUse: row.whenToUse ?? null,
             }),
           },
         )
@@ -413,6 +415,7 @@ export function TemplatesAdmin(props: { clientId: string }): JSX.Element {
                   <span className="text-[11px] text-me-charcoal/60">第 {row.version} 版</span>
                   <span className="text-[11px] text-me-charcoal/60">{formatNz(row.createdAt)}</span>
                 </div>
+                <WhenToUsePreview text={row.whenToUse} />
                 <p className="mt-1 text-[11px] text-me-charcoal/60">
                   近 30 天：发出 {s.sent} · 被拦 {s.blocked} · 出错 {s.failed} · 不明 {s.unknown}
                 </p>

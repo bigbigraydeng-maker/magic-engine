@@ -143,6 +143,23 @@ export async function getAdSetStatus(
   return res.json() as Promise<AdSetSummary>
 }
 
+/** One ad set's optimization goal, or null when it cannot be read. Read-only. */
+export async function getAdSetOptimizationGoal(
+  adSetId: string,
+  accessToken: string,
+): Promise<string | null> {
+  const params = new URLSearchParams({ fields: 'id,optimization_goal', access_token: accessToken })
+  try {
+    const res = await fetch(`${GRAPH_BASE}/${adSetId}?${params.toString()}`)
+    if (!res.ok) return null
+    const json = await res.json() as { optimization_goal?: unknown }
+    return typeof json.optimization_goal === 'string' && json.optimization_goal ? json.optimization_goal : null
+  } catch (err) {
+    console.error('[meta/adsets] getAdSetOptimizationGoal fetch error:', err)
+    return null
+  }
+}
+
 /** Set one ad set ACTIVE/PAUSED — the other half of the force-pause guard. */
 export async function setAdSetStatus(
   adSetId: string,
