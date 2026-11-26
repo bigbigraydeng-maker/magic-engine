@@ -4,7 +4,6 @@
  * daily auto-job cards. Issuing does not write a budget.
  * Confirm goes through submitBudgetCard.
  */
-
 import { createHash } from 'node:crypto'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { KernelDeps } from '@/lib/kernel/deps'
@@ -23,19 +22,17 @@ import type { HardCheck } from '@/lib/confirmation-card/facts'
 import {
   boundedBudgetAfter,
   budgetIntent,
+  loadSupervisionStates,
+  loadTuesdaySnapshot,
   normalAdAccount,
   numericAdset,
-} from './tuesday-budget-amount'
-import { loadSupervisionStates, loadTuesdaySnapshot } from './tuesday-budget-live'
-import type { WeeklyBudgetSuggestion } from './prescription-weekly-check'
-
+  type TuesdaySuggestion,
+} from './tuesday-budget-recheck'
 export const TUESDAY_SUBJECT_PREFIX = 'tuesday-budget:'
-
 export interface TuesdayPorts {
   locks: VersionLockSource
   readLive(clientId: string, order: BudgetOrder): Promise<BudgetSnapshot | { blocked: string }>
 }
-
 export interface TuesdayIssueResult {
   readonly clientId: string
   readonly issued: boolean
@@ -44,25 +41,21 @@ export interface TuesdayIssueResult {
   readonly runId: string | null
   readonly fingerprint: string | null
 }
-
 const WINDOW_DAYS = 7
 const AGENT = { kind: 'agent' as const, email: null }
-
 export function productionTuesdayPorts(sb: SupabaseClient, now: Date): TuesdayPorts {
   return {
     locks: prescriptionLockSource(sb),
     readLive: (clientId, order) => loadTuesdaySnapshot(sb, clientId, order, now),
   }
 }
-
 export function tuesdaySubject(direction: 'increase' | 'decrease', adsetId: string, accountId: string): string {
   const hex = createHash('sha256').update(`${direction}|${adsetId}|${accountId}`).digest('hex').slice(0, 12)
   return `${TUESDAY_SUBJECT_PREFIX}${hex}`
 }
-
 export async function issueTuesdayBudgetTunes(
   deps: KernelDeps,
-  proposals: readonly WeeklyBudgetSuggestion[],
+  proposals: readonly TuesdaySuggestion[],
   ports: TuesdayPorts,
   now?: Date,
 ): Promise<TuesdayIssueResult[]> {
@@ -73,7 +66,6 @@ export async function issueTuesdayBudgetTunes(
   }
   return out
 }
-
 export async function tuesdayConfirmRefusal(
   sb: SupabaseClient,
   clientId: string,
@@ -92,10 +84,9 @@ export async function tuesdayConfirmRefusal(
   }
   return amountStillMatches(hold, live, direction)
 }
-
 async function issueOne(
   deps: KernelDeps,
-  proposal: WeeklyBudgetSuggestion,
+  proposal: TuesdaySuggestion,
   ports: TuesdayPorts,
   now?: Date,
 ): Promise<TuesdayIssueResult> {
@@ -113,10 +104,9 @@ async function issueOne(
   if (!key) return skipped(proposal.clientId, '这张卡算不出幂等键，没有出卡。')
   return publish(deps, proposal, order, live, locked.lock, key, guard.checks, now)
 }
-
 async function publish(
   deps: KernelDeps,
-  proposal: WeeklyBudgetSuggestion,
+  proposal: TuesdaySuggestion,
   order: BudgetOrder,
   live: BudgetSnapshot,
   lock: BudgetHold['lock'],
@@ -149,7 +139,6 @@ async function publish(
     return skipped(proposal.clientId, reason)
   }
 }
-
 function amountStillMatches(
   hold: BudgetHold,
   live: BudgetSnapshot,
@@ -162,7 +151,6 @@ function amountStillMatches(
   if (bounded.after !== hold.afterCents) return '按现在的额度重算，金额和卡上的不一样，没有改。'
   return null
 }
-
 function remainingOf(live: BudgetSnapshot): number | null {
   const accountCap = live.accountCapCents
   const accountLive = live.accountLiveCents
@@ -175,8 +163,7 @@ function remainingOf(live: BudgetSnapshot): number | null {
   if (!Number.isSafeInteger(accountRemaining) || !Number.isSafeInteger(clientRemaining)) return null
   return Math.min(accountRemaining, clientRemaining)
 }
-
-function orderFrom(proposal: WeeklyBudgetSuggestion): BudgetOrder | { skip: string } {
+function orderFrom(proposal: TuesdaySuggestion): BudgetOrder | { skip: string } {
   if (!isUuid(proposal.clientId) || !isUuid(proposal.prescriptionId)) return { skip: '客户或方案编号不对，没有出卡。' }
   if (!numericAdset(proposal.adsetId)) return { skip: '巡检没有说清是哪一组，这次不出卡。' }
   const accountId = normalAdAccount(proposal.adAccountId)
@@ -194,9 +181,8 @@ function orderFrom(proposal: WeeklyBudgetSuggestion): BudgetOrder | { skip: stri
     observationWindowDays: WINDOW_DAYS,
   }
 }
-
 function cleanAmounts(
-  proposal: WeeklyBudgetSuggestion,
+  proposal: TuesdaySuggestion,
 ): { before: number; after: number; direction: MetricDirection } | { skip: string } {
   const before = proposal.beforeCents
   const after = proposal.afterCents
@@ -208,7 +194,6 @@ function cleanAmounts(
   if (proposal.direction === 'decrease' && after > before) return { skip: '说是减预算，金额却更多，没有出卡。' }
   return { before, after, direction: proposal.direction === 'increase' ? 'up' : 'down' }
 }
-
 function holdOf(
   order: BudgetOrder,
   live: BudgetSnapshot,
@@ -218,29 +203,8 @@ function holdOf(
   fingerprint: string,
   subjectKey: string,
 ): BudgetHold {
-  return {
-    kind: 'adset_daily_budget',
-    status: 'holding',
-    cardRunId: runId,
-    subjectKey,
-    fingerprint,
-    orderKey: budgetOrderKey(order),
-    order,
-    lock,
-    idempotencyKey,
-    beforeCents: live.currentCents as number,
-    afterCents: order.newDailyBudgetCents,
-    direction: order.direction,
-    observationWindowDays: WINDOW_DAYS,
-    confirmedBy: null,
-    actionRunId: null,
-    readbackCents: null,
-    readbackMatched: null,
-    writeAttempted: false,
-    wroteMeta: false,
-  }
+  return { kind: 'adset_daily_budget', status: 'holding', cardRunId: runId, subjectKey, fingerprint, orderKey: budgetOrderKey(order), order, lock, idempotencyKey, beforeCents: live.currentCents as number, afterCents: order.newDailyBudgetCents, direction: order.direction, observationWindowDays: WINDOW_DAYS, confirmedBy: null, actionRunId: null, readbackCents: null, readbackMatched: null, writeAttempted: false, wroteMeta: false }
 }
-
 async function capFromPlan(
   sb: SupabaseClient,
   clientId: string,
@@ -250,19 +214,16 @@ async function capFromPlan(
   const cap = await readPlanDailyTotalCap(sb, clientId, planId).catch(() => null)
   return { ...live, clientCapCents: cap && cap.ok ? cap.cents : null }
 }
-
-function clashing(rows: readonly WeeklyBudgetSuggestion[], row: WeeklyBudgetSuggestion): string | null {
+function clashing(rows: readonly TuesdaySuggestion[], row: TuesdaySuggestion): string | null {
   const same = rows.filter((item) => item.clientId === row.clientId)
   if (same.length <= 1) return null
   return '有不止一处要调，这次先不出卡。'
 }
-
 function safeFace(name: string | null): string | null {
   const text = clipName(name)
   if (text === '这一组' || /act_/i.test(text) || /\d{10,}/.test(text)) return null
   return text
 }
-
 function skipped(clientId: string, reason: string): TuesdayIssueResult {
   return { clientId, issued: false, executed: false, reason, runId: null, fingerprint: null }
 }
