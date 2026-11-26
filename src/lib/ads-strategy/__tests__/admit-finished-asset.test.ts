@@ -4,6 +4,7 @@ import {
   accountUploadReceipt,
   admitFinishedAsset,
   creativePoolUploadEnabled,
+  externalUploadPath,
   factoryPublicVideoUrl,
   pickPrimaryAdAccount,
   reusableVideoId,
@@ -193,5 +194,25 @@ describe('url and receipt helpers', () => {
     expect(reusableVideoId(ref, ACCOUNT)).toBe('555')
     expect(reusableVideoId(ref, OTHER)).toBeNull()
     expect(reusableVideoId({ ...ref, meta_video_source: 'hand' }, ACCOUNT)).toBeNull()
+  })
+})
+
+describe('finished videos admitted from outside the factory', () => {
+  it('accepts only <clientId>/external/<file> for this client', () => {
+    expect(externalUploadPath('c-1/external/bf.mp4', 'c-1')).toBe('c-1/external/bf.mp4')
+    expect(externalUploadPath('c-2/external/bf.mp4', 'c-1')).toBeNull()
+    expect(externalUploadPath('c-1/external/../x.mp4', 'c-1')).toBeNull()
+    expect(externalUploadPath('/c-1/external/bf.mp4', 'c-1')).toBeNull()
+    expect(externalUploadPath('https://x/c-1/external/bf.mp4', 'c-1')).toBeNull()
+    expect(externalUploadPath('c-1/external/', 'c-1')).toBeNull()
+    expect(externalUploadPath('c-1/renders/bf.mp4', 'c-1')).toBeNull()
+  })
+
+  it('builds the public URL for an external upload, still refusing traversal and plain http', () => {
+    expect(factoryPublicVideoUrl('c-1/external/bf.mp4', 'https://files.example.test/bucket'))
+      .toBe('https://files.example.test/bucket/c-1/external/bf.mp4')
+    expect(factoryPublicVideoUrl('c-1/external/../bf.mp4', 'https://files.example.test/bucket')).toBeNull()
+    expect(factoryPublicVideoUrl('c-1/other/bf.mp4', 'https://files.example.test/bucket')).toBeNull()
+    expect(factoryPublicVideoUrl('c-1/external/bf.mp4', 'http://files.example.test/bucket')).toBeNull()
   })
 })

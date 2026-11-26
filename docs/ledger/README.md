@@ -16,7 +16,7 @@
 ---
 id: 2026-09-24-nal-messenger-15s-creative-3day-review
 title: 一句人话，PM 读得懂
-status: decided            # decided | done | verified | failed
+status: decided            # decided | done | verified | failed | expired
 owner: pm                  # pm | agent
 decided_on: 2026-09-24
 source: session:beef24ba   # 从哪来：session:<id 前 8 位> | pr:<n> | issue:<n> | doc:<path>
@@ -31,7 +31,7 @@ check_note: 一句话         # 夜巡结论或"为什么判不了"
 正文最多 5 行上下文。只写指针，不写客户业务数字、账户号、客户老板原话。
 ```
 
-## 四个状态
+## 五个状态
 
 | status | 意思 | 什么时候会被摆到 PM 眼前 |
 |---|---|---|
@@ -39,6 +39,7 @@ check_note: 一句话         # 夜巡结论或"为什么判不了"
 | `done` | 做完了，还没验 | 到了 `verify_by`，或做完超过 7 天没验；到期后 2 天没有 `last_checked` = "夜巡没来" |
 | `verified` | 验过了，成 | 不再出现 |
 | `failed` | 验过了，不成 | 一直出现，直到有人开新卡或改状态 |
+| `expired` | 过期没验：到期太久没人按判据核，PM 同意不再追（2026-11-25）。**不等于验过了** | 不再出现；必须写 `last_checked` + `check_note` 说清为什么不追，不许带 `verified_ref`；要重启就新开一张卡 |
 
 ## 机器强制的规则（不是提醒，是拦）
 

@@ -27,7 +27,8 @@ export interface RemotionMusicClearance {
 
 export function remotionMusicChoices(rawBriefRemotion: unknown): RemotionMusicChoice[]
 
-export function remotionMusicClearance(rawBriefRemotion: unknown): RemotionMusicClearance
+/** measuredSec: video length measured at upload; only used for external finished videos. */
+export function remotionMusicClearance(rawBriefRemotion: unknown, measuredSec?: number): RemotionMusicClearance
 
 export function checkRemotionProps(
   rawBriefRemotion: unknown,

@@ -24,10 +24,12 @@ import {
   changeEvent,
   done,
   factsOf,
-  isWelcomeEmail,
+  isTriggerEmail,
   recordView,
   refuse,
   revokeAsSystem,
+  triggerOf,
+  TriggerSchema,
   type Actor,
   type CommandDeps,
   type CommandResult,
@@ -44,6 +46,7 @@ export const AuthorizeCommandSchema = z
     backfill_hours: z.number().int().min(0).max(35).default(0),
     expires_in_days: z.number().int().min(1).max(90).default(90),
     confirm: z.boolean().default(false),
+    trigger: TriggerSchema,
   })
   .strict()
 export type AuthorizeCommand = z.infer<typeof AuthorizeCommandSchema>
@@ -131,7 +134,7 @@ export async function authorizeCommand(deps: CommandDeps, clientId: string, acto
   const loaded = await deps.store.load(command.authorization_id)
   if (!loaded.ok) return refuse(500, 'AUTHORIZATION_UNREADABLE')
   const record = loaded.record
-  if (record === null || record.clientId !== clientId || !isWelcomeEmail(record)) return refuse(404, 'PROPOSAL_NOT_FOUND')
+  if (record === null || record.clientId !== clientId || !isTriggerEmail(record, triggerOf(deps))) return refuse(404, 'PROPOSAL_NOT_FOUND')
   if (record.revokedAt !== null) return refuse(409, 'PROPOSAL_REVOKED')
   if (record.authorizedAt !== null) return refuse(409, 'ALREADY_AUTHORIZED')
   if (record.ruleSha256 !== command.rule_sha256) return refuse(409, 'RULE_CHANGED')

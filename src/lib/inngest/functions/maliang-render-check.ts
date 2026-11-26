@@ -339,7 +339,7 @@ async function runWorkOrderReview(
 }
 
 /** External uploads get the v2 check when available; everything else stays on v1. */
-function workOrderCheck(deps: MaliangDeps, ctx: WorkOrderReviewContext, videoUrl: string): Promise<MaliangCheck> {
+export function workOrderCheck(deps: Pick<MaliangDeps, 'check' | 'checkV2' | 'apiKey'>, ctx: WorkOrderReviewContext, videoUrl: string): Promise<MaliangCheck> {
   const apiKey = deps.apiKey()
   const allowedHosts = allowedVideoHosts()
   if (ctx.external && deps.checkV2) {

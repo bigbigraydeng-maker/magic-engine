@@ -20,6 +20,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import { partitionExternalDataPull } from '@/lib/clients/external-data-pull-allowlist'
 import { supabaseAdmin } from '@/lib/supabase'
 import { readSentRecordConfig, syncMailchimpActivity } from '@/lib/mailchimp/sync'
 import { ping } from '@/lib/mailchimp/client'
@@ -63,13 +64,19 @@ async function run(): Promise<NextResponse> {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  const targets = (clients ?? []).filter(
-    (c) => (c.leads_config as { mailchimp_enabled?: boolean } | null)?.mailchimp_enabled === true,
+  const roster = partitionExternalDataPull(
+    (clients ?? []).filter(
+      (c) => (c.leads_config as { mailchimp_enabled?: boolean } | null)?.mailchimp_enabled === true,
+    ) as Array<{ id: string; name: string | null; leads_config: unknown }>,
+    (client) => client.id,
   )
+  const targets = roster.kept
 
   if (targets.length === 0) {
     // 空转也要留痕：没客户开这个功能 ≠ 没跑
-    await cronRun.finish({ summary: { note: '没有客户开启邮件同步，本轮空转' } })
+    await cronRun.finish({
+      summary: { note: '没有客户开启邮件同步，本轮空转', skipped_by_allowlist: roster.skippedCount },
+    })
     return NextResponse.json({
       ok: true,
       note: '没有客户开启邮件同步（clients.leads_config.mailchimp_enabled）',
@@ -97,7 +104,7 @@ async function run(): Promise<NextResponse> {
     processed: synced.length,
     completed: synced.length - failed,
     failed,
-    summary: { synced },
+    summary: { synced, skipped_by_allowlist: roster.skippedCount },
   })
   return NextResponse.json({ ok: true, synced })
 }

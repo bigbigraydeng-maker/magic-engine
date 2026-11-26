@@ -1,3 +1,4 @@
+import type { LedgerStatus } from '@/lib/ledger/types'
 import { daysBetween } from '@/lib/ledger/walk'
 import { isClosedTitle, parseDescription } from './parse-event'
 import {
@@ -12,7 +13,7 @@ import {
 
 export interface LedgerCardView {
   id: string
-  status: 'decided' | 'done' | 'verified' | 'failed'
+  status: LedgerStatus
   verifiedRef: string | null
 }
 
@@ -93,6 +94,15 @@ function decideEvent(
       ledgerId,
       probe: null,
       reason: '台账卡已 verified',
+    }
+  }
+  if (card.status === 'expired') {
+    return {
+      ...base,
+      tier: 'closed',
+      ledgerId,
+      probe: null,
+      reason: '台账卡已过期不追（PM 同意）',
     }
   }
   if (card.status === 'done' && card.verifiedRef !== null) {

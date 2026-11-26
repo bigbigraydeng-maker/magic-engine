@@ -18,6 +18,8 @@ describe('customerCameBack', () => {
     ['answered inbound call', { channel: 'phone', source: 'twilio', talkSeconds: 40 }],
     ['real reply email', { channel: 'email', source: 'outlook', subject: 'Re: brochure', body: 'Is March still open?' }],
     ['Messenger message', { channel: 'messenger', source: 'messenger', body: 'hi, about the tour' }],
+    // PM 11-16: a guest who rings back goes to staff, answered or not (the DNC lift keeps answered ≥15 s).
+    ['missed / short inbound call', { channel: 'phone', source: 'twilio', talkSeconds: 5 }],
   ]
   for (const [label, over] of counts) {
     it(`${label} after takeover-on counts`, () => {
@@ -29,7 +31,7 @@ describe('customerCameBack', () => {
     ['outbound mail (ours)', { direction: 'outbound', channel: 'email', body: 'hello' }],
     ['Mailchimp activity', { channel: 'email', source: 'mailchimp', body: 'x' }],
     ['auto-reply', { channel: 'email', source: 'outlook', subject: 'Automatic reply: out of office', body: 'away' }],
-    ['missed / short call', { channel: 'phone', source: 'twilio', talkSeconds: 5 }],
+    ['automated inbound call', { channel: 'phone', source: 'twilio', talkSeconds: 5, automated: true }],
     ['empty Messenger message', { channel: 'messenger', source: 'messenger', body: '  ' }],
   ]
   for (const [label, over] of ignored) {

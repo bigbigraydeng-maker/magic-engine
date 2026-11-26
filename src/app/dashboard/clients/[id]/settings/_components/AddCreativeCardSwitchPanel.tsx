@@ -2,20 +2,32 @@
 
 import { useCallback, useEffect, useState } from 'react'
 
-export function AddCreativeCardSwitchPanel({ clientId }: { clientId: string }) {
-  const sw = useCreativeSwitch(clientId)
+export function AddCreativeCardSwitchPanel({
+  clientId,
+  path = 'add-creative-card',
+  title = '往广告组加图的确认卡',
+  detail = '默认关。打开后才能出加图卡。关掉则不出卡，也不会去建广告。',
+  label = '开关往广告组加图的确认卡',
+}: {
+  clientId: string
+  path?: string
+  title?: string
+  detail?: string
+  label?: string
+}) {
+  const sw = useCreativeSwitch(clientId, path)
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <p className="text-sm font-bold text-slate-800">往广告组加图的确认卡</p>
-          <p className="mt-1 text-xs text-slate-500">默认关。打开后才能出加图卡。关掉则不出卡，也不会去建广告。</p>
+          <p className="text-sm font-bold text-slate-800">{title}</p>
+          <p className="mt-1 text-xs text-slate-500">{detail}</p>
         </div>
         <button
           type="button"
           role="switch"
           aria-checked={sw.enabled}
-          aria-label="开关往广告组加图的确认卡"
+          aria-label={label}
           disabled={sw.phase !== 'ready'}
           onClick={() => { void sw.toggle() }}
           className={`relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50 ${sw.enabled ? 'bg-cyan-600' : 'bg-slate-300'}`}
@@ -29,11 +41,11 @@ export function AddCreativeCardSwitchPanel({ clientId }: { clientId: string }) {
   )
 }
 
-function useCreativeSwitch(clientId: string) {
+function useCreativeSwitch(clientId: string, path: string) {
   const [enabled, setEnabled] = useState(false)
   const [phase, setPhase] = useState<'loading' | 'ready' | 'error'>('loading')
   const [note, setNote] = useState<string | null>(null)
-  const base = `/api/clients/${clientId}/ad-strategy-config/add-creative-card`
+  const base = `/api/clients/${clientId}/ad-strategy-config/${path}`
 
   const reload = useCallback(async () => {
     setPhase('loading')

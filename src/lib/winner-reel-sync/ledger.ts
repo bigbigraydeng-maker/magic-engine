@@ -84,7 +84,7 @@ export async function saveHold(
 }
 
 export function holdFromAdd(intent: AddIntent, cardRunId: string, fingerprint: string, configAskedActive: boolean): ProposalHold {
-  return baseHold('add_paused', addSubject(intent), cardRunId, fingerprint, configAskedActive, 'up', intent.score, {
+  const hold = baseHold('add_paused', addSubject(intent), cardRunId, fingerprint, configAskedActive, 'up', intent.score, {
     postId: intent.postId,
     pageId: intent.pageId,
     adAccountId: intent.adAccountId,
@@ -94,6 +94,7 @@ export function holdFromAdd(intent: AddIntent, cardRunId: string, fingerprint: s
     score: intent.score,
     ctr: null,
   })
+  return intent.origin ? { ...hold, origin: intent.origin } : hold
 }
 
 export function holdFromPause(intent: PauseIntent, cardRunId: string, fingerprint: string, configAskedActive: boolean): ProposalHold {

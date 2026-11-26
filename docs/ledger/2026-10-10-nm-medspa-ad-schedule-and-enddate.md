@@ -1,7 +1,7 @@
 ---
 id: 2026-10-10-nm-medspa-ad-schedule-and-enddate
 title: NM Medspa 那条广告调整投放时段并延后结束日期
-status: done
+status: verified
 owner: agent
 decided_on: 2026-10-10
 source: session:9d80e738
@@ -9,6 +9,9 @@ done_on: 2026-10-10
 done_ref: doc:docs/clients/nm-medspa/2026-10-10-messenger-ad-faq-readonly-check.md
 verify_by: 2026-10-13
 verify_how: 对照 doc:docs/clients/nm-medspa/2026-10-10-messenger-ad-faq-readonly-check.md §10 第二、三轮，读回那个广告组，投放时段、结束日期要与文档写的一致、用广告主时区；再按广告主时区读小时级数据（hourly_stats_aggregated_by_advertiser_time_zone，不是逐日汇总，逐日数看不出时段外花费），12:00–17:00 以外的小时不该有花费
+last_checked: 2026-11-26
+check_note: Meta 读回时段每天 12:00–17:00 广告主时区、结束 10-19 与文档一致；小时级花费只在 12–16 点，17 点边界仅 0.02
+verified_ref: doc:docs/ledger/evidence/2026-10-10-nm-medspa-ad-schedule-and-enddate--2026-11-26.md
 ---
 依据 PM 2026-10-10 的两条指示，分两轮改、各自整体回读，卫青动手前做了记录审查。
 具体时段、日期、预算影响和撤回办法都在客户文档 §10，本卡不重复数字。

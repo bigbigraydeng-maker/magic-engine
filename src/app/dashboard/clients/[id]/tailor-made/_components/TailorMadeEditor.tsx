@@ -16,6 +16,7 @@ import {
 } from '@/lib/tailor-made/types';
 import type { ReviewItem } from '@/lib/tailor-made/extract';
 import AiComposer, { type ChatTurn } from './AiComposer';
+import HeroPicker from './HeroPicker';
 import ReviewPanel, { sectionIdForPath } from './ReviewPanel';
 import { pollTailorMadeJob } from '@/lib/tailor-made/poll-job';
 
@@ -601,22 +602,12 @@ export default function TailorMadeEditor({
 
             {/* 封面：系统按目的地自动选，但一定有猜错的时候，所以明说选了什么并给换的入口 */}
             {heroChoices.length > 0 && (
-              <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-black/5 pt-3">
-                <span className="text-xs text-me-charcoal/55">
-                  封面：
-                  {heroName
-                    ? <strong className="ml-1 text-me-charcoal/80">系统选了「{heroChoices.find(c=>c.name===heroName)?.label ?? heroName}」</strong>
-                    : <span className="ml-1">默认</span>}
-                </span>
-                <select
-                  value={heroName ?? ''}
-                  onChange={(e) => e.target.value && void changeHero(e.target.value)}
-                  className="rounded-md border border-black/15 px-2 py-1 text-xs"
-                >
-                  <option value="">换一张…</option>
-                  {heroChoices.map((c) => <option key={c.name} value={c.name}>{c.label}</option>)}
-                </select>
-              </div>
+              <HeroPicker
+                clientId={clientId}
+                choices={heroChoices}
+                current={heroName}
+                onPick={(name) => void changeHero(name)}
+              />
             )}
           </section>
 

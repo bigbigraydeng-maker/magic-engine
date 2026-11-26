@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { filterClientIdsForExternalDataPull } from '@/lib/clients/external-data-pull-allowlist'
 import { supabaseAdmin } from '@/lib/supabase'
 import {
   runAttributionJob,
@@ -333,6 +334,7 @@ export async function POST(
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
 async function loadGscClientIds(singleClientId?: string): Promise<string[]> {
+  // Explicit ?client_id= is a manual rerun. The allowlist covers scheduled rosters only.
   if (singleClientId) return [singleClientId]
 
   const { data, error } = await supabaseAdmin
@@ -349,5 +351,7 @@ async function loadGscClientIds(singleClientId?: string): Promise<string[]> {
     throw new Error(`client_connectors query failed: ${error.message}`)
   }
 
-  return (data ?? []).map((r: { client_id: string }) => r.client_id)
+  return filterClientIdsForExternalDataPull(
+    (data ?? []).map((r: { client_id: string }) => r.client_id),
+  )
 }

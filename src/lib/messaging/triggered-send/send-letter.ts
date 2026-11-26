@@ -10,11 +10,11 @@
  */
 
 import { createHash } from 'node:crypto'
-import { renderTemplate, type RenderContext } from '@/lib/crm/email-templates/render'
+import { isCatalogueExpired, renderTemplate, type RenderContext } from '@/lib/crm/email-templates/render'
 import type { EmailTemplateVersion } from '@/lib/crm/email-templates/types'
 import type { ResendEmailRequest } from '@/lib/messaging/adapters/resend-email'
 import { SEND_ID_TAG } from './receipt-consumer'
-import type { SendableRule } from './rule'
+import type { AnySendableRule, LetterEntry } from './rule'
 import { signUnsubscribeToken, type EnvReader } from './unsubscribe-token'
 
 export interface RenderedLetter {
@@ -47,6 +47,41 @@ export function renderWelcomeLetter(template: Pick<EmailTemplateVersion, 'subjec
   return { ok: true, letter: { subject: rendered.subject, text: rendered.body, renderedSha256 } }
 }
 
+export type NamedLetterRender =
+  | { ok: true; letter: RenderedLetter }
+  /** `catalogue_expired`: the catalogue link frozen in the authorization is past its last day (wait for a new one). */
+  | { ok: false; reason: 'missing_first_name' | 'render_failed' | 'catalogue_expired'; detail: string }
+
+/** A catalogue with no last day never expires (the rule says so by leaving it out). */
+const NO_LAST_DAY = '9999-12-31'
+
+/**
+ * Render one letter of a letter list (design 2026-11-17 §4.3, §7.2): the first name and the catalogue link FROZEN in
+ * the authorization (never read from the settings, W1). `today` is the client's day the letter is (first) attempted:
+ * a replay passes the day of its first attempt, so the letter cannot change because a day went by (W6).
+ */
+export function renderNamedLetter(
+  template: Pick<EmailTemplateVersion, 'subject' | 'body' | 'pickMode'>,
+  contactName: string | null,
+  today: string,
+  context: LetterEntry['context'],
+): NamedLetterRender {
+  const url = context.catalogue_url
+  const catalogue = url === null ? null : { url, validUntil: context.catalogue_valid_until ?? NO_LAST_DAY }
+  const ctx: RenderContext = { contactName, senderDisplayName: null, callWhen: null, inputs: {}, facts: null, provider: null, catalogue, today }
+  const rendered = renderTemplate(template, ctx)
+  if (rendered.missing.length > 0) {
+    if (rendered.missing.includes('catalogue_url') && catalogue !== null && isCatalogueExpired(catalogue.validUntil, today)) {
+      return { ok: false, reason: 'catalogue_expired', detail: `valid until ${catalogue.validUntil}` }
+    }
+    const onlyName = rendered.missing.every((m) => m === 'first_name')
+    return { ok: false, reason: onlyName ? 'missing_first_name' : 'render_failed', detail: `missing: ${rendered.missing.join(',')}` }
+  }
+  if (rendered.problems.length > 0) return { ok: false, reason: 'render_failed', detail: rendered.problems.join(',') }
+  const renderedSha256 = sha256(JSON.stringify({ subject: rendered.subject, text: rendered.body }))
+  return { ok: true, letter: { subject: rendered.subject, text: rendered.body, renderedSha256 } }
+}
+
 /** ME's own public origin (the unsubscribe entry lives there): https, nothing after the host. null = not usable. */
 export function publicOriginOf(env: EnvReader): string | null {
   const raw = (env('APP_URL') ?? env('NEXT_PUBLIC_APP_URL') ?? '').trim()
@@ -63,7 +98,7 @@ export function publicOriginOf(env: EnvReader): string | null {
 
 export interface LetterAddressing {
   account: string
-  rule: SendableRule
+  rule: AnySendableRule
   clientId: string
   to: string
   idempotencyKey: string

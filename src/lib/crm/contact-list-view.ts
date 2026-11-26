@@ -17,7 +17,7 @@
  */
 
 import { buildContactModel, type ContactRowLike, type StageMetaLike, type TouchpointRowLike } from './contact-model'
-import { segmentContact, SEGMENT_META, type SegmentResult } from './segments'
+import { segmentContact, SEGMENT_META, type SegmentResult, type SiteReading } from './segments'
 import { dayRow } from './day-list'
 import { demoteForTakeover, takeoverMarkFor } from './ai-takeover/day-list-filter'
 import { toReengageTouchRow } from './ai-takeover/came-back'
@@ -51,6 +51,8 @@ export interface PriorityViewInput {
    * 命中的人挪到「先放着」并写明原因——只挪不删，仍在「全部客人」里看得见、点「同行」可筛出来。
    */
   tradeIds?: ReadonlySet<string>
+  /** 近 7 天谁在官网看手册 / 团页面（link-tracking/site-reading-prod）。缺省 = 没有这个信息，没人进「正在看手册」。 */
+  siteReading?: ReadonlyMap<string, SiteReading>
   /**
    * 今天从哪一刻开始（客户所在地时间，毫秒）。**传了才做「当天名单不变」**：
    * 员工今天记的笔记 / 打的电话不许把人从「今天要联系」挪走（day-list 的承诺）。
@@ -176,7 +178,7 @@ export function buildPriorityView<T>(
   for (const c of input.contacts) {
     byId.set(c.id, c)
     const tps = byContact.get(c.id) ?? []
-    const model = buildContactModel(c, tps, input.stageMeta)
+    const model = { ...buildContactModel(c, tps, input.stageMeta), siteReading: input.siteReading?.get(c.id) ?? null }
     // 传了 dayStartMs → 位置按「今天开工那一刻」的样子算（冻结），客人今天的动作照常实时进来。
     const day =
       input.dayStartMs !== undefined

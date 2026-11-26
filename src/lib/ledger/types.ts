@@ -1,7 +1,11 @@
-export type LedgerStatus = 'decided' | 'done' | 'verified' | 'failed'
+/**
+ * expired = 过期没验：到期太久没人按判据核，PM 同意不再追（2026-11-25 PM 回「批」）。
+ * 它不是「验过了」——只是不再天天出现在待办里；要重启就新开一张卡。
+ */
+export type LedgerStatus = 'decided' | 'done' | 'verified' | 'failed' | 'expired'
 export type LedgerOwner = 'pm' | 'agent'
 
-export const LEDGER_STATUSES: readonly LedgerStatus[] = ['decided', 'done', 'verified', 'failed']
+export const LEDGER_STATUSES: readonly LedgerStatus[] = ['decided', 'done', 'verified', 'failed', 'expired']
 export const LEDGER_OWNERS: readonly LedgerOwner[] = ['pm', 'agent']
 
 /** 每个指向字段允许的写法（魏征/子牙复审：done_ref 不许 url/session，防"随手贴个链接"糊弄） */

@@ -22,6 +22,84 @@ const DATAFORSEO_API_BASE = 'https://api.dataforseo.com/v3'
 // AU=2036, NZ=2554
 const LOCATION_CODE: Record<'au' | 'nz', number> = { au: 2036, nz: 2554 }
 
+// ─── Organic target resolution ───────────────────────────────────────────────
+
+/** Hosts that serve Google's SERP redirect links (google.com, www.google.co.nz, …). */
+const GOOGLE_HOST_RE = /^(?:www\.)?google\.[a-z.]+$/i
+
+/** Known social platforms → canonical domain, keyed by the lowercased website_name prefix. */
+const PLATFORM_DOMAIN: Record<string, string> = {
+  facebook:  'facebook.com',
+  instagram: 'instagram.com',
+  youtube:   'youtube.com',
+  linkedin:  'linkedin.com',
+  reddit:    'reddit.com',
+  tiktok:    'tiktok.com',
+  x:         'x.com',
+  pinterest: 'pinterest.com',
+}
+
+/** A bare domain such as "brisbanesfinestfloors.au" (no scheme, no path). */
+const BARE_DOMAIN_RE = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/
+
+/**
+ * Resolve the real destination of an organic SERP item.
+ *
+ * Since 2026-11-02 DataForSEO returns organic items as Google redirect links
+ * (`https://google.com/goto?url=…`) with the real target only in `breadcrumb`
+ * or `website_name`. This recovers the true URL/domain, and never returns the
+ * Google redirect itself. Pure and non-throwing.
+ */
+export function resolveOrganicTarget(it: {
+  url?:          string | null
+  domain?:       string | null
+  breadcrumb?:   string | null
+  website_name?: string | null
+}): { url: string; domain: string | null } {
+  const rawUrl = it.url ?? ''
+
+  // 1. Non-redirect URLs pass through unchanged.
+  let isRedirect = false
+  try {
+    const parsed = new URL(rawUrl)
+    isRedirect = GOOGLE_HOST_RE.test(parsed.hostname)
+      && (parsed.pathname.startsWith('/goto') || parsed.pathname.startsWith('/url'))
+  } catch {
+    // Unparseable url — treat as non-redirect passthrough.
+  }
+  if (!isRedirect) {
+    return { url: rawUrl, domain: it.domain ?? null }
+  }
+
+  // 2. Breadcrumb that starts with a scheme → cut at the first separator.
+  const breadcrumb = it.breadcrumb ?? ''
+  if (breadcrumb.startsWith('http://') || breadcrumb.startsWith('https://')) {
+    const cut = breadcrumb.split(/ ›| ·|\s/)[0] ?? ''
+    try {
+      const parsed = new URL(cut)
+      return { url: `${parsed.origin}${parsed.pathname}`, domain: parsed.hostname }
+    } catch {
+      // Fall through to website_name.
+    }
+  }
+
+  // 3. website_name → platform domain or bare domain.
+  const websiteName = it.website_name ?? ''
+  const firstPart = websiteName.split(/·/)[0]?.trim().toLowerCase() ?? ''
+  if (firstPart) {
+    const platform = PLATFORM_DOMAIN[firstPart]
+    if (platform) {
+      return { url: `https://${platform}`, domain: platform }
+    }
+    if (BARE_DOMAIN_RE.test(firstPart)) {
+      return { url: `https://${firstPart}`, domain: firstPart }
+    }
+  }
+
+  // 4. Unresolvable — never return the Google link.
+  return { url: '', domain: null }
+}
+
 // ─── Return type ─────────────────────────────────────────────────────────────
 
 /** Shape matches DiscoveredSerpResult in zhangqian/types.ts. */
@@ -59,33 +137,27 @@ function authHeader(): string {
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-/** Country full-names for DataForSEO `location_name` city builds. */
-const COUNTRY_FULL_NAME: Record<'au' | 'nz', string> = {
-  au: 'Australia',
-  nz: 'New Zealand',
-}
-
 /** Map a city slug (as stored in `industry_ai_visibility_questions.city`) to
- * its DataForSEO-recognized display name. Keys are lowercase slugs; values
- * are the city display name DataForSEO accepts in `location_name`. */
-const CITY_DISPLAY_NAME: Record<string, string> = {
-  // New Zealand
-  auckland:    'Auckland',
-  wellington:  'Wellington',
-  christchurch:'Christchurch',
-  queenstown:  'Queenstown',
+ * its DataForSEO `location_code`. Verified live 2026-11-23 from
+ * /v3/serp/google/locations. Keys are lowercase slugs. */
+const CITY_LOCATION_CODE: Record<string, number> = {
   // Australia
-  sydney:      'Sydney',
-  melbourne:   'Melbourne',
-  brisbane:    'Brisbane',
-  perth:       'Perth',
-  adelaide:    'Adelaide',
-  'gold-coast':'Gold Coast',
-  gold_coast:  'Gold Coast',
+  sydney:       1000286,
+  melbourne:    1000567,
+  brisbane:     1000339,
+  perth:        1000676,
+  adelaide:     1000422,
+  'gold-coast': 1000665,
+  gold_coast:   1000665,
+  // New Zealand
+  auckland:     1011036,
+  wellington:   1011058,
+  christchurch: 1011065,
+  queenstown:   1011074,
 }
 
 export interface SerpOptions {
-  /** Optional city slug — when set, DataForSEO uses location_name = "{City},{Country}" instead of country-level location_code. */
+  /** Optional city slug — when set and mapped, DataForSEO uses that city's location_code instead of the country-level one. */
   city?: string | null
   /** Override language. Default 'en'. Use ISO 639-1 codes such as 'zh'. */
   language?: string
@@ -109,14 +181,14 @@ export async function getSerpPage(
   const language = options.language ?? 'en'
 
   // Build location: city-level if city provided AND mapped, else country-level
-  let locationField: { location_name: string } | { location_code: number }
+  let locationField: { location_code: number }
   if (options.city) {
-    const cityDisplay = CITY_DISPLAY_NAME[options.city.toLowerCase()]
-    if (cityDisplay) {
-      locationField = { location_name: `${cityDisplay},${COUNTRY_FULL_NAME[countryCode]}` }
+    const cityCode = CITY_LOCATION_CODE[options.city.toLowerCase()]
+    if (cityCode) {
+      locationField = { location_code: cityCode }
     } else {
       // Unknown city slug — refuse rather than silently fall back to country
-      throw new Error(`getSerpPage: unknown city slug "${options.city}". Add to CITY_DISPLAY_NAME in serp.ts.`)
+      throw new Error(`getSerpPage: unknown city slug "${options.city}". Add to CITY_LOCATION_CODE in serp.ts.`)
     }
   } else {
     locationField = { location_code: LOCATION_CODE[countryCode] }
@@ -153,6 +225,8 @@ export async function getSerpPage(
           url?:                   string | null
           description?:           string | null
           domain?:                string | null
+          breadcrumb?:            string | null
+          website_name?:          string | null
           rating?:                number | null
           reviews_count?:         number | null
           address?:               string | null
@@ -181,15 +255,13 @@ export async function getSerpPage(
 
   const organicResults = items
     .filter(it => it.type === 'organic')
-    .filter(it => {
-      const url = it.url ?? ''
-      return !NON_COMMERCIAL_RE.test(url)
-    })
+    .map(it => ({ it, target: resolveOrganicTarget(it) }))
+    .filter(({ target }) => target.url !== '' && !NON_COMMERCIAL_RE.test(target.url))
     .slice(0, 10)
-    .map(it => ({
+    .map(({ it, target }) => ({
       position:    it.rank_absolute ?? 0,
       title:       it.title        ?? '',
-      url:         it.url          ?? '',
+      url:         target.url,
       description: it.description  ?? '',
     }))
 
@@ -320,6 +392,8 @@ export async function getOrganicRanks(
           rank_absolute?: number
           url?:           string | null
           domain?:        string | null
+          breadcrumb?:    string | null
+          website_name?:  string | null
         }>
       }>
     }>
@@ -333,12 +407,14 @@ export async function getOrganicRanks(
   }
 
   const items: OrganicRankItem[] = (task.result?.[0]?.items ?? [])
-    .filter(it => it.type === 'organic' && typeof it.rank_group === 'number' && typeof it.url === 'string' && it.url !== '')
-    .map(it => ({
+    .filter(it => it.type === 'organic' && typeof it.rank_group === 'number')
+    .map(it => ({ it, target: resolveOrganicTarget(it) }))
+    .filter(({ target }) => target.url !== '')
+    .map(({ it, target }) => ({
       rankGroup:    it.rank_group as number,
       rankAbsolute: typeof it.rank_absolute === 'number' ? it.rank_absolute : null,
-      url:          it.url as string,
-      domain:       it.domain ?? null,
+      url:          target.url,
+      domain:       target.domain,
     }))
 
   return {

@@ -9,5 +9,7 @@ verify_by: 2026-10-14
 verify_how: 合并上线后打开 CTS 的 Tour 管理页，看左侧是否分三层可折叠、右侧顶部有面包屑；2027 班期补录后列表滚动与搜索正常
 done_on: 2026-10-12
 done_ref: pr:2477
+last_checked: 2026-11-20
+check_note: PR 2477 已合并，主干有 TourListGroups 和 tour-breadcrumb 面包屑组件；页面需登录，没法看三层折叠和滚动搜索，判不了
 ---
 纯界面改动，PR #2477，风险 C。PM 2026-10-12 反馈「Tour 系列展示没有层级」。

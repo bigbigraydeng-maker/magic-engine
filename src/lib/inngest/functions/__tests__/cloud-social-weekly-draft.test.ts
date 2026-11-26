@@ -245,8 +245,14 @@ describe('social-weekly-draft: the image-post draft step is isolated from the re
     await handlerOf(fn)({ event: dueEvent('write'), step: fakeStep() })
 
     expect(imageStep.run).toHaveBeenCalledWith('c1', '2026-11-05', expect.anything(), null, expect.anything())
-    const call = (deps.finishRun as unknown as { mock: { calls: [{ summary: { imagePost: { drafted: number } } }][] } }).mock.calls[0][0]
+    const call = (deps.finishRun as unknown as { mock: { calls: [{ summary: {
+      imagePost: { drafted: number }
+      storyWeek: { drafted: number; skipped: string }
+      weekDrafts: { post: { drafted: number } }
+    } }][] } }).mock.calls[0][0]
     expect(call.summary.imagePost.drafted).toBe(1)
+    expect(call.summary.storyWeek).toMatchObject({ drafted: 0, skipped: 'no_story_quota' })
+    expect(call.summary.weekDrafts.post.drafted).toBe(1)
     vi.unstubAllEnvs()
   })
 

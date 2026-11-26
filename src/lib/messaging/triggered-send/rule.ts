@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto'
-import { parseSendBlock, type SendRuleBlock } from './send-rule'
+import type { RuleGates } from './rule-gates'
+import { isLettersBlock, parseSendBlock, type LetterEntry, type LettersSendBlock, type SendRuleBlock } from './send-rule'
 
-export type { SendRuleBlock }
+export type { LetterEntry, LettersSendBlock, SendRuleBlock }
 
 export const GATE_CONTRACT_VERSION = 1
 // Only sources whose lead-form touchpoints are known to exist. A source for hand-made test contacts is added with the
@@ -20,12 +21,28 @@ export interface TriggeredSendRule {
   legacy: { mailchimp_campaign_title_prefix: string; excluded_tags: string[] }
   human_mail: { required_mailboxes: string[] }
   recipient_allowlist: string[] | null
-  /** The real-send block (identity, template, quiet hours, stop lines). Absent on rehearsal-only proposals. */
-  send?: SendRuleBlock
+  /** The real-send block (identity, template or letter list, quiet hours, stop lines). Absent on rehearsal-only proposals. */
+  send?: SendRuleBlock | LettersSendBlock
+  /**
+   * Which of the gates this kind of letter judges (design 2026-11-17 §4.2, §7.2). Absent = the welcome letter's gates,
+   * and an absent block is never written as a key, so the welcome letter's rule keeps its fingerprint.
+   */
+  gates?: RuleGates
 }
 
-/** A rule that may be authorized for real sending: the send block is there. */
+// The gates live in `rule-gates.ts` (no Node imports there, so the dashboard's rule summary can use them).
+export { gatesOf, WELCOME_GATES, type RuleGates } from './rule-gates'
+
+/** A rule that may be authorized for real sending of ONE letter: the send block is there and names a template. */
 export type SendableRule = TriggeredSendRule & { send: SendRuleBlock }
+/** A rule that may be authorized for real sending of a LIST of letters (each one sent at most once per guest). */
+export type LetterRule = TriggeredSendRule & { send: LettersSendBlock }
+/** Either kind. */
+export type AnySendableRule = SendableRule | LetterRule
+
+export function isLetterRule(rule: AnySendableRule): rule is LetterRule {
+  return isLettersBlock(rule.send)
+}
 
 export type RuleParseResult = { ok: true; rule: TriggeredSendRule } | { ok: false; error: string }
 
@@ -48,6 +65,25 @@ const FREQUENCY_CAP_KEYS = ['max', 'window_days'] as const
 const CONSENT_KEYS = ['accepted_bases'] as const
 const LEGACY_KEYS = ['mailchimp_campaign_title_prefix', 'excluded_tags'] as const
 const HUMAN_MAIL_KEYS = ['required_mailboxes'] as const
+const GATES_KEYS = ['sales_email', 'legacy_welcomed', 'stale', 'count_legacy_batch'] as const
+
+function parseGates(raw: unknown): RuleGates | string {
+  if (!isPlainObject(raw)) return 'gates must be a plain object'
+  const err = checkExactKeys(raw, GATES_KEYS, 'gates')
+  if (err) return err
+  for (const key of GATES_KEYS) if (typeof raw[key] !== 'boolean') return `gates.${key} must be a boolean`
+  return {
+    sales_email: raw.sales_email as boolean,
+    legacy_welcomed: raw.legacy_welcomed as boolean,
+    stale: raw.stale as boolean,
+    count_legacy_batch: raw.count_legacy_batch as boolean,
+  }
+}
+
+/** A letter list names its guests itself (the caller picks them): it may say it has no audience source of its own. */
+function namesLetters(sendRaw: unknown): boolean {
+  return isPlainObject(sendRaw) && Object.prototype.hasOwnProperty.call(sendRaw, 'letters')
+}
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (value === null || typeof value !== 'object') return false
@@ -119,8 +155,8 @@ export function parseRule(input: unknown): RuleParseResult {
       return fail('rule must be a plain object')
     }
 
-    // `send` is the one optional top-level key: rehearsal proposals do not carry it.
-    const { send: sendRaw, ...required } = input
+    // `send` and `gates` are the optional top-level keys: rehearsal proposals do not carry them.
+    const { send: sendRaw, gates: gatesRaw, ...required } = input
     const topErr = checkExactKeys(required, TOP_KEYS, '')
     if (topErr) return fail(topErr)
 
@@ -139,7 +175,8 @@ export function parseRule(input: unknown): RuleParseResult {
     if (audienceErr) return fail(audienceErr)
 
     const sourcesRaw = audienceRaw.sources
-    if (!Array.isArray(sourcesRaw) || sourcesRaw.length === 0) {
+    // Empty only for a letter list (its guests are named by the caller, design 2026-11-17 §4.1).
+    if (!Array.isArray(sourcesRaw) || (sourcesRaw.length === 0 && !namesLetters(sendRaw))) {
       return fail('audience.sources must be a non-empty array')
     }
     if (!isUniqueStringArray(sourcesRaw)) {
@@ -317,6 +354,11 @@ export function parseRule(input: unknown): RuleParseResult {
       if (!send.ok) return fail(send.error)
       rule.send = send.send
     }
+    if (Object.prototype.hasOwnProperty.call(input, 'gates')) {
+      const gates = parseGates(gatesRaw)
+      if (typeof gates === 'string') return fail(gates)
+      rule.gates = gates
+    }
 
     return { ok: true, rule }
   } catch (err) {
@@ -358,13 +400,32 @@ function encode(value: unknown): string {
   throw new Error('canonicalJson: only plain objects, arrays and JSON primitives are allowed')
 }
 
-/** A rule that may be authorized for real sending: valid, and carrying its send block. */
-export function parseSendRule(input: unknown): { ok: true; rule: SendableRule } | { ok: false; error: string } {
+/** A rule that may be authorized for real sending: valid, and carrying its send block (either kind). */
+export function parseAnySendRule(input: unknown): { ok: true; rule: AnySendableRule } | { ok: false; error: string } {
   const parsed = parseRule(input)
   if (!parsed.ok) return parsed
   const { send } = parsed.rule
   if (send === undefined) return { ok: false, error: 'send is required for a rule that may be authorized' }
-  return { ok: true, rule: { ...parsed.rule, send } }
+  return { ok: true, rule: isLettersBlock(send) ? { ...parsed.rule, send } : { ...parsed.rule, send } }
+}
+
+/** A rule that may be authorized for real sending of ONE letter: valid, carrying a send block with a template. */
+export function parseSendRule(input: unknown): { ok: true; rule: SendableRule } | { ok: false; error: string } {
+  const parsed = parseAnySendRule(input)
+  if (!parsed.ok) return parsed
+  if (isLetterRule(parsed.rule)) return { ok: false, error: 'send.letters: this rule sends a list of letters, not one' }
+  return { ok: true, rule: parsed.rule }
+}
+
+/** A rule that may be authorized for real sending of a LIST of letters. */
+export function parseLetterRule(input: unknown): { ok: true; rule: LetterRule } | { ok: false; error: string } {
+  const parsed = parseAnySendRule(input)
+  if (!parsed.ok) return parsed
+  if (!isLetterRule(parsed.rule)) return { ok: false, error: 'send.template: this rule sends one letter, not a list' }
+  // A list of letters must say which gates it judges: falling back to the welcome letter's would quietly take the old
+  // batch out of "7 days, 2 e-mails" (design 2026-11-17 §7.2).
+  if (parsed.rule.gates === undefined) return { ok: false, error: 'gates is required for a rule that sends a list of letters' }
+  return { ok: true, rule: parsed.rule }
 }
 
 export function canonicalJson(value: unknown): string {

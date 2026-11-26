@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { partitionExternalDataPull } from '@/lib/clients/external-data-pull-allowlist'
 import { supabaseAdmin } from '@/lib/supabase'
 import {
   snapshotRankedKeywordsForClient,
@@ -72,26 +73,35 @@ export async function GET(req: NextRequest) {
     )
   }
 
-  const eligibleClients: SerpCaptureClient[] = ((clients ?? []) as ClientRow[])
-    .filter((c): c is ClientRow & KeywordSnapshotClient =>
-      typeof c.id === 'string' &&
-      typeof c.domain === 'string' &&
-      c.domain.trim().length > 0
-    )
-    .map(c => ({
-      id: c.id,
-      domain: c.domain,
-      semrush_db: c.semrush_db,
-      name: c.name ?? '',
-      brand_aliases: c.brand_aliases ?? null,
-    }))
+  const roster = partitionExternalDataPull(
+    ((clients ?? []) as ClientRow[])
+      .filter((c): c is ClientRow & KeywordSnapshotClient =>
+        typeof c.id === 'string' &&
+        typeof c.domain === 'string' &&
+        c.domain.trim().length > 0
+      )
+      .map(c => ({
+        id: c.id,
+        domain: c.domain,
+        semrush_db: c.semrush_db,
+        name: c.name ?? '',
+        brand_aliases: c.brand_aliases ?? null,
+      })),
+    (client) => client.id,
+  )
+  const eligibleClients: SerpCaptureClient[] = roster.kept
 
   const watchKeywordsByClient = new Map<string, string[]>(
     ((clients ?? []) as ClientRow[]).map(c => [c.id, parseWatchKeywords(c.seo_config)]),
   )
 
   if (eligibleClients.length === 0) {
-    await cronRun.finish({ processed: 0, completed: 0, failed: 0 })
+    await cronRun.finish({
+      processed: 0,
+      completed: 0,
+      failed: 0,
+      summary: { skipped_by_allowlist: roster.skippedCount },
+    })
     return NextResponse.json({
       success: true,
       message: 'No clients with a domain — nothing to snapshot',
@@ -171,6 +181,7 @@ export async function GET(req: NextRequest) {
       serp_failed_clients: serpFailedCount,
       watch_rows_written: watchRowsWritten,
       watch_failed_clients: watchFailedCount,
+      skipped_by_allowlist: roster.skippedCount,
     },
   })
   return NextResponse.json({

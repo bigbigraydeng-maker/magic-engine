@@ -147,6 +147,29 @@ describe('runFrozenFieldCheck（真实 git 仓库集成测试）', { timeout: 60
     execSync(`rm -rf "${dir}"`)
   })
 
+  it('删除 expired 卡 → error（过期没验的记录也不许删）', () => {
+    const dir = setupRepo()
+    const cardPath = join(dir, 'docs/ledger/2026-09-28-test-card.md')
+
+    writeFileSync(cardPath, card({
+      status: 'expired',
+      last_checked: '2027-01-01',
+      check_note: '过期没验',
+    }))
+    git('git add -A && git commit -m "base"', dir)
+    const baseSha = git('git rev-parse HEAD', dir)
+
+    unlinkSync(cardPath)
+    git('git add -A && git commit -m "delete expired card"', dir)
+    const headSha = git('git rev-parse HEAD', dir)
+
+    const result = runFrozenFieldCheck(baseSha, headSha, dir)
+    expect(result.errors).toHaveLength(1)
+    expect(result.errors[0]).toContain('不许删除')
+
+    execSync(`rm -rf "${dir}"`)
+  })
+
   it('删除 verified 卡 → warning（允许归档）', () => {
     const dir = setupRepo()
     const cardPath = join(dir, 'docs/ledger/2026-09-28-test-card.md')

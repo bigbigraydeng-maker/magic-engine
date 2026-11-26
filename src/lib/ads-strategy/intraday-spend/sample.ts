@@ -12,6 +12,8 @@ export interface InsightSpendRow {
   adsetId: string
   spend?: string
   impressions?: string
+  leads?: number
+  messaging?: number
 }
 export interface SpendDraft {
   clientId: string

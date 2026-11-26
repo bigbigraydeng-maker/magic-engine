@@ -14,7 +14,7 @@
 import { createClient } from '@supabase/supabase-js'
 
 import { fetchCTRForAds, listAdsInAdSet } from '../meta/ads-manager'
-import { getAdSetStatus } from '../meta/adsets'
+import { getAdSetOptimizationGoal, getAdSetStatus } from '../meta/adsets'
 import { getRegisteredAccountIds } from '../meta/campaign-ownership'
 import { fetchPagePosts, getPageAccessToken, rankVideoWinners } from '../meta/page-posts'
 import { getMetaTokenForClient } from '../meta/token-manager'
@@ -68,13 +68,15 @@ export interface SyncResult {
 // Config loader
 // ────────────────────────────────────────────────────────────────────────────
 
-async function loadConfig(clientId: string): Promise<SyncConfig | null> {
-  const { data, error } = await supabaseAdmin
+async function loadConfig(clientId: string, opts: { requireEnabled?: boolean } = {}): Promise<SyncConfig | null> {
+  let query = supabaseAdmin
     .from('winner_reel_sync_config')
     .select('*')
     .eq('client_id', clientId)
-    .eq('enabled', true)
-    .maybeSingle()
+  // `enabled` switches the daily Reel scan. The daily-plan promote button only
+  // needs the pool ad set, so it reads the row either way.
+  if (opts.requireEnabled !== false) query = query.eq('enabled', true)
+  const { data, error } = await query.maybeSingle()
 
   if (error || !data) return null
   return {
@@ -276,6 +278,45 @@ async function scan(clientId: string, opts: SyncOptions, blank: WinnerSuggestion
     pauses,
     configAskedActive: cfg.newAdDefaultStatus === 'ACTIVE',
     slackWebhookUrl: cfg.slackWebhookUrl,
+  }
+}
+
+export type PromotionTarget =
+  | {
+      ok: true
+      pageId: string
+      adAccountId: string
+      adsetId: string
+      /** Page-post ids (the part after `<page>_`) already promoted in the pool ad set. */
+      promotedPostIds: ReadonlySet<string>
+      /** The pool ad set's Meta optimization goal; null when it could not be read. */
+      optimizationGoal: string | null
+    }
+  | { ok: false; reason: string }
+
+/**
+ * Where a person-requested promotion goes: the client's pool ad set from
+ * winner_reel_sync_config, after the same ownership checks as the Reel scan.
+ * Read-only. Confirm calls it again so a stale card cannot write.
+ */
+export async function loadPromotionTarget(clientId: string): Promise<PromotionTarget> {
+  try {
+    const cfg = await loadConfig(clientId, { requireEnabled: false })
+    if (!cfg) return { ok: false, reason: '这个客户没有配推广池广告组，没法建推广广告。' }
+    const token = await getMetaTokenForClient(clientId)
+    if (!token) return { ok: false, reason: '读不到广告账户的钥匙，没法建推广广告。' }
+    const ownership = await assertConfigOwnedByClient(cfg, clientId, token)
+    if (!ownership.ok) return { ok: false, reason: ownership.reason }
+    const [ads, optimizationGoal] = await Promise.all([
+      listAdsInAdSet(cfg.targetAdsetId, token),
+      getAdSetOptimizationGoal(cfg.targetAdsetId, token),
+    ])
+    const promotedPostIds = new Set(
+      ads.map((ad) => ad.effectiveObjectStoryId?.split('_')[1]).filter((id): id is string => Boolean(id)),
+    )
+    return { ok: true, pageId: cfg.fbPageId, adAccountId: cfg.adAccountId, adsetId: cfg.targetAdsetId, promotedPostIds, optimizationGoal }
+  } catch (error) {
+    return { ok: false, reason: `读推广池广告组出错：${error instanceof Error ? error.message : String(error)}` }
   }
 }
 

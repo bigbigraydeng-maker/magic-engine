@@ -23,6 +23,9 @@ import { loadQualifiedBlock } from '../portfolio/qualified-leads-loader'
 import { resolveTargetCplCents } from '../client-target-cpl'
 import { judgePatrolCost, type PatrolCostVerdict } from './patrol-cost'
 import { loadAdHealthPatrolSurface, type AdHealthPatrolSurface } from './patrol-ad-health'
+import { rulesFromLeadsConfig } from '../trend-check/config'
+import { judgeTrendCheckPatrol, type TrendCheckPatrolSurface } from '../trend-check/patrol-surface'
+import { trendCheckPatrolEnabled } from '../trend-check/config'
 import type { AccountInput, AdLevelCoverage, Diagnosis, ExcludedEntity } from '../portfolio/diagnostics/types'
 import type { DigestGoalContext } from '../portfolio/internal-digest'
 
@@ -151,6 +154,8 @@ export interface GrowthStatePayload {
   patrolCost?: PatrolCostVerdict
   /** 当日广告体检警报摘要（来自 ad_health_narratives） */
   adHealth?: AdHealthPatrolSurface | null
+  /** 日趋势 Check（PR-2；开关 `leads_config.ads_trend_check`） */
+  trendCheck?: TrendCheckPatrolSurface | null
 }
 
 export interface BuildGrowthStateResult {
@@ -170,6 +175,8 @@ export function buildHeadline(
   goal: DigestGoalContext | null,
   patrolCost: PatrolCostVerdict | null = null,
   adHealth: AdHealthPatrolSurface | null = null,
+  earlyWarningLine: string | null = null,
+  trendCheck: TrendCheckPatrolSurface | null = null,
 ): string {
   const hits = problems.filter(d => d.status === 'hit').length
   const opps = opportunities.filter(d => d.status === 'hit').length
@@ -191,26 +198,32 @@ export function buildHeadline(
     parts.push(`${patrolCost.flags.length} 个广告组单次成本连续偏高`)
   }
   if (adHealth) parts.push(`广告体检：${adHealth.headline}`)
+  if (earlyWarningLine) parts.push(earlyWarningLine)
+  if (trendCheck?.patrolLine) parts.push(trendCheck.patrolLine)
 
-  if (hits === 0 && opps === 0 && !(patrolCost && patrolCost.flags.length > 0) && !adHealth) {
+  if (hits === 0 && opps === 0 && !(patrolCost && patrolCost.flags.length > 0) && !adHealth && !earlyWarningLine && !trendCheck) {
     parts.push(completeness === 'partial' ? '数据没拉全，今天只看不动' : '今天没发现要紧的事')
   } else if (completeness === 'partial') parts.push('（数据没拉全，机会没判）')
 
   return parts.join('，')
 }
 
-async function loadPatrolTargetCplMajor(clientId: string): Promise<number | null> {
+async function loadPatrolClientConfig(clientId: string): Promise<{ leadsConfig: unknown; targetMajor: number | null }> {
   const [clientRow, strategyRow, plans] = await Promise.all([
     supabaseAdmin.from('clients').select('leads_config').eq('id', clientId).maybeSingle(),
     supabaseAdmin.from('ad_strategy_configs').select('target_cost_per_primary').eq('client_id', clientId).maybeSingle(),
     supabaseAdmin.from('marketing_plans').select('plan_data').eq('client_id', clientId).eq('status', 'approved'),
   ])
+  const leadsConfig = (clientRow.data as { leads_config?: unknown } | null)?.leads_config
   const cents = resolveTargetCplCents({
     strategyMajor: (strategyRow.data as { target_cost_per_primary?: unknown } | null)?.target_cost_per_primary,
-    leadsConfig: (clientRow.data as { leads_config?: unknown } | null)?.leads_config,
+    leadsConfig,
     planRows: (plans.data ?? []) as { plan_data?: unknown }[],
   })
-  return cents === null ? null : cents / 100
+  return {
+    leadsConfig,
+    targetMajor: cents === null ? null : cents / 100,
+  }
 }
 
 /**
@@ -227,10 +240,15 @@ export async function buildGrowthState(
   try {
     const evaluatedAt = new Date().toISOString()
     const input = await loadDiagnosisInput(clientId, date, evaluatedAt)
-    const [targetMajor, adHealth] = await Promise.all([
-      loadPatrolTargetCplMajor(clientId),
+    const { loadPatrolEarlyWarningLine } = await import(
+      '@/lib/ads-strategy/monitoring/predictive-early-warning/run'
+    )
+    const [clientCfg, adHealth, earlyWarningLine] = await Promise.all([
+      loadPatrolClientConfig(clientId),
       loadAdHealthPatrolSurface(clientId, date),
+      loadPatrolEarlyWarningLine(supabaseAdmin, clientId, date),
     ])
+    const targetMajor = clientCfg.targetMajor
     const patrolCost = judgePatrolCost(input, targetMajor, evaluatedAt)
     const completeness = resolveCompleteness({
       accounts: [...syncAccounts],
@@ -254,8 +272,22 @@ export async function buildGrowthState(
     const scorecard = safeBuildAdsScorecard(input, completeness.completeness)
     if (!('error' in scorecard)) scorecard.qualified = await loadQualifiedBlock(input)
 
+    const trendCheck =
+      trendCheckPatrolEnabled(clientCfg.leadsConfig) && completeness.completeness === 'complete'
+        ? judgeTrendCheckPatrol(input, date, targetMajor, rulesFromLeadsConfig(clientCfg.leadsConfig))
+        : null
+
     const payload: GrowthStatePayload = {
-      headline: buildHeadline(problems, opportunityRun.opportunities, completeness.completeness, goal, patrolCost, adHealth),
+      headline: buildHeadline(
+        problems,
+        opportunityRun.opportunities,
+        completeness.completeness,
+        goal,
+        patrolCost,
+        adHealth,
+        earlyWarningLine,
+        trendCheck,
+      ),
       dataCompleteness: completeness.completeness,
       completenessReasons: completeness.reasons,
       problems,
@@ -269,6 +301,7 @@ export async function buildGrowthState(
       scorecard,
       patrolCost,
       adHealth,
+      trendCheck,
     }
 
     const { error } = await supabaseAdmin.from('ads_growth_states').upsert(

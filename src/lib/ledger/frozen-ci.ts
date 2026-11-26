@@ -78,7 +78,7 @@ export function runFrozenFieldCheck(
       const result = parseLedgerFile(basename(file), baseText)
       if (result.ok) {
         const st = result.entry.status
-        if (st === 'decided' || st === 'done') {
+        if (st === 'decided' || st === 'done' || st === 'expired') {
           errors.push(
             `${file}：status 为 ${st} 的台账卡不许删除——结论和判据会一起消失`,
           )

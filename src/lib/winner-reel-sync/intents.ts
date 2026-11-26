@@ -1,5 +1,13 @@
 /** What the daily scan would have written. The scan itself does not write. */
 
+/** A daily-plan Post a person asked to promote. Absent = the winner-Reel scan proposed it. */
+export interface DailyPlanOrigin {
+  kind: 'daily_plan'
+  planId: string
+  /** The plan date (YYYY-MM-DD) of the published Post. */
+  date: string
+}
+
 export interface AddIntent {
   postId: string
   name: string
@@ -7,6 +15,7 @@ export interface AddIntent {
   pageId: string
   adAccountId: string
   adsetId: string
+  origin?: DailyPlanOrigin
 }
 
 export interface PauseIntent {
@@ -50,4 +59,6 @@ export interface ProposalHold {
   resultLine?: string
   /** Approved ads plan this activate was checked against. */
   planId?: string
+  /** Set when the add came from the daily-plan promote button, not the Reel scan. */
+  origin?: DailyPlanOrigin
 }

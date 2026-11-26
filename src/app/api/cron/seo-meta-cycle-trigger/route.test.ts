@@ -46,6 +46,7 @@ describe('POST /api/cron/seo-meta-cycle-trigger — 手动补触发', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     process.env.CRON_SECRET = CRON_SECRET
+    vi.stubEnv('EXTERNAL_DATA_PULL_CLIENT_IDS', '*')
     mockSendInngestEvent.mockResolvedValue({ event_ids: ['evt_1'] })
   })
 
@@ -90,5 +91,21 @@ describe('POST /api/cron/seo-meta-cycle-trigger — 手动补触发', () => {
     expect(res.status).toBe(200)
     expect(await res.json()).toMatchObject({ client_id: CTS, clients_dispatched: [CTS] })
     expect(mockSendInngestEvent).toHaveBeenCalledTimes(1)
+  })
+
+  it('显式 client_id 不走外部拉取白名单', async () => {
+    vi.stubEnv('EXTERNAL_DATA_PULL_CLIENT_IDS', '')
+    delete process.env.EXTERNAL_DATA_PULL_CLIENT_IDS
+    mockClientsQuery.mockResolvedValue({
+      data: [
+        { id: CTS, domain: 'ctstours.co.nz', semrush_db: 'nz', seo_config: { meta_cycle_enabled: true } },
+        { id: OZTOP, domain: 'oztopbuildingsupplies.com.au', semrush_db: 'au', seo_config: { meta_cycle_enabled: true } },
+      ],
+      error: null,
+    })
+    const { POST } = await import('./route')
+    const res = await POST(makeRequest(CRON_SECRET, { client_id: OZTOP }))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ client_id: OZTOP, clients_dispatched: [OZTOP] })
   })
 })

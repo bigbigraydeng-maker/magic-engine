@@ -33,6 +33,15 @@ describe('client FDE sidebar routes', () => {
     }
   })
 
+  it('confirmation sits right under 定制行程 for travel clients only (the workbench tool cards are no longer shown, so the sidebar is the only way in)', () => {
+    const facts = viewerFacts('admin', null, false)
+    const keys = buildClientFdeSections(CLIENT, 'travel', facts, '/x').flatMap((s) => s.items).map((i) => i.key)
+    expect(keys.indexOf('confirmation')).toBe(keys.indexOf('tailor-made') + 1)
+    const other = buildClientFdeSections(CLIENT, 'real estate', facts, '/x').flatMap((s) => s.items).map((i) => i.key)
+    expect(other).not.toContain('confirmation')
+    expect(activeNavKey(`/dashboard/clients/${CLIENT}/confirmation`, buildClientFdeSections(CLIENT, 'travel', facts, '/x'))).toBe('confirmation')
+  })
+
   it('travel industry gets tour catalog entry', () => {
     const facts = viewerFacts('admin', null, false)
     const items = buildClientFdeSections(CLIENT, 'travel', facts, '/x').flatMap((s) => s.items)

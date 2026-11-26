@@ -1,13 +1,11 @@
 /**
- * Self-contained Inngest step that drafts image posts for one client on one date.
- *
- * Called from the weekly-draft handleDue as a single step.  Loads its own data
- * (tours, assets, recent slugs, campaign, settings) so the caller only passes
- * clientId + date + a small deps bag.
+ * Drafts image posts for one client.
+ * With a weekly count and a target week, spreads that many drafts across the week.
+ * Otherwise keeps the existing one-day path.
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { loadPublishedTourFacts } from '@/lib/tour-catalog/store-publish'
-import { loadRankableClientAssets } from '@/lib/factory/client-asset-pool'
+import { loadFactoryStills, type FactoryStill } from '@/lib/factory/still-library'
 import { getActiveCampaigns } from '@/lib/content/campaign-injector'
 import { readSocialAgentSettings } from '@/lib/social/recipe/tier-defaults'
 import { checkFacts } from '@/lib/social/weekly-loop/fact-check'
@@ -15,19 +13,15 @@ import { scanOutboundClaims } from '@/lib/social/outbound-claims'
 import { draftImagePost } from './image-post-drafter'
 import { writeImagePostPlan } from './image-post-plan-writer'
 import { generateImagePostCopy } from './image-post-generate-copy'
-import { getActiveBrief } from '@/lib/content/brief-injector'
-import { runImageEdit } from '@/lib/visual/image-edit'
-import { readPosterText } from '@/lib/visual/poster-text-reader'
-import { readPosterLineage } from '@/lib/assets/provenance'
-import { readPosterBrand, resolvePosterRecipe } from '@/lib/visual/poster-recipe'
 import type { PublishedTourFact } from '@/lib/tour-catalog/publish-contract'
 import type { RankableAssetRow } from '@/lib/factory/client-asset-pool'
 import {
-  composeTourPoster,
-  type ComposeTourPosterDeps,
-  type ComposeTourPosterResult,
-  type PosterReceipt,
-} from './image-post-poster'
+  autoImagePostDate,
+  datesStillNeeded,
+  decideImagePostBatch,
+  type ImagePostBatch,
+  type WeekWindow,
+} from './image-post-week'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,96 +30,22 @@ import {
 export interface ImagePostStepDeps {
   supabase: SupabaseClient
   callLLM: (prompt: string) => Promise<string>
-  /** Test seam for the poster recipe. Production leaves it unset and real deps are built. */
-  poster?: {
-    loadBrief?: (clientId: string) => Promise<{ vi_colors?: unknown; website?: unknown } | null>
-    compose?: Partial<ComposeTourPosterDeps>
-  }
+  /** Target week. When set together with a weekly count, drafts are spread across that week. */
+  week?: WeekWindow | null
 }
 
 export interface ImagePostStepReceipt {
   attempted: number
   drafted: number
   planIds: string[]
+  /** Dates of the drafts written in this call, same order as planIds. */
+  dates: string[]
+  /** Weekly count this call was aiming at. Absent on the per-day path. */
+  requested?: number
+  /** Every auto image post on the target week after this call. Week mode only. */
+  weekLines?: Array<{ date: string; ref: string }>
   skipped: string | null
   error: string | null
-  /** Only when a poster recipe is on: one entry per poster attempt (composed or fallback + reason). */
-  posters?: PosterReceipt[]
-  /** Only when a poster recipe is on: summed provider cost of every attempt, failed ones included. */
-  posterCostUsd?: number
-}
-
-// ---------------------------------------------------------------------------
-// Poster recipe wiring (opt-in via social_agent.image_post_recipe)
-// ---------------------------------------------------------------------------
-
-type ComposePoster = (tour: PublishedTourFact, image: RankableAssetRow) => Promise<ComposeTourPosterResult>
-
-async function buildPosterComposer(
-  recipeId: unknown,
-  clientId: string,
-  date: string,
-  deps: ImagePostStepDeps,
-): Promise<ComposePoster | null> {
-  const recipe = resolvePosterRecipe(recipeId)
-  if (!recipe) return null
-
-  // Brief loaded once per step. A read failure = no brand colour = every attempt falls back.
-  const loadBrief = deps.poster?.loadBrief ?? getActiveBrief
-  const brief = await loadBrief(clientId).catch(() => null)
-  const brand = readPosterBrand(brief?.vi_colors ?? null)
-  const website = typeof brief?.website === 'string' ? brief.website : null
-
-  const composeDeps: ComposeTourPosterDeps = {
-    runImageEdit: (req) => runImageEdit(req),
-    readPosterText: (url) => readPosterText(url),
-    findExistingPoster: (q) => findExistingPoster(deps.supabase, q),
-    insertPosterAsset: async (row) => {
-      // client_id pinned to this step's client, whatever the row says.
-      const { data, error } = await deps.supabase
-        .from('client_assets')
-        .insert({ ...row, client_id: clientId })
-        .select('id')
-        .single()
-      if (error) throw new Error(error.message)
-      return { id: (data as { id: string }).id }
-    },
-    ...deps.poster?.compose,
-  }
-  return (tour, asset) => composeTourPoster({ clientId, date, tour, asset, recipe, brand, website }, composeDeps)
-}
-
-/** Same client + same generated filename (recipe/tour/date) + same source photo + same recipe version. */
-async function findExistingPoster(
-  supabase: SupabaseClient,
-  q: { clientId: string; originalFilename: string; sourceAssetId: string; recipeId: string; recipeVersion: number },
-): Promise<{ id: string } | null> {
-  const { data, error } = await supabase
-    .from('client_assets')
-    .select('id, vision_metadata')
-    .eq('client_id', q.clientId)
-    .eq('original_filename', q.originalFilename)
-    .is('archived_at', null)
-    .limit(10)
-  if (error) throw new Error(error.message)
-  const hit = ((data ?? []) as Array<{ id: string; vision_metadata: unknown }>).find((row) => {
-    const lineage = readPosterLineage(row.vision_metadata)
-    return lineage !== null &&
-      lineage.source_asset_id === q.sourceAssetId &&
-      lineage.recipe_id === q.recipeId &&
-      lineage.recipe_version === q.recipeVersion
-  })
-  return hit ? { id: hit.id } : null
-}
-
-function withPosters(
-  receipt: ImagePostStepReceipt,
-  posters: PosterReceipt[] | null,
-): ImagePostStepReceipt {
-  if (!posters) return receipt
-  // Image-edit spend plus text read-back spend, failed attempts included.
-  const posterCostUsd = posters.reduce((sum, p) => sum + (p.cost_usd ?? 0) + (p.text_check?.cost_usd ?? 0), 0)
-  return { ...receipt, posters, posterCostUsd: Math.round(posterCostUsd * 1e6) / 1e6 }
 }
 
 // ---------------------------------------------------------------------------
@@ -174,96 +94,194 @@ export async function runImagePostStep(
   planTier: unknown,
   deps: ImagePostStepDeps,
 ): Promise<ImagePostStepReceipt> {
+  const batch = decideImagePostBatch({ config: clientConfig, week: deps.week ?? null })
+  const weekDates = await weekDatesToDraft(deps, clientId, batch)
+  if (weekDates.receipt) return weekDates.receipt
+
   const settings = readSocialAgentSettings(clientConfig, planTier)
-  if (settings.imagePostPerDay <= 0) {
-    return { attempted: 0, drafted: 0, planIds: [], skipped: 'imagePostPerDay=0', error: null }
+  const dates = weekDates.dates ?? (settings.imagePostPerDay > 0 ? Array.from({ length: settings.imagePostPerDay }, () => date) : [])
+  if (dates.length === 0) {
+    return { attempted: 0, drafted: 0, planIds: [], dates: [], skipped: 'imagePostPerDay=0', error: null }
   }
 
-  // Load published tour catalog
-  const tourRead = await loadPublishedTourFacts(deps.supabase, clientId, date)
-  if (!tourRead.published || tourRead.tours.length === 0) {
-    return { attempted: 0, drafted: 0, planIds: [], skipped: 'no_published_tours', error: null }
+  const requested = batch.action === 'week' ? batch.requested : undefined
+  const catalogDate = weekDates.dates ? weekDates.catalogDate : date
+  const written = await writeImageDrafts(clientId, dates, catalogDate, requested, deps)
+  if (!weekDates.existing) return written
+  return {
+    ...written,
+    weekLines: [...weekDates.existing.lines, ...written.dates.map((slot, i) => ({ date: slot, ref: written.planIds[i] ?? '' }))],
   }
+}
 
-  // Load client assets (the shared pool already leaves AI posters out — no poster-of-a-poster).
-  const assets = await loadRankableClientAssets(clientId, deps.supabase)
-  if (assets.length === 0) {
-    return { attempted: 0, drafted: 0, planIds: [], skipped: 'no_client_assets', error: null }
+async function weekDatesToDraft(
+  deps: ImagePostStepDeps,
+  clientId: string,
+  batch: ImagePostBatch,
+): Promise<{ dates?: string[]; catalogDate: string; existing?: ExistingPosts; receipt?: ImagePostStepReceipt }> {
+  if (batch.action === 'day') return { catalogDate: '' }
+  if (batch.action === 'week-skip') {
+    return { catalogDate: '', receipt: emptyImageReceipt(batch.skipped, null, batch.requested ?? undefined) }
   }
+  const existing = await loadAutoImagePosts(deps.supabase, clientId, batch)
+  if (existing === 'unreadable') {
+    return { catalogDate: batch.weekStart, receipt: emptyImageReceipt(null, 'existing_posts_unreadable', batch.requested) }
+  }
+  const dates = datesStillNeeded(batch.dates, existing.counts)
+  if (dates.length === 0) {
+    return {
+      catalogDate: batch.weekStart,
+      receipt: { ...emptyImageReceipt('already_drafted', null, batch.requested), weekLines: existing.lines },
+    }
+  }
+  return { dates, catalogDate: batch.weekStart, existing }
+}
 
-  // Find active campaign
+function emptyImageReceipt(skipped: string | null, error: string | null, requested?: number): ImagePostStepReceipt {
+  const receipt: ImagePostStepReceipt = { attempted: 0, drafted: 0, planIds: [], dates: [], skipped, error }
+  if (requested !== undefined) receipt.requested = requested
+  return receipt
+}
+
+interface ExistingPosts {
+  counts: Map<string, number>
+  lines: Array<{ date: string; ref: string }>
+}
+
+async function loadAutoImagePosts(
+  supabase: SupabaseClient,
+  clientId: string,
+  week: WeekWindow,
+): Promise<ExistingPosts | 'unreadable'> {
+  const { data, error } = await supabase
+    .from('social_plans')
+    .select('id, plan_data')
+    .eq('client_id', clientId)
+    .order('created_at', { ascending: false })
+    .limit(200)
+  if (error) return 'unreadable'
+  const counts = new Map<string, number>()
+  const lines: Array<{ date: string; ref: string }> = []
+  for (const row of data ?? []) {
+    const rec = recordOf(row)
+    const date = autoImagePostDate(rec?.plan_data, week)
+    if (!date) continue
+    counts.set(date, (counts.get(date) ?? 0) + 1)
+    lines.push({ date, ref: typeof rec?.id === 'string' ? rec.id : '' })
+  }
+  return { counts, lines }
+}
+
+function recordOf(raw: unknown): Record<string, unknown> | null {
+  return typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? raw as Record<string, unknown> : null
+}
+
+async function writeImageDrafts(
+  clientId: string,
+  dates: string[],
+  catalogDate: string,
+  requested: number | undefined,
+  deps: ImagePostStepDeps,
+): Promise<ImagePostStepReceipt> {
+  const stills = await loadFactoryStills(deps.supabase, clientId)
+  if (stills === 'unreadable') return emptyImageReceipt('factory_stills_unreadable', null, requested)
+  const chosen = postStillsFor(dates, stills)
+  if (chosen.size === 0) return emptyImageReceipt('no_factory_still', null, requested)
+  const tourRead = await loadPublishedTourFacts(deps.supabase, clientId, catalogDate)
+  if (!tourRead.published || tourRead.tours.length === 0) return emptyImageReceipt('no_published_tours', null, requested)
   const campaigns = await getActiveCampaigns(clientId)
-  if (campaigns.length === 0) {
-    return { attempted: 0, drafted: 0, planIds: [], skipped: 'no_active_campaign', error: null }
+  if (campaigns.length === 0) return emptyImageReceipt('no_active_campaign', null, requested)
+  const campaign = campaigns[0]
+  if (!campaign) return emptyImageReceipt('no_active_campaign', null, requested)
+  return draftEachDate(clientId, dates, tourRead.tours, chosen, campaign.id, requested, deps)
+}
+
+function postStillsFor(dates: string[], stills: FactoryStill[]): Map<string, FactoryStill> {
+  const chosen = new Map<string, FactoryStill>()
+  for (const date of dates) {
+    const hit = stills.find((still) => still.role === 'post' && still.aspect === '4:5' && still.slotDate === date)
+    if (hit) chosen.set(date, hit)
   }
-  const campaignId = campaigns[0].id
+  return chosen
+}
 
-  // Load recent slugs to avoid repetition
+async function draftEachDate(
+  clientId: string,
+  dates: string[],
+  tours: PublishedTourFact[],
+  stills: Map<string, FactoryStill>,
+  campaignId: string,
+  requested: number | undefined,
+  deps: ImagePostStepDeps,
+): Promise<ImagePostStepReceipt> {
   const recentSlugs = await loadRecentImagePostSlugs(deps.supabase, clientId, 7)
-
-  // Draft
-  const ctaBaseUrl = `https://www.ctstours.co.nz/tours`
-  const composePoster = settings.imagePostRecipe
-    ? await buildPosterComposer(settings.imagePostRecipe, clientId, date, deps)
-    : null
-  const drafterDeps = {
+  const planIds: string[] = []
+  const draftedDates: string[] = []
+  const copyDeps = {
     generateCopy: (tour: Parameters<typeof generateImagePostCopy>[0], asset: Parameters<typeof generateImagePostCopy>[1]) =>
       generateImagePostCopy(tour, asset, { callLLM: deps.callLLM }),
     checkFacts,
     scanOutboundClaims,
-    ...(composePoster ? { composePoster } : {}),
   }
-
-  const planIds: string[] = []
-  const posters: PosterReceipt[] | null = composePoster ? [] : null
-  const count = settings.imagePostPerDay
-
-  for (let i = 0; i < count; i++) {
+  for (const slotDate of dates) {
+    const still = stills.get(slotDate)
+    if (!still) continue
     const result = await draftImagePost(
-      {
-        clientId,
-        date,
-        tours: tourRead.tours,
-        assets,
-        recentTourSlugs: [...recentSlugs, ...planIds.map(() => '')],
-        ctaBaseUrl,
-      },
-      drafterDeps,
+      { clientId, date: slotDate, tours, assets: [stillAsset(still)], recentTourSlugs: [...recentSlugs], ctaBaseUrl: 'https://www.ctstours.co.nz/tours' },
+      copyDeps,
     )
-
-    if (!result.ok) {
-      return withPosters({ attempted: i + 1, drafted: planIds.length, planIds, skipped: null, error: result.reason }, posters)
-    }
-    if (result.poster) posters?.push(result.poster)
-
+    if (!result.ok) return finishDraft(planIds.length + 1, planIds, draftedDates, null, result.reason, requested)
     const writeResult = await writeImagePostPlan(
-      { clientId, campaignId, date, draft: result.draft, tourSlug: result.tourSlug, poster: result.poster },
-      {
-        insertPlan: async (row) => {
-          const { data, error } = await deps.supabase
-            .from('social_plans')
-            .insert({
-              client_id: row.client_id,
-              campaign_id: row.campaign_id,
-              platform: row.platform,
-              wave_number: row.wave_number,
-              plan_data: row.plan_data,
-            })
-            .select('id')
-            .single()
-          if (error) throw new Error(error.message)
-          return { id: data.id }
-        },
-      },
+      { clientId, campaignId, date: slotDate, draft: result.draft, tourSlug: result.tourSlug, poster: result.poster },
+      { insertPlan: (row) => insertSocialPlan(deps.supabase, row) },
     )
-
-    if (!writeResult.ok) {
-      return withPosters({ attempted: i + 1, drafted: planIds.length, planIds, skipped: null, error: writeResult.error }, posters)
-    }
-
+    if (!writeResult.ok) return finishDraft(planIds.length + 1, planIds, draftedDates, null, writeResult.error, requested)
     planIds.push(writeResult.planId)
+    draftedDates.push(slotDate)
     recentSlugs.push(result.tourSlug)
   }
+  if (planIds.length === 0) return emptyImageReceipt('no_factory_still', null, requested)
+  return finishDraft(dates.length, planIds, draftedDates, null, null, requested)
+}
 
-  return withPosters({ attempted: count, drafted: planIds.length, planIds, skipped: null, error: null }, posters)
+function stillAsset(still: FactoryStill): RankableAssetRow {
+  return {
+    id: still.id,
+    storage_url: still.storageUrl,
+    original_filename: `${still.slotDate}.jpg`,
+    vision_metadata: null,
+    source: 'ai_generated',
+  }
+}
+
+function finishDraft(
+  attempted: number,
+  planIds: string[],
+  dates: string[],
+  skipped: string | null,
+  error: string | null,
+  requested: number | undefined,
+): ImagePostStepReceipt {
+  const receipt: ImagePostStepReceipt = { attempted, drafted: planIds.length, planIds, dates, skipped, error }
+  if (requested !== undefined) receipt.requested = requested
+  return receipt
+}
+
+async function insertSocialPlan(
+  supabase: SupabaseClient,
+  row: { client_id: string; campaign_id: string; platform: string; wave_number: number; plan_data: unknown },
+): Promise<{ id: string }> {
+  const { data, error } = await supabase
+    .from('social_plans')
+    .insert({
+      client_id: row.client_id,
+      campaign_id: row.campaign_id,
+      platform: row.platform,
+      wave_number: row.wave_number,
+      plan_data: row.plan_data,
+    })
+    .select('id')
+    .single()
+  if (error) throw new Error(error.message)
+  return { id: (data as { id: string }).id }
 }

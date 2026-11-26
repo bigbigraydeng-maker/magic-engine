@@ -100,6 +100,13 @@ function ports(over: Partial<WinnerPorts> = {}): WinnerPorts {
       pauses: [{ adId: '101', name: '弱的', reason: '低', ctr: 0.1, pageId: 'page-1', adAccountId: 'act_11', adsetId: '301' }],
       configAskedActive: true, slackWebhookUrl: null,
     })),
+    recheckDailyPlan: vi.fn(async () => ({
+      ok: true as const,
+      intent: {
+        postId: 'post-1', name: '每日帖 2026-11-19', score: 0, pageId: 'page-1', adAccountId: 'act_11', adsetId: '301',
+        origin: { kind: 'daily_plan' as const, planId: 'plan-9', date: '2026-11-19' },
+      },
+    })),
     token: vi.fn(async () => 'token'),
     createPaused: vi.fn(async () => ({ adId: '101' })),
     readPlacement: vi.fn(async () => paused),
@@ -111,6 +118,43 @@ function ports(over: Partial<WinnerPorts> = {}): WinnerPorts {
     ...over,
   }
 }
+
+describe('daily-plan promote card confirm', () => {
+  const origin = { kind: 'daily_plan' as const, planId: 'plan-9', date: '2026-11-19' }
+
+  it('re-checks the daily-plan Post, not the Reel scan, then creates one paused ad', async () => {
+    const store = db({ id: 'row-1', payload: hold({ origin, score: 0, before: 0 }) })
+    const used = ports()
+    const result = await confirmWinnerCard(store.client, input(), used)
+    expect(used.recheckDailyPlan).toHaveBeenCalledWith(CLIENT, origin)
+    expect(used.recheck).not.toHaveBeenCalled()
+    expect(used.createPaused).toHaveBeenCalledTimes(1)
+    expect(used.createPaused).toHaveBeenCalledWith(expect.objectContaining({ status: 'PAUSED', postId: 'post-1', adsetId: '301' }))
+    expect(used.activate).not.toHaveBeenCalled()
+    expect(used.link).toHaveBeenCalledWith(expect.objectContaining({ createdBy: 'daily_plan_promote' }))
+    expect(used.proposeLive).toHaveBeenCalledTimes(1)
+    expect(result.resultLine).toContain('已建成暂停广告')
+    expect(store.rows[0]?.payload.status).toBe('executed')
+  })
+
+  it('does not create anything when the Post was recalled or its poster expired since the card', async () => {
+    const store = db({ id: 'row-1', payload: hold({ origin, score: 0, before: 0 }) })
+    const used = ports({ recheckDailyPlan: vi.fn(async () => ({ ok: false as const, reason: '已经撤回了' })) })
+    await expect(confirmWinnerCard(store.client, input(), used)).rejects.toThrow(/对不上/)
+    expect(used.createPaused).not.toHaveBeenCalled()
+    expect(used.decide).not.toHaveBeenCalled()
+  })
+
+  it('does not create anything when the pool ad set changed since the card', async () => {
+    const store = db({ id: 'row-1', payload: hold({ origin, score: 0, before: 0 }) })
+    const used = ports({ recheckDailyPlan: vi.fn(async () => ({
+      ok: true as const,
+      intent: { postId: 'post-1', name: 'x', score: 0, pageId: 'page-1', adAccountId: 'act_11', adsetId: '999', origin },
+    })) })
+    await expect(confirmWinnerCard(store.client, input(), used)).rejects.toThrow(/对不上/)
+    expect(used.createPaused).not.toHaveBeenCalled()
+  })
+})
 
 describe('winner card confirm', () => {
   it('a row stuck writing is not written again', async () => {

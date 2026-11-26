@@ -28,7 +28,7 @@ export interface DualReviewIo {
   loadOrder(id: string): Promise<AssetOrder | null | 'unreadable'>
   loadHosts(clientId: string): Promise<string[] | null>
   readPage(url: string, hosts: readonly string[]): Promise<string | null>
-  musicOf(brief: unknown): RemotionMusicClearance
+  musicOf(brief: unknown, output: unknown): RemotionMusicClearance
   loadPool(clientId: string): Promise<{ version: ConfigVersion; pool: CreativePoolEntry[] } | null>
   writePool(clientId: string, pool: CreativePoolEntry[], version: ConfigVersion): Promise<'ok' | 'conflict' | 'error'>
   writeOrder(id: string, patch: Record<string, unknown>, expectStatus: string): Promise<'ok' | 'conflict' | 'error'>
@@ -90,7 +90,7 @@ async function decideFor(io: DualReviewIo, order: AssetOrder): Promise<DualRevie
     claims,
     officialHosts: hosts,
     pages,
-    music: io.musicOf(order.brief),
+    music: io.musicOf(order.brief, order.output),
   })
 }
 
