@@ -8,6 +8,11 @@ import { FPS } from './timing'
 import { fontFamily } from './theme'
 import { aspectFromCanvas, coverRect, portraitCoverBox, subjectAnchorY, templateProps } from './aspect'
 import { useStage } from './stage'
+import { useStyleFamily } from './styles/fonts'
+import { logoStartFrame } from './styles/rules'
+import { peelStyle } from './styles/select'
+import { StyledAtmosphere } from './styles/StyledAtmosphere'
+import type { ResolvedLook } from './styles/types'
 
 function atmosphereVideoStyle(props: AtmosphereProps, width: number, height: number): React.CSSProperties {
   const crop = props.crop
@@ -57,7 +62,7 @@ const TextLine: React.FC<{ props: AtmosphereProps; timing: AtmosphereTiming }> =
   )
 }
 
-export const AtmosphereReel: React.FC<Record<string, unknown>> = (rawProps) => {
+const AtmosphereReelMain: React.FC<Record<string, unknown>> = (rawProps) => {
   const props = parseAtmosphereProps(templateProps(rawProps))
   const timing = computeAtmosphereTiming(props)
   const plan = resolveFramePlan('atmosphere', props)
@@ -88,4 +93,36 @@ export const AtmosphereReel: React.FC<Record<string, unknown>> = (rawProps) => {
       {props.musicFile !== null ? <Audio src={staticFile(props.musicFile)} volume={vol * 0.9 * (props.musicGain ?? 1)} startFrom={Math.round((props.musicStartSec ?? 0) * FPS)} /> : null}
     </AbsoluteFill>
   )
+}
+
+function carriedLook(rawProps: Record<string, unknown>): ResolvedLook | null {
+  const look = peelStyle(rawProps).look
+  return look == null ? null : (look as ResolvedLook)
+}
+
+function plainProps(rawProps: Record<string, unknown>): Record<string, unknown> {
+  const body = peelStyle(rawProps).body
+  return body === rawProps ? rawProps : (body as Record<string, unknown>)
+}
+
+const AtmosphereStyled: React.FC<{ rawProps: Record<string, unknown>; look: ResolvedLook }> = ({ rawProps, look }) => {
+  const family = useStyleFamily(look)
+  const props = parseAtmosphereProps(templateProps(peelStyle(rawProps).body))
+  const timing = computeAtmosphereTiming(props)
+  const frame = useCurrentFrame()
+  const vol = interpolate(frame, [0, timing.fadeInFrames, timing.totalFrames - timing.fadeOutFrames, timing.totalFrames], [0, 1, 1, 0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' })
+  const requestedLogo = props.logoMode === 'always' ? 0 : Math.max(0, timing.totalFrames - 60)
+  if (family === null) return null
+  return (
+    <AbsoluteFill style={{ background: '#000' }}>
+      <StyledAtmosphere props={props} timing={timing} look={look} family={family} logoFrom={logoStartFrame(requestedLogo, look.rules, FPS)} />
+      {props.musicFile !== null ? <Audio src={staticFile(props.musicFile)} volume={vol * 0.9 * (props.musicGain ?? 1)} startFrom={Math.round((props.musicStartSec ?? 0) * FPS)} /> : null}
+    </AbsoluteFill>
+  )
+}
+
+export const AtmosphereReel: React.FC<Record<string, unknown>> = (rawProps) => {
+  const look = carriedLook(rawProps)
+  if (look) return <AtmosphereStyled rawProps={rawProps} look={look} />
+  return <AtmosphereReelMain rawProps={plainProps(rawProps)} />
 }
