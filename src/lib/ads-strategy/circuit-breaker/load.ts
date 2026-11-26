@@ -69,13 +69,8 @@ export async function loadBreakerFacts(
   if (!adsets) return 'unreadable'
   const captures = { rows: stalenessStamps(captured.rows), error: captured.error }
   const settings = readBreakerSettings(client.leads, plans.rows, strategy.row)
-  const delivering = deliveringAccountIds(
-    latestSnaps(snaps.rows),
-    [...spend.rows, ...recentAdsetSpend(adsets.rows, nzDate)],
-    captures.rows,
-    now,
-    settings.staleHours,
-  )
+  const recent = [...spend.rows, ...recentAdsetSpend(adsets.rows, nzDate)]
+  const delivering = deliveringAccountIds(latestSnaps(snaps.rows), recent, captures.rows, now, settings.staleHours)
   const accounts = accountIds(client.primary, snaps.rows, delivering)
   return assemble(now, localDate, nzDate, client.leads, plans, snaps, spend, adsets, captures, accounts, strategy.row, delivering)
 }
@@ -224,22 +219,13 @@ async function readSpend(
   return { rows, truncated: rows.length >= SPEND_LIMIT }
 }
 
-async function readAdsetSpend(
-  sb: SupabaseClient,
-  clientId: string,
-  nzDate: string,
-): Promise<{ rows: SpendRaw[]; truncated: boolean } | null> {
+async function readAdsetSpend(sb: SupabaseClient, clientId: string, nzDate: string): Promise<{ rows: SpendRaw[]; truncated: boolean } | null> {
   const days = completeDaysBefore(nzDate)
   if (!days || days.length === 0) return { rows: [], truncated: false }
-  const newest = days[0]
-  const oldest = days[days.length - 1]
   const { data, error } = await sb.from('ad_daily_insights')
     .select('ad_account_id, entity_id, entity_name, parent_id, insight_date, spend, leads, messaging_conversations, updated_at')
-    .eq('client_id', clientId)
-    .eq('level', 'adset')
-    .gte('insight_date', oldest)
-    .lte('insight_date', newest)
-    .limit(ADSET_SPEND_LIMIT)
+    .eq('client_id', clientId).eq('level', 'adset')
+    .gte('insight_date', days[days.length - 1]).lte('insight_date', days[0]).limit(ADSET_SPEND_LIMIT)
   if (error) return null
   const rows = (data ?? []) as SpendRaw[]
   return { rows: rows.map((row) => ({ ...row, level: 'adset' })), truncated: rows.length >= ADSET_SPEND_LIMIT }
@@ -417,16 +403,10 @@ function mapAdset(
   const campaignId = row.parent_id ?? ''
   if (!row.entity_id || !campaignId || !Number.isFinite(spend)) return []
   return [{
-    accountId: row.ad_account_id,
-    campaignId,
-    campaignName: names.get(campaignId) || '在投的广告系列',
-    adsetId: row.entity_id,
-    adsetName: row.entity_name?.trim() || '在投的广告组',
-    day: String(row.insight_date).slice(0, 10),
-    spendCents: Math.round(spend * 100),
-    primaryCount: countedPrimary(primary, row),
-    currency,
-    adsetLive: live.has(row.entity_id),
+    accountId: row.ad_account_id, campaignId, campaignName: names.get(campaignId) || '在投的广告系列',
+    adsetId: row.entity_id, adsetName: row.entity_name?.trim() || '在投的广告组',
+    day: String(row.insight_date).slice(0, 10), spendCents: Math.round(spend * 100),
+    primaryCount: countedPrimary(primary, row), currency, adsetLive: live.has(row.entity_id),
   }]
 }
 

@@ -44,18 +44,10 @@ function depsFor(sb: SupabaseClient, clientId: string, now: Date): ApplyDeps {
   }
 }
 
-async function issuePause(
-  sb: SupabaseClient,
-  clientId: string,
-  args: PauseIssueArgs,
-  now: Date,
-): Promise<{ ok: true; runId: string } | { ok: false; reason: string }> {
+async function issuePause(sb: SupabaseClient, clientId: string, args: PauseIssueArgs, now: Date) {
   if (args.unit === 'adset' && args.adsetId) {
     return issueBreakerPauseCard(sb, clientId, {
-      adsetId: args.adsetId,
-      campaignId: args.campaignId,
-      accountId: args.accountId,
-      name: args.name,
+      adsetId: args.adsetId, campaignId: args.campaignId, accountId: args.accountId, name: args.name,
     }, now)
   }
   return issueCampaign(sb, clientId, args)

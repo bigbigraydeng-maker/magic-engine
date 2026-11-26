@@ -66,11 +66,9 @@ async function addPause(counts: ApplyCounts, day: string, pause: PauseProposal, 
     return
   }
   const issued = await deps.issuePause({
-    campaignId: pause.campaignId,
-    accountId: pause.accountId,
+    campaignId: pause.campaignId, accountId: pause.accountId, unit: pause.unit,
     name: pause.unit === 'adset' ? pause.adsetName || pause.campaignName : pause.campaignName,
     adsetId: pause.unit === 'adset' ? pause.adsetId : null,
-    unit: pause.unit,
   })
   if (!issued.ok && issued.reason === 'pending') {
     counts.skipped += 1

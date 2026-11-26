@@ -254,8 +254,7 @@ function campaignSnap(accountId: string, campaignId: string, status: string, cap
 function adsetSnap(accountId: string, campaignId: string, adsetId: string, status: string, capturedAt: string) {
   return {
     client_id: 'client-a', ad_account_id: accountId, level: 'adset', entity_id: adsetId, entity_name: adsetId,
-    campaign_id: campaignId, adset_id: adsetId, status, effective_status: status, captured_at: capturedAt,
-    timezone_name: null, currency: null,
+    campaign_id: campaignId, adset_id: adsetId, status, effective_status: status, captured_at: capturedAt, timezone_name: null, currency: null,
   }
 }
 
@@ -267,27 +266,10 @@ function adSnap(accountId: string, campaignId: string, adId: string, status: str
   }
 }
 
-function adsetDays(
-  accountId: string,
-  campaignId: string,
-  adsetId: string,
-  updatedAt: string,
-  spend: number,
-  leads: number | null,
-  messaging: number | null,
-) {
+function adsetDays(accountId: string, campaignId: string, adsetId: string, updatedAt: string, spend: number, leads: number | null, messaging: number | null) {
   return ['2026-11-08', '2026-11-07', '2026-11-06'].map((insight_date) => ({
-    client_id: 'client-a',
-    ad_account_id: accountId,
-    level: 'adset',
-    entity_id: adsetId,
-    entity_name: adsetId,
-    parent_id: campaignId,
-    insight_date,
-    spend,
-    leads,
-    messaging_conversations: messaging,
-    updated_at: updatedAt,
+    client_id: 'client-a', ad_account_id: accountId, level: 'adset', entity_id: adsetId, entity_name: adsetId,
+    parent_id: campaignId, insight_date, spend, leads, messaging_conversations: messaging, updated_at: updatedAt,
   }))
 }
 
