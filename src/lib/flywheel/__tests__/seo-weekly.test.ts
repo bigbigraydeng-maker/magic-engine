@@ -8,7 +8,7 @@
  *   4. 来路不明的条子会不会被放行
  */
 
-import { describe, it, expect } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   FLYWHEEL_SEO_SNAPSHOT_DUE_EVENT,
@@ -85,6 +85,10 @@ function fakeSupabase(tables: Record<string, { data: Row[] | null; error: { mess
 }
 
 describe('谁会被扫 —— 名单判据', () => {
+  beforeEach(() => {
+    vi.stubEnv('EXTERNAL_DATA_PULL_CLIENT_IDS', '*')
+  })
+
   it('在服务中 + 填了网址 的才进名单，网址两边空白会被削掉', async () => {
     const fake = fakeSupabase({
       clients: {
@@ -137,6 +141,24 @@ describe('谁会被扫 —— 名单判据', () => {
   it('🔴 查名单失败必须报出来，不许当成「今天没人要扫」', async () => {
     const fake = fakeSupabase({ clients: { data: null, error: { message: 'boom' } } })
     expect(await loadSnapshotRoster(fake.client)).toEqual({ ok: false, reason: 'boom' })
+  })
+
+  it('默认白名单只留 CTS；显式补触发可以关掉这道闸', async () => {
+    vi.stubEnv('EXTERNAL_DATA_PULL_CLIENT_IDS', '')
+    delete process.env.EXTERNAL_DATA_PULL_CLIENT_IDS
+    const fake = fakeSupabase({
+      clients: {
+        data: [
+          { id: CTS, domain: 'ctstours.co.nz', client_status: 'active' },
+          { id: OZTOP, domain: 'oztopbuildingsupplies.com.au', client_status: 'active' },
+        ],
+        error: null,
+      },
+    })
+    const scheduled = await loadSnapshotRoster(fake.client)
+    expect(scheduled.ok && scheduled.entries).toEqual([{ clientId: CTS, domain: 'ctstours.co.nz' }])
+    const manual = await loadSnapshotRoster(fake.client, { applyExternalPullAllowlist: false })
+    expect(manual.ok && manual.entries.map((entry) => entry.clientId)).toEqual([CTS, OZTOP])
   })
 })
 

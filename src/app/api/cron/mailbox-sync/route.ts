@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { filterClientIdsForExternalDataPull, filterRowsWithClientId } from '@/lib/clients/external-data-pull-allowlist'
 import { supabaseAdmin } from '@/lib/supabase'
 import { syncMailbox, type MailboxTarget } from '@/lib/microsoft/mail-ingest'
 import { MICROSOFT_MAIL_PROVIDER } from '@/lib/microsoft/mail-oauth'
@@ -56,12 +57,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: connErr.message }, { status: 500 })
   }
 
-  const connections = (conns ?? []) as { id: string; client_id: string; account_id: string }[]
+  const connections = filterRowsWithClientId(
+    (conns ?? []) as { id: string; client_id: string; account_id: string }[],
+  )
   if (connections.length === 0) {
     await run.finish({ processed: 0, completed: 0, failed: 0, summary: { note: '还没有客户连邮箱' } })
     return NextResponse.json({ ok: true, mailboxes: 0, results: [] })
   }
-  const clientIds = Array.from(new Set(connections.map((c) => c.client_id)))
+  const clientIds = filterClientIdsForExternalDataPull(Array.from(new Set(connections.map((c) => c.client_id))))
 
   // leads_config 一起取回来：里面有设置页填的「客户自己的邮件域名」（关联公司），
   // 官网域名和收信域名都覆盖不到它 —— `pa@chinatravel.co.nz` 就是这么变成客人的。

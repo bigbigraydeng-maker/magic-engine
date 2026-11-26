@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { filterRowsWithId } from '@/lib/clients/external-data-pull-allowlist'
 import { supabaseAdmin } from '@/lib/supabase'
 import {
   captureReputationForClient,
@@ -52,7 +53,7 @@ export async function GET(req: NextRequest) {
     )
   }
 
-  const eligible = ((clients ?? []) as ReputationClient[]).filter(hasReputationIdentity)
+  const eligible = filterRowsWithId(((clients ?? []) as ReputationClient[]).filter(hasReputationIdentity))
 
   if (eligible.length === 0) {
     await cronRun.finish({ processed: 0, completed: 0, failed: 0 })

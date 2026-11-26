@@ -14,6 +14,7 @@ describe('paid tagging audience authority', () => {
   it.each([null, ''])('does not reopen a cleared dedicated audience (%s) using old JSON', async value => {
     vi.stubEnv('CRON_SECRET', 'local-test')
     vi.stubEnv('MAILCHIMP_API_KEY', 'test-us19')
+    vi.stubEnv('EXTERNAL_DATA_PULL_CLIENT_IDS', '*')
     mocks.from.mockImplementation((table: string) => {
       let columns = ''
       const query = {

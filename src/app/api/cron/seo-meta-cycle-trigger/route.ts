@@ -108,7 +108,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     created_at: now.toISOString(),
   }
 
-  const roster = await loadMetaCycleRoster(supabaseAdmin)
+  // A named client_id is a manual rerun and skips the external-pull allowlist.
+  const roster = await loadMetaCycleRoster(supabaseAdmin, {
+    applyExternalPullAllowlist: requestedClientId === null,
+  })
   if (!roster.ok) {
     return NextResponse.json({ ...base, status: 'roster_failed', clients_dispatched: [], error: roster.reason }, { status: 500 })
   }
