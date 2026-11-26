@@ -1,6 +1,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { loadSocialFactSource } from './fact-aliases'
-import { sumWeeklyMaliangSpend } from './maliang-backfill'
+import {
+  mergeMaliangChargeLedgers,
+  maliangBackfillSpendTotal,
+  nextMaliangChargeLedger,
+  sumWeeklyMaliangSpend,
+} from './maliang-backfill'
 import { expireUnapproved, writeReelSchedule } from './schedule-writer'
 import { readPublishOn } from '@/lib/social/week-pack/manifest'
 import { WEEKLY_LOOP_JOB, type FactCheckWriteOutcome, type WeeklyLoopClient, type WeeklyLoopDeps, type WeeklyLoopOrderRow } from './run'
@@ -97,19 +102,56 @@ export async function loadWeeklyMaliangSpend(
   return sumWeeklyMaliangSpend(rows.map((row) => (isRecord(row) ? row.summary : null)))
 }
 
+function maliangReservedCharges(summary: unknown): number[] {
+  if (!isRecord(summary)) return []
+  const backfill = summary.maliang_backfill
+  if (!isRecord(backfill) || !Array.isArray(backfill.charges_usd)) return []
+  return backfill.charges_usd.filter(
+    (c): c is number => typeof c === 'number' && Number.isFinite(c) && c >= 0,
+  )
+}
+
+/** Reserved per-review charges already booked on this run row (empty when unreadable). */
+export async function loadRunMaliangReservedCharges(db: SupabaseClient, runId: string): Promise<number[]> {
+  const { data, error } = await db.from('cron_run_logs').select('summary').eq('id', runId).maybeSingle()
+  if (error) throw new Error(`maliang_spend_read_failed: ${error.message}`)
+  if (!isRecord(data)) return []
+  return maliangReservedCharges(data.summary)
+}
+
 /**
- * Books 马良 money on this run's own log row before the model is called, so a run that dies
- * part-way still counts against the week. Overwritten later by the run's final receipt (same total).
+ * Books one review's 马良 money on this run's own log row before the model is called, so a run
+ * that dies part-way still counts every review that already reserved. finish-run merges the
+ * charge ledger into the final receipt.
  * Throws when the row is missing or the write fails: the caller must then not call the model.
  */
 export async function reserveWeeklyMaliangSpend(
   db: SupabaseClient,
-  input: { runId: string; clientId: string; spentUsd: number },
+  input: { runId: string; clientId: string; chargeUsd: number },
 ): Promise<void> {
+  const { data: row, error: readError } = await db
+    .from('cron_run_logs')
+    .select('summary')
+    .eq('id', input.runId)
+    .eq('job_name', WEEKLY_LOOP_JOB)
+    .eq('status', 'running')
+    .maybeSingle()
+  if (readError) throw new Error(`maliang_spend_reserve_failed: ${readError.message}`)
+  if (!isRecord(row)) throw new Error('maliang_spend_reserve_failed: run row not found')
+
+  const ledger = nextMaliangChargeLedger(
+    isRecord(row.summary) ? row.summary.maliang_backfill : null,
+    input.chargeUsd,
+  )
+
   const { data, error } = await db
     .from('cron_run_logs')
     .update({
-      summary: { kind: 'client_run', client_id: input.clientId, maliang_backfill: { spent_usd: input.spentUsd, reserved: true } },
+      summary: {
+        kind: 'client_run',
+        client_id: input.clientId,
+        maliang_backfill: { ...ledger, reserved: true },
+      },
     })
     .eq('id', input.runId)
     .eq('job_name', WEEKLY_LOOP_JOB)
@@ -117,6 +159,24 @@ export async function reserveWeeklyMaliangSpend(
     .select('id')
   if (error) throw new Error(`maliang_spend_reserve_failed: ${error.message}`)
   if (!Array.isArray(data) || data.length !== 1) throw new Error('maliang_spend_reserve_failed: run row not found')
+}
+
+/** Merge reserved charges into the finish-run receipt without under-counting. */
+export function mergeMaliangBackfillOnFinish<T extends Record<string, unknown>>(
+  summary: T,
+  reservedCharges: readonly number[],
+): T {
+  if (!isRecord(summary.maliang_backfill)) return summary
+  const backfill = summary.maliang_backfill
+  const receiptCharges = Array.isArray(backfill.charges_usd)
+    ? backfill.charges_usd.filter((c): c is number => typeof c === 'number' && Number.isFinite(c) && c >= 0)
+    : []
+  const charges_usd = mergeMaliangChargeLedgers(reservedCharges, receiptCharges)
+  const spent_usd = maliangBackfillSpendTotal({ ...backfill, charges_usd })
+  return {
+    ...summary,
+    maliang_backfill: { ...backfill, charges_usd, spent_usd },
+  }
 }
 
 export function createWeeklyLoopDbDeps(db: SupabaseClient): WeeklyLoopDeps {
