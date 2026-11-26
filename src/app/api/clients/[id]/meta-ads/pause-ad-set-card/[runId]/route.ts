@@ -8,11 +8,14 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { executeAutoPauseHold } from '@/app/api/clients/[id]/ad-health/auto-pause/[runId]/decision/route'
 import { executeConfirmedPause } from '@/lib/action-submission/pause-ad-set'
 import { confirmMoneyPause } from '@/lib/action-submission/money-card'
+import { confirmBreakerPauseCard } from '@/lib/ads-pause-card/breaker-card'
 import { confirmPauseCard } from '@/lib/ads-pause-card/confirm'
+import { decideConfirmationCard, type CardClicker } from '@/lib/confirmation-card'
+import { nzToday } from '@/lib/ads-strategy/promo-window'
 import { kernelThatCannotResume } from '@/lib/ads-pause-card/kernel'
 import { readPauseLive } from '@/lib/ads-pause-card/live'
 import { createKernel } from '@/lib/kernel'
-import { parseDecisionBody, publicError } from '@/lib/confirmation-card/http'
+import { parseDecisionBody, publicError, type DecisionBody } from '@/lib/confirmation-card/http'
 import { isUuid } from '@/lib/validation-utils'
 import { pauseCardGate } from '../access'
 
@@ -32,6 +35,8 @@ export async function POST(
   }
   try {
     const body = parseDecisionBody(raw)
+    const breakerReply = await replyBreaker(id, runId, gate.clicker, body)
+    if (breakerReply) return breakerReply
     const email = gate.clicker.kind === 'opc' || gate.clicker.kind === 'fde' ? gate.clicker.email : ''
     const money = await confirmMoneyPause({
       kernel: createKernel(supabaseAdmin),
@@ -77,4 +82,51 @@ export async function POST(
     if (mapped.status === 500) console.error('[pause-ad-set-card] confirm failed')
     return NextResponse.json({ error: mapped.message }, { status: mapped.status })
   }
+}
+
+async function replyBreaker(
+  clientId: string,
+  runId: string,
+  clicker: CardClicker,
+  body: DecisionBody,
+): Promise<NextResponse | null> {
+  const kernel = kernelThatCannotResume(supabaseAdmin)
+  const breaker = await confirmBreakerPauseCard({
+    sb: supabaseAdmin,
+    clientId,
+    runId,
+    fingerprint: body.fingerprint,
+    resolution: body.resolution,
+    decide: () => decided(kernel, clientId, runId, clicker, body),
+    execute: (input) => executeConfirmedPause(kernel, {
+      clientId,
+      goalId: '',
+      adAccountId: input.accountId,
+      adsetId: input.adsetId,
+      cycleDate: nzToday(Date.now()),
+      nonce: input.nonce,
+      basis: input.basis,
+    }),
+  })
+  if (!breaker.handled) return null
+  if (breaker.status === 200) return NextResponse.json({ ok: breaker.wrote, wroteMeta: breaker.wrote, reason: breaker.reason })
+  return NextResponse.json({ error: breaker.reason, wroteMeta: false }, { status: breaker.status })
+}
+
+async function decided(
+  kernel: ReturnType<typeof kernelThatCannotResume>,
+  clientId: string,
+  runId: string,
+  clicker: CardClicker,
+  body: DecisionBody,
+): Promise<'confirmed' | 'declined' | 'stopped'> {
+  const view = await decideConfirmationCard(kernel, {
+    clientId, runId, clicker,
+    resolution: body.resolution,
+    expectedDecisionId: body.expectedDecisionId,
+    fingerprint: body.fingerprint,
+  })
+  if (view.status === 'confirmed') return 'confirmed'
+  if (view.status === 'declined') return 'declined'
+  return 'stopped'
 }
