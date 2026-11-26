@@ -76,3 +76,24 @@
 - 证据：生产库 `cron_run_logs` `job_name like 'seo-meta-cycle-step%'`，W45、W46 共 12 行；`seo_meta_log` 总数 / `max(created_at)` / 近 7 天新增；`cron_run_logs` `job_name='seo-meta-rank-sampler'` 近 7 天 7 行、`rows_dispatched` 全为 0（2026-11-10 取数）；`docs/ledger/2026-10-29-cts-meta-cycle-generator-sees-original.md`（`status: decided`，`verify_by: 2026-11-03`）。
 - 建议的规则或检查：①台账卡过了 `verify_by` 还没达成验收，巡检要自动把它标成「到期未验证」并进今日待办，不能一直停在 decided；②印证 10-29 第 1 条的「产出体检」：连续 ≥2 周 `proposals>0 且 applied=0` 就开人工卡——这条到今天还没有任何机制在做。
 - 与现有手册关系：印证本候选区 10-29 第 1 条、11-03 第 1 条（新数字：第 6 周、W46 7/9 名额生成前失败、xian-city-wall 第 5 周）；新增「过期台账卡不会自己变 failed」。
+
+## 2026-11-17 · 自动化平台额度用完，SEO 这条线整条停了却一张回执都没有：W47 周循环没跑、谷歌搜索数据每天拉取和排名采样 11-14 后全停
+- 层级：通用·候选（共用的调度方式，所有客户的 SEO 任务都受影响；目前证据来自 CTS 一个客户的运行记录）
+- 发生了什么：Inngest 免费额度 2026-11-15 14:20（新西兰）用满（见台账卡）。之后 SEO 相关的 Inngest 定时任务全部没有新运行记录：`gsc-page-daily` / `gsc-page-daily-pull` 最后一次 11-14 18:30 UTC，`gsc-query-page-daily` / `-pull` 最后一次 11-14 19:00 UTC，`seo-meta-rank-sampler` 最后一次 11-14 20:20 UTC（之前每天一次）；标题周循环 6 步上一轮是 W46（11-09 05:30 UTC），本该 11-16 05:30 UTC 跑的 W47 一行都没有。同期全库还有 54 个任务在 11-16 之后照常写记录（`seo-patrol-daily`、`keyword-snapshots-weekly`、`seo-weekly-list`、`weekly-seo-report` 不走 Inngest，照常跑），所以不是整个系统停了，是挂在 Inngest 上的那一半停了。PR 3883 的应急改道只救了「电话进 CRM」和「新线索进表格」，SEO 任务不在里面；台账卡写额度预计 12-01 恢复（未核实），这意味着 W47、W48 两轮周循环和约 16 天的谷歌搜索每日数据会缺。之前几条候选讲的是「跑了、回执全绿、没产出」；这次是「根本没跑、连回执都没有」，靠读回执做的产出体检照样发现不了。
+- 证据：生产库 `cron_run_logs`，按 `job_name` 取近 10 天 `max(started_at)`（2026-11-17 取数）；全库「近 10 天至少 5 次、最后一次早于 11-15 06:00 UTC」的任务 20 个，「11-16 之后有记录」的 54 个；`docs/ledger/2026-11-16-inngest-quota-relief-direct-fallback.md`（「其余 Inngest 任务这两周仍停着」）；PR https://github.com/bigbigraydeng-maker/magic-engine/pull/3883（改道范围只有 telephony / lead-sheet；PR 正文另记 `gsc-page-daily.test.ts` 在干净主干 df3a00e5c 上有 2 条测试失败，本任务没有复跑）。
+- 建议的规则或检查：①产出体检除了看「回执里有没有产出」，还要看「该来的回执来没来」：按登记表的调度时间，每天核一次「上次运行时间 + 1 个周期 + 宽限」，超时就进今日待办，写明停的是哪条、影响哪个客户；②额度恢复那天（12-01 前后）要核谷歌搜索每日数据有没有补上 11-15 起的空档。谷歌搜索后台能查到过去 16 个月的数据，按理能补，但现在的拉取任务支不支持按日期补拉，没核实；③以后再做「额度不够先改道」，SEO 每天的数据拉取应该排进改道清单，排在周循环前面（周循环晚一周没事，数据断了以后算前后对比就缺基准）。
+- 与现有手册关系：新增。补充本候选区 10-29 第 1 条：那条只管「跑了没产出」，这条讲「没跑」也要能发现。
+
+## 2026-11-24 · 每周 SEO 待办清单连发 7 周、共 24 张卡，0 张有人做，16 张到期被系统自动作废
+- 层级：客户·CTS（单客户候选；清单程序是所有客户共用的）
+- 发生了什么：`seo-weekly-list` 每周一都是 `completed`（本周 11-23 新增 3 张）。但它从 10-05 起生成的 24 张 SEO 卡（`execution_items`，`steps_json.loop='seo_goal_v1'`）里，没有一张变成进行中或完成：16 张 3 周后被自动标 `skipped`，原因全是 `expired_no_action`；剩下 8 张（11-16 的 5 张、11-23 的 3 张）还在 `pending`，照这个规律也会到期作废。10-08 台账卡 11-17 复查时已经写了「没人领，按判据该由 PM 指定负责人」，到今天还没有指定。同时，清单点名的页面和标题周循环反复卡住的页面是同一批：`xian-city-wall-travel-guide`、`faq/visa-requirements`、李子坝 3 个 slug、`how-many-days-in-chongqing`，两条自动化盯着同一批页面，两边都没落地。另外本周 3 张卡标题都是「加强页面：点击率偏低」，但卡里自己的诊断写的都是 `cause: siblings`（同主题有别的自家页面在分食曝光，例如 `how-many-days-in-chongqing` 的兄弟页 `chongqing-chengdu-itinerary-10-days` 有 511 次曝光）。诊断是抢词，给的动作却是改这一页。
+- 证据：生产库 `execution_items`，条件 `steps_json->>'loop'='seo_goal_v1'`，按创建周 × 状态分组：10-05 skipped 5、10-12 skipped 3、10-26 skipped 5、11-02 skipped 3、11-16 pending 5、11-23 pending 3；`skip_reason` 16/16 为 `expired_no_action`；样例卡 id `c5532cf9-4df7-49c9-83fc-4dd6b7a16d2d` 的 `ctr_diagnosis.cause='siblings'`（2026-11-24 取数）；`cron_run_logs` `job_name='seo-weekly-list'` 11-23 `inserted=3`；`docs/ledger/2026-10-08-seo-automation-health-audit.md`（`last_checked: 2026-11-17` 的 check_note）。
+- 建议的规则或检查：①清单卡连续 ≥2 批全部 `expired_no_action`，就别再只是作废，在今日待办里升一条「这条清单没人领」给 PM，写明作废了几张、涉及哪些页；②诊断是 `siblings` 时，卡的动作应改成「先处理同主题抢词（合并 / 规范网址 / 岔开定位）」，不要再叫「加强页面」；③同一页同时出现在周循环候选和周清单里，两边要互相知道，别各发各的。
+- 与现有手册关系：印证 playbook-seo-general.md 第 116 行（先查自家页抢词，再改标题），新数字：本周 3/3 张卡诊断是抢词、动作却是改这一页；印证本候选区 10-29 第 1 条（回执全绿零产出），这次是另一条自动化（周清单），7 周 0 产出；新增「卡到期自动作废，没人知道」。
+
+## 2026-11-24 · 周循环停了第 2 轮，谷歌搜索每日数据缺口到 10 天；恢复时还会多一个新的拦截原因
+- 层级：客户·CTS（单客户候选）
+- 发生了什么：接本候选区 11-17 最后一条。标题周循环 6 步本周仍没有任何记录（最后一次还是 W46，11-09 05:30 UTC），W47、W48 两轮都没跑；`gsc-page-daily`、`gsc-query-page-daily`（含 `-pull`）和 `seo-meta-rank-sampler` 最后一次仍是 11-14，近 7 天 0 次。不走 Inngest 的 `seo-patrol-daily`（7 次）、`keyword-snapshots-weekly`、`seo-weekly-list` 照常跑。`seo_meta_log` 仍是 65 行，最后一行 2026-09-28，近 7 天新增 0、判定 0。新情况：PR 3915（11-23 合并）修好了 DataForSEO 搜索结果网址变谷歌跳转链接的问题，但只能还原到网站这一级、还原不出具体哪一页，PR 自己写明周循环的「是不是这一页在排名」判断会因此偏保守，会判成 `other_own_page`。周循环本来就常因「搜索结果里排的是自家另一页」被拦（11-03 第 1、6 条），恢复后这个原因可能变多，而且是误判。
+- 证据：生产库 `cron_run_logs`，`job_name like 'seo%' or like 'gsc%'` 的 `max(started_at)` 与近 7 天次数（2026-11-24 取数）；`seo_meta_log` 总数 / `max(created_at)` / 近 7 天新增与 `checked_at`；PR https://github.com/bigbigraydeng-maker/magic-engine/pull/3915（「已知限制」一段）；`docs/ledger/2026-11-23-dataforseo-serp-real-domain-and-city-code.md`（verify_by 2026-12-01）。
+- 建议的规则或检查：①周循环恢复前，先让 `rank-check` 在只能还原到网站一级时返回「看不出是哪一页」，不要直接判 `other_own_page` 去拦；②恢复后第一轮，单独数一次 `other_own_page` 拦了几页，和 W40–W46 的平均比，明显变多就是这个原因；③11-17 那条的①（该来的回执没来要报警）到今天仍没有机制在做，这是第 2 周。
+- 与现有手册关系：印证本候选区 11-17 最后一条（新数字：第 2 轮周循环没跑，数据缺口从约 3 天到 10 天）；补充 playbook-seo-general.md 第六节（跳转链接只能还原到网站一级），新增「这个限制会让周循环多拦页」。

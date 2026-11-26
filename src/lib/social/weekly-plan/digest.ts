@@ -21,6 +21,8 @@ export function slotDigest(plan: WeeklySocialPlan): string {
       format: item.format,
       group: item.contentGroup,
       themeId: item.themeId,
+      ...(item.date ? { date: item.date } : {}),
+      ...(item.draftRef ? { ref: item.draftRef } : {}),
     })),
   })
 }

@@ -11,6 +11,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import { filterRowsWithId } from '@/lib/clients/external-data-pull-allowlist'
 import { supabaseAdmin } from '@/lib/supabase'
 import { countPageMetricFailures, syncPageMetrics, type PageMetricsSyncResult } from '@/lib/social/page-metrics-sync'
 import { TikTokAdapter } from '@/lib/flywheel/adapters/TikTokAdapter'
@@ -92,7 +93,7 @@ async function syncTikTokProfiles(): Promise<TikTokSyncResult> {
   let synced = 0
   let failed = 0
 
-  for (const client of clients) {
+  for (const client of filterRowsWithId(clients as Array<{ id: string }>)) {
     try {
       const metrics = await adapter.pullMetrics(client.id)
       if (metrics.length > 0) synced++

@@ -4,6 +4,7 @@
  */
 
 import type { ClientRecipeConfig } from '@/lib/social/recipe/synthesize'
+import { readSocialWeekOnly } from '@/lib/social/social-week-quota'
 
 import type { BuildInput, CountSignal, FlagSignal, GoalInput, PillarPick, ThemeInput, WeeklyQuotaInput } from './types'
 
@@ -11,23 +12,15 @@ const UNREAD_COUNT: CountSignal = { state: 'unreadable', value: 0 }
 const UNREAD_FLAG: FlagSignal = { state: 'unreadable', value: false }
 
 export function readWeeklyQuota(config: unknown): { quota: WeeklyQuotaInput; gaps: string[] } {
-  const week = record(record(config)?.social_week)
-  const gaps: string[] = []
+  const week = readSocialWeekOnly(config)
   return {
     quota: {
-      storyPerWeek: oneQuota(week?.story_per_week, 'Story', gaps),
-      postPerWeek: oneQuota(week?.post_per_week, '图文', gaps),
-      reelPerWeek: oneQuota(week?.reel_per_week, 'Reel', gaps),
+      storyPerWeek: week.storyPerWeek,
+      postPerWeek: week.postPerWeek,
+      reelPerWeek: week.reelPerWeek,
     },
-    gaps,
+    gaps: week.gaps,
   }
-}
-
-function oneQuota(raw: unknown, label: string, gaps: string[]): number | null {
-  if (raw === undefined || raw === null) return null
-  if (typeof raw === 'number' && Number.isInteger(raw) && raw >= 0 && raw <= 999) return raw
-  gaps.push(`${label}的每周条数不是可用的整数，这项没有采用。`)
-  return null
 }
 
 export function readClientRecipe(config: unknown, pillars: readonly PillarPick[] | null): ClientRecipeConfig {

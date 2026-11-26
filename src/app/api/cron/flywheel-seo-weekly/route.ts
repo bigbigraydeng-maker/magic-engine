@@ -58,7 +58,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     created_at: now.toISOString(),
   }
 
-  const roster = await loadSnapshotRoster(supabaseAdmin)
+  // A named client_id is a manual rerun and skips the external-pull allowlist.
+  const roster = await loadSnapshotRoster(supabaseAdmin, {
+    applyExternalPullAllowlist: requestedClientId === null,
+  })
   if (!roster.ok) {
     return NextResponse.json(
       { ...base, status: 'roster_failed', clients_dispatched: 0, error: roster.reason },

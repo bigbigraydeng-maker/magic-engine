@@ -9,6 +9,7 @@ import type { RankableAssetRow } from '@/lib/factory/client-asset-pool'
 import type { CampaignDailyPostDraft } from '@/lib/campaign/daily-plan'
 import type { FactCheckResult, FactCheckInput } from '@/lib/social/weekly-loop/fact-check'
 import type { ClaimHit } from '@/lib/social/outbound-claims'
+import type { ComposeTourPosterResult, PosterReceipt } from './image-post-poster'
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -30,10 +31,23 @@ export interface ImagePostDrafterDeps {
   ) => Promise<{ hook: string; body: string; cta: string }>
   checkFacts: (input: FactCheckInput) => FactCheckResult
   scanOutboundClaims: (text: string) => ClaimHit[]
+  /**
+   * Optional poster recipe. Runs only after the copy passed fact check + outbound scan
+   * (so a rejected draft never spends money). Success → the draft uses the poster;
+   * failure → the draft keeps the original photo. Absent → behaviour unchanged.
+   */
+  composePoster?: (tour: PublishedTourFact, image: RankableAssetRow) => Promise<ComposeTourPosterResult>
 }
 
 export type ImagePostDraftResult =
-  | { ok: true; draft: CampaignDailyPostDraft; tourSlug: string; factCheck: FactCheckResult }
+  | {
+      ok: true
+      draft: CampaignDailyPostDraft
+      tourSlug: string
+      factCheck: FactCheckResult
+      /** Present only when `composePoster` was supplied: what happened to the poster attempt. */
+      poster?: PosterReceipt
+    }
   | { ok: false; reason: string }
 
 // ---------------------------------------------------------------------------
@@ -146,14 +160,18 @@ export async function draftImagePost(
     return { ok: false, reason: claimResult.reason }
   }
 
-  // 7. Assemble draft
+  // 7. Optional poster (falls back to the original photo on any failure)
+  const poster = deps.composePoster ? await deps.composePoster(tour, image) : null
+
+  // 8. Assemble draft
   const draft: CampaignDailyPostDraft = {
     hook: copy.hook,
     body: copy.body,
     cta: copy.cta,
-    image_asset_id: image.id,
+    image_asset_id: poster?.ok ? poster.assetId : image.id,
     cta_url: ctaUrl,
   }
 
-  return { ok: true, draft, tourSlug: tour.slug, factCheck }
+  if (!poster) return { ok: true, draft, tourSlug: tour.slug, factCheck }
+  return { ok: true, draft, tourSlug: tour.slug, factCheck, poster: poster.receipt }
 }

@@ -6,10 +6,14 @@
  * change: an absent block is not written as a key). Required by `parseSendRule`: an authorization is only ever written
  * for a proposal that carries it. Strict like the rest of the rule: a missing key or a bad value makes it invalid, with
  * no fall-back to a default.
+ * A trigger with several letters (the AI follow-up letters) names `send.letters` instead of `send.template`: one or
+ * the other, never both (design 2026-11-17 §4.1, §7.2).
  * Design: docs/specs/2026-11-02-me-send-gate-p2-design-v0.md §3.1, §4.3 (plan: §17).
  */
 
+import { createHash } from 'node:crypto'
 import { isAutomatedTemplateKey } from '@/lib/crm/email-templates/automated-template-key'
+import { LETTER_KEY_RE } from './trigger-scope'
 
 export interface SendRuleBlock {
   identity: {
@@ -37,9 +41,38 @@ export interface SendRuleBlock {
   }
 }
 
-export type SendBlockParse = { ok: true; send: SendRuleBlock } | { ok: false; error: string }
+/**
+ * One letter of a letter list (a trigger with several letters, each sent to a guest at most once; design 2026-11-17
+ * §7.2). The template is pinned: version and content fingerprint as they were when proposed. `context` is frozen with
+ * it (the catalogue link the letter may carry): the sender never reads it from anywhere else (W1).
+ */
+export interface LetterEntry {
+  letter_key: string
+  template_key: string
+  template_version: number
+  template_sha256: string
+  context: { catalogue_url: string | null; catalogue_valid_until: string | null }
+}
+
+/** The send block of a trigger with a list of letters: like `SendRuleBlock`, with `letters` instead of `template`. */
+export interface LettersSendBlock {
+  identity: SendRuleBlock['identity']
+  letters: LetterEntry[]
+  send_window: SendRuleBlock['send_window']
+  health_breaker: SendRuleBlock['health_breaker']
+}
+
+export type SendBlockParse = { ok: true; send: SendRuleBlock | LettersSendBlock } | { ok: false; error: string }
+
+/** At most this many letters in one list (the database does not count them; the rule does). */
+export const MAX_LETTERS = 8
 
 const SEND_KEYS = ['identity', 'template', 'send_window', 'health_breaker']
+const LETTERS_SEND_KEYS = ['identity', 'letters', 'send_window', 'health_breaker']
+const LETTER_KEYS = ['letter_key', 'template_key', 'template_version', 'template_sha256', 'context']
+const CONTEXT_KEYS = ['catalogue_url', 'catalogue_valid_until']
+const SHA256_RE = /^[0-9a-f]{64}$/
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/
 const IDENTITY_KEYS = ['from', 'reply_to']
 const TEMPLATE_KEYS = ['key']
 const WINDOW_KEYS = ['start', 'end']
@@ -134,8 +167,81 @@ function parseBreaker(raw: unknown): SendRuleBlock['health_breaker'] | string {
   }
 }
 
+function parseCatalogueUrl(raw: unknown): string | null | undefined {
+  if (raw === null) return null
+  if (typeof raw !== 'string' || raw.length > 600) return undefined
+  try {
+    const url = new URL(raw)
+    return url.protocol === 'https:' && url.username === '' && url.password === '' ? raw : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function isCalendarDay(raw: string): boolean {
+  if (!DAY_RE.test(raw)) return false
+  const at = new Date(`${raw}T00:00:00.000Z`)
+  return !Number.isNaN(at.getTime()) && at.toISOString().slice(0, 10) === raw
+}
+
+function parseContext(raw: unknown, path: string): LetterEntry['context'] | string {
+  if (!isPlainObject(raw)) return `${path} must be a plain object`
+  const err = exactKeys(raw, CONTEXT_KEYS, path)
+  if (err) return err
+  const url = parseCatalogueUrl(raw.catalogue_url)
+  if (url === undefined) return `${path}.catalogue_url must be null or an https link`
+  const until = raw.catalogue_valid_until
+  if (until !== null && (typeof until !== 'string' || !isCalendarDay(until))) return `${path}.catalogue_valid_until must be null or YYYY-MM-DD`
+  return { catalogue_url: url, catalogue_valid_until: until }
+}
+
+function parseLetter(raw: unknown, i: number): LetterEntry | string {
+  const path = `send.letters[${i}]`
+  if (!isPlainObject(raw)) return `${path} must be a plain object`
+  const err = exactKeys(raw, LETTER_KEYS, path)
+  if (err) return err
+  if (typeof raw.letter_key !== 'string' || !LETTER_KEY_RE.test(raw.letter_key)) return `${path}.letter_key is malformed`
+  if (typeof raw.template_key !== 'string' || !TEMPLATE_KEY_RE.test(raw.template_key)) return `${path}.template_key is malformed`
+  if (!isAutomatedTemplateKey(raw.template_key)) return `${path}.template_key must be an automated (auto-) template`
+  if (!intIn(raw.template_version, 1, Number.MAX_SAFE_INTEGER)) return `${path}.template_version must be an integer >= 1`
+  if (typeof raw.template_sha256 !== 'string' || !SHA256_RE.test(raw.template_sha256)) return `${path}.template_sha256 must be 64 lower-case hex characters`
+  const context = parseContext(raw.context, `${path}.context`)
+  if (typeof context === 'string') return context
+  return { letter_key: raw.letter_key, template_key: raw.template_key, template_version: raw.template_version, template_sha256: raw.template_sha256, context }
+}
+
+function parseLetters(raw: unknown): LetterEntry[] | string {
+  if (!Array.isArray(raw) || raw.length < 1 || raw.length > MAX_LETTERS) return `send.letters must hold 1..${MAX_LETTERS} letters`
+  const letters: LetterEntry[] = []
+  const seen = new Set<string>()
+  for (let i = 0; i < raw.length; i += 1) {
+    const letter = parseLetter(raw[i], i)
+    if (typeof letter === 'string') return letter
+    if (seen.has(letter.letter_key)) return `send.letters has the letter_key ${letter.letter_key} twice`
+    seen.add(letter.letter_key)
+    letters.push(letter)
+  }
+  return letters
+}
+
+function parseLettersBlock(raw: Record<string, unknown>): SendBlockParse {
+  if (Object.prototype.hasOwnProperty.call(raw, 'template')) return { ok: false, error: 'send.template and send.letters are exclusive' }
+  const err = exactKeys(raw, LETTERS_SEND_KEYS, 'send')
+  if (err) return { ok: false, error: err }
+  const identity = parseIdentity(raw.identity)
+  if (typeof identity === 'string') return { ok: false, error: identity }
+  const letters = parseLetters(raw.letters)
+  if (typeof letters === 'string') return { ok: false, error: letters }
+  const window = parseSendWindow(raw.send_window)
+  if (typeof window === 'string') return { ok: false, error: window }
+  const breaker = parseBreaker(raw.health_breaker)
+  if (typeof breaker === 'string') return { ok: false, error: breaker }
+  return { ok: true, send: { identity, letters, send_window: window, health_breaker: breaker } }
+}
+
 export function parseSendBlock(raw: unknown): SendBlockParse {
   if (!isPlainObject(raw)) return { ok: false, error: 'send must be a plain object' }
+  if (Object.prototype.hasOwnProperty.call(raw, 'letters')) return parseLettersBlock(raw)
   const err = exactKeys(raw, SEND_KEYS, 'send')
   if (err) return { ok: false, error: err }
   const identity = parseIdentity(raw.identity)
@@ -148,3 +254,24 @@ export function parseSendBlock(raw: unknown): SendBlockParse {
   if (typeof breaker === 'string') return { ok: false, error: breaker }
   return { ok: true, send: { identity, template, send_window: window, health_breaker: breaker } }
 }
+
+/** A send block with a letter list (and not a single template). */
+export function isLettersBlock(send: SendRuleBlock | LettersSendBlock): send is LettersSendBlock {
+  return Object.prototype.hasOwnProperty.call(send, 'letters')
+}
+
+/**
+ * The fingerprint of a letter list, stored as the authorization's `template_sha256` (with `template_version` 1): sha256
+ * of the canonical JSON of the letters sorted by key, each with only its key and its pinned template. The list itself
+ * lives in the rule (covered by the rule's own fingerprint); this makes a changed template visible in the same column
+ * the one-letter authorization uses.
+ */
+export function lettersFingerprint(letters: readonly LetterEntry[]): string {
+  const sorted = [...letters]
+    .sort((a, b) => (a.letter_key < b.letter_key ? -1 : a.letter_key > b.letter_key ? 1 : 0))
+    .map((l) => `{"letter_key":${JSON.stringify(l.letter_key)},"template_key":${JSON.stringify(l.template_key)},"template_sha256":${JSON.stringify(l.template_sha256)},"template_version":${l.template_version}}`)
+  return createHash('sha256').update(`[${sorted.join(',')}]`, 'utf8').digest('hex')
+}
+
+/** The template version stored on a letter-list authorization (the list's own fingerprint is the sha). */
+export const LETTER_LIST_TEMPLATE_VERSION = 1

@@ -50,12 +50,16 @@ async function live(): Promise<NextResponse> {
     }
     const now = new Date()
     const receipt = await runIntradaySample(productionDeps(), { now, sleep: delay })
+    const { runPredictiveEarlyWarning } = await import(
+      '@/lib/ads-strategy/monitoring/predictive-early-warning/run'
+    )
+    const earlyWarning = await runPredictiveEarlyWarning(supabaseAdmin, now, receipt.earlyWarningSnaps)
     const proposal = await liveProposal(now)
     await cronRun.finish({
       processed: receipt.accountsSampled + receipt.failed,
       completed: receipt.accountsSampled + receipt.noLive,
       failed: receipt.failed,
-      summary: { ...receipt, proposal } as unknown as Record<string, unknown>,
+      summary: { ...receipt, proposal, earlyWarning } as unknown as Record<string, unknown>,
     })
     return NextResponse.json({ ok: receipt.failed === 0, ...receipt, proposal })
   } catch {

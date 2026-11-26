@@ -23,7 +23,16 @@ import {
   type CampaignDailyPlanData,
 } from '@/lib/campaign/daily-plan'
 import { postChecklistPasses } from '@/lib/social/content-review'
-import { judgePriceClaimWithSource, priceGateMessage } from '@/lib/content/price-claim-gate'
+import {
+  findPriceGateBlocks,
+  findStalePosterBlocks,
+  findUnsignedPosterBlocks,
+  loadPosterParentSources,
+  priceFactText,
+  posterImageFacts,
+  posterParentIds,
+  type GateAssetRow,
+} from '@/lib/campaign/daily-plan-poster-backing'
 import { judgePostPriceFacts, loadOfferPriceFacts } from '@/lib/content/price-fact-gate'
 import {
   buildDailyPlanAutoChecks,
@@ -170,11 +179,13 @@ async function buildCandidates(
   const assetIds = Array.from(new Set(selected.map(post => post.image_asset_id)))
   const { data: assets, error } = await supabaseAdmin
     .from('client_assets')
-    .select('id, storage_url, mime_type, status, archived_at, source')
+    .select('id, storage_url, mime_type, status, archived_at, source, verified_by, verified_at, vision_metadata')
     .eq('client_id', clientId)
     .in('id', assetIds)
   if (error) throw error
   const assetById = new Map((assets ?? []).map(asset => [asset.id, asset]))
+  // AI posters are judged against their parent photo's *current* source (same client).
+  const parentSources = await loadPosterParentSources(supabaseAdmin, clientId, posterParentIds(assets ?? []))
 
   const bundleByDate = new Map(row.planData.bundles.map(bundle => [bundle.date, bundle]))
   const candidates: PublishCandidate[] = []
@@ -235,6 +246,7 @@ async function buildCandidates(
       judgedText: [message, firstComment.text].join('\n\n'),
       imageUrl: asset.storage_url as string,
       imageSource: (asset.source as string | null) ?? null,
+      ...posterImageFacts(asset as GateAssetRow, parentSources),
     })
   }
 
@@ -312,24 +324,8 @@ async function resolvePageToken(
   return { token, tokenSource }
 }
 
-/**
- * 「真实价格只能配真实画面」—— 服务端那道闸，跟 `lib/content/price-claim-gate` 同源。
- *
- * 界面上的闸挡的是手滑；这里挡的是绕过界面的路。这条 bridge 一旦跑起来东西就真
- * 出去了，人不在场，所以每条待发 Post 的文案都要过一遍：文案报了价、配图却背不了
- * 真价，就拦下整批，让审核者在授权前先看到。判定与界面共用同一段代码，不会出现
- * 「界面拦了后端放行」这种最难查的不一致。
- */
-function findPriceGateBlocks(
-  posts: PublishCandidate[],
-): Array<{ date: string; message: string }> {
-  const blocks: Array<{ date: string; message: string }> = []
-  for (const post of posts) {
-    const verdict = judgePriceClaimWithSource({ caption: post.judgedText, source: post.imageSource })
-    if (verdict.blocked) blocks.push({ date: post.date, message: priceGateMessage(verdict.source) })
-  }
-  return blocks
-}
+// 「真实价格只能配真实画面」那道闸（含 AI 海报新规矩）在 `daily-plan-poster-backing.ts`
+// 的 `findPriceGateBlocks`：判定与界面共用 `judgePriceClaimWithSource`，非海报的判法不变。
 
 /**
  * 价格数字核对 —— 价格闸的第二步：文案里写的每个价格数字，必须跟客户资料里该团的
@@ -345,7 +341,8 @@ async function findPriceFactBlocks(
   const offers = await loadOfferPriceFacts(supabaseAdmin, clientId)
   const blocks: Array<{ date: string; reason: string; message: string }> = []
   for (const post of posts) {
-    const result = judgePostPriceFacts({ text: post.judgedText, ctaUrl: post.cta_url, offers })
+    // Poster text is judged with the copy: a price printed on the image must match the facts too.
+    const result = judgePostPriceFacts({ text: priceFactText(post), ctaUrl: post.cta_url, offers })
     if (result.verdict.status === 'blocked') {
       blocks.push({ date: post.date, reason: result.verdict.reason, message: result.message })
     }
@@ -410,6 +407,18 @@ export async function runDailyPlanPublish(input: RunDailyPlanPublishInput): Prom
   if (priceBlocks.length > 0) return refuse(conflict('PRICE_CLAIM_UNBACKED', {
     blocked: priceBlocks,
     hint: '整批已暂停（不是只拦列出的日期）：把列出日期的价格去掉或换成客户确认过的图，再重新演练。',
+  }))
+
+  // AI 海报：不管有没有价格都要签过字；海报上的出发日已过也不能发。
+  const unsignedBlocks = findUnsignedPosterBlocks(pending)
+  if (unsignedBlocks.length > 0) return refuse(conflict('POSTER_NOT_CONFIRMED', {
+    blocked: unsignedBlocks,
+    hint: '整批已暂停（不是只拦列出的日期）：去素材库对过原图、给列出日期的海报签字，再重新演练。',
+  }))
+  const staleBlocks = findStalePosterBlocks(pending, (input.now ?? new Date()).toISOString().slice(0, 10))
+  if (staleBlocks.length > 0) return refuse(conflict('POSTER_DEPARTURE_PASSED', {
+    blocked: staleBlocks,
+    hint: '整批已暂停（不是只拦列出的日期）：列出日期的海报出发日已过，换回原图或重新出海报。',
   }))
 
   // 价格数字核对：图过关了还要看数字——价格对不上客户资料的，整批同样暂停。

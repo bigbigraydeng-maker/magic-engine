@@ -765,6 +765,14 @@ export default function ClientDetailPage() {
                   badge="in_house"
                 />
               )}
+              {industryFeatureFlags(client?.industry).tailor_made && (
+                <ToolCard
+                  href={`/dashboard/clients/${clientId}/confirmation`}
+                  title="确认单生成器"
+                  desc="地接确认单：填团号、航班、每天行程、酒店 → 一键出品牌 PDF / Word"
+                  badge="in_house"
+                />
+              )}
               {industryFeatureFlags(client?.industry).tour_catalog && (
                 <ToolCard
                   href={`/dashboard/clients/${clientId}/tour-catalog`}

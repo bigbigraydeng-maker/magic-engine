@@ -22,6 +22,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { filterRowsWithClientId } from '@/lib/clients/external-data-pull-allowlist'
 import { supabaseAdmin } from '@/lib/supabase'
 import { fetchPagePosts, type PagePost } from '@/lib/meta/page-posts'
 import { authorizeConfiguredPage } from '@/lib/meta/page-sync-authorization'
@@ -131,7 +132,8 @@ export async function loadPageMappings(supabase: SupabaseClient): Promise<PageMa
     }
   }
 
-  return Array.from(byClient.entries()).map(([client_id, page_id]) => ({ client_id, page_id }))
+  const mappings = Array.from(byClient.entries()).map(([client_id, page_id]) => ({ client_id, page_id }))
+  return filterRowsWithClientId(mappings)
 }
 
 /** 主页这一腿里，真正算进 failed_count 的条数。已知坏令牌不算，它们有自己的待办。 */

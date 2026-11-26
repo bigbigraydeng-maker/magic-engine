@@ -6,9 +6,11 @@ import {
   GO_LIVE_CONFIRM_LABEL,
   pausedDraftClickUrl,
 } from '@/lib/ads-strategy/paused-draft-copy'
+import type { AddCreativeCardDetail } from '@/lib/ads-creative-card/display'
+import type { VideoUploadCardDetail } from '@/lib/ads-strategy/video-upload-card'
 import type { CardStatus } from '@/lib/confirmation-card/view'
 import { ConfirmationCard } from './ConfirmationCard'
-import { STATUS_CHIP_LABEL, isMutedStatus } from './card-display'
+import { STATUS_CHIP_LABEL, addCreativeChipClass, isMutedStatus, visibleStatusChip } from './card-display'
 
 export interface CardPayload {
   readonly runId: string
@@ -25,10 +27,48 @@ export interface CardPayload {
   readonly confirmEnabled: boolean
   readonly declineEnabled: boolean
   readonly blockedReason: string | null
+  readonly addCreativeDetail?: AddCreativeCardDetail | null
+  readonly addCreativeStatusChip?: string | null
+  readonly videoUploadDetail?: VideoUploadCardDetail | null
 }
 
 function text(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value : null
+}
+
+function readVideoUploadDetail(value: unknown): VideoUploadCardDetail | null {
+  if (!value || typeof value !== 'object') return null
+  const row = value as Record<string, unknown>
+  if (typeof row.videoUrl !== 'string' || !row.videoUrl.startsWith('https://')) return null
+  return { videoUrl: row.videoUrl, title: text(row.title) }
+}
+
+function readAddCreativeDetail(value: unknown): AddCreativeCardDetail | null {
+  if (!value || typeof value !== 'object') return null
+  const row = value as Record<string, unknown>
+  const adName = text(row.adName)
+  const headline = text(row.headline)
+  const primaryText = text(row.primaryText)
+  const ctaLabel = text(row.ctaLabel)
+  const adSetLabel = text(row.adSetLabel)
+  const newAdStatusLabel = text(row.newAdStatusLabel)
+  const confirmSentence = text(row.confirmSentence)
+  const imageFilename = text(row.imageFilename)
+  if (!adName || !headline || !primaryText || !ctaLabel || !adSetLabel || !newAdStatusLabel || !confirmSentence || !imageFilename) {
+    return null
+  }
+  const imageUrl = typeof row.imageUrl === 'string' && row.imageUrl.startsWith('https://') ? row.imageUrl : null
+  return {
+    imageUrl,
+    imageFilename,
+    adName,
+    headline,
+    primaryText,
+    ctaLabel,
+    adSetLabel,
+    newAdStatusLabel,
+    confirmSentence,
+  }
 }
 
 function readStatus(value: unknown): CardStatus {
@@ -70,6 +110,9 @@ export function toCardPayload(value: unknown): CardPayload | null {
     confirmEnabled: row.confirmEnabled,
     declineEnabled: row.declineEnabled,
     blockedReason: row.blockedReason,
+    addCreativeDetail: readAddCreativeDetail(row.addCreativeDetail),
+    addCreativeStatusChip: text(row.addCreativeStatusChip),
+    videoUploadDetail: readVideoUploadDetail(row.videoUploadDetail),
   }
 }
 
@@ -120,7 +163,14 @@ function CardRow({ clientId, card }: { clientId: string; card: CardPayload }) {
     setNote(null)
     const result = await postDecision(clientId, view, resolution)
     if (typeof result === 'string') setNote(result)
-    else setView(result)
+    else {
+      setView({
+        ...result,
+        addCreativeDetail: result.addCreativeDetail ?? view.addCreativeDetail,
+        addCreativeStatusChip: result.addCreativeStatusChip ?? view.addCreativeStatusChip,
+        videoUploadDetail: result.videoUploadDetail ?? view.videoUploadDetail,
+      })
+    }
     setBusy(false)
   }
 
@@ -142,6 +192,9 @@ function CardRow({ clientId, card }: { clientId: string; card: CardPayload }) {
         muted={isMutedStatus(view.status)}
         goLiveHref={goLive ? GO_LIVE_CONFIRM_HREF : undefined}
         goLiveLabel={goLive ? GO_LIVE_CONFIRM_LABEL : undefined}
+        addCreativeDetail={view.addCreativeDetail}
+        addCreativeStatusChip={view.addCreativeStatusChip}
+        videoUploadDetail={view.videoUploadDetail}
         onConfirm={() => { void send('confirm') }}
         onDecline={() => { void send('decline') }}
       />
@@ -178,9 +231,10 @@ function StatusChip({
 }
 
 function RecentRow({ card }: { card: CardPayload }) {
-  const chip = STATUS_CHIP_LABEL[card.status]
-  const chipClass =
-    card.status === 'confirmed'
+  const chip = visibleStatusChip(card)
+  const chipClass = card.addCreativeStatusChip
+    ? addCreativeChipClass(card.addCreativeStatusChip)
+    : card.status === 'confirmed'
       ? 'bg-sky-100 text-sky-900'
       : card.status === 'declined'
         ? 'bg-me-charcoal/10 text-me-charcoal/70'

@@ -43,6 +43,7 @@ const ALLOWED_PROVIDER_KEYS: Record<string, RegExp> = {
 const PROVIDER_NAME = /published_tours|publishedTours|PublishedTour/
 // Known coupling (see the header): the shared gates and the settings contract name the single provider that exists today.
 const PROVIDER_NAME_ALLOWED = new Set([
+  'src/lib/crm/email-templates/link-tracking/page-label-facts-prod.ts',
   'src/lib/crm/email-templates/types.ts',
   'src/lib/crm/email-templates/settings.ts',
   'src/lib/crm/email-templates/send-gates.ts',

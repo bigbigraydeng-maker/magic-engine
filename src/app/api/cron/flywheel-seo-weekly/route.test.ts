@@ -53,6 +53,7 @@ describe('GET /api/cron/flywheel-seo-weekly — 手动补触发', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     process.env.CRON_SECRET = CRON_SECRET
+    vi.stubEnv('EXTERNAL_DATA_PULL_CLIENT_IDS', '*')
     mockSendInngestEvent.mockResolvedValue({ event_ids: ['evt_1'] })
   })
 
@@ -154,6 +155,23 @@ describe('GET /api/cron/flywheel-seo-weekly — 手动补触发', () => {
     expect(await res.json()).toMatchObject({ client_id: CTS, clients_dispatched: 1 })
     expect(mockSendInngestEvent).toHaveBeenCalledTimes(1)
     expect(mockSendInngestEvent.mock.calls[0][0].data.client_id).toBe(CTS)
+  })
+
+  it('显式 client_id 不走外部拉取白名单', async () => {
+    vi.stubEnv('EXTERNAL_DATA_PULL_CLIENT_IDS', '')
+    delete process.env.EXTERNAL_DATA_PULL_CLIENT_IDS
+    mockClientsQuery.mockResolvedValue({
+      data: [
+        { id: CTS, domain: 'ctstours.co.nz' },
+        { id: OZTOP, domain: 'oztopbuildingsupplies.com.au' },
+      ],
+      error: null,
+    })
+    const { GET } = await import('./route')
+    const res = await GET(makeRequest(CRON_SECRET, OZTOP))
+    expect(res.status).toBe(200)
+    expect(mockSendInngestEvent).toHaveBeenCalledTimes(1)
+    expect(mockSendInngestEvent.mock.calls[0][0].data.client_id).toBe(OZTOP)
   })
 
   it('attempt 模式生成新的去重键，且只接受安全字符', async () => {

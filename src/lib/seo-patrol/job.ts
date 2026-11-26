@@ -22,6 +22,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { filterRowsWithId } from '@/lib/clients/external-data-pull-allowlist'
 import { supabaseAdmin } from '@/lib/supabase'
 import { persistZhugeActions, executionItemDedupKey } from '@/lib/zhuge/action-persister'
 import { SEO_ACTION_TYPE } from '@/lib/flywheel/vocabulary'
@@ -624,10 +625,12 @@ export async function runSeoPatrol(
     throw new Error(`Failed to load clients: ${error.message}`)
   }
 
-  const eligible = ((clients ?? []) as Array<{ id: string; domain: string | null; semrush_db: string | null }>)
-    .filter((c): c is SeoPatrolClient =>
-      typeof c.id === 'string' && typeof c.domain === 'string' && c.domain.trim().length > 0,
-    )
+  const eligible = filterRowsWithId(
+    ((clients ?? []) as Array<{ id: string; domain: string | null; semrush_db: string | null }>).filter(
+      (c): c is SeoPatrolClient =>
+        typeof c.id === 'string' && typeof c.domain === 'string' && c.domain.trim().length > 0,
+    ),
+  )
 
   const results: SeoPatrolClientResult[] = []
   for (const client of eligible) {

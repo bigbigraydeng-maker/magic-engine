@@ -753,6 +753,74 @@ describe('pushPriceGateItems — href 必须指到「真的能改」的地方，
   })
 })
 
+describe('pushPriceGateItems — AI 海报被拦也要进待办（不只看文案有没有价）', () => {
+  const PARENT = 'a1b2c3d4-0000-4000-8000-000000000001'
+  const POSTER_URL = 'https://x.supabase.co/storage/v1/object/public/visual-assets/c1/posters/image-v1-1.jpg'
+  const posterRow = {
+    id: 'poster-7', source: 'ai_generated', verified_by: null, verified_at: null,
+    vision_metadata: { poster: {
+      recipe_id: 'tour_poster_v1', recipe_version: 1, source_asset_id: PARENT, has_price: false, text_lines: ['X'],
+      cost_usd: 0.038, provider_request_id: null, created_at: '2026-11-15T00:00:00.000Z', next_depart_on: null,
+    } },
+  }
+
+  /**
+   * Fake of the chains pushPriceGateItems + judgeOutgoingPost run, enumerated (穷举) from source:
+   *   content_posts: select → eq                         visual_assets: select → eq → order×3 → limit
+   *   client_assets: select → eq → eq → limit → maybeSingle   (gate lookup / href lookup)
+   *                  select → eq → eq → maybeSingle            (parent photo)
+   * `queried` records every client_assets select so the test can prove no extra lookups.
+   */
+  function fake(imageUrl: string, queried: string[]): SupabaseClient {
+    const post = { id: 'post-2', client_id: 'c1', title: '海报帖', caption: 'Discover China this spring' }
+    const contentPosts = { select: () => contentPosts, eq: async () => ({ data: [post], error: null }) }
+    const visual: Record<string, unknown> = {}
+    visual.select = () => visual
+    visual.eq = () => visual
+    visual.order = () => visual
+    visual.limit = async () => ({ data: [{ storage_url: imageUrl }], error: null })
+    const assets = () => {
+      let cols = ''
+      const b: Record<string, unknown> = {}
+      b.select = (c: string) => { cols = c; queried.push(c); return b }
+      b.eq = () => b
+      b.limit = () => b
+      b.maybeSingle = async () => ({
+        data: cols.startsWith('source, archived_at') ? { source: 'client_verified', archived_at: null } : cols === 'id' ? { id: 'poster-7' } : posterRow,
+        error: null,
+      })
+      return b
+    }
+    const client = {
+      from: (table: string) => {
+        if (table === 'content_posts') return contentPosts
+        if (table === 'visual_assets') return visual
+        if (table === 'client_assets') return assets()
+        throw new Error(`unexpected table in test: ${table}`)
+      },
+    }
+    return client as unknown as SupabaseClient
+  }
+
+  it('文案没价、配图是没签字的海报 → 生成待办，链接到海报，说明里附原图链接', async () => {
+    const items: ManualItem[] = []
+    await pushPriceGateItems(fake(POSTER_URL, []), items, () => 'CTS Tours NZ')
+    expect(items).toHaveLength(1)
+    expect(items[0].kind).toBe('price_claim_unbacked')
+    expect(items[0].href).toBe('https://app.magicengine.com.au/dashboard/clients/c1/assets?highlight=poster-7')
+    expect(items[0].how).toContain(`assets?highlight=${PARENT}`)
+    expect(items[0].what).toContain('还没有团队成员对过原图签字')
+  })
+
+  it('文案没价、配图不是海报地址 → 不查素材库，不出待办（跟以前一样）', async () => {
+    const items: ManualItem[] = []
+    const queried: string[] = []
+    await pushPriceGateItems(fake('https://img/plain.jpg', queried), items, () => 'CTS Tours NZ')
+    expect(items).toHaveLength(0)
+    expect(queried).toEqual([])
+  })
+})
+
 describe('pushClientDocManualTaskItems — 客户文档里的一次性人工请求必须进今日待办', () => {
   const task = {
     clientId: 'c0000000-0000-0000-0000-000000000000',

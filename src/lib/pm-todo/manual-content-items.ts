@@ -7,7 +7,7 @@ import type { ManualItem } from './manual-item-types'
 import { renderWorkerDownReason, type AlivePing } from '@/lib/factory/render-worker-report'
 import { judgeWorkerPresence, judgeQueueByClient, latestAliveAt } from '@/lib/factory/worker-presence'
 import { containsPriceClaim } from '@/lib/content/price-claim'
-import { judgeOutgoingPost } from '@/lib/content/price-claim-gate'
+import { judgeOutgoingPost, type PriceClaimVerdict } from '@/lib/content/price-claim-gate'
 import { SOURCE_LABELS } from '@/lib/assets/provenance'
 
 /** 出片余额充值页 —— 用户自己的账户页,不是深链,登录后一定打得开。 */
@@ -100,6 +100,35 @@ export async function pushCreatomateRenderItems(
   }
 }
 
+const ASSETS_PAGE = (clientId: string, assetId: string) =>
+  `https://app.magicengine.com.au/dashboard/clients/${clientId}/assets?highlight=${assetId}`
+
+/** 配图是 AI 海报而被拦：链接直达海报（那里有原图链接和签字按钮），说明里再附原图链接。 */
+function posterGateItem(
+  post: { id: string; client_id: string; title: string | null },
+  verdict: PriceClaimVerdict,
+  nameOf: (id: string) => string,
+): ManualItem {
+  const posterLink = verdict.posterAssetId ? ASSETS_PAGE(post.client_id, verdict.posterAssetId) : null
+  const originalLink = verdict.posterSourceAssetId ? ASSETS_PAGE(post.client_id, verdict.posterSourceAssetId) : null
+  const why = verdict.lookupFailed
+    ? '配图的来源核对不了（素材库查询出错，或海报记录找不到）'
+    : verdict.posterSigned === false
+      ? '配图是 AI 海报，还没有团队成员对过原图签字'
+      : '配图是 AI 海报，报了价（文案或海报上），但原图本身打不了真价'
+  return {
+    kind: 'price_claim_unbacked',
+    client_id: post.client_id,
+    client_name: nameOf(post.client_id),
+    what: `帖子「${post.title ?? post.id}」已审批但发不出去 —— ${why}。海报是模型排的，可能把照片里的东西或字改错了。`,
+    how:
+      '两条路选一条：① 换回原图（文案有价就一并去掉）；' +
+      '② 打开原图对一遍海报，原图本身能打真价、海报上的字也对，就在海报卡片上点「已对原图，确认」，再回来重发。' +
+      (originalLink ? `原图：${originalLink}` : '原图已不在素材库，只能走第 ① 条。'),
+    href: posterLink ?? originalLink ?? `https://app.magicengine.com.au/dashboard/clients/${post.client_id}/execution`,
+  }
+}
+
 /**
  * 审批过了但发不出去的帖子 —— 文案报了价，配图来源却背不了真价。
  *
@@ -125,11 +154,9 @@ export async function pushPriceGateItems(
     caption: string | null
   }>
 
-  // 绝大多数帖子不报价 —— 先在内存里筛掉，别为了没价格的帖子去查素材。
-  const withPrice = rows.filter((p) => containsPriceClaim(p.caption))
-  if (withPrice.length === 0) return
-
-  for (const post of withPrice) {
+  // 文案没价的帖子也要看：配图是 AI 海报时，没签字 / 图里有价同样发不出去（PM 2026-11-15）。
+  // 只有地址落在 `/posters/` 下的图才可能是海报，其余没价的帖子照旧跳过、不再多查素材库。
+  for (const post of rows) {
     // 跟 create-post 取图口径一致：外部改过的终版优先，其次选中的，再次最新的。
     const { data: assets } = await supabase
       .from('visual_assets')
@@ -142,6 +169,7 @@ export async function pushPriceGateItems(
       .limit(1)
     const storageUrl = (assets ?? [])[0]?.storage_url as string | undefined
     if (!storageUrl) continue // 没配图 = 发不出去是别的原因，不归这条管
+    if (!containsPriceClaim(post.caption) && !storageUrl.includes('/posters/')) continue
 
     const verdict = await judgeOutgoingPost(supabase, {
       clientId: post.client_id,
@@ -162,6 +190,11 @@ export async function pushPriceGateItems(
       .limit(1)
       .maybeSingle()
     const libraryAssetId = (libraryRow as { id: string } | null)?.id
+
+    if (verdict.poster || verdict.lookupFailed) {
+      items.push(posterGateItem(post, verdict, nameOf))
+      continue
+    }
 
     items.push({
       kind: 'price_claim_unbacked',

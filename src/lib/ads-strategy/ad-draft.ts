@@ -222,8 +222,42 @@ export interface AdDraft {
   placements?: string[]
 }
 
-/** 每天最多敢自动花多少 —— 超过这个数不是 ME 该自己决定的事。 */
+/**
+ * 客户没设每日上限时，一份草稿每天最多写多少。
+ * 设了上限的客户按自己的上限走（`draftDailyCeiling`），不再一刀切这个数。
+ */
 export const MAX_AUTO_DAILY_BUDGET = 50
+
+/** 一份草稿每天预算的顶。调用方不给就是 `MAX_AUTO_DAILY_BUDGET`。 */
+export interface DraftLimits {
+  /** 整数货币单位（不是分）。 */
+  maxDailyBudget: number
+}
+
+function usableCapCents(cents: number | null | undefined): number | null {
+  return typeof cents === 'number' && Number.isSafeInteger(cents) && cents > 0 ? cents : null
+}
+
+/**
+ * 草稿每天预算的顶：客户总上限和这个账户的上限里较小的那个（分换成元）。
+ * 两个都没设、或读到的不是正整数分 → 回到 `MAX_AUTO_DAILY_BUDGET`。
+ * 已在投加这份草稿是否超上限，另由确认卡的日预算上限检查判，这里只管单份草稿。
+ */
+export function draftDailyCeiling(
+  clientCapCents: number | null | undefined,
+  accountCapCents: number | null | undefined,
+): number {
+  const caps = [usableCapCents(clientCapCents), usableCapCents(accountCapCents)].filter(
+    (c): c is number => c !== null,
+  )
+  if (caps.length === 0) return MAX_AUTO_DAILY_BUDGET
+  return Math.min(...caps) / 100
+}
+
+function ceilingOf(limits: DraftLimits | undefined): number {
+  const max = limits?.maxDailyBudget
+  return typeof max === 'number' && Number.isFinite(max) && max > 0 ? max : MAX_AUTO_DAILY_BUDGET
+}
 
 /** 一次最少跑几天（Meta：每日预算的广告组时长必须超过 24 小时）。 */
 export const MIN_DURATION_DAYS = 2
@@ -252,7 +286,7 @@ export interface DraftProblem {
   message: string
 }
 
-type ExpandedDraftCheck = (d: AdDraft) => DraftProblem[]
+type ExpandedDraftCheck = (d: AdDraft, maxDailyBudget: number) => DraftProblem[]
 
 /**
  * Extra field checks live in ad-draft-expansion.ts. That file reads
@@ -273,7 +307,7 @@ export function registerExpandedDraftProblems(check: ExpandedDraftCheck): void {
  * 这里**只查 ME 自己能确定的事**（缺字段、超预算、打法和参数对不上）。
  * 买家会看到什么、Meta 会自动加什么，一律等建完回读 —— 那些在这里查不出来。
  */
-export function validateDraft(d: AdDraft): DraftProblem[] {
+export function validateDraft(d: AdDraft, limits?: DraftLimits): DraftProblem[] {
   // 请求体是 `body as AdDraft`，形状没人保证过 —— 先挡住会让后面直接抛 500（且不留账）的输入。
   if (!isKnownDraftKind(d.kind)) {
     return [{ field: 'kind', message: `不认识的广告类型：${String(d.kind)}` }]
@@ -291,7 +325,7 @@ export function validateDraft(d: AdDraft): DraftProblem[] {
   }
   const multi = Array.isArray(d.adSets)
   return [
-    ...validateCommon(d),
+    ...validateCommon(d, ceilingOf(limits)),
     ...(d.kind === 'messenger_conversation' && !multi ? validateMessenger(d) : []),
   ]
 }
@@ -325,16 +359,16 @@ export function ageProblems(ageMin: number | undefined, ageMax: number | undefin
   return p
 }
 
-function moneyAndSpanProblems(d: AdDraft): DraftProblem[] {
+function moneyAndSpanProblems(d: AdDraft, maxDailyBudget: number): DraftProblem[] {
   const p: DraftProblem[] = []
   if (!Number.isFinite(d.dailyBudget) || d.dailyBudget <= 0) {
     p.push({ field: 'dailyBudget', message: '每天预算必须是大于 0 的数' })
   } else if (!isWholeCents(d.dailyBudget)) {
     p.push({ field: 'dailyBudget', message: '每天预算最多写到分（两位小数），多出来的位数会被 Meta 悄悄四舍五入' })
-  } else if (d.dailyBudget > MAX_AUTO_DAILY_BUDGET) {
+  } else if (d.dailyBudget > maxDailyBudget) {
     p.push({
       field: 'dailyBudget',
-      message: `每天 ${d.dailyBudget} 超过自动发布上限 ${MAX_AUTO_DAILY_BUDGET} —— 这个量级要人自己决定`,
+      message: `每天 ${d.dailyBudget} 超过建草稿的每日上限 ${maxDailyBudget} —— 这个量级要人自己决定`,
     })
   }
   if (!Number.isInteger(d.durationDays) || d.durationDays <= 0) {
@@ -350,12 +384,12 @@ function moneyAndSpanProblems(d: AdDraft): DraftProblem[] {
   return p
 }
 
-function validateCommon(d: AdDraft): DraftProblem[] {
+function validateCommon(d: AdDraft, maxDailyBudget: number): DraftProblem[] {
   const p: DraftProblem[] = []
 
   if (!d.clientId) p.push({ field: 'clientId', message: '没说是哪个客户' })
   if (!d.pageId) p.push({ field: 'pageId', message: '没说用哪个主页发' })
-  p.push(...moneyAndSpanProblems(d))
+  p.push(...moneyAndSpanProblems(d, maxDailyBudget))
 
   if (!Array.isArray(d.adSets)) {
     if (!d.geoCountries || d.geoCountries.length === 0) {
@@ -377,7 +411,7 @@ function validateCommon(d: AdDraft): DraftProblem[] {
   }
   p.push(...reelsLeadDraftProblems(d))
 
-  p.push(...expandedDraftProblems(d))
+  p.push(...expandedDraftProblems(d, maxDailyBudget))
 
   return p
 }

@@ -16,6 +16,7 @@ import {
   hookRows,
   hookTypeSize,
   inferHookStyle,
+  looksThai,
   overlayWindows,
   postcardCardTop,
   resolveEndCard,
@@ -172,6 +173,25 @@ describe('hook fallbacks', () => {
     const lines = wrapHeadline('One two three four five six seven')
     assert.ok(lines.length >= 2)
     assert.ok(lines.length <= 3)
+  })
+
+  test('Thai headline wraps between words and never starts a line with a combining mark', () => {
+    for (const text of ['วีซ่านักเรียนผ่านฉลุย', 'ทุนเรียนต่อนิวซีแลนด์มีจริง', 'วีซ่านักเรียนยื่นจากประเทศไทย ผ่านฉลุย']) {
+      const lines = wrapHeadline(text)
+      assert.ok(lines.length >= 1 && lines.length <= 3, `${text} -> ${lines.length} lines`)
+      assert.equal(lines.join('').replace(/\s/g, ''), text.replace(/\s/g, ''))
+      for (const line of lines) assert.ok(!/^[\u0e31\u0e34-\u0e3a\u0e47-\u0e4e]/.test(line), line)
+    }
+  })
+
+  test('looksThai detects Thai only', () => {
+    assert.equal(looksThai('ผ่าน'), true)
+    assert.equal(looksThai('Pass'), false)
+    assert.equal(looksThai('通过'), false)
+  })
+
+  test('English headline wrapping is unchanged', () => {
+    assert.deepEqual(wrapHeadline('One two three four five six seven'), ['One two three', 'four five six', 'seven'])
   })
 
   test('empty copy stays English, and Chinese copy selects the Chinese line', () => {

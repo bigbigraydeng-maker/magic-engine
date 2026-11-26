@@ -62,6 +62,11 @@ const LOADERS: Record<string, () => Promise<RouteModule>> = {
   'market-intel-daily': () => import('@/app/api/cron/market-intel-daily/route'),
   'cron-run-logs-cleanup': () => import('@/app/api/cron/cron-run-logs-cleanup/route'),
   'baseline-domains-monthly': () => import('@/app/api/cron/baseline-domains-monthly/route'),
+  'telephony-direct-sweep': () => import('@/app/api/cron/telephony-direct-sweep/route'),
+  'lead-sheet-direct-sync': () => import('@/app/api/cron/lead-sheet-direct-sync/route'),
+  'maliang-direct-sweep': () => import('@/app/api/cron/maliang-direct-sweep/route'),
+  'crm-followup-stopline': () => import('@/app/api/cron/crm-followup-stopline/route'),
+  'crm-ai-pickup': () => import('@/app/api/cron/crm-ai-pickup/route'),
 }
 
 export function dispatchLoaderRoutes(): string[] {

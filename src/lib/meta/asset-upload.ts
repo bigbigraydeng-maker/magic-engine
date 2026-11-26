@@ -121,24 +121,58 @@ export async function uploadVideoToMeta(
   }
 }
 
-/** Read one video back from this ad account. Does not create or open an ad. */
+/**
+ * Read one video back from this ad account. Does not create or open an ad.
+ *
+ * Graph has no `/act_x/advideos/<id>` path (2026-11-23: every read-back failed that way while
+ * both uploads were really in the account), so this lists the account's videos and looks for
+ * the id. A fresh upload is only listed once Meta finishes processing it (2026-11-23: ~21 s for an
+ * 18 s clip), so it keeps looking for about a minute — inside the 120 s confirm route.
+ */
 export async function readVideoInAdAccount(
   adAccountId: string,
   videoId: string,
   accessToken: string,
+  opts: { attempts?: number; waitMs?: number; sleep?: (ms: number) => Promise<void> } = {},
 ): Promise<{ ok: true; videoId: string } | { ok: false; error: string }> {
   if (!/^\d{1,32}$/.test(videoId)) return { ok: false, error: '回读的视频编号格式不对。' }
-  const params = new URLSearchParams({ fields: 'id', access_token: accessToken })
-  try {
-    const res = await fetch(`${GRAPH_BASE}/${adAccountId}/advideos/${videoId}?${params}`)
-    const text = await res.text()
-    if (!res.ok) return { ok: false, error: '广告账户里还读不到这条视频。' }
-    const id = (JSON.parse(text) as { id?: unknown }).id
-    if (id !== videoId) return { ok: false, error: '回读到的视频编号和刚传的对不上。' }
-    return { ok: true, videoId }
-  } catch {
-    return { ok: false, error: '回读广告账户里的视频失败。' }
+  const attempts = opts.attempts ?? 12
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+  for (let i = 0; i < attempts; i++) {
+    if (i > 0) await sleep(opts.waitMs ?? 5000)
+    const found = await accountListsVideo(adAccountId, videoId, accessToken)
+    if (found === 'found') return { ok: true, videoId }
+    if (found === 'error') return { ok: false, error: '回读广告账户里的视频失败。' }
   }
+  return { ok: false, error: '广告账户里还读不到这条视频。' }
+}
+
+const READBACK_PAGES = 3
+
+async function accountListsVideo(
+  adAccountId: string,
+  videoId: string,
+  accessToken: string,
+): Promise<'found' | 'missing' | 'error'> {
+  const params = new URLSearchParams({ fields: 'id', limit: '100', access_token: accessToken })
+  let url: string | null = `${GRAPH_BASE}/${adAccountId}/advideos?${params}`
+  for (let page = 0; url && page < READBACK_PAGES; page++) {
+    try {
+      const res = await fetch(url)
+      if (!res.ok) return 'error'
+      const json = JSON.parse(await res.text()) as { data?: { id?: unknown }[]; paging?: { next?: unknown } }
+      if ((json.data ?? []).some((v) => v?.id === videoId)) return 'found'
+      url = nextGraphPage(json.paging?.next)
+    } catch {
+      return 'error'
+    }
+  }
+  return 'missing'
+}
+
+function nextGraphPage(next: unknown): string | null {
+  if (typeof next !== 'string') return null
+  return next.startsWith('https://graph.facebook.com/') ? next : null
 }
 
 /** 按 mime 分流。判 mime 不判文件名 —— 文件名会骗人。 */

@@ -231,6 +231,9 @@ export const ADS_ACTION_TYPE = {
   /** Change one ad set daily budget after a person confirms the card. */
   ADJUST_ADSET_DAILY_BUDGET: 'ads.adjust_adset_daily_budget',
 
+  /** Add one image ad into an existing ad set after a person confirms the card. */
+  ADD_AD_CREATIVE: 'ads.add_ad_creative',
+
   /** Add a negative keyword to stop wasted spend (third_party, meta) */
   ADD_NEGATIVE_KEYWORD: 'ads.add_negative_keyword',
 

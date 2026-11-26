@@ -120,7 +120,7 @@ describe('story-lite-publish function', () => {
     const opts = optsOf(fn)
     expect(opts.id).toBe(`${CLOUD_FN_PREFIX}story-lite-publish`)
     expect(opts.triggers?.[0]?.cron).toBe(STORY_LITE_PUBLISH_CRON)
-    expect(STORY_LITE_PUBLISH_CRON).toBe('TZ=Pacific/Auckland */10 * * * *')
+    expect(STORY_LITE_PUBLISH_CRON).toBe('TZ=Pacific/Auckland */20 * * * *')
     expect(opts.retries).toBe(0)
     expect(opts.concurrency?.limit).toBe(1)
   })

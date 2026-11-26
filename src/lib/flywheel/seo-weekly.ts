@@ -18,6 +18,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { filterRowsWithClientIdCamel } from '@/lib/clients/external-data-pull-allowlist'
 
 /**
  * 云端专属事件名 —— 本机 factory-worker 不消费（见 lib/inngest/client.ts 的
@@ -76,7 +77,10 @@ export type RosterResult =
  *    客户随手填一个占位网址，就会把他静默拉进每周付费扫描。要排除某个客户，
  *    正确做法是清掉他的网址或改他的服务状态，不是在这里加一张名单。
  */
-export async function loadSnapshotRoster(supabase: SupabaseClient): Promise<RosterResult> {
+export async function loadSnapshotRoster(
+  supabase: SupabaseClient,
+  options?: { applyExternalPullAllowlist?: boolean },
+): Promise<RosterResult> {
   const { data, error } = await supabase
     .from('clients')
     .select('id, domain')
@@ -94,7 +98,8 @@ export async function loadSnapshotRoster(supabase: SupabaseClient): Promise<Rost
     return [{ clientId, domain: domain.trim() }]
   })
 
-  return { ok: true, entries }
+  const applyAllowlist = options?.applyExternalPullAllowlist !== false
+  return { ok: true, entries: applyAllowlist ? filterRowsWithClientIdCamel(entries) : entries }
 }
 
 /**

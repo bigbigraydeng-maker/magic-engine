@@ -9,5 +9,7 @@ verify_by: 2026-10-13
 verify_how: 包 B 合并后做包 C（模板接出片机）；方案要求的「现场查 viral_reference_library 复核配方对账表」这一项还没做，需有读库授权的窗口补；真实广告数据出来后看快切完播率。
 done_on: 2026-10-06
 done_ref: doc:docs/audits/2026-10-06-remotion-pack-b-montage-template.md
+last_checked: 2026-11-21
+check_note: 主干已有 src/lib/factory/remotion-daily-plan 下的蒙太奇参数代码和测试（包 C 接线迹象）；配方库现有 4002 行，但配方对账表复核没有记录；快切完播率数据没找到
 ---
 包 B 只做模板本身（schema、组件、命令行 --template montage、测试、试跑），不接出片机、不做选择器。试跑用虚构与 CTS 两套 props，换客户没改代码。

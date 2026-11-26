@@ -12,6 +12,7 @@
  * （联系页等其它表单的线索进得来，只算「只验证了其它表单」）。所以这里写的必须是广告真正点进去的那些页面。
  */
 
+import { filterClientIdsForExternalDataPull } from '@/lib/clients/external-data-pull-allowlist'
 import type { TrackingClientConfig } from './types'
 
 const CTS_CLIENT_ID = 'c0000000-0000-0000-0000-000000000000'
@@ -84,5 +85,5 @@ export function getTrackingClientConfig(clientId: string): TrackingClientConfig 
 
 /** 所有配置了追踪检查的客户（每日检查会逐个跑）。 */
 export function listTrackingClientIds(): string[] {
-  return Object.keys(BY_CLIENT)
+  return filterClientIdsForExternalDataPull(Object.keys(BY_CLIENT))
 }

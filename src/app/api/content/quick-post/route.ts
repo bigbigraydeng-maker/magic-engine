@@ -12,7 +12,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
-import { judgeOutgoingPost, priceGateMessage } from '@/lib/content/price-claim-gate'
+import { judgeOutgoingPost, outgoingPriceGateMessage } from '@/lib/content/price-claim-gate'
 
 interface QuickPostBody {
   client_id: string
@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
     })
     if (verdict.blocked) {
       return NextResponse.json(
-        { success: false, error: priceGateMessage(verdict.source), code: 'price_claim_unbacked' },
+        { success: false, error: outgoingPriceGateMessage(verdict), code: 'price_claim_unbacked' },
         { status: 409 },
       )
     }

@@ -11,6 +11,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
+import { filterRowsWithClientId } from '@/lib/clients/external-data-pull-allowlist'
 import { syncWinnerReels } from '@/lib/winner-reel-sync/engine'
 import { startCronRun } from '@/lib/cron/run-logger'
 
@@ -51,7 +52,7 @@ export async function GET(request: Request) {
   }
 
   const results = []
-  for (const cfg of configs) {
+  for (const cfg of filterRowsWithClientId(configs as Array<{ client_id: string }>)) {
     const r = await syncWinnerReels(cfg.client_id)
     results.push({
       clientId: r.clientId,

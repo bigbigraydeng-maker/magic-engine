@@ -17,6 +17,7 @@
  */
 
 import type { NoteParse } from './note-parser'
+import { groundCallbackAt, type CallbackGroundingContext } from './note-callback-grounding'
 
 const STRIP_RE = /[\s\p{P}\p{S}]/gu
 
@@ -513,7 +514,7 @@ function hasTravelTimeCue(note: string): boolean {
  * 把 AI 的解析结果按原话「落地」：没有依据的事实一律拿掉。
  * `parsed` 的 outcome / do_not_contact 由调用方（规则层）另行覆盖，这里不动。
  */
-export function groundNoteParse(raw: string, parsed: NoteParse): NoteParse {
+export function groundNoteParse(raw: string, parsed: NoteParse, ctx?: CallbackGroundingContext): NoteParse {
   const note = (raw ?? '').trim()
   const verbatim = note.slice(0, 120)
 
@@ -527,7 +528,8 @@ export function groundNoteParse(raw: string, parsed: NoteParse): NoteParse {
       ? parsed.travel_window
       : null
   const hasCue = NEXT_STEP_CUE_RE.test(note)
-  const callback = hasCue ? parsed.callback_at : null
+  // 回电时间还要在原话里有「回电时间」的说法、且早不过笔记本身；没带上下文（老调用方）时保持旧行为。
+  const callback = !hasCue ? null : ctx ? groundCallbackAt(note, parsed.callback_at, ctx) : parsed.callback_at
   const nextStep = hasCue ? parsed.mentioned_next_step : false
 
   // 摘要：空 / 有一句话原话撑不住 → 整条退回原话。

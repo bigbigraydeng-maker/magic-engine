@@ -38,14 +38,15 @@ export interface ClickStatRow {
   occurred_at: string
   counts_as_human: boolean
   suspected_scan: boolean
+  path: string | null
 }
 
 /**
  * Newest first. A mail checker that opens the link a second before the guest must not swallow the guest's own click:
  * the 5-minute de-dupe only looks at clicks that were not suspected scans (review 2026-11-10, 魏征 P1).
  */
-export function statsFromRows(rows: readonly ClickStatRow[]): { count: number; lastAt: string | null; hasHuman: boolean } {
-  const lastReal = rows.find((r) => !r.suspected_scan)
+export function statsFromRows(rows: readonly ClickStatRow[], path: string | null): { count: number; lastAt: string | null; hasHuman: boolean } {
+  const lastReal = rows.find((r) => !r.suspected_scan && r.path === path)
   return { count: rows.length, lastAt: lastReal?.occurred_at ?? null, hasHuman: rows.some((r) => r.counts_as_human) }
 }
 
@@ -66,15 +67,15 @@ export function createClickStore(db: SupabaseClient, mail: PriorSendLookup): Cli
       const prior = await mail.findPriorSend(info.clientId, info.requestId, info.contactId)
       return prior !== null && prior.status === 'sent'
     },
-    async clickStats(token) {
+    async clickStats(token, path) {
       const { data, error } = await db
         .from('crm_email_link_clicks')
-        .select('occurred_at, counts_as_human, suspected_scan')
+        .select('occurred_at, counts_as_human, suspected_scan, path')
         .eq('token', token)
         .order('occurred_at', { ascending: false })
         .limit(60)
       if (error) throw new Error(`crm_email_link_clicks: ${error.message}`)
-      return statsFromRows((data as ClickStatRow[] | null) ?? [])
+      return statsFromRows((data as ClickStatRow[] | null) ?? [], path)
     },
     async insertClick(row: ClickRow) {
       const { error } = await db.from('crm_email_link_clicks').insert(row)

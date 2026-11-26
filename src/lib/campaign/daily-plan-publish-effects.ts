@@ -53,6 +53,18 @@ export interface PublishCandidate extends CampaignDailyPublishPlannedPost {
   judgedText: string
   imageUrl: string
   imageSource: string | null
+  /** AI posters only (see daily-plan-poster-backing): the image is a poster… */
+  imageIsPoster?: boolean
+  /** …whether it can back a real price (parent's current source + team sign-off)… */
+  imageBacksRealPrice?: boolean
+  /** …and whether the poster itself shows a price. */
+  imagePriceClaim?: boolean
+  /** Poster signed off by the team. */
+  imageSigned?: boolean
+  /** Text printed on the poster, its departure date, and whether it has a departure line. */
+  posterTextLines?: string[]
+  posterNextDepartOn?: string | null
+  posterHasDepartureLine?: boolean
 }
 
 export interface LiveOutcome {

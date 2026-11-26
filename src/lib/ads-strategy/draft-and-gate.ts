@@ -109,6 +109,10 @@ export interface DraftRecord {
    */
   adSetIds?: string[]
   adIds?: string[]
+  /** 确认卡上那个账户名。开投卡靠它认账户；客户登记了多个账户时没有它就开不了。 */
+  accountLabel?: string
+  /** 草稿建在哪个广告账户。开投卡拿它核对检查回执查的是不是同一个账户。 */
+  adAccountId?: string
   findings?: LaunchFinding[]
   /** 买家会看到的每一句，原样存下来给人过目。 */
   buyerWillSee?: { adName: string; lines: string[] }[]
@@ -156,6 +160,13 @@ export interface CreateDraftDeps {
    * 不要把读库失败的结果顺手写成 `[]`。
    */
   brandRedlines?: readonly string[]
+  /**
+   * 单份草稿每天预算的顶（元）。不传 = `MAX_AUTO_DAILY_BUDGET`。
+   * 只有人已经点过确认卡、且卡上核过客户上限的路径才传（见 paused-draft-submit）。
+   */
+  maxDailyBudget?: number
+  /** 确认卡上那个账户名，原样记进草稿，开投卡用。只有确认卡路径会传。 */
+  accountLabel?: string
   /** 可注入的时钟，测试用。 */
   now?: () => number
 }
@@ -243,7 +254,8 @@ export async function createDraftForApproval(
   if (held) return failedOutcome(deps, clean, { ...base, error: held })
 
   // ── 0. ME 自己就能判的错，不要浪费一次真实创建 ────────────────────────
-  const problems = [...validateDraft(clean), ...checkDraftRedlines(clean, deps.brandRedlines)]
+  const limits = deps.maxDailyBudget === undefined ? undefined : { maxDailyBudget: deps.maxDailyBudget }
+  const problems = [...validateDraft(clean, limits), ...checkDraftRedlines(clean, deps.brandRedlines)]
   if (problems.length > 0) {
     const error = problems.map((p) => `${p.field}：${p.message}`).join('；')
     return failedOutcome(deps, clean, { ...base, error })
@@ -589,6 +601,8 @@ async function recordGate(
   const id = await record(deps.supabase, draft.clientId, {
     status, draft, summary: ctx.summary, readback,
     ...publishedIds(draft, published),
+    ...(deps.accountLabel ? { accountLabel: deps.accountLabel } : {}),
+    adAccountId: deps.adAccountId,
     findings: merged.findings,
     buyerWillSee: merged.buyerWillSee,
     redlinesChecked: ctx.redlinesChecked,

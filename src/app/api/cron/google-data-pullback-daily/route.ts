@@ -47,6 +47,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import { partitionExternalDataPull } from '@/lib/clients/external-data-pull-allowlist'
 import { supabaseAdmin } from '@/lib/supabase'
 import { fetchGscSnapshot } from '@/lib/gsc/client'
 import { gscSiteUrlFromConfig } from '@/lib/gsc/connected-clients'
@@ -187,6 +188,21 @@ async function fireAdsDiagnosticsCompletedEvent(
   }
 }
 
+/** Unique client ids, then the allowlist. One client on several sources counts once. */
+function externalPullScope(ids: readonly string[]): { allowed: ReadonlySet<string>; skippedCount: number } {
+  const unique: string[] = []
+  const seen = new Set<string>()
+  for (const id of ids) {
+    if (typeof id !== 'string') continue
+    const key = id.trim().toLowerCase()
+    if (key.length === 0 || seen.has(key)) continue
+    seen.add(key)
+    unique.push(key)
+  }
+  const part = partitionExternalDataPull(unique, (id) => id)
+  return { allowed: new Set(part.kept), skippedCount: part.skippedCount }
+}
+
 // ─── Route ───────────────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
@@ -240,8 +256,22 @@ export async function GET(req: NextRequest) {
     )
   }
 
-  const connectors = connResult.data
-  const metaClients = (metaResult.data ?? []) as Array<{ id: string; name: string; domain: string | null; meta_ad_account_id: string }>
+  const metaRows = (metaResult.data ?? []) as Array<{
+    id: string
+    name: string
+    domain: string | null
+    meta_ad_account_id: string
+  }>
+  const googleAdsRows = (googleAdsResult.data ?? []) as Array<{ client_id: string; account_id: string }>
+  const pullScope = externalPullScope([
+    ...((connResult.data ?? []) as Array<{ client_id: string }>).map((row) => row.client_id),
+    ...metaRows.map((row) => row.id),
+    ...googleAdsRows.map((row) => row.client_id),
+  ])
+  const connectors = ((connResult.data ?? []) as ConnectorRow[]).filter((row) =>
+    pullScope.allowed.has(row.client_id.trim().toLowerCase()),
+  )
+  const metaClients = metaRows.filter((row) => pullScope.allowed.has(row.id.trim().toLowerCase()))
   // googleAdsResult.error is non-fatal (table may not exist in some envs) — log
   // and proceed with an empty list rather than failing the whole cron run.
   if (googleAdsResult.error) {
@@ -250,7 +280,9 @@ export async function GET(req: NextRequest) {
       googleAdsResult.error.message,
     )
   }
-  const googleAdsClients = (googleAdsResult.data ?? []) as Array<{ client_id: string; account_id: string }>
+  const googleAdsClients = googleAdsRows.filter((row) =>
+    pullScope.allowed.has(row.client_id.trim().toLowerCase()),
+  )
 
   // ── 2. Build per-client work map ───────────────────────────────────────────
   const workMap = new Map<string, ClientWork>()
@@ -296,7 +328,12 @@ export async function GET(req: NextRequest) {
   )
 
   if (work.length === 0) {
-    await cronRun.finish({ processed: 0, completed: 0, failed: 0 })
+    await cronRun.finish({
+      processed: 0,
+      completed: 0,
+      failed: 0,
+      summary: { skipped_by_allowlist: pullScope.skippedCount },
+    })
     return NextResponse.json({
       success:           true,
       message:           'No clients with connected data sources — nothing to sync',
@@ -772,7 +809,7 @@ export async function GET(req: NextRequest) {
     completed: results.length - failed,
     error: errorMessage,
     failed,
-    summary: { gsc_synced: gscSynced, ga4_synced: ga4Synced, meta_synced: metaSynced, meta_idle: metaIdle, google_ads_synced: googleAdsSynced, ad_daily_synced: adDailySynced, ad_daily_rows: adDailyRows, ad_level_synced: adLevelSynced, ad_level_rows: adLevelRows, ad_health_synced: adHealthSynced, ad_health_alerts: adHealthAlerts, video_columns_written: withVideo, errors, circuit_probe: circuitProbes, creative_state_cards: results.reduce((sum, row) => sum + (row.creative_state?.cards ?? 0), 0), scale_fallback_cards: results.reduce((sum, row) => sum + (row.scale_fallback?.cards ?? 0), 0) },
+    summary: { gsc_synced: gscSynced, ga4_synced: ga4Synced, meta_synced: metaSynced, meta_idle: metaIdle, google_ads_synced: googleAdsSynced, ad_daily_synced: adDailySynced, ad_daily_rows: adDailyRows, ad_level_synced: adLevelSynced, ad_level_rows: adLevelRows, ad_health_synced: adHealthSynced, ad_health_alerts: adHealthAlerts, video_columns_written: withVideo, errors, circuit_probe: circuitProbes, creative_state_cards: results.reduce((sum, row) => sum + (row.creative_state?.cards ?? 0), 0), scale_fallback_cards: results.reduce((sum, row) => sum + (row.scale_fallback?.cards ?? 0), 0), skipped_by_allowlist: pullScope.skippedCount },
   })
   return NextResponse.json({
     success:           true,

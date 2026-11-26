@@ -75,6 +75,8 @@ async function loadFirstTouches(
   sources: readonly string[],
 ): Promise<{ ok: true; firstTouch: Map<string, string> } | { ok: false; error: string }> {
   const firstTouch = new Map<string, string>()
+  // A letter list has no audience source of its own (its guests are named by the caller): nothing to look up.
+  if (sources.length === 0) return { ok: true, firstTouch }
   for (const ids of chunk(contactIds, CHUNK_SIZE)) {
     const res = await db
       .from('contact_touchpoints')

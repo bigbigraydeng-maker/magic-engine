@@ -40,6 +40,7 @@ import { CmsPanel } from '../_components/CmsPanel'
 import { MailboxPanel } from './_components/MailboxPanel'
 import { AdStrategyPanel } from './_components/AdStrategyPanel'
 import { PauseAdSetCardSwitchPanel } from './_components/PauseAdSetCardSwitchPanel'
+import { AddCreativeCardSwitchPanel } from './_components/AddCreativeCardSwitchPanel'
 import { AdOutcomePanel } from './_components/AdOutcomePanel'
 import { QualifiedStagesPanel } from './_components/QualifiedStagesPanel'
 import { CompetitorDomainsPanel } from './_components/CompetitorDomainsPanel'
@@ -149,6 +150,18 @@ function TabBody({
             <AdStrategyPanel clientId={clientId} />
             <div className="mt-3">
               <PauseAdSetCardSwitchPanel clientId={clientId} />
+              <div className="mt-3">
+                <AddCreativeCardSwitchPanel clientId={clientId} />
+                <div className="mt-3">
+                  <AddCreativeCardSwitchPanel
+                    clientId={clientId}
+                    path="tune-cards"
+                    title="广告调方确认卡"
+                    detail="默认关。打开后，每天巡查发现问题时才会出确认卡。关掉则不出卡，也不会改广告。"
+                    label="开关广告调方确认卡"
+                  />
+                </div>
+              </div>
             </div>
             <div className="mt-3"><AdOutcomePanel clientId={clientId} /></div>
             <div className="mt-3"><QualifiedStagesPanel clientId={clientId} /></div>

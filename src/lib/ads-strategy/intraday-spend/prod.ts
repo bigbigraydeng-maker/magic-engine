@@ -1,5 +1,6 @@
 import { findSharedAdAccounts, getActiveClientsWithMetaAccounts } from '@/lib/meta/client-ad-accounts'
 import { fetchHeartbeatAdsets, fetchHeartbeatTodayInsights, type GraphReadError } from '@/lib/meta/entity-settings'
+import { LEAD_ACTION_PRIORITY, MESSAGING_ACTION_PRIORITY, pickAction } from '@/lib/meta/objective-metrics'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import { supabaseAdmin } from '@/lib/supabase'
 import { readClientDailyTotalCap } from '@/lib/approval-source/plan-cap'
@@ -77,7 +78,13 @@ async function readAccount(adAccountId: string, token: string, day: string) {
     complete: insights.complete && !limited(insights.error),
     rateLimited: limited(insights.error),
     adsets: mapped,
-    insights: insights.rows.map((row) => ({ adsetId: row.adset_id ?? '', spend: row.spend, impressions: row.impressions })),
+    insights: insights.rows.map((row) => ({
+      adsetId: row.adset_id ?? '',
+      spend: row.spend,
+      impressions: row.impressions,
+      leads: pickAction(row.actions, LEAD_ACTION_PRIORITY),
+      messaging: pickAction(row.actions, MESSAGING_ACTION_PRIORITY),
+    })),
   }
 }
 function limited(error: GraphReadError | null): boolean {

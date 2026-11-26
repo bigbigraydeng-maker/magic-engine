@@ -108,8 +108,18 @@ export function reusableVideoId(reviewRef: Record<string, unknown>, accountId: s
   return stored.videoId
 }
 
+/** Finished video admitted from outside the factory: `<clientId>/external/<file>` in the same bucket. */
+export function externalUploadPath(raw: string, clientId: string): string | null {
+  const p = raw.trim()
+  if (!p || /^[a-z][a-z0-9+.-]*:/i.test(p) || p.startsWith('/') || p.includes('%') || p.includes('\\')) return null
+  const segments = p.split('/')
+  if (segments.some((segment) => segment === '' || segment === '.' || segment === '..')) return null
+  return segments.length >= 3 && segments[0] === clientId && segments[1] === 'external' ? p : null
+}
+
 export function factoryPublicVideoUrl(videoPath: string | null, publicBase: string): string | null {
-  if (!videoPath || videoPath.includes('..') || !videoPath.startsWith('renders/')) return null
+  if (!videoPath || videoPath.includes('..')) return null
+  if (!videoPath.startsWith('renders/') && !/^[^/]+\/external\/[^/]/.test(videoPath)) return null
   const base = publicBase.replace(/\/$/, '')
   if (!base.startsWith('https://')) return null
   return `${base}/${videoPath}`

@@ -24,6 +24,7 @@ import type { EmailUnsubscribeRecord, EmailUnsubscribeWrite } from '@/lib/crm/em
 import type { ProviderReceipt } from '@/lib/messaging/provider-events/receipt-types'
 import { decideReceipt, type ReceiptFacts, type ReceiptKind, type ReceiptPatch, type ReceiptRow } from './receipt'
 import { verifyUnsubscribeToken, type EnvReader } from './unsubscribe-token'
+import { isLiveScope } from './trigger-scope'
 
 export const SEND_ID_TAG = 'triggered_send_id'
 /** A `pending` row this recent may still be recording its message id: a receipt to its address is retried. */
@@ -118,7 +119,7 @@ async function namedRows(hints: readonly SendHint[], store: ReceiptStore): Promi
   const rows: ReceiptRow[] = []
   for (const hint of hints) {
     const row = await store.findById(hint.sendId)
-    if (row === null || row.dedupeScope !== 'lifetime') continue
+    if (row === null || !isLiveScope(row.dedupeScope)) continue
     if (hint.clientId !== null && row.clientId !== hint.clientId) continue
     if (!rows.some((r) => r.id === row.id)) rows.push(row)
   }
@@ -152,7 +153,7 @@ async function matchRow(loaded: LoadedReceipt, store: ReceiptStore, lastTry: boo
 
 /** A complaint stops e-mail to the contact and address of the named letter. Repeats are harmless; a failed write throws. */
 async function recordComplaint(row: ReceiptRow, facts: ReceiptFacts, store: ReceiptStore, now: Date): Promise<void> {
-  if (facts.kind !== 'complained' || row.dedupeScope !== 'lifetime' || row.toAddressSha256 === null) return
+  if (facts.kind !== 'complained' || !isLiveScope(row.dedupeScope) || row.toAddressSha256 === null) return
   const written = await store.recordUnsubscribe({
     clientId: row.clientId,
     contactId: row.contactId,

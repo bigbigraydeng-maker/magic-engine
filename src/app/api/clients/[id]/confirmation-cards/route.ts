@@ -10,7 +10,17 @@ import {
   listConfirmationCards,
 } from '@/lib/confirmation-card'
 import { parseIssueBody, publicError } from '@/lib/confirmation-card/http'
+import { addCreativeListExtrasByRunId } from '@/lib/ads-creative-card/hold-display'
 import { pausedDraftResultLines } from '@/lib/ads-strategy/paused-draft-submit'
+import { videoUploadDetailsByRunId, type VideoUploadCardDetail } from '@/lib/ads-strategy/video-upload-card'
+import type { AddCreativeCardDetail } from '@/lib/ads-creative-card/display'
+import type { ConfirmationCardView } from '@/lib/confirmation-card'
+
+type ShownCard = ConfirmationCardView & {
+  addCreativeDetail?: AddCreativeCardDetail
+  addCreativeStatusChip?: string
+  videoUploadDetail?: VideoUploadCardDetail
+}
 
 function clickerOf(req: Request, email: string, role: 'admin' | 'client-viewer', allowedClientId: string | null, clientId: string) {
   return clickerFromSession({
@@ -36,10 +46,28 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   try {
     const kernel = createKernel(supabaseAdmin)
     const cards = await listConfirmationCards(kernel, params.id, clicker)
-    const lines = await pausedDraftResultLines(kernel.supabase, params.id)
+    const [draftLines, creativeExtras, videoDetails] = await Promise.all([
+      pausedDraftResultLines(kernel.supabase, params.id),
+      addCreativeListExtrasByRunId(kernel.supabase, params.id),
+      videoUploadDetailsByRunId(kernel.supabase, params.id),
+    ])
     const shown = cards.map((card) => {
-      const line = lines.get(card.runId)
-      return line ? { ...card, statusLine: line } : card
+      const extra = creativeExtras.get(card.runId)
+      const draftLine = draftLines.get(card.runId)
+      let merged: ShownCard = draftLine ? { ...card, statusLine: draftLine } : card
+      const video = videoDetails.get(card.runId)
+      if (video) merged = { ...merged, videoUploadDetail: video }
+      if (extra) {
+        merged = { ...merged, addCreativeDetail: extra.detail }
+        if (extra.statusChip) {
+          merged = {
+            ...merged,
+            addCreativeStatusChip: extra.statusChip,
+            statusLine: extra.statusLine ?? merged.statusLine,
+          }
+        }
+      }
+      return merged
     })
     return NextResponse.json({ cards: shown })
   } catch (error) {

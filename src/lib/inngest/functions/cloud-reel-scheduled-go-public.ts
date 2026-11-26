@@ -15,7 +15,8 @@ import { isGlobalAdminEmail } from '@/lib/auth/whitelist'
 import { nzToday } from '@/lib/factory/publish/promote/scheduled-grant'
 
 export const REEL_SCHEDULED_FUNCTION_ID = `${CLOUD_FN_PREFIX}reel-scheduled-go-public`
-export const REEL_SCHEDULED_CRON = 'TZ=Pacific/Auckland */30 * * * *'
+/** Hourly at :02 (was every 30 min; 2026-11-16 Inngest quota). Reels go public from the client's publish hour (NZ), so :02 keeps them within minutes of it. */
+export const REEL_SCHEDULED_CRON = 'TZ=Pacific/Auckland 2 * * * *'
 export const REEL_SCHEDULED_EVENT = 'social/reel.scheduled_go_public.due'
 export const REEL_SCHEDULED_JOB = 'reel-scheduled-go-public'
 export { DEFAULT_PUBLISH_HOUR, publishHourOf }

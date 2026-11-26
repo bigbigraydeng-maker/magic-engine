@@ -113,7 +113,7 @@ export interface DigestMailer {
       to: string[]
       subject: string
       html: string
-    }): Promise<{ error: unknown; data?: { id?: string } | null }>
+    }, options?: { idempotencyKey?: string }): Promise<{ error: unknown; data?: { id?: string } | null }>
   }
 }
 
@@ -152,6 +152,8 @@ export async function sendDigestMail(params: {
   html: string
   apiKey?: string
   mailerFactory?: (apiKey: string) => DigestMailer
+  /** 可选：同一个键发信服务只受理一次 —— 防重试重复发信。不传 = 原样不变。 */
+  idempotencyKey?: string
 }): Promise<DigestSendResult> {
   const { fromLabel, recipients, subject, html } = params
   const apiKey = params.apiKey ?? process.env.RESEND_API_KEY
@@ -159,12 +161,11 @@ export async function sendDigestMail(params: {
 
   try {
     const mailer = (params.mailerFactory ?? defaultMailer)(apiKey)
-    const { error, data } = await mailer.emails.send({
-      from: meMailFrom(fromLabel),
-      to: recipients,
-      subject,
-      html,
-    })
+    const payload = { from: meMailFrom(fromLabel), to: recipients, subject, html }
+    // 不传去重键时调用形状跟以前一模一样（只有一个参数）。
+    const { error, data } = params.idempotencyKey
+      ? await mailer.emails.send(payload, { idempotencyKey: params.idempotencyKey })
+      : await mailer.emails.send(payload)
     if (error) return { sent: false, reason: describeSendError(error), recipients }
     const messageId = typeof data?.id === 'string' ? data.id : undefined
     return { sent: true, recipients, ...(messageId ? { messageId } : {}) }
