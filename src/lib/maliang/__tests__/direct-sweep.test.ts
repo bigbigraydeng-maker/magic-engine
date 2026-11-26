@@ -48,6 +48,23 @@ describe('runMaliangDirectSweep', () => {
     expect((await first).status).toBe('done')
   })
 
+  it('asks the caller to move an unreadable order, and still finishes if that write throws', async () => {
+    const noteUnread = vi.fn(async () => { throw new Error('write failed') })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const receipt = await runMaliangDirectSweep({
+      listPending: async () => [order(1), order(2)],
+      review: async (o) => o.work_order_id === 'wo-1'
+        ? { kind: 'unread', reason: 'video_url_mismatch' }
+        : { kind: 'checked', status: 'pass', reasons: [] },
+      noteUnread,
+      batch: 2,
+    })
+    expect(noteUnread).toHaveBeenCalledTimes(1)
+    expect(noteUnread).toHaveBeenCalledWith(expect.objectContaining({ work_order_id: 'wo-1' }), 'video_url_mismatch')
+    expect(receipt.results.map((r) => r.outcome.kind)).toEqual(['unread', 'checked'])
+    warn.mockRestore()
+  })
+
   it('builds the same public file URL the admit step sends', () => {
     expect(contentFactoryPublicUrl('https://p.supabase.co/', 'c1/external/a.mp4'))
       .toBe('https://p.supabase.co/storage/v1/object/public/content-factory/c1/external/a.mp4')

@@ -20,13 +20,25 @@ import {
   runMaliangDirectSweep,
   type DirectReviewOutcome,
 } from '@/lib/maliang/direct-sweep'
+import {
+  directReadNotSkippedFilter,
+  MALIANG_DIRECT_PREFETCH,
+  orderDirectReadQueue,
+  recordDirectReadFailure,
+} from '@/lib/maliang/direct-read-queue'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
 const LOOKBACK_DAYS = 14
 
-interface PendingRow { id: string; client_id: string; brief: unknown; output: { video_path?: unknown } | null }
+interface PendingRow {
+  id: string
+  client_id: string
+  created_at: string
+  brief: unknown
+  output: { video_path?: unknown } | null
+}
 
 async function listPending(limit: number): Promise<WorkOrderReady[]> {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -34,23 +46,30 @@ async function listPending(limit: number): Promise<WorkOrderReady[]> {
   const since = new Date(Date.now() - LOOKBACK_DAYS * 86_400_000).toISOString()
   const { data, error } = await supabaseAdmin
     .from('content_work_orders')
-    .select('id, client_id, brief, output')
+    .select('id, client_id, created_at, brief, output')
     .eq('status', 'in_review')
     .eq('brief->>engine', EXTERNAL_UPLOAD_ENGINE)
     .gte('created_at', since)
     .not('output->video_path', 'is', null)
     .is('output->maliang_check', null)
+    .or(directReadNotSkippedFilter())
     .order('created_at', { ascending: true })
-    .limit(limit * 4)
+    .limit(Math.max(limit * 4, MALIANG_DIRECT_PREFETCH))
   if (error) throw new Error(error.message)
-  return ((data ?? []) as PendingRow[])
-    .filter((row) => isExternalUpload(row.brief) && typeof row.output?.video_path === 'string' && row.output.video_path.length > 0)
-    .slice(0, limit)
-    .map((row) => ({
-      client_id: row.client_id,
-      work_order_id: row.id,
-      output_url: contentFactoryPublicUrl(supabaseUrl, row.output!.video_path as string),
-    }))
+  const ranked = orderDirectReadQueue(
+    ((data ?? []) as PendingRow[]).filter((row) =>
+      isExternalUpload(row.brief) && typeof row.output?.video_path === 'string' && row.output.video_path.length > 0,
+    ),
+  )
+  return ranked.slice(0, limit).map((row) => ({
+    client_id: row.client_id,
+    work_order_id: row.id,
+    output_url: contentFactoryPublicUrl(supabaseUrl, row.output!.video_path as string),
+  }))
+}
+
+async function noteUnread(order: WorkOrderReady, reason: string): Promise<void> {
+  await recordDirectReadFailure(supabaseAdmin, order.work_order_id, reason)
 }
 
 async function review(order: WorkOrderReady): Promise<DirectReviewOutcome> {
@@ -75,7 +94,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const startedAt = Date.now()
   const runId = await startCronRunId(MALIANG_DIRECT_JOB)
-  const receipt = await runMaliangDirectSweep({ listPending, review })
+  const receipt = await runMaliangDirectSweep({ listPending, review, noteUnread })
   const unread = receipt.results.filter((r) => r.outcome.kind === 'unread')
   const error = receipt.error ?? (unread.length > 0
     ? unread.map((r) => `${r.work_order_id}: ${r.outcome.kind === 'unread' ? r.outcome.reason : ''}`).join(' | ')

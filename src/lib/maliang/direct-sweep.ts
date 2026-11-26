@@ -9,7 +9,8 @@
  * that path does not check for an existing verdict and may review once more.)
  * Bounded per run: each review costs one model call. Unlike the Inngest path it
  * does not send material-only orders on to the dual review; a person clicks
- * 收入素材库, which runs that review inline.
+ * 收入素材库, which runs that review inline. An order that cannot be read is
+ * moved to the back of the queue; three failed reads in a row take it out.
  *
  * Switch: env INNGEST_DIRECT_FALLBACK = 'off' turns this off (shared with the other fallbacks).
  */
@@ -27,6 +28,8 @@ export type DirectReviewOutcome =
 export interface MaliangSweepDeps {
   listPending(limit: number): Promise<WorkOrderReady[]>
   review(order: WorkOrderReady): Promise<DirectReviewOutcome>
+  /** Move an unreadable order off the head of the queue. Optional in tests. */
+  noteUnread?(order: WorkOrderReady, reason: string): Promise<void>
   /** Reviews per run; defaults to MALIANG_DIRECT_BATCH. */
   batch?: number
 }
@@ -42,6 +45,15 @@ let running = false
 
 function errText(err: unknown): string {
   return (err instanceof Error ? err.message : String(err)).slice(0, 300)
+}
+
+async function noteUnreadFailure(deps: MaliangSweepDeps, order: WorkOrderReady, reason: string): Promise<void> {
+  if (!deps.noteUnread) return
+  try {
+    await deps.noteUnread(order, reason)
+  } catch (err) {
+    console.warn(`[maliang-direct-sweep] could not move ${order.work_order_id} back: ${errText(err)}`)
+  }
 }
 
 export async function runMaliangDirectSweep(deps: MaliangSweepDeps): Promise<MaliangSweepReceipt> {
@@ -65,6 +77,7 @@ export async function runMaliangDirectSweep(deps: MaliangSweepDeps): Promise<Mal
         outcome = { kind: 'unread', reason: errText(err) }
       }
       results.push({ work_order_id: order.work_order_id, outcome })
+      if (outcome.kind === 'unread') await noteUnreadFailure(deps, order, outcome.reason)
     }
     return { status: 'done', picked: pending.length, results, error: null }
   } finally {
