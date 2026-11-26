@@ -73,7 +73,7 @@ describe('reel-scheduled-go-public function', () => {
     expect(opts.id).toBe(`${CLOUD_FN_PREFIX}reel-scheduled-go-public`)
     expect(opts.id).toBe(REEL_SCHEDULED_FUNCTION_ID)
     expect(opts.triggers?.[0]?.cron).toBe(REEL_SCHEDULED_CRON)
-    expect(REEL_SCHEDULED_CRON).toBe('TZ=Pacific/Auckland */30 * * * *')
+    expect(REEL_SCHEDULED_CRON).toBe('TZ=Pacific/Auckland 2 * * * *')
     expect(opts.triggers?.[1]?.event).toBe(REEL_SCHEDULED_EVENT)
     expect(REEL_SCHEDULED_EVENT).toBe('social/reel.scheduled_go_public.due')
     expect(opts.retries).toBe(0)

@@ -5,6 +5,7 @@
  * Preview unless `confirm: true`; armed only after the authorization event went out (`authorization-authorize.ts`).
  * Sends nothing by itself: real sending also needs the deploy switches, which only the PM turns on.
  * A global administrator who is ALSO on the approver list (the PM himself), `authorization-http.ts`.
+ * Optional `trigger` in the body: which kind of letter (absent = the welcome letter; design 2026-11-17 §4.5).
  * Design: docs/specs/2026-11-02-me-send-gate-p2-design-v0.md §4.3 (plan: §17).
  */
 import type { NextRequest } from 'next/server'
@@ -30,7 +31,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   if (!parsed.success) return invalidCommand('INVALID_AUTHORIZE_COMMAND', parsed.error.flatten())
   if (parsed.data.client_id !== params.id) return invalidCommand('CLIENT_ID_MISMATCH', null)
   try {
-    return respond(await authorizeCommand(createAuthorizationDeps(supabaseAdmin), params.id, gate.actor, parsed.data))
+    return respond(await authorizeCommand(createAuthorizationDeps(supabaseAdmin, parsed.data.trigger), params.id, gate.actor, parsed.data))
   } catch (error: unknown) {
     console.error('[triggered-send authorize] failed', error instanceof Error ? error.name : 'unknown')
     return internalError()

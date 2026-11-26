@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
-import { HERO_CHOICES, loadHeroDataUri } from '@/lib/tailor-made/hero'
+import { HERO_CHOICES, loadHeroDataUri, loadHeroThumb } from '@/lib/tailor-made/hero'
 
 /**
  * GET /api/clients/[id]/tailor-made/heroes
  *   → { choices }                 可选封面清单
  * GET ...?name=chongqing
  *   → { name, dataUri }           取某张图，供顾问手动换封面
+ * GET ...?thumb=chongqing
+ *   → image/jpeg                  换封面面板里的小缩略图
  *
  * 系统会按目的地自动选，但一定有猜错的时候（「重庆+张家界」哪个当主打？）。
  * 静默选错顾问未必注意到，直到客人收到才发现 —— 所以界面上要显示
@@ -18,6 +20,15 @@ export const dynamic = 'force-dynamic'
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   const access = await requireDashboardClientAccess(params.id)
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
+
+  const thumb = req.nextUrl.searchParams.get('thumb')
+  if (thumb) {
+    const buf = await loadHeroThumb(thumb)
+    if (!buf) return NextResponse.json({ error: '没有这张缩略图' }, { status: 404 })
+    return new NextResponse(new Uint8Array(buf), {
+      headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400' },
+    })
+  }
 
   const name = req.nextUrl.searchParams.get('name')
   if (!name) return NextResponse.json({ choices: HERO_CHOICES })

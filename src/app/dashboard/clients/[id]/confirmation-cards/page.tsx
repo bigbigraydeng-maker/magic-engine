@@ -1,6 +1,6 @@
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { AdsExecutionReviewPanel } from '../_components/AdsExecutionReviewPanel'
-import { CardList } from './card-list'
+import { AddCreativeEntry } from './add-creative-entry'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,7 +29,7 @@ export default async function ConfirmationCardsPage({
         </p>
       </header>
       <div className="max-w-3xl space-y-8">
-        <CardList clientId={params.id} />
+        <AddCreativeEntry clientId={params.id} />
         <AdsExecutionReviewPanel clientId={params.id} />
       </div>
     </div>

@@ -35,6 +35,7 @@ import {
   type SampleSignal,
   type SnapshotSignal,
 } from './cap-proposal'
+import { scopeWithExecutionExperience } from '@/lib/ads/ads-execution-prescription'
 export async function runLiveCapProposal(sb: SupabaseClient, now: Date): Promise<CapReceipt> {
   const kernel = createKernel(sb)
   const clients = await getActiveClientsWithMetaAccounts(sb)
@@ -121,10 +122,15 @@ async function issuePlan(
   plan: CardPlan,
 ): Promise<boolean> {
   const attach = await canAttach(sb, clientId, plan)
+  const baseFacts = describePlan(plan, attach)
+  const itemType = plan.action === 'decrease' ? 'budget' as const : plan.action === 'pause' ? 'pause' as const : null
+  const scope = itemType
+    ? await scopeWithExecutionExperience(sb, clientId, itemType, baseFacts.scope)
+    : baseFacts.scope
   const card = await issueConfirmationCard(kernel, {
     clientId,
     clicker: { kind: 'agent', email: 'intraday-cap@internal' },
-    facts: describePlan(plan, attach),
+    facts: { ...baseFacts, scope },
     lifetime: 'nz_day',
   })
   if (attach) await attachHold(sb, clientId, plan, card.runId, card.fingerprint, card.expectedDecisionId).catch(() => undefined)

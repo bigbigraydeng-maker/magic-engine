@@ -14,6 +14,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { filterRowsWithClientIdCamel } from '@/lib/clients/external-data-pull-allowlist'
 import { isoWeekKey } from '@/lib/flywheel/seo-weekly'
 
 export { isoWeekKey }
@@ -78,7 +79,7 @@ export async function loadWatchRoster(supabase: SupabaseClient): Promise<RosterR
     return [{ clientId, semrushDb: typeof semrushDb === 'string' ? semrushDb : null }]
   })
 
-  return { ok: true, entries }
+  return { ok: true, entries: filterRowsWithClientIdCamel(entries) }
 }
 
 /**

@@ -11,7 +11,8 @@
 import type { GetStepTools } from 'inngest'
 import { inngest, CLOUD_FN_PREFIX } from '../client'
 import { supabaseAdmin } from '@/lib/supabase'
-import { cronRunHandle, startCronRunId } from '@/lib/cron/run-logger'
+import { cronRunHandle, cronRunIdFromInngestRun, startCronRunWithId } from '@/lib/cron/run-logger'
+import { socialWeeklyDraftOnFailure } from './social-weekly-draft-failure'
 import { cadenceFromConfig, isoDate, nzCalendar } from '@/lib/social/week-pack/cadence'
 import { buildRunIncompleteTask, incompleteReasons, runWeeklyLoop, WEEKLY_LOOP_JOB, type FactCheckWriteOutcome, type WeeklyLoopDeps, type WeeklyLoopMode, type WeeklyLoopReceipt } from '@/lib/social/weekly-loop/run'
 import { createWeeklyLoopDbDeps, listWeeklyLoopClients, loadWeeklyLoopClientConfig, loadWeeklyMaliangSpend, reserveWeeklyMaliangSpend, weeklyLoopEnabled } from '@/lib/social/weekly-loop/run-deps'
@@ -21,7 +22,14 @@ import { REVIEW_V2_ESTIMATE_USD, runReviewCheckV2, withinWeeklyBudget } from '@/
 import { REMOTION_REVIEW_TIMEOUT_MS, runCheckWithTimeout, stampWorkOrderOutput } from '@/lib/maliang/review-disposition'
 import { readSocialAgentSettings } from '@/lib/social/recipe/tier-defaults'
 import { MALIANG_BACKFILL_MAX_PER_RUN, maliangWeeklyCapUsd, overlayReviews, pickBackfillTargets, type BackfillPersisted, type BackfillTarget, type MaliangBackfillReceipt } from '@/lib/social/weekly-loop/maliang-backfill'
-import { runImagePostStep, type ImagePostStepReceipt } from '@/lib/social/image-post-step'
+import type { ImagePostStepReceipt } from '@/lib/social/image-post-step'
+import { prepareWeekDrafts, prepareWeekDraftsFailed, type PreparedWeekDrafts } from '@/lib/social/weekly-draft/prepare'
+import type { ProducedDrafts } from '@/lib/social/weekly-plan/produced'
+import {
+  ensureWeekPlanApprovalAfterDraft,
+  shouldOpenWeekPlanApprovalAfterDraft,
+  type WeekPlanApprovalAfterDraftReceipt,
+} from '@/lib/social/weekly-plan/after-draft'
 
 export const SOCIAL_WEEKLY_DRAFT_FUNCTION_ID = `${CLOUD_FN_PREFIX}social-weekly-draft`
 export const SOCIAL_WEEKLY_DRAFT_CRON = 'TZ=Pacific/Auckland 30 6 * * *'
@@ -115,7 +123,8 @@ export interface SocialWeeklyDraftDeps {
   listClients: () => Promise<LoopClient[]>
   loadClientConfig: (clientId: string) => Promise<unknown>
   loopDeps: () => WeeklyLoopDeps
-  startRun: () => Promise<string>
+  /** Opens this Inngest run's own log row. The id is derived from `inngestRunId`. */
+  startRun: (inngestRunId: string) => Promise<string>
   finishRun: (input: {
     runId: string
     startedAt: number
@@ -505,9 +514,9 @@ export function forceDaily(ctx: Pick<DueContext, 'forceDaily'>, mode: WeeklyLoop
   return ctx.forceDaily && mode === 'dry_run'
 }
 
-async function handleCron(deps: SocialWeeklyDraftDeps, step: StepLike): Promise<FanOutReceipt> {
+async function handleCron(deps: SocialWeeklyDraftDeps, step: StepLike, inngestRunId: string): Promise<FanOutReceipt> {
   const started = await step.run('start-run', async () => ({
-    runId: await deps.startRun(),
+    runId: await deps.startRun(inngestRunId),
     startedAt: Date.now(),
   }))
 
@@ -590,9 +599,10 @@ async function handleDue(
   deps: SocialWeeklyDraftDeps,
   event: { id?: unknown; ts?: unknown; data?: unknown },
   step: StepLike,
+  inngestRunId: string,
 ): Promise<ClientRunReceipt> {
   const started = await step.run('start-run', async () => ({
-    runId: await deps.startRun(),
+    runId: await deps.startRun(inngestRunId),
     startedAt: Date.now(),
   }))
 
@@ -600,6 +610,10 @@ async function handleDue(
 
   let receipt: ClientRunReceipt
   let imagePostReceipt: ImagePostStepReceipt | null = null
+  let storyWeek: PreparedWeekDrafts['story'] | null = null
+  let weekDrafts: PreparedWeekDrafts['summary'] | null = null
+  let producedDrafts: ProducedDrafts | null = null
+  let weekPlanApprovalReceipt: WeekPlanApprovalAfterDraftReceipt | null = null
   if (!ctx.clientId) {
     receipt = await step.run('invalid-event', async () => invalidEventReceipt(ctx))
   } else {
@@ -645,35 +659,53 @@ async function handleDue(
         return loopErrorReceipt(ctx, resolved.mode, resolved.forced, message, backfill.receipt)
       }
     })
-    // --- Image post auto-draft (knife 3) ---
+    // Story and image drafts are prepared before the week card. A failure in one stays on its receipt.
     if (resolved.mode === 'write') {
-      imagePostReceipt = await step.run('draft-image-posts', async (): Promise<ImagePostStepReceipt> => {
-        // Own step, own safety net: whatever goes wrong here becomes an error receipt. It must never stop 'finish-run'
-        // (the run log) or touch the reel loop, which already finished above.
+      const prepared = await step.run('prepare-week-drafts', async () => {
         try {
-          if (!process.env.OPENAI_API_KEY) {
-            return { attempted: 0, drafted: 0, planIds: [], skipped: 'no_openai_key', error: null }
-          }
-          const { getOpenAIClient } = await import('@/lib/ai/openai-client')
-          const openai = getOpenAIClient()
-          const callLLM = async (prompt: string): Promise<string> => {
-            const resp = await openai.chat.completions.create({
-              model: 'gpt-4o-mini',
-              messages: [{ role: 'user', content: prompt }],
-              temperature: 0.7,
-              max_tokens: 600,
-            })
-            return resp.choices[0]?.message?.content ?? ''
-          }
-          return await runImagePostStep(ctx.clientId, isoDate(nzCalendar(deps.now())), resolved.clientConfig, null, {
+          return await prepareWeekDrafts({
+            clientId: ctx.clientId,
+            now: deps.now(),
+            config: resolved.clientConfig,
+            reelScheduled: Array.isArray(receipt.scheduled) ? receipt.scheduled : [],
+            reelScheduledCount: receipt.counts?.scheduled ?? 0,
             supabase: supabaseAdmin,
-            callLLM,
           })
         } catch (e) {
-          const message = e instanceof Error ? e.message : String(e)
-          return { attempted: 0, drafted: 0, planIds: [], skipped: null, error: `image_step_failed: ${message}`.slice(0, 300) }
+          return prepareWeekDraftsFailed(errorMessage(e, 200))
         }
       })
+      imagePostReceipt = prepared.image
+      storyWeek = prepared.story
+      weekDrafts = prepared.summary
+      producedDrafts = prepared.produced
+
+      if (
+        shouldOpenWeekPlanApprovalAfterDraft({
+          mode: receipt.mode,
+          status: receipt.status,
+          failureCount: receipt.failures.length,
+        })
+      ) {
+        weekPlanApprovalReceipt = await step.run(
+          'open-week-plan-approval',
+          async (): Promise<WeekPlanApprovalAfterDraftReceipt> => {
+            try {
+              return await ensureWeekPlanApprovalAfterDraft(
+                supabaseAdmin,
+                ctx.clientId,
+                deps.now(),
+                undefined,
+                producedDrafts,
+              )
+            } catch (e) {
+              const message = errorMessage(e, 300)
+              console.error('[weekly-plan] after-draft: unexpected failure:', message)
+              return { status: 'error', reason: message }
+            }
+          },
+        )
+      }
     }
   }
 
@@ -687,7 +719,13 @@ async function handleDue(
       processed,
       completed,
       failed,
-      summary: { ...receipt, imagePost: imagePostReceipt },
+      summary: {
+        ...receipt,
+        imagePost: imagePostReceipt,
+        storyWeek,
+        weekDrafts,
+        weekPlanApproval: weekPlanApprovalReceipt,
+      },
       error: failed > 0 ? receipt.failures.join('; ').slice(0, 500) : undefined,
     })
     return null
@@ -703,13 +741,23 @@ export function createSocialWeeklyDraftFunction(deps: SocialWeeklyDraftDeps) {
       name: 'Social weekly draft: fact-check, 马良 gate and schedule draft reels (dry run unless switched on)',
       concurrency: { limit: 1, key: 'event.data.clientId' },
       retries: 0,
+      onFailure: socialWeeklyDraftOnFailure,
     },
     [{ cron: SOCIAL_WEEKLY_DRAFT_CRON }, { event: SOCIAL_WEEKLY_DRAFT_DUE_EVENT }],
-    async ({ event, step }) =>
-      event.name === SOCIAL_WEEKLY_DRAFT_DUE_EVENT
-        ? handleDue(deps, event, step)
-        : handleCron(deps, step),
+    async ({ event, step, runId }) => {
+      const inngestRunId = typeof runId === 'string' ? runId : ''
+      return event.name === SOCIAL_WEEKLY_DRAFT_DUE_EVENT
+        ? handleDue(deps, event, step, inngestRunId)
+        : handleCron(deps, step, inngestRunId)
+    },
   )
+}
+
+/** Opens the log row for this Inngest run. Same id `onFailure` closes. */
+export async function openWeeklyDraftRun(inngestRunId: string): Promise<string> {
+  const id = cronRunIdFromInngestRun(inngestRunId)
+  await startCronRunWithId(WEEKLY_LOOP_JOB, id)
+  return id
 }
 
 /** 生产实例。 */
@@ -719,7 +767,7 @@ export const socialWeeklyDraft = createSocialWeeklyDraftFunction({
   listClients: () => listWeeklyLoopClients(supabaseAdmin),
   loadClientConfig: (clientId) => loadWeeklyLoopClientConfig(supabaseAdmin, clientId),
   loopDeps: () => createWeeklyLoopDbDeps(supabaseAdmin),
-  startRun: () => startCronRunId(WEEKLY_LOOP_JOB),
+  startRun: (inngestRunId) => openWeeklyDraftRun(inngestRunId),
   finishRun: async ({ runId, startedAt, ...rest }) => {
     await cronRunHandle(WEEKLY_LOOP_JOB, runId, startedAt).finish(rest)
   },

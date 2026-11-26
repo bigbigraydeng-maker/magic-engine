@@ -21,6 +21,13 @@ vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
 const imageStep = vi.hoisted(() => ({ run: vi.fn() }))
 vi.mock('@/lib/social/image-post-step', () => ({ runImagePostStep: imageStep.run }))
 vi.mock('@/lib/ai/openai-client', () => ({ getOpenAIClient: () => ({ chat: { completions: { create: vi.fn() } } }) }))
+vi.mock('@/lib/social/weekly-plan/after-draft', async (importOriginal) => {
+  const orig = await importOriginal<typeof import('@/lib/social/weekly-plan/after-draft')>()
+  return {
+    ...orig,
+    ensureWeekPlanApprovalAfterDraft: vi.fn(async () => ({ status: 'skipped', reason: 'test' })),
+  }
+})
 
 type Fn = ReturnType<typeof createSocialWeeklyDraftFunction>
 const optsOf = (fn: Fn) =>
@@ -238,8 +245,14 @@ describe('social-weekly-draft: the image-post draft step is isolated from the re
     await handlerOf(fn)({ event: dueEvent('write'), step: fakeStep() })
 
     expect(imageStep.run).toHaveBeenCalledWith('c1', '2026-11-05', expect.anything(), null, expect.anything())
-    const call = (deps.finishRun as unknown as { mock: { calls: [{ summary: { imagePost: { drafted: number } } }][] } }).mock.calls[0][0]
+    const call = (deps.finishRun as unknown as { mock: { calls: [{ summary: {
+      imagePost: { drafted: number }
+      storyWeek: { drafted: number; skipped: string }
+      weekDrafts: { post: { drafted: number } }
+    } }][] } }).mock.calls[0][0]
     expect(call.summary.imagePost.drafted).toBe(1)
+    expect(call.summary.storyWeek).toMatchObject({ drafted: 0, skipped: 'no_story_quota' })
+    expect(call.summary.weekDrafts.post.drafted).toBe(1)
     vi.unstubAllEnvs()
   })
 

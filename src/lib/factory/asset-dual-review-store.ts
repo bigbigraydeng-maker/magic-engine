@@ -67,9 +67,11 @@ async function loadPool(clientId: string): Promise<Awaited<ReturnType<DualReview
   return { version: version.version, pool: loaded.config.creative_pool }
 }
 
-function musicOf(brief: unknown) {
+function musicOf(brief: unknown, output: unknown) {
   const remotion = isRecord(brief) ? brief.remotion : null
-  return remotionMusicClearance(remotion)
+  const probe = isRecord(output) && isRecord(output.probe) ? output.probe : null
+  const measured = probe && typeof probe.duration_seconds === 'number' ? probe.duration_seconds : undefined
+  return remotionMusicClearance(remotion, measured)
 }
 
 export function supabaseDualReviewIo(supabase: SupabaseClient): DualReviewIo {

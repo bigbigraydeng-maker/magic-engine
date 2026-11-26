@@ -60,14 +60,21 @@ export function rulesFromLeadsConfig(leadsConfig: unknown): ReviewVerdictRules {
   }
 }
 
+function validCardWindowDays(cardWindowDays: number): boolean {
+  return Number.isInteger(cardWindowDays) && cardWindowDays >= 1 && cardWindowDays <= 28
+}
+
 export function observationWindowForAction(
   actionType: string,
   rules: ReviewVerdictRules,
-  _cardWindowDays: number,
+  cardWindowDays: number,
 ): number {
-  if (actionType === PAUSE_CARD_ACTION) return rules.pauseWindowDays
   if (actionType === BUDGET_CARD_ACTION) return rules.budgetWindowDays
-  return _cardWindowDays
+  if (actionType === PAUSE_CARD_ACTION) {
+    if (validCardWindowDays(cardWindowDays)) return cardWindowDays
+    return rules.pauseWindowDays
+  }
+  return cardWindowDays
 }
 
 export function primaryCostMetric(primary: OutcomeStep | null): string {

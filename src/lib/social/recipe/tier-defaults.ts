@@ -28,7 +28,19 @@ export interface SocialAgentSettings {
   reelSource: 'client' | 'tier' | 'off'
   imagePostPerDay: number
   imagePostSource: 'client' | 'tier' | 'off'
+  /** Image-post layout recipe from `social_agent.image_post_recipe`; null = post the photo as-is (default). */
+  imagePostRecipe: ImagePostRecipeId | null
   tier: PlanTier | null
+}
+
+/** Whitelist of image-post recipes a client may opt into. Anything else reads as null (off). */
+export const IMAGE_POST_RECIPE_IDS = ['tour_poster_v1'] as const
+export type ImagePostRecipeId = (typeof IMAGE_POST_RECIPE_IDS)[number]
+
+export function parseImagePostRecipe(raw: unknown): ImagePostRecipeId | null {
+  return typeof raw === 'string' && (IMAGE_POST_RECIPE_IDS as readonly string[]).includes(raw)
+    ? (raw as ImagePostRecipeId)
+    : null
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -42,6 +54,30 @@ export function parsePlanTier(raw: unknown): PlanTier | null {
   return null
 }
 
+/** A whole-number daily quota the client set explicitly, or null. */
+function clientQuota(raw: unknown): number | null {
+  return typeof raw === 'number' && Number.isFinite(raw) && Number.isInteger(raw) && raw >= 0 ? raw : null
+}
+
+/**
+ * Image posts without the daily social agent (PM 2026-11-15): a client in the weekly loop can draft image
+ * posts on its draft day while its reel cadence stays weekly. Needs `image_post_standalone === true` AND an
+ * explicit `image_post_per_day`; no tier default, so no client starts drafting by accident.
+ */
+function standaloneImagePosts(
+  socialAgent: unknown,
+): Pick<SocialAgentSettings, 'imagePostPerDay' | 'imagePostSource' | 'imagePostRecipe'> {
+  const off = { imagePostPerDay: 0, imagePostSource: 'off' as const, imagePostRecipe: null }
+  if (!isRecord(socialAgent) || socialAgent.image_post_standalone !== true) return off
+  const perDay = clientQuota(socialAgent.image_post_per_day)
+  if (perDay === null || perDay === 0) return off
+  return {
+    imagePostPerDay: Math.min(perDay, DAILY_IMAGE_POST_HARD_CAP),
+    imagePostSource: 'client',
+    imagePostRecipe: parseImagePostRecipe(socialAgent.image_post_recipe),
+  }
+}
+
 export function readSocialAgentSettings(
   config: unknown,
   planTier: unknown,
@@ -52,7 +88,7 @@ export function readSocialAgentSettings(
   const enabled = isRecord(socialAgent) && socialAgent.enabled === true
 
   if (!enabled) {
-    return { enabled: false, reelPerDay: 0, reelSource: 'off', imagePostPerDay: 0, imagePostSource: 'off', tier }
+    return { ...standaloneImagePosts(socialAgent), enabled: false, reelPerDay: 0, reelSource: 'off', tier }
   }
 
   const rawReelPerDay = isRecord(socialAgent) ? socialAgent.reel_per_day : undefined
@@ -104,6 +140,7 @@ export function readSocialAgentSettings(
     reelSource,
     imagePostPerDay: Math.min(imagePostValue, DAILY_IMAGE_POST_HARD_CAP),
     imagePostSource,
+    imagePostRecipe: parseImagePostRecipe(isRecord(socialAgent) ? socialAgent.image_post_recipe : undefined),
     tier,
   }
 }

@@ -170,6 +170,10 @@ function makeUpsertChain(returnedId: string, withError: { message: string } | nu
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
+beforeEach(() => {
+  vi.stubEnv('EXTERNAL_DATA_PULL_CLIENT_IDS', '*')
+})
+
 describe('GET /api/cron/google-data-pullback-daily', () => {
   beforeEach(() => {
     vi.clearAllMocks()

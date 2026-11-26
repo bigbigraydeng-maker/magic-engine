@@ -51,7 +51,7 @@ describe('P1-1：短而真的笔记不是「没内容」', () => {
   })
 
   it('「周五回电」→ 回电时间保留，且那天排进「约好回电」（callback_due）', async () => {
-    const friday = '2026-10-30T20:00:00.000Z' // 新西兰周六早 9 点前的周五晚，仅需落在「今天」之前的合理窗口
+    const friday = '2026-10-29T20:00:00.000Z' // 新西兰周五（10-30）早 9 点：笔记记在周三 10-28，「周五」就是这一天
     create.mockResolvedValue({
       output_text: JSON.stringify({ ...BASE, callback_at: friday, mentioned_next_step: true, summary: '周五回电。' }),
     })
@@ -164,11 +164,18 @@ describe('子牙 (c)：中文数字与地名', () => {
 })
 
 describe('Codex 复审 559352e：中文钟点、完成态、否定范围、英文月份', () => {
-  const at = '2026-11-02T20:00:00.000Z'
+  // 笔记记在新西兰周一 11-02 15:00。回电时间必须跟原话对得上（PM 11-15：不许 AI 编回电）：
+  // 「明早十点」= 11-03 10:00；只说钟点的「下午三点 / 十一点」= 今天或明天，这里取明天。
+  const notedAt = '2026-11-02T02:00:00.000Z'
+  const cases: Array<[string, string]> = [
+    ['明早十点联系', '2026-11-02T21:00:00.000Z'],
+    ['下午三点联系', '2026-11-03T02:00:00.000Z'],
+    ['十一点联系', '2026-11-02T22:00:00.000Z'],
+  ]
 
-  it.each(['明早十点联系', '下午三点联系', '十一点联系'])(
+  it.each(cases)(
     '「%s」经 parseNote 保留回电时间，到点后进 callback_due',
-    async (note) => {
+    async (note, at) => {
       create.mockResolvedValue({
         output_text: JSON.stringify({
           ...BASE,
@@ -177,7 +184,7 @@ describe('Codex 复审 559352e：中文钟点、完成态、否定范围、英�
           summary: note,
         }),
       })
-      const r = await parseNote(note, { now: new Date('2026-10-31T02:00:00.000Z') })
+      const r = await parseNote(note, { now: new Date(notedAt) })
       expect(create).toHaveBeenCalled()
       expect(r.callback_at).toBe(at)
       expect(r.mentioned_next_step).toBe(true)
@@ -191,14 +198,14 @@ describe('Codex 复审 559352e：中文钟点、完成态、否定范围、英�
           {
             channel: 'phone',
             direction: 'outbound',
-            occurredAt: '2026-10-31T02:00:00.000Z',
+            occurredAt: notedAt,
             source: 'me_manual',
             outcome: 'callback_set',
             callbackAt: r.callback_at,
           },
         ],
       }
-      const seg = segmentContact(c, new Date('2026-11-02T22:00:00.000Z'))
+      const seg = segmentContact(c, new Date(new Date(at).getTime() + 2 * 3_600_000))
       expect(seg.segment).toBe('callback_due')
     },
   )

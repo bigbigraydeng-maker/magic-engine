@@ -41,6 +41,7 @@ export const SITE_DIFF_FIELD_LABELS: Readonly<Record<string, string>> = {
   review_count: '评价数',
   review_summary: '评价摘要',
   related_blog_slugs: '推荐阅读',
+  route_variants: '分日期线路版本',
   quick_answer: '快速回答',
 }
 
@@ -76,6 +77,7 @@ const COMPARED_FIELDS: readonly string[] = [
   'review_count',
   'review_summary',
   'related_blog_slugs',
+  'route_variants',
   'quick_answer',
 ]
 
@@ -226,13 +228,14 @@ function normaliseWebsiteTour(product: FirstPartyTour, today: string): Record<st
     review_count: product.review_count ?? null,
     review_summary: product.review_summary ?? null,
     related_blog_slugs: product.related_blog_slugs ?? [],
+    route_variants: product.route_variants ?? [],
     quick_answer: product.quick_answer ?? null,
   }
 }
 
 /** Normalise the catalog tour into the comparable shape. */
 function normaliseCatalogTour(tour: WebsiteTour): Record<string, unknown> {
-  return { ...tour }
+  return { ...tour, route_variants: tour.route_variants ?? [] }
 }
 
 /** Build one difference entry for a scalar field. */

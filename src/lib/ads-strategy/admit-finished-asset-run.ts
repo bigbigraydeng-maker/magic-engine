@@ -6,8 +6,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { isAssetOnly } from '@/lib/factory/deliverable'
 import { validateRenderPath } from '@/lib/factory/worker-guard'
+import { isExternalUpload } from '@/lib/factory/talent-consent'
 import { createKernel } from '@/lib/kernel'
 import { getRegisteredAccountIds } from '@/lib/meta/campaign-ownership'
+import { canonicalAccountDigits } from '@/lib/meta/ad-account-binding'
 import { getClientAdAccounts } from '@/lib/meta/client-ad-accounts'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import { requestVideoUploadCard } from './video-upload-card'
@@ -15,6 +17,7 @@ import {
   ACCOUNT_UPLOAD_SOURCE,
   ASSET_UPLOAD_REFUSED,
   admitFinishedAsset,
+  externalUploadPath,
   creativePoolUploadEnabled,
   readyToUpload,
   type AdmitDeps,
@@ -41,7 +44,9 @@ function toOrder(row: Record<string, unknown>): AdmitWorkOrder | null {
     clientId,
     status: typeof row.status === 'string' ? row.status : '',
     assetOnly: isAssetOnly(row.brief),
-    videoPath: rawPath ? validateRenderPath(rawPath, clientId, id) : null,
+    videoPath: rawPath
+      ? validateRenderPath(rawPath, clientId, id) ?? (isExternalUpload(row.brief) ? externalUploadPath(rawPath, clientId) : null)
+      : null,
     reviewRef: (row.review_ref ?? {}) as Record<string, unknown>,
   }
 }
@@ -135,6 +140,21 @@ export async function requestFinishedVideoUpload(
     workOrderId: loaded.order.id,
     accountId: plan.accountId,
     fileUrl: plan.fileUrl,
+    title: await orderAngle(supabase, loaded.order.id),
+    accountLabel: await accountLabelFor(loaded.order.clientId, plan.accountId),
   })
   return { ok: true, runId: card.runId }
+}
+
+/** Card wording only; a read failure leaves the card without a title rather than blocking it. */
+async function orderAngle(supabase: SupabaseClient, workOrderId: string): Promise<string | undefined> {
+  const { data } = await supabase.from('content_work_orders').select('angle').eq('id', workOrderId).maybeSingle()
+  const angle = (data as { angle?: unknown } | null)?.angle
+  return typeof angle === 'string' && angle.trim() ? angle.trim() : undefined
+}
+
+async function accountLabelFor(clientId: string, accountId: string): Promise<string | undefined> {
+  const accounts = await getClientAdAccounts(clientId)
+  const match = accounts.find((account) => canonicalAccountDigits(account.adAccountId) === canonicalAccountDigits(accountId))
+  return match?.label?.trim() || undefined
 }

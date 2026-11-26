@@ -71,7 +71,9 @@ describe('review verdict rules', () => {
   it('picks default pause vs budget windows', () => {
     const rules = DEFAULT_REVIEW_VERDICT_RULES
     expect(observationWindowForAction(BUDGET_CARD_ACTION, rules, 14)).toBe(7)
-    expect(observationWindowForAction(PAUSE_CARD_ACTION, rules, 7)).toBe(3)
+    expect(observationWindowForAction(PAUSE_CARD_ACTION, rules, 7)).toBe(7)
+    expect(observationWindowForAction(PAUSE_CARD_ACTION, rules, 0)).toBe(3)
+    expect(observationWindowForAction(PAUSE_CARD_ACTION, rules, 29)).toBe(3)
   })
 
   it('maps tier labels for UI', () => {

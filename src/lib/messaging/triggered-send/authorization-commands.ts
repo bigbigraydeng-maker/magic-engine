@@ -1,5 +1,6 @@
 /**
- * Two of the commands of the welcome letter's standing authorization (§4.3): propose and revoke. Authorize is in
+ * Two of the commands of a standing authorization (§4.3): propose and revoke. Which kind of letter (the welcome letter
+ * by default, or the AI follow-up letters) is the deps' `trigger`, chosen by the route from the request. Authorize is in
  * `authorization-authorize.ts`, the read-only status in `authorization-status.ts`, the shared checks in
  * `authorization-assess.ts`, the shared ports and helpers in `authorization-core.ts`.
  *
@@ -17,15 +18,19 @@ import {
   done,
   emitBestEffort,
   factsOf,
-  isWelcomeEmail,
+  isTriggerEmail,
   recordView,
   refuse,
   revokeAsSystem,
+  triggerOf,
+  TriggerSchema,
   type Actor,
   type ChangeFacts,
   type CommandDeps,
   type CommandResult,
 } from './authorization-core'
+import { isLettersBlock } from './send-rule'
+import { EMAIL_CHANNEL } from './trigger-scope'
 
 export const ProposeCommandSchema = z
   .object({
@@ -35,6 +40,7 @@ export const ProposeCommandSchema = z
     daily_cap: z.number().int().min(1).max(50),
     rule: z.unknown(),
     confirm: z.boolean().default(false),
+    trigger: TriggerSchema,
   })
   .strict()
 export type ProposeCommand = z.infer<typeof ProposeCommandSchema>
@@ -44,6 +50,7 @@ export const RevokeCommandSchema = z
     client_id: AUTHORIZATION_UUID_SCHEMA,
     authorization_id: AUTHORIZATION_UUID_SCHEMA,
     reason: z.string().trim().min(1).max(300),
+    trigger: TriggerSchema,
   })
   .strict()
 export type RevokeCommand = z.infer<typeof RevokeCommandSchema>
@@ -61,11 +68,13 @@ export async function proposeCommand(deps: CommandDeps, clientId: string, actor:
   const open = await deps.store.loadOpen(clientId)
   if (!open.ok) return refuse(500, 'AUTHORIZATIONS_UNREADABLE')
   const replaced = open.open.proposal
+  const send = checked.rule.send
   const proposal = {
     account: command.account,
     rule: checked.rule,
     rule_sha256: checked.ruleSha256,
-    template_key: checked.rule.send.template.key,
+    template_key: isLettersBlock(send) ? null : send.template.key,
+    letter_keys: isLettersBlock(send) ? send.letters.map((l) => l.letter_key) : null,
     template_version: checked.templateVersion,
     template_sha256: checked.templateSha256,
     daily_cap: command.daily_cap,
@@ -81,8 +90,8 @@ export async function proposeCommand(deps: CommandDeps, clientId: string, actor:
   const inserted = await deps.store.insertProposal({
     requestId,
     clientId,
-    triggerKey: 'welcome',
-    channel: 'email',
+    triggerKey: triggerOf(deps),
+    channel: EMAIL_CHANNEL,
     account: command.account,
     rule: checked.rule,
     ruleSha256: checked.ruleSha256,
@@ -97,6 +106,7 @@ export async function proposeCommand(deps: CommandDeps, clientId: string, actor:
     return inserted.code === 'proposal_conflict' ? refuse(409, 'PROPOSAL_CONFLICT', extra) : refuse(500, 'PROPOSAL_NOT_WRITTEN', extra)
   }
   const facts: ChangeFacts = {
+    triggerKey: triggerOf(deps),
     requestId,
     id: inserted.id,
     clientId,
@@ -132,7 +142,7 @@ export async function revokeCommand(deps: CommandDeps, clientId: string, actor: 
   const loaded = await deps.store.load(command.authorization_id)
   if (!loaded.ok) return refuse(500, 'AUTHORIZATION_UNREADABLE')
   const record = loaded.record
-  if (record === null || record.clientId !== clientId || !isWelcomeEmail(record)) return refuse(404, 'AUTHORIZATION_NOT_FOUND')
+  if (record === null || record.clientId !== clientId || !isTriggerEmail(record, triggerOf(deps))) return refuse(404, 'AUTHORIZATION_NOT_FOUND')
   if (record.revokedAt !== null) {
     return refuse(409, 'ALREADY_REVOKED', { authorization: recordView(record), ...(await currentlyOpen(deps, clientId)) })
   }

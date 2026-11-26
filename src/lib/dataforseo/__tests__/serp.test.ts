@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { getSerpPage } from '../serp'
+import { getSerpPage, getOrganicRanks, resolveOrganicTarget } from '../serp'
 import aiOverviewFixture from './fixtures/serp-ai-overview-nz.json'
 
 vi.mock('@/lib/validation-utils', () => ({
@@ -136,5 +136,104 @@ describe('getSerpPage', () => {
 
     expect(result.ai_overview_text).toBeNull()
     expect(result.ai_overview_sources).toEqual([])
+  })
+
+  it('resolves a Google redirect organic item to the breadcrumb host', async () => {
+    mockFetch.mockReturnValue(
+      makeMockResponse([
+        {
+          type:          'organic',
+          rank_group:    1,
+          rank_absolute: 6,
+          domain:        'google.com',
+          url:           'https://google.com/goto?url=CAESXgHEIkXX',
+          title:         'https://brisbanesfinestfloors.au/',
+          breadcrumb:    'https://brisbanesfinestfloors.au',
+          website_name:  'brisbanesfinestfloors.au',
+        },
+      ]),
+    )
+
+    const result = await getSerpPage('flooring brisbane')
+
+    expect(result.organic_results[0]?.url).toBe('https://brisbanesfinestfloors.au/')
+  })
+
+  it('sends a city location_code and no location_name', async () => {
+    mockFetch.mockReturnValue(makeMockResponse([]))
+
+    await getSerpPage('flooring', 'au', { city: 'brisbane' })
+
+    const request = mockFetch.mock.calls[0]?.[1] as RequestInit
+    const payload = JSON.parse(String(request.body)) as Array<{ location_code?: number; location_name?: string }>
+    expect(payload[0]?.location_code).toBe(1000339)
+    expect(payload[0]?.location_name).toBeUndefined()
+  })
+})
+
+describe('resolveOrganicTarget', () => {
+  it('passes a normal url through unchanged', () => {
+    expect(resolveOrganicTarget({ url: 'https://a.com/page', domain: 'a.com' }))
+      .toEqual({ url: 'https://a.com/page', domain: 'a.com' })
+  })
+
+  it('resolves a redirect via an http breadcrumb with a › suffix', () => {
+    expect(resolveOrganicTarget({
+      url:         'https://google.com/goto?url=abc',
+      domain:      'google.com',
+      breadcrumb:  'https://www.thebestbrisbane.com › Recent articles',
+      website_name: 'thebestbrisbane.com',
+    })).toEqual({ url: 'https://www.thebestbrisbane.com/', domain: 'www.thebestbrisbane.com' })
+  })
+
+  it('resolves a redirect via a platform website_name', () => {
+    expect(resolveOrganicTarget({
+      url:          'https://google.com/goto?url=abc',
+      domain:       'google.com',
+      breadcrumb:   '1.8K+ followers',
+      website_name: 'Facebook · NS Timber Flooring',
+    })).toEqual({ url: 'https://facebook.com', domain: 'facebook.com' })
+  })
+
+  it('returns empty for an unresolvable redirect', () => {
+    expect(resolveOrganicTarget({
+      url:          'https://google.com/goto?url=abc',
+      domain:       'google.com',
+      breadcrumb:   '1 month ago',
+      website_name: 'Instagram · romans_flooring',
+    })).toEqual({ url: 'https://instagram.com', domain: 'instagram.com' })
+
+    expect(resolveOrganicTarget({
+      url:          'https://google.com/goto?url=abc',
+      domain:       'google.com',
+      breadcrumb:   '1 month ago',
+      website_name: 'Some Unknown Thing',
+    })).toEqual({ url: '', domain: null })
+  })
+})
+
+describe('getOrganicRanks', () => {
+  beforeEach(() => mockFetch.mockReset())
+
+  it('resolves redirect items and keeps rankGroup', async () => {
+    mockFetch.mockReturnValue(
+      makeMockResponse([
+        {
+          type:          'organic',
+          rank_group:    1,
+          rank_absolute: 6,
+          domain:        'google.com',
+          url:           'https://google.com/goto?url=abc',
+          breadcrumb:    'https://brisbanesfinestfloors.au',
+          website_name:  'brisbanesfinestfloors.au',
+        },
+      ]),
+    )
+
+    const snapshot = await getOrganicRanks('x', 'au', { depth: 10 })
+
+    expect(snapshot.items[0]?.rankGroup).toBe(1)
+    expect(snapshot.items[0]?.domain).toBe('brisbanesfinestfloors.au')
+    expect(snapshot.items[0]?.url).toBe('https://brisbanesfinestfloors.au/')
   })
 })

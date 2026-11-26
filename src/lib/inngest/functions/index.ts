@@ -24,11 +24,13 @@ import { adsD3AutoPause } from './ads-d3-auto-pause'
 import { leadSheetSyncFanOut, leadSheetSyncOne } from './lead-sheet-sync'
 import { calendarClosureAudit } from './calendar-closure-audit'
 import { promoPlanDailyWatch } from './promo-plan-daily-watch'
+import { crmFollowupStopline } from './crm-followup-stopline'
 import { adBreakdownCapture } from './ad-breakdown-capture'
 import { adsTrackingPreflight } from './ads-tracking-preflight'
 import { adsTrackingLaunchWatch } from './ads-tracking-launch-watch'
 import { adsServicePauseNotify } from './ads-service-pause-notify'
 import { crmLeadFollowupDigest } from './crm-lead-followup-digest'
+import { crmEnquiryDailyDigest } from './crm-enquiry-daily-digest'
 import { adsAutonomySyncFunction } from './ads-autonomy-sync'
 import { adsCampaignBudgetDecrease } from './ads-campaign-budget'
 import { adsO1BudgetScale } from './ads-o1-budget-scale'
@@ -63,6 +65,7 @@ import { socialReadbackWeekly } from './cloud-social-readback-weekly'
 
 export const cloudFunctions = [
   promoPlanDailyWatch,
+  crmFollowupStopline,
   adBreakdownCapture,
   adsTrackingPreflight,
   adsTrackingLaunchWatch,
@@ -101,6 +104,7 @@ export const cloudFunctions = [
   leadSheetSyncOne,
   calendarClosureAudit,
   crmLeadFollowupDigest,
+  crmEnquiryDailyDigest,
   adsAutonomySyncFunction,
   adsCampaignBudgetDecrease,
   adsO1BudgetScale,

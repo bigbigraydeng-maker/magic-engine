@@ -17,7 +17,7 @@ const SENT_AT = '2026-11-10T00:00:00.000Z'
 const MIN = 60_000
 
 function report(over: Partial<ClickReport> = {}): ClickReport {
-  return { token: 'AAAAAAAAAAAA', path: '/brochures/b.pdf', method: 'GET', ua: CHROME, fetchSite: 'none', fetchMode: 'navigate', fetchDest: 'document', ...over }
+  return { token: 'AAAAAAAAAAAA', path: '/brochures/b.pdf', method: 'GET', ua: CHROME, fetchSite: 'none', fetchMode: 'navigate', fetchDest: 'document', kind: 'link', ...over }
 }
 
 const info: TokenInfo = { token: 'AAAAAAAAAAAA', clientId: 'c1', contactId: 'k1', requestId: 'r1', kind: 'catalogue', tour: null, createdAt: SENT_AT }
@@ -141,16 +141,51 @@ describe('createMinuteCap', () => {
 describe('statsFromRows (the 5-minute de-dupe)', () => {
   it('a scan a second before the guest does not swallow the guest\'s click', async () => {
     const { statsFromRows } = await import('../click-store-prod')
-    const rows = [{ occurred_at: '2026-11-11T07:03:00Z', counts_as_human: false, suspected_scan: true }]
-    expect(statsFromRows(rows)).toEqual({ count: 1, lastAt: null, hasHuman: false })
+    const rows = [{ occurred_at: '2026-11-11T07:03:00Z', counts_as_human: false, suspected_scan: true, path: '/b.pdf' }]
+    expect(statsFromRows(rows, '/b.pdf')).toEqual({ count: 1, lastAt: null, hasHuman: false })
   })
 
   it('a real click within 5 minutes does count for the de-dupe', async () => {
     const { statsFromRows } = await import('../click-store-prod')
     const rows = [
-      { occurred_at: '2026-11-11T07:05:00Z', counts_as_human: false, suspected_scan: true },
-      { occurred_at: '2026-11-11T07:03:00Z', counts_as_human: true, suspected_scan: false },
+      { occurred_at: '2026-11-11T07:05:00Z', counts_as_human: false, suspected_scan: true, path: '/b.pdf' },
+      { occurred_at: '2026-11-11T07:03:00Z', counts_as_human: true, suspected_scan: false, path: '/b.pdf' },
     ]
-    expect(statsFromRows(rows)).toEqual({ count: 2, lastAt: '2026-11-11T07:03:00Z', hasHuman: true })
+    expect(statsFromRows(rows, '/b.pdf')).toEqual({ count: 2, lastAt: '2026-11-11T07:03:00Z', hasHuman: true })
+  })
+
+  it('de-dupes per page: a click on another page minutes later is not swallowed; the token total still counts all', async () => {
+    const { statsFromRows } = await import('../click-store-prod')
+    const rows = [{ occurred_at: '2026-11-11T07:03:00Z', counts_as_human: true, suspected_scan: false, path: '/b.pdf' }]
+    expect(statsFromRows(rows, '/tours/china/discovery/essentials')).toEqual({ count: 1, lastAt: null, hasHuman: true })
+  })
+})
+
+describe('page views reported by the client site (kind page_view)', () => {
+  it('parses the kind; anything else is a mail-link click', () => {
+    const view = parseClickReport({ token: 'AAAAAAAAAAAA', path: '/tours/a/b/c', method: 'GET', ua: CHROME, kind: 'page_view' })
+    expect(view).toMatchObject({ ok: true, report: { kind: 'page_view' } })
+    const other = parseClickReport({ token: 'AAAAAAAAAAAA', path: '/tours/a/b/c', method: 'GET', ua: CHROME, kind: 'something' })
+    expect(other).toMatchObject({ ok: true, report: { kind: 'link' } })
+  })
+
+  it('a browser page view counts without a document navigation (in-site navigation has none)', () => {
+    const v = report({ kind: 'page_view', path: '/tours/a/b/c', fetchSite: null, fetchMode: null, fetchDest: null })
+    expect(judgeClick(v, 2 * MIN)).toEqual({ uaClass: 'browser', suspectedScan: false, countsAsHuman: true })
+  })
+
+  it('a page view from a non-browser, or right after the mail went out, never counts', () => {
+    expect(judgeClick(report({ kind: 'page_view', ua: 'python-requests/2.31' }), 2 * MIN).countsAsHuman).toBe(false)
+    expect(judgeClick(report({ kind: 'page_view' }), 30_000)).toMatchObject({ suspectedScan: true, countsAsHuman: false })
+  })
+
+  it('the same mail-link rules still apply to kind link (a prefetch is not a person)', () => {
+    expect(judgeClick(report({ fetchMode: 'cors', fetchDest: 'empty' }), 2 * MIN).countsAsHuman).toBe(false)
+  })
+
+  it('asks the store about THIS page when de-duping', async () => {
+    const { s } = store()
+    await recordClick(report({ kind: 'page_view', path: '/tours/a/b/c' }), s, at(30 * MIN))
+    expect(s.clickStats).toHaveBeenCalledWith('AAAAAAAAAAAA', '/tours/a/b/c')
   })
 })

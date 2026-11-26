@@ -63,6 +63,8 @@ export const WORKLIST_GROUPS: WorklistGroup[] = [
   // 点了链接 = 客人自己动了手，跟「他回话了」是同一件事：有人在等。
   // （2026-08-03 从 acted 挪上来。PM 原话说的是「打开了邮件」，但打开证明不了
   //  任何事 —— 苹果的隐私保护会替用户自动打开；点击才要真人动手。）
+  // 这几天自己在官网翻手册 —— 比「点过一次链接」更说明他在看，排在它前面。
+  { key: 'reading_site',       members: ['reading_site'],            layer: 'waiting' },
   { key: 'clicked_link',       members: ['clicked_link'],            layer: 'waiting' },
   // 新进来的人在这里等第一步。原来它被放在最下面那层、还默认折起来 ——
   // 等于每天新来的询价一进系统就被折叠了。

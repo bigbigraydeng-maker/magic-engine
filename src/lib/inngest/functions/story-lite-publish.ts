@@ -23,7 +23,11 @@ import {
 
 export const STORY_LITE_PUBLISH_FUNCTION_ID = `${CLOUD_FN_PREFIX}story-lite-publish`
 export const STORY_LITE_PUBLISH_JOB = 'story-lite-publish'
-export const STORY_LITE_PUBLISH_CRON = 'TZ=Pacific/Auckland */10 * * * *'
+/**
+ * Every 20 minutes (was 10; 2026-11-16 Inngest quota). Must stay ≤ 25: a slot is publishable from 5 min early to
+ * 20 min late (DEFAULT_SWEEP_CONFIG), so a longer gap would skip slots.
+ */
+export const STORY_LITE_PUBLISH_CRON = 'TZ=Pacific/Auckland */20 * * * *'
 
 export interface StoryReconcileEmit {
   ok: boolean

@@ -7,8 +7,10 @@ import { canonicalHashOfInput } from '@/lib/kernel/canonical-hash'
 import type { AccountCapFacts, LiveSpendByAccount } from '@/lib/marketing-plan/promo/budget-caps'
 import { confirmBlockReason, contentFingerprint, type CardFacts, type HardCheck } from '@/lib/confirmation-card/facts'
 import {
+  draftDailyCeiling,
   isKnownDraftKind,
   MAX_AD_SETS,
+  MAX_AUTO_DAILY_BUDGET,
   metaTripletFor,
   type AdDraft,
   inheritedSpendOf,
@@ -112,15 +114,25 @@ export function plainMetaError(error: string): string {
   return `Meta 没有收下这份暂停草稿：${cleaned.slice(0, 140)}`
 }
 
+/**
+ * 这张卡上一份草稿每天最多写多少：按这个客户自己设的上限算，只放宽、不低于原来的 50。
+ * 客户上限比 50 还低时，由下面的日预算上限检查用真实金额拦，这里不另收紧
+ * （往已有广告组加广告时，这里比的是请求体金额，收紧会误拦）。
+ */
+export function pausedDraftCeiling(review: PausedDraftReview): number {
+  const account = review.accounts?.find((row) => row.ad_account_id === review.adAccountId && row.owned_by_client)
+  return Math.max(MAX_AUTO_DAILY_BUDGET, draftDailyCeiling(review.clientCapCents, account?.daily_cap_cents ?? null))
+}
+
 function hardChecks(draft: AdDraft, review: PausedDraftReview): HardCheck[] {
-  const checks = [reviewCheck(draft), capCheck(draft, review), countCheck(draft), buildableCheck(draft)]
+  const checks = [reviewCheck(draft, review), capCheck(draft, review), countCheck(draft), buildableCheck(draft)]
   const campaign = campaignCheck(draft, review)
   if (campaign) checks.push(campaign)
   return checks
 }
 
-function reviewCheck(draft: AdDraft): HardCheck {
-  const problems = reviewDraftForBuild(draft)
+function reviewCheck(draft: AdDraft, review: PausedDraftReview): HardCheck {
+  const problems = reviewDraftForBuild(draft, { maxDailyBudget: pausedDraftCeiling(review) })
   if (problems.length === 0) return { label: '建前复核', state: 'green', reason: '' }
   return { label: '建前复核', state: 'red', reason: clip(problems[0]?.message ?? '复核没通过') }
 }

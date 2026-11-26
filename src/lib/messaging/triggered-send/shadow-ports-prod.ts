@@ -25,7 +25,7 @@ import { evaluateFrequency } from '@/lib/crm/email-templates/gates/frequency'
 import { readEmailUnsubscribed } from '@/lib/crm/email-unsubscribe'
 
 import { localDay } from './candidates'
-import type { TriggeredSendRule } from './rule'
+import { gatesOf, type TriggeredSendRule } from './rule'
 import { addressSha256 } from './shadow-store'
 import type {
   AddressHistoryRead,
@@ -70,6 +70,11 @@ const EVIDENCE_BUDGET_MS = 15_000
 /** The batch check and the Mailchimp member lookup have no timeout of their own: bound them, so one slow answer cannot eat the whole chunk step. */
 const LEGACY_BUDGET_MS = 10_000
 const MEMBER_BUDGET_MS = 10_000
+
+/** What the old batch did, when the rule does not ask (`gates.legacy_welcomed` off): nothing is known, nothing is judged. */
+function notReadLegacy(): LegacyEvidence {
+  return { welcomed: false, batchSeen: false, campaignIds: [] }
+}
 
 /** A batch campaign sent before the lead came in (minus a margin for clock differences) cannot have welcomed that lead. */
 const BATCH_BEFORE_LEAD_MARGIN_MS = 10 * 60_000
@@ -279,6 +284,9 @@ export function createShadowGatePorts(deps: ShadowPortsDeps): {
   // evidence de-duplicates and counts (a human e-mail within two minutes of the batch mail must not swallow it), and
   // are remembered here. What the batch did for a contact is read separately below.
   const prefix = deps.rule.legacy.mailchimp_campaign_title_prefix
+  // A letter that does not replace the old batch counts the batch's campaigns like any other mail (the guest got them,
+  // design 2026-11-17 §7.2): they stay in the evidence. Only the welcome letter takes them out.
+  const gates = gatesOf(deps.rule)
   const legacyBatchById = new Map<string, LegacyBatchSeen>()
   const campaignCache = new Map<string, Promise<MailchimpCampaign[]>>()
 
@@ -310,7 +318,7 @@ export function createShadowGatePorts(deps: ShadowPortsDeps): {
               emailsSent: campaign.emailsSent,
             })
           }
-          return campaigns.filter((campaign) => !isBatchCampaign(campaign))
+          return gates.count_legacy_batch ? campaigns : campaigns.filter((campaign) => !isBatchCampaign(campaign))
         })
         .catch((err: unknown) => {
           campaignCache.delete(key)
@@ -439,6 +447,8 @@ export function createShadowGatePorts(deps: ShadowPortsDeps): {
       })
       if (!verdict.ok && verdict.reason === 'frequency_unverifiable') return { ok: false, error: verdict.error }
       // The cap is unreachable on purpose, so a verdict always carries the de-duplicated items.
+      // A letter that does not judge "the old batch already welcomed them" does not read it either (§7.2).
+      if (!gates.legacy_welcomed) return { ok: true, items: verdict.items, legacy: notReadLegacy() }
       const legacy = await withDeadline(readLegacy(contact), LEGACY_BUDGET_MS, 'old-batch check timed out')
       return { ok: true, items: verdict.items, legacy }
     } catch (err) {

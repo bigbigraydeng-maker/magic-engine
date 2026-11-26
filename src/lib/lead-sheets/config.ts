@@ -7,6 +7,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { filterClientIdsForExternalDataPull } from '@/lib/clients/external-data-pull-allowlist'
 import {
   LEAD_SHEET_FIELDS,
   destinationKey,
@@ -379,5 +380,6 @@ export async function loadRoutedClientIds(supabase: SupabaseClient): Promise<str
     .select('client_id')
     .eq('enabled', true)
   if (error) throw new Error(`读线索表格路线名单失败：${error.message}`)
-  return [...new Set(((data ?? []) as Array<{ client_id: string }>).map((r) => r.client_id))]
+  const ids = [...new Set(((data ?? []) as Array<{ client_id: string }>).map((r) => r.client_id))]
+  return filterClientIdsForExternalDataPull(ids)
 }

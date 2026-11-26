@@ -15,6 +15,7 @@
  */
 
 import type { ReceiptKind } from '@/lib/messaging/provider-events/receipt-types'
+import { isLiveScope } from './trigger-scope'
 
 export type { ReceiptKind }
 
@@ -112,7 +113,7 @@ function isPersonNotSent(row: ReceiptRow): boolean {
 function moveAllowed(row: ReceiptRow, target: ReceiptKind): ReceiptDecision | null {
   const from = rankOf(row.status)
   const to = RANK[target]
-  if (row.dedupeScope !== 'lifetime' || from === null) return { kind: 'unchanged', reason: 'not_a_send' }
+  if (!isLiveScope(row.dedupeScope) || from === null) return { kind: 'unchanged', reason: 'not_a_send' }
   if (target === 'failed') {
     if (isPersonNotSent(row)) return { kind: 'unchanged', reason: 'person_marked_not_sent' }
     if (from >= RANK.delivered) return { kind: 'unchanged', reason: 'failed_after_delivery' }

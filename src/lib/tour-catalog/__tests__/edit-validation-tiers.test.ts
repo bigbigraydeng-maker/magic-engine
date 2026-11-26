@@ -34,6 +34,7 @@ const SITE_VALUES: Record<string, unknown> = {
   tags: ['small group'],
   faqs: [{ question: 'Q', answer: 'A', link: null }],
   quickAnswer: 'Nine days.',
+  siteExtras: { related_blog_slugs: ['best-time-to-visit-china'] },
 }
 
 describe('client editor (no edit_site)', () => {
@@ -217,16 +218,12 @@ describe('tourPatchToDb', () => {
     })
   })
 
-  it('never produces a site_extras column, whatever is passed in', () => {
-    const sneaky = { siteExtras: { related_blog_slugs: ['x'] }, site_extras: { a: 1 } } as Record<string, unknown>
-    expect(tourPatchToDb(sneaky)).toEqual({})
-    const result = validateTourPatch({ siteExtras: { related_blog_slugs: ['x'] } }, admin())
-    expect(result).toEqual({
-      ok: false,
-      errors: [
-        { field: 'siteExtras', code: 'field_not_editable' },
-        { field: '*', code: 'empty_patch' },
-      ],
+  it('writes the site_extras column only from a validated siteExtras, never from a raw column name', () => {
+    expect(tourPatchToDb({ site_extras: { a: 1 } } as Record<string, unknown>)).toEqual({})
+    expect(tourPatchToDb({ siteExtras: { related_blog_slugs: ['x'] } })).toEqual({
+      site_extras: { related_blog_slugs: ['x'] },
     })
+    const result = validateTourPatch({ siteExtras: { a: 1 } }, admin())
+    expect(result).toEqual({ ok: false, errors: [{ field: 'siteExtras.a', code: 'unknown_key' }] })
   })
 })

@@ -9,7 +9,7 @@ verify_by: 2026-09-30
 verify_how: PR 合并后 all/page.tsx 无改动仍能拿到老响应；带 ?page=1&perPage=100 调用能拿到 paged 响应；对 CTS 客户 stage=quoted 筛选人数与 Supabase Studio 上直查一致
 done_on: 2026-09-25
 done_ref: pr:2001
-last_checked: 2026-11-10
-check_note: 11-10：gh pr view 2001 MERGED；main上src/app/api/clients/[id]/crm/contacts/route.ts含page/perPage/stage/q参数分支(无参数走老形状)，代码层成立；线上响应与CTS stage=quoted人数对比需登录态，判不了
+last_checked: 2026-11-25
+check_note: 11-25：main上src/app/api/clients/[id]/crm/contacts/route.ts仍在(最近改动7738afa03于11-18)，含perPage/stage分支86处匹配；线上响应形状与CTS stage=quoted人数对比要登录，判不了
 ---
 CRM 升级 6 轮（方案 pr:2000）第一轮，DeepSeek 1 轮 $0.02，Fable 窗口出提示词 + 复审 + 修类型错。

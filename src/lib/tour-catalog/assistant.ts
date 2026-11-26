@@ -404,7 +404,7 @@ const PROPOSE_CHANGES_TOOL: Anthropic.Tool = {
               description:
                 'update_tour 允许的键：name, title, shortDescription, durationText, displayPriceText, highlights, itinerary, inclusions, exclusions, tourCities, singleSupplement, singleSupplementNote, maxGroupSize, isActive, soldOut, managesDepartures。' +
                 'itinerary 的每一天可以带 accommodation（住宿）和 festiveLabel（节日标记）；没改就不用写，系统会保留原值。' +
-                '不能改的键（写了这条改动会被拒）：heroImage, gallery, metaTitle, metaDescription, tags, faqs, rating, reviewCount, reviewSummary, quickAnswer。' +
+                '不能改的键（写了这条改动会被拒）：heroImage, gallery, metaTitle, metaDescription, tags, faqs, rating, reviewCount, reviewSummary, quickAnswer, siteExtras。' +
                 'update_departure 允许的键：returnOn, status, priceTextOverride。' +
                 '只放需要改的键，不要用别名（例如价格必须写 displayPriceText，不要写 price）。',
             },

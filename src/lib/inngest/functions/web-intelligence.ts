@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { inngest, CLOUD_FN_PREFIX } from '../client'
 import { supabaseAdmin as db } from '@/lib/supabase'
+import { isClientAllowedForExternalDataPull } from '@/lib/clients/external-data-pull-allowlist'
 import { allowedClient, requestSchema } from '@/lib/web-intelligence/contracts'
 import { readRun } from '@/lib/web-intelligence/store'
 import { loadCompetitors } from '@/lib/web-intelligence/targets'
@@ -44,7 +45,10 @@ export const webIntelligenceDue = inngest.createFunction({
     if (!process.env.WEB_INTELLIGENCE_ALLOWED_CLIENT_IDS) return []
     const r = await db.from('web_intelligence_settings').select('client_id').eq('enabled', true).eq('entitled', true)
     if (r.error) throw new Error('settings_read_failed')
-    return r.data.map(row => row.client_id as string).filter(allowedClient)
+    return r.data
+      .map(row => row.client_id as string)
+      .filter(allowedClient)
+      .filter((id) => isClientAllowedForExternalDataPull(id))
   })
   for (const clientId of clients) {
     const due = await step.run(`due-${clientId}`, () => dueTargets(clientId))
@@ -66,7 +70,10 @@ export const webIntelligenceTrafficDue = inngest.createFunction({
     if (!process.env.WEB_INTELLIGENCE_ALLOWED_CLIENT_IDS) return []
     const r = await db.from('web_intelligence_settings').select('client_id').eq('enabled', true).eq('entitled', true)
     if (r.error) throw new Error('settings_read_failed')
-    return r.data.map(row => row.client_id as string).filter(allowedClient)
+    return r.data
+      .map(row => row.client_id as string)
+      .filter(allowedClient)
+      .filter((id) => isClientAllowedForExternalDataPull(id))
   })
   const results: Array<{ client_id: string; domains: number; persisted: number; duplicates: number; write_failures: number; cost_usd: number; error?: string }> = []
   for (const clientId of clients) {

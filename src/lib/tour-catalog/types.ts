@@ -35,6 +35,25 @@ export interface CatalogItineraryDay {
   operatorLogo?: CatalogOperatorLogo
 }
 
+/**
+ * A second way to run one tour, for departures whose route differs (e.g. Panorama's October 2027
+ * departure replaces Yunnan with Zhangjiajie). Stored in the tour's site_extras under
+ * `route_variants`; the tour's own itinerary stays the default route.
+ */
+export interface CatalogRouteVariant {
+  /** Short code used in links and tabs, e.g. "oct-2027". */
+  id: string
+  /** Tab label shown to visitors, e.g. "16 Oct 2027". */
+  label: string
+  /** One line telling visitors what is different about this route. */
+  note: string | null
+  /** ISO dates (YYYY-MM-DD) of the departures that run this route. */
+  departOn: string[]
+  /** Name of the route-map image for this route, or null to show no map. */
+  mapSlug: string | null
+  itinerary: CatalogItineraryDay[]
+}
+
 export interface CatalogTour {
   id: string
   clientId: string

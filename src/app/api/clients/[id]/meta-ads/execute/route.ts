@@ -1,21 +1,20 @@
 /**
  * POST /api/clients/[id]/meta-ads/execute
  *
- * P18.A.1: Execute a real Meta Ads action (pause campaign, adjust budget).
+ * Pause or resume a campaign by asking for a confirmation card.
+ * ads.adjust_bid is closed: a daily budget change only happens from a confirmation card.
  *
  * Body JSON:
- *   action_type       — 'ads.pause_campaign' | 'ads.adjust_bid' | 'ads.reactivate_campaign'
+ *   action_type       — 'ads.pause_campaign' | 'ads.reactivate_campaign'
  *   campaign_id       — Meta campaign ID string (no "act_" prefix)
  *   params?           — extra params by action type:
- *     new_daily_budget  (adjust_bid only) — new daily budget in whole currency units (AUD/USD)
  *     execution_item_id — optional link to flywheel execution item
  *
  * Responses:
  *   202 pause / resume asks for a confirmation card and does not write Meta
- *   202 adjust_bid queues a budget decrease
  *   400 missing required fields
  *   403 campaign_id does not belong to this client's registered ad account (AD-SEC-1)
- *   422 action not supported, campaign has no daily_budget (for adjust_bid), or reactivate of an ME Messenger draft campaign
+ *   422 action not supported, direct budget change, or reactivate of an ME Messenger draft campaign
  *   424 META_SYSTEM_USER_TOKEN not configured
  *
  * Before/after are stored in flywheel_actions.payload for audit and undo.
@@ -23,16 +22,12 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requireAdsCampaignBudgetAccess, queueAdsCampaignBudgetDecrease } from '@/lib/action-submission/ads-campaign-budget'
+import { requireAdsCampaignBudgetAccess } from '@/lib/action-submission/ads-campaign-budget'
 import { requestCampaignStatusCard } from '@/lib/action-submission/campaign-status-card'
-import { createKernel } from '@/lib/kernel'
-import { inngest } from '@/lib/inngest/client'
-import { ADS_CAMPAIGN_BUDGET_DECREASE_REQUESTED } from '@/lib/inngest/ads-events'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import { assertCampaignOwnedByClient } from '@/lib/meta/campaign-ownership'
 import { toActAccountId } from '@/lib/meta/ad-account-binding'
 import { ADS_ACTION_TYPE } from '@/lib/flywheel/vocabulary'
-import { nzToday } from '@/lib/pm-todo/ledger-items'
 import {
   checkMessengerDraftCampaign,
   MESSENGER_REACTIVATE_BLOCKED_MESSAGE,
@@ -43,7 +38,6 @@ import { publicError } from '@/lib/confirmation-card/http'
 
 const SUPPORTED_ACTION_TYPES = new Set([
   ADS_ACTION_TYPE.PAUSE_CAMPAIGN,
-  ADS_ACTION_TYPE.ADJUST_BID,
   'ads.reactivate_campaign',   // undo of pause — not in vocab (undo path only)
 ])
 
@@ -57,7 +51,6 @@ interface ExecuteBody {
   action_type: string
   campaign_id: string
   params?: {
-    new_daily_budget?: number
     execution_item_id?: string
   }
 }
@@ -88,6 +81,17 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     return NextResponse.json(
       { error: 'action_type and campaign_id are required' },
       { status: 400 },
+    )
+  }
+
+  // Closed before token, ownership, and queue. A budget change only starts from a confirmation card.
+  if (action_type === ADS_ACTION_TYPE.ADJUST_BID) {
+    return NextResponse.json(
+      {
+        error: '直接改日预算已关闭。改广告预算只能走确认卡。',
+        code: 'direct_budget_change_closed',
+      },
+      { status: 422 },
     )
   }
 
@@ -179,78 +183,6 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
       const mapped = publicError(error)
       return NextResponse.json({ error: mapped.message }, { status: mapped.status })
     }
-  }
-
-  if (action_type === ADS_ACTION_TYPE.ADJUST_BID) {
-    const newBudget = actionParams.new_daily_budget
-    if (typeof newBudget !== 'number' || !Number.isFinite(newBudget) || newBudget <= 0) {
-      return NextResponse.json(
-        { error: 'params.new_daily_budget (positive number in whole currency units) is required for adjust_bid' },
-        { status: 400 },
-      )
-    }
-    if (!beforeDetails.daily_budget) {
-      return NextResponse.json(
-        { error: 'This campaign has no campaign-level daily budget (likely using ad set budgets). Adjust budget directly in Meta Ads Manager.' },
-        { status: 422 },
-      )
-    }
-    // Kernel and Meta use the account's minor currency unit (two decimals for AU/NZ accounts).
-    const budgetCents = Math.round(newBudget * 100)
-    if (!Number.isSafeInteger(budgetCents)) {
-      return NextResponse.json({ error: 'params.new_daily_budget is outside the supported range' }, { status: 400 })
-    }
-
-    const currentCents = Number(beforeDetails.daily_budget)
-    if (!Number.isSafeInteger(currentCents) || currentCents <= 0) {
-      return NextResponse.json(
-        { error: 'Meta returned an invalid campaign budget; the change was not submitted.' },
-        { status: 422 },
-      )
-    }
-    if (budgetCents > currentCents) {
-      return NextResponse.json(
-        { error: '这个入口目前只支持降低广告系列日预算；上调预算暂不开放。', code: 'campaign_budget_increase_not_supported' },
-        { status: 422 },
-      )
-    }
-    if (actionParams.execution_item_id !== undefined && typeof actionParams.execution_item_id !== 'string') {
-      return NextResponse.json({ error: 'params.execution_item_id must be a string' }, { status: 400 })
-    }
-
-    // Meta 返回纯数字账户号，内核和库都用 act_ 形式（2026-10-19 止损路由 503 同根缺陷）。
-    const adAccountId = toActAccountId(beforeDetails.account_id)
-    if (!adAccountId) return NextResponse.json({ error: 'account_id_unreadable' }, { status: 503 })
-    const submitted = await queueAdsCampaignBudgetDecrease(createKernel(supabaseAdmin), {
-      clientId,
-      access,
-      cycleDate: nzToday(new Date()),
-      adAccountId,
-      campaignId: campaign_id,
-      afterCents: budgetCents,
-      executionItemId: actionParams.execution_item_id ?? null,
-    })
-    try {
-      await inngest.send({
-        name: ADS_CAMPAIGN_BUDGET_DECREASE_REQUESTED,
-        data: { client_id: clientId, action_run_id: submitted.run.id },
-      })
-    } catch (error) {
-      console.error('[meta-ads/execute] Inngest dispatch failed:', error)
-      return NextResponse.json({
-        error: '预算操作已登记，但暂时无法排入执行队列；请重试。',
-        actionRunId: submitted.run.id,
-        kind: 'queue_failed',
-      }, { status: 503 })
-    }
-    return NextResponse.json({
-      success: true,
-      status: 'queued',
-      actionRunId: submitted.run.id,
-      campaignId: campaign_id,
-      before,
-      after: { ...before, daily_budget: String(budgetCents) },
-    }, { status: 202 })
   }
 
   return NextResponse.json({ error: 'Unhandled action type' }, { status: 422 })

@@ -14,6 +14,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { filterRowsWithClientIdCamel } from '@/lib/clients/external-data-pull-allowlist'
 
 export const GSC_CONNECTOR_ANCHOR = 'gsc'
 export const GSC_CONNECTOR_CONNECTED = 'connected'
@@ -68,5 +69,5 @@ export async function loadGscConnectedClients(
     return [{ clientId, siteUrl }]
   })
 
-  return { ok: true, clients }
+  return { ok: true, clients: filterRowsWithClientIdCamel(clients) }
 }

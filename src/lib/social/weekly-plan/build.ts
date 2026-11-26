@@ -102,6 +102,7 @@ function shell(
     counts: { story: null, post: null, reel: null },
     countSources: { ...sources, mix },
     goal: input.goal,
+    readbackSuggestion: input.readbackSuggestion,
     themes: { read: input.themes.read, labels: input.themes.items.map((item) => item.label) },
     items: [],
     gaps: [],

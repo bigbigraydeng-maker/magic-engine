@@ -55,10 +55,14 @@ describe('ai-tracker-weekly 候选名单：排除已开 ai_visibility_inngest_en
   const CTS = 'c0000000-0000-0000-0000-000000000000'
   const OZTOP = 'd5c98811-1c1d-4ded-bdf0-4cefec6afb84'
 
+  const mockFinish = vi.fn()
+
   beforeEach(() => {
     vi.clearAllMocks()
     process.env.CRON_SECRET = 'test-secret'
-    mockStartCronRun.mockResolvedValue({ finish: vi.fn() })
+    vi.stubEnv('EXTERNAL_DATA_PULL_CLIENT_IDS', '*')
+    mockFinish.mockReset()
+    mockStartCronRun.mockResolvedValue({ finish: mockFinish })
     mockRunTracker.mockResolvedValue({
       total_cost_usd: 0, runs_succeeded: 1, runs_failed: 0,
     })
@@ -104,5 +108,29 @@ describe('ai-tracker-weekly 候选名单：排除已开 ai_visibility_inngest_en
 
     const processedIds = mockRunTracker.mock.calls.map((c) => (c[0] as { client_id: string }).client_id)
     expect(processedIds.sort()).toEqual([CTS, OZTOP].sort())
+    expect(mockFinish.mock.calls[0]?.[0]).toMatchObject({ summary: { skipped_by_allowlist: 0 } })
+  })
+
+  it('默认白名单跳过非 CTS，summary 只记数量', async () => {
+    vi.stubEnv('EXTERNAL_DATA_PULL_CLIENT_IDS', '')
+    delete process.env.EXTERNAL_DATA_PULL_CLIENT_IDS
+    mockQueriesEq.mockResolvedValue({ data: [{ client_id: CTS }, { client_id: OZTOP }], error: null })
+    mockClientsChain.mockResolvedValue({
+      data: [
+        { id: CTS, seo_config: null },
+        { id: OZTOP, seo_config: null },
+      ],
+      error: null,
+    })
+
+    const { GET } = await import('./route')
+    const res = await GET(makeRequest('test-secret'))
+    expect(res.status).toBe(202)
+    await new Promise((r) => setTimeout(r, 0))
+    await new Promise((r) => setTimeout(r, 0))
+
+    const processedIds = mockRunTracker.mock.calls.map((c) => (c[0] as { client_id: string }).client_id)
+    expect(processedIds).toEqual([CTS])
+    expect(mockFinish.mock.calls[0]?.[0]).toMatchObject({ summary: { skipped_by_allowlist: 1 } })
   })
 })

@@ -1,0 +1,38 @@
+{
+  "client_slug": "fixture-client-c",
+  "target_cost_per_primary": 48,
+  "adset": {
+    "id": "fixture-adset-group-a",
+    "name": "Fixture group A"
+  },
+  "narrative_window": {
+    "day_1": "2026-10-31",
+    "day_11": "2026-11-10",
+    "acceptance_first": "2026-11-05",
+    "acceptance_last": "2026-11-10"
+  },
+  "structure": {
+    "delivering_ad_count": 1,
+    "single_creative_days": 11
+  },
+  "daily": [
+    { "insight_date": "2026-10-24", "ctr_pct": 5.78, "impressions": 1180, "spend": 48, "primary_results": 2, "cpm": 40.7 },
+    { "insight_date": "2026-10-25", "ctr_pct": 5.78, "impressions": 1190, "spend": 49, "primary_results": 2, "cpm": 41.2 },
+    { "insight_date": "2026-10-26", "ctr_pct": 5.78, "impressions": 1200, "spend": 49, "primary_results": 2, "cpm": 40.8 },
+    { "insight_date": "2026-10-27", "ctr_pct": 5.78, "impressions": 1200, "spend": 50, "primary_results": 2, "cpm": 41.7 },
+    { "insight_date": "2026-10-28", "ctr_pct": 5.78, "impressions": 1210, "spend": 50, "primary_results": 2, "cpm": 41.3 },
+    { "insight_date": "2026-10-29", "ctr_pct": 6.05, "impressions": 1215, "spend": 50, "primary_results": 2, "cpm": 41.2 },
+    { "insight_date": "2026-10-30", "ctr_pct": 6.05, "impressions": 1220, "spend": 50, "primary_results": 2, "cpm": 41.0 },
+    { "insight_date": "2026-10-31", "ctr_pct": 5.7, "impressions": 1220, "spend": 51, "primary_results": 2, "cpm": 41.8 },
+    { "insight_date": "2026-11-01", "ctr_pct": 5.75, "impressions": 1218, "spend": 51, "primary_results": 2, "cpm": 41.9 },
+    { "insight_date": "2026-11-02", "ctr_pct": 5.75, "impressions": 1215, "spend": 52, "primary_results": 2, "cpm": 42.8 },
+    { "insight_date": "2026-11-03", "ctr_pct": 5.75, "impressions": 1210, "spend": 52, "primary_results": 2, "cpm": 43.0 },
+    { "insight_date": "2026-11-04", "ctr_pct": 5.75, "impressions": 1208, "spend": 52, "primary_results": 2, "cpm": 43.0 },
+    { "insight_date": "2026-11-05", "ctr_pct": 4.1, "impressions": 1200, "spend": 53, "primary_results": 2, "cpm": 44.2 },
+    { "insight_date": "2026-11-06", "ctr_pct": 3.95, "impressions": 1195, "spend": 53, "primary_results": 2, "cpm": 44.4 },
+    { "insight_date": "2026-11-07", "ctr_pct": 3.78, "impressions": 1190, "spend": 54, "primary_results": 2, "cpm": 45.4 },
+    { "insight_date": "2026-11-08", "ctr_pct": 3.55, "impressions": 1185, "spend": 54, "primary_results": 2, "cpm": 45.6 },
+    { "insight_date": "2026-11-09", "ctr_pct": 3.32, "impressions": 1180, "spend": 55, "primary_results": 2, "cpm": 46.6 },
+    { "insight_date": "2026-11-10", "ctr_pct": 2.9, "impressions": 1175, "spend": 55, "primary_results": 2, "cpm": 46.8 }
+  ]
+}

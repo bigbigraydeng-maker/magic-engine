@@ -58,6 +58,7 @@ describe('GET /api/cron/keyword-snapshots-weekly', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     process.env.CRON_SECRET = CRON_SECRET
+    vi.stubEnv('EXTERNAL_DATA_PULL_CLIENT_IDS', '*')
     // Step 2 (SERP capture) default: succeeds with nothing captured.
     mockCaptureSerpForClient.mockResolvedValue({
       client_id: 'x',

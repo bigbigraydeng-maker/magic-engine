@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { filterRowsWithId } from '@/lib/clients/external-data-pull-allowlist'
 import { supabaseAdmin } from '@/lib/supabase'
 import { JobRunner } from '@/lib/site-audit/job-runner'
 import { executeJob } from '@/lib/site-audit/job-executor'
@@ -80,7 +81,7 @@ export async function GET(req: NextRequest) {
       pages_stale_before_run?: number
     }> = []
 
-    for (const client of (clients ?? []) as ClientRow[]) {
+    for (const client of filterRowsWithId((clients ?? []) as ClientRow[])) {
       if (!client.domain) continue
 
       try {

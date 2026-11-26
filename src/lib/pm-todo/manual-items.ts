@@ -37,8 +37,10 @@ import { pushTourCatalogPublishRequestItems } from './tour-catalog-publish-reque
 import { pushAutoPublishItems } from './auto-publish-items'
 import { pushStoryLiteItems } from './story-lite-items'
 import { pushWeekPackItems } from './week-pack-items'
+import { pushWeekPlanApprovalItems } from './week-plan-items'
 import { pushEmailReplyItems } from './email-reply-items'
 import { pushLeadFollowupItems } from './lead-followup-items'
+import { pushCatalogueFollowupItems } from './catalogue-followup-items'
 import { pushBindingRequestItems } from './binding-request-items'
 import { pushPageBindingItems } from './page-binding-items'
 import { pushFacebookSyncFailingItems } from './facebook-sync-items'
@@ -51,6 +53,10 @@ import { pushDistributorApplicationItems } from './distributor-application-items
 import { pushToolsWideBudgetItems } from './tools-wide-budget-items'
 import { pushAdsAutonomySyncItems } from './ads-autonomy-items'
 import { pushAdsRuleFindingItems } from './ads-rule-finding-items'
+import { pushTuneContentTickets } from '@/lib/ads-tune/ticket'
+import { pushAdsHealthPatrolItems } from './ads-health-patrol-items'
+import { pushAdsTrendCheckItems } from './ads-trend-check-items'
+import { pushAdsPredictiveEarlyWarningItems } from './ads-predictive-early-warning-items'
 import { pushAdsCircuitItems } from './ads-circuit-items'
 import { pushAdsCircuitBreakerItems } from './ads-circuit-breaker-items'
 import { pushAdsServicePauseItems } from './ads-service-pause-items'
@@ -383,6 +389,9 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     }, ids).catch((e) =>
       console.warn('[manual-items] 每周整包待办检查失败（不阻塞其他待办）:', e),
     ),
+    (b) => pushWeekPlanApprovalItems(supabase, b, ids, nameOf, now).catch((e) =>
+      console.warn('[manual-items] 本周方案待批待办检查失败（不阻塞其他待办）:', e),
+    ),
     // 本周已批准方案的进度复查 —— 只通知建议，不要求按这条去改方案
     (b) => pushPrescriptionItems(supabase, b, now, nameOf).catch((e) =>
       console.warn('[manual-items] 方案复查通知读取失败（不阻塞其他待办）:', e),
@@ -444,6 +453,18 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 每日广告巡检的广告级规则（D2 / D10）—— 只读，要不要改由人定；同一件事按 remind-cadence 节奏提醒
     (b) => pushAdsRuleFindingItems(supabase, b, now, nameOf).catch((e) =>
       console.warn('[manual-items] 广告级规则待办生成失败（不阻塞其他待办）:', e),
+    ),
+    (b) => pushTuneContentTickets(supabase, b, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 调方缺素材待办读不出来（不阻塞其他待办）:', e),
+    ),
+    (b) => pushAdsHealthPatrolItems(supabase, b, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 广告体检警报待办生成失败（不阻塞其他待办）:', e),
+    ),
+    (b) => pushAdsTrendCheckItems(supabase, b, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 广告趋势检查待办生成失败（不阻塞其他待办）:', e),
+    ),
+    (b) => pushAdsPredictiveEarlyWarningItems(supabase, b, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 广告预警待办生成失败（不阻塞其他待办）:', e),
     ),
     // 广告熔断中的账户 —— 判据是"现在还处在熔断中吗"，不是时间窗口（v2.5 §6.2 派生态）
     (b) => pushAdsCircuitItems(supabase, b, nameOf).catch((e) =>
@@ -541,6 +562,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 客人填了表超过 24 小时没人回 —— 汇总信的开关一直关着，没有任何人被指派（CTS 积压 170 条）。
     (b) => pushLeadFollowupItems(supabase, b, ids, now, nameOf).catch((e) =>
       console.warn('[manual-items] 线索没人回待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 发出目录之后挂着「AI 跟进中」却没人跟的客人 —— AI 的后续动作还没做成程序（跟进流程整套重排的第 0 刀）
+    (b) => pushCatalogueFollowupItems(supabase, b, ids, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 发目录之后没人跟待办生成失败（不阻塞其他待办）:', e),
     ),
     // 客户交了广告账户号等核实 —— 客户以为交上去了，不下发就没人知道（AD-SEC-3）
     (b) => pushBindingRequestItems(supabase, b, ids, now, nameOf).catch((e) =>

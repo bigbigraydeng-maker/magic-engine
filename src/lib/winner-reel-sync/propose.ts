@@ -9,6 +9,7 @@ import { createKernel } from '@/lib/kernel'
 import { issueConfirmationCard, type CardClicker } from '@/lib/confirmation-card'
 import type { CardFacts, HardCheck } from '@/lib/confirmation-card/facts'
 import {
+  DAILY_POST_ADD_WHAT,
   WINNER_ACTIVATE_WHAT,
   WINNER_ADD_WHAT,
   WINNER_OBSERVATION_DAYS,
@@ -115,7 +116,7 @@ async function proposeAdd(
   const card = await issueConfirmationCard(kernel, {
     clientId: args.clientId,
     clicker: args.clicker,
-    facts: addFacts(subjectKey, args.configAskedActive),
+    facts: addFacts(subjectKey, args.configAskedActive, intent),
     now: args.now,
   })
   await insertHold(args.supabase, args.clientId, holdFromAdd(intent, card.runId, card.fingerprint, args.configAskedActive))
@@ -139,7 +140,14 @@ async function proposePause(
   return { adId: intent.adId, name: intent.name, reason: intent.reason, ctr: intent.ctr, proposalRunId: card.runId }
 }
 
-function addFacts(subjectKey: string, configAskedActive: boolean): CardFacts {
+function addFacts(subjectKey: string, configAskedActive: boolean, intent: AddIntent): CardFacts {
+  if (intent.origin?.kind === 'daily_plan') {
+    return facts(subjectKey, DAILY_POST_ADD_WHAT, '不花钱', `确认之后才建，观察 ${WINNER_OBSERVATION_DAYS} 天`,
+      `${intent.origin.date} 已发的帖子，加进推广池广告组（${intent.adsetId}）。建成后仍暂停，不新开系列，不改预算。`, [
+        check('只建暂停', '不会把新广告直接打开'),
+        check('帖子仍在', '出卡前核对过：已发出、没被撤回、海报上的出发日期没过'),
+      ])
+  }
   const scope = configAskedActive
     ? '客户开过自动上线。这次只出建议，建成后仍暂停。'
     : '加进已有广告组。建成后仍暂停，不新开系列。'

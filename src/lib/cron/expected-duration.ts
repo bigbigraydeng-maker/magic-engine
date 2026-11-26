@@ -4,8 +4,9 @@
  * 清理任务用它的两倍判断「还停在 running」是不是进程重启留下的孤儿行。
  * 表里没有的任务（Inngest、或 `startCronRun` 用了常量而不是字面量）走 2 小时默认。
  *
- * 只收录 `startCronRun('字面量')` 和 `maxDuration` 写在同一个路由文件里的任务。
+ * 路由任务：只收录 `startCronRun('字面量')` 和 `maxDuration` 写在同一个路由文件里的。
  * 对账测试会重新扫这些文件，改了时长这里没跟着改就会红。
+ * Inngest 任务没有路由上的 maxDuration，按任务名单独登记（目前只有 social-weekly-draft）。
  */
 export const JOB_MAX_DURATION_SEC: Readonly<Record<string, number>> = {
   'ad-entity-snapshot': 600,
@@ -51,6 +52,8 @@ export const JOB_MAX_DURATION_SEC: Readonly<Record<string, number>> = {
   'site-audit-cron': 120,
   'social-comment-autoreply': 900,
   'social-engagement-pullback': 300,
+  // 15 minutes. Stale cleanup uses twice this, instead of the 2 hour default.
+  'social-weekly-draft': 900,
   'team-memory-sweeper': 300,
   'viral-analyzer-worker': 300,
   'viral-discovery-weekly': 300,
