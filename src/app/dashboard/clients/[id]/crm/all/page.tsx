@@ -38,6 +38,7 @@ import { ts, type ContactRow, type CustomColumnMeta } from './_components/contac
 import { ContactTableRow } from './_components/ContactTableRow'
 import { ContactTableHead } from './_components/ContactTableHead'
 import { ListFilters, TradeBatchPanel, type AssigneeView } from './_components/ListFilters'
+import { QualifiedEntry, type QualifiedEntryData } from './_components/QualifiedEntry'
 import { FlatPagination, SectionPagerRow } from './_components/ListPagination'
 import { isToday, toDrawerRow, sectionRange, type PrioritySectionData } from './_components/list-helpers'
 import type { RecentStaffNote } from '@/lib/crm/recent-staff-notes'
@@ -108,6 +109,10 @@ export default function CrmAllContactsPage() {
   const [viewReady, setViewReady] = useState(false)
   const [sections, setSections] = useState<PrioritySectionData[]>([])
   const [recentNotes, setRecentNotes] = useState<RecentStaffNote[]>([])
+  // 已报价的客人今天有几位在等。筛了阶段时服务端不给数字（只算得出一部分），沿用筛之前那一份。
+  const [qualified, setQualified] = useState<QualifiedEntryData | null>(null)
+  // 换了客户，上一个客户的数字和阶段不能留着。
+  useEffect(() => { setQualified(null) }, [clientId])
   const [quickRow, setQuickRow] = useState<ContactRow | null>(null)
   const [openingRecentId, setOpeningRecentId] = useState<string | null>(null)
   const recentOpenSeqRef = useRef(0)
@@ -198,6 +203,7 @@ export default function CrmAllContactsPage() {
         view?: string
         sections?: PrioritySectionData[]
         recentNotes?: RecentStaffNote[]
+        qualified?: QualifiedEntryData | null
         stages?: StageOption[]
         focus?: { found: boolean; section?: SectionKey; page?: number }
         error?: string
@@ -219,6 +225,8 @@ export default function CrmAllContactsPage() {
       if (json.view === 'priority') {
         const secs = json.sections ?? []
         setRecentNotes(json.recentNotes ?? [])
+        // 字段在 = 这次是没筛过的完整名单（null = 这个客户没有合格阶段）；字段不在 = 筛过或在搜索，沿用上一份。
+        if ('qualified' in json) setQualified(json.qualified ?? null)
         setSections(secs)
         setColumns(json.columns ?? [])
         setTotal(secs.reduce((n, s) => n + s.total, 0))
@@ -775,6 +783,8 @@ export default function CrmAllContactsPage() {
             assigneeFilter={assigneeFilter}
             onAssigneeFilterChange={setAssigneeFilter}
           />
+
+          {grouped && !qDebounced.trim() && <QualifiedEntry data={qualified} stageFilter={stageFilter} onStageFilterChange={setStageFilter} />}
 
           {grouped && <RecentNotesPanel notes={recentNotes} openingContactId={openingRecentId} onOpen={(note) => void openRecentNote(note)} />}
 
