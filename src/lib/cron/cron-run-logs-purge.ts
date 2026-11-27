@@ -12,6 +12,12 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 export const NOISE_RETENTION_DAYS = 7
 export const EXPIRED_RETENTION_DAYS = 180
 export const PURGE_BATCH_SIZE = 3_000
+/**
+ * PostgREST sends `.in()` values in the request URL. A 3000-id DELETE is ~110KB
+ * and gateways often reject that (414/400). Same cap as `IN_CHUNK` in
+ * `crm-stage-signals-run.ts`. The 3000-row SELECT batch stays as-is.
+ */
+const IN_CHUNK = 100
 /** Leave headroom under route `maxDuration` (120s) for abandon + finish. */
 export const PURGE_TIME_BUDGET_MS = 95_000
 
@@ -50,6 +56,14 @@ function isEmptyCounts(row: Pick<CandidateRow, 'processed' | 'completed_count' |
 
 function pastDeadline(deadlineMs: number): boolean {
   return Date.now() >= deadlineMs
+}
+
+async function deleteByIds(supabase: SupabaseClient, ids: readonly string[]): Promise<void> {
+  for (let i = 0; i < ids.length; i += IN_CHUNK) {
+    const part = ids.slice(i, i + IN_CHUNK)
+    const { error } = await supabase.from('cron_run_logs').delete().in('id', part)
+    if (error) throw new Error(error.message)
+  }
 }
 
 async function latestStartedAtByJob(
@@ -129,8 +143,7 @@ async function purgeNoiseBatch(
     return { deleted: 0, skipPastStartedAt: rows[rows.length - 1]!.started_at }
   }
 
-  const { error: delErr } = await supabase.from('cron_run_logs').delete().in('id', ids)
-  if (delErr) throw new Error(delErr.message)
+  await deleteByIds(supabase, ids)
   return { deleted: ids.length, skipPastStartedAt: null }
 }
 
@@ -150,8 +163,7 @@ async function purgeExpiredBatch(
   const ids = (data ?? []).map((r) => (r as { id: string }).id)
   if (ids.length === 0) return 0
 
-  const { error: delErr } = await supabase.from('cron_run_logs').delete().in('id', ids)
-  if (delErr) throw new Error(delErr.message)
+  await deleteByIds(supabase, ids)
   return ids.length
 }
 
