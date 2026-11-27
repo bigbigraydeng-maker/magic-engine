@@ -3,7 +3,7 @@
  *
  * 为什么要测:主流程的测试全用内存 store,所以真实 store 里的
  * `.is('payload->>promote_rev', null)` / `.eq('payload->>promote_rev', rev)` /
- * `.eq('updated_at', …)` / `.eq('status','published')` / 平台过滤,
+ * `.eq('updated_at', …)` / `.in('status', published|platform_draft)` / 平台过滤,
  * 删掉哪一条主流程测试都不会红。这里直接盯真实 store 发出的查询。
  */
 
@@ -19,7 +19,7 @@ function builder(table: string) {
     calls.push({ table, method, args })
     return b
   }
-  for (const m of ['select', 'eq', 'is', 'update']) b[m] = record(m)
+  for (const m of ['select', 'eq', 'is', 'in', 'update']) b[m] = record(m)
   const settle = () => {
     const q = results[table] ?? []
     return Promise.resolve(q.shift() ?? { data: null, error: null })
@@ -166,13 +166,14 @@ describe('casPayload(乐观并发)', () => {
 })
 
 describe('writeOrderPublishedRef(乐观并发)', () => {
-  it('必须同时带 id、updated_at=读到时的值、status=published', async () => {
+  it('必须同时带 id、updated_at=读到时的值、status 为 published 或 platform_draft', async () => {
     results.content_work_orders = [{ data: [{ id: 'wo-1' }], error: null }]
     const ok = await createSupabasePromoteStore().writeOrderPublishedRef('wo-1', 'old', { platform: 'facebook' })
     expect(ok).toBe(true)
     expect(has('content_work_orders', 'eq', 'id', 'wo-1')).toBe(true)
     expect(has('content_work_orders', 'eq', 'updated_at', 'old')).toBe(true)
-    expect(has('content_work_orders', 'eq', 'status', 'published')).toBe(true)
+    expect(has('content_work_orders', 'in', 'status', ['published', 'platform_draft'])).toBe(true)
+    expect(has('content_work_orders', 'eq', 'status', 'published')).toBe(false)
   })
 
   it('命中 0 行(别人先改了)→ false,不抛', async () => {

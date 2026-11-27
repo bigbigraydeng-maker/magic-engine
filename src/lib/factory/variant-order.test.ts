@@ -285,5 +285,7 @@ describe('VARIANT_BASE_STATUSES', () => {
     expect(statuses).not.toContain('claimed')
     expect(statuses).not.toContain('producing')
     expect(statuses).not.toContain('dead_letter')
+    expect(statuses).toContain('platform_draft')
+    expect(statuses).toContain('published')
   })
 })

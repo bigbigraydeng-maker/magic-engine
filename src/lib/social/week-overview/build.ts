@@ -87,7 +87,8 @@ export interface WeekOverview {
   post: { connected: false }
 }
 
-/** Factory orders that are not a Reel anyone can look at (archived, replaced, failed, stuck). */
+/** Factory orders that are not a Reel anyone can look at (archived, replaced, failed, stuck).
+ *  platform_draft stays in the list: it is an uploaded draft, hidden only when the status is one of these. */
 const HIDDEN_REEL_STATUSES = ['archived', 'superseded', 'failed', 'dead_letter'] as const
 const REEL_LIMIT = 30
 

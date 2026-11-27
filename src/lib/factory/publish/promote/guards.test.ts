@@ -278,6 +278,15 @@ describe('checkOrderPrechecks', () => {
     if (!res.ok) expect(res.status).toBe(409)
   })
 
+  it('accepts a platform_draft reel that is not yet public', () => {
+    const res = checkOrderPrechecks({
+      order: makeOrder({ status: 'platform_draft', published_ref: { video_state: 'DRAFT', video_id: 'vid-1', page_id: 'page-1' } }),
+      rows: [makeRow()],
+      target: makeTarget(),
+    })
+    expect(res.ok).toBe(true)
+  })
+
   it('rejects video_state PUBLISHED with 409', () => {
     const res = checkOrderPrechecks({
       order: makeOrder({

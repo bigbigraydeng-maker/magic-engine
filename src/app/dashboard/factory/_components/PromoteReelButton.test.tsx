@@ -144,6 +144,15 @@ it('promoteEntry returns null when status is not published', () => {
   expect(promoteEntry({ status: 'draft', published: { video_state: 'DRAFT' } })).toBeNull()
 })
 
+it('promoteEntry also opens a platform_draft reel, including one without a video_state stamp', () => {
+  expect(promoteEntry({ status: 'platform_draft', published: { video_state: 'DRAFT' } })).toBe('promote')
+  expect(promoteEntry({ status: 'platform_draft', published: { video_state: null } })).toBe('promote')
+  expect(promoteEntry({
+    status: 'platform_draft',
+    published: { video_state: 'PUBLISHED', first_comment_pending: true },
+  })).toBe('comment')
+})
+
 it('preview panel shows the catalog check result and the lines that did not match', async () => {
   const div = document.body.appendChild(document.createElement('div'))
   const preview = { ...PREVIEW, fact_check: readFactCheck({ verdict: 'pass', catalog_version: 13, problems: [], note: '画面字幕没有文本，未核' }) }

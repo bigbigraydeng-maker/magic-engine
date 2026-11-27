@@ -5,6 +5,7 @@
 // 租约与栅栏:抢占后授权状态一直保持 claimed,直到收尾写成 consumed(或失败时显式释放成 failed /
 // meta_published_db_pending);所有写入都带 attempt_id 栅栏,被别的请求接管就中止。
 
+import { isOnPlatformOrderStatus } from '@/lib/factory/platform-draft-status'
 import { sanitizeFailReason } from '../publish-display'
 import { asRecord, redlineSurface } from './guards'
 import { fenced, mutatePayload, readAuth, withAuth } from './payload-lock'
@@ -100,7 +101,7 @@ export async function writeOrder(deps: PromoteDeps, ctx: PromoteContext, facts: 
 async function writeOrderOnce(deps: PromoteDeps, ctx: PromoteContext, facts: PublishedFacts, requestId: string): Promise<Fail | null> {
   for (let attempt = 0; attempt < 3; attempt++) {
     const fresh = await deps.store.loadOrder(ctx.order.id)
-    if (!fresh || fresh.status !== 'published') return fail(409, '工单状态在转公开过程中变了,请核对')
+    if (!fresh || !isOnPlatformOrderStatus(fresh.status)) return fail(409, '工单状态在转公开过程中变了,请核对')
     const cur = asRecord(fresh.published_ref)
     if (cur['video_state'] === 'PUBLISHED' && cur['promote_request_id'] === requestId) return null
     if (cur['video_state'] !== 'DRAFT') return fail(409, '工单已不是草稿状态,请核对')
@@ -173,7 +174,7 @@ async function rescanAfterPublish(deps: PromoteDeps, f: FinishInput): Promise<st
 async function markCommentPending(deps: PromoteDeps, orderId: string, pending: boolean): Promise<void> {
   for (let attempt = 0; attempt < 3; attempt++) {
     const fresh = await deps.store.loadOrder(orderId)
-    if (!fresh || fresh.status !== 'published') return
+    if (!fresh || !isOnPlatformOrderStatus(fresh.status)) return
     const cur = asRecord(fresh.published_ref)
     if ((cur['first_comment_pending'] === true) === pending) return
     const next = { ...cur }

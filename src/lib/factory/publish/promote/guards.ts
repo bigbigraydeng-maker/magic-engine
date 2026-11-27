@@ -10,6 +10,7 @@ import {
   humanKeysForReviewRef,
   validateContentChecklist,
 } from '@/lib/social/content-review'
+import { isOnPlatformOrderStatus, isUploadedUnpublishedDraft } from '@/lib/factory/platform-draft-status'
 import { CONSENT_REASON_ZH, consentVerdict } from '@/lib/factory/talent-consent'
 import type { PublishTarget } from '../../types'
 import { portFor } from './platform-port'
@@ -109,14 +110,15 @@ function checkTarget(target: PublishTarget | null): PrecheckResult | null {
   return failure ? { ok: false, ...failure } : null
 }
 
-/** 工单状态:已发布、Reel 处于 DRAFT、且带 master_brief_id。 */
+/** 工单状态:已在平台上的草稿(旧 published+DRAFT,或 platform_draft)、且带 master_brief_id。 */
 function checkOrderState(order: PromoteOrder): PrecheckResult | null {
-  if (order.status !== 'published') {
+  if (!isOnPlatformOrderStatus(order.status)) {
     return { ok: false, status: 409, error: '工单状态不是已发布,不能转公开' }
   }
 
   const publishedRef = asRecord(order.published_ref)
-  if (publishedRef['video_state'] !== 'DRAFT') {
+  const videoState = typeof publishedRef['video_state'] === 'string' ? publishedRef['video_state'] : null
+  if (!isUploadedUnpublishedDraft(order.status, videoState)) {
     return { ok: false, status: 409, error: '只有草稿(DRAFT)状态的 Reel 才能转公开' }
   }
   if (!nonEmptyString(order.master_brief_id)) {

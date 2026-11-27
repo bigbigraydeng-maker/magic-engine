@@ -55,7 +55,7 @@ export async function POST(req: Request, {params}: Context) {
   if (!access.ok) return NextResponse.json({error:access.error},{status:access.status})
   const order = await load(params.id,params.orderId)
   if (!order || !video(order)) return NextResponse.json({error:'未找到此客户的成片'},{status:404})
-  if (!['approved','published','measuring','closed'].includes(order.status)) return NextResponse.json({error:'请先完成成片审核，再发布到 TikTok'},{status:409})
+  if (!['approved','published','platform_draft','measuring','closed'].includes(order.status)) return NextResponse.json({error:'请先完成成片审核，再发布到 TikTok'},{status:409})
   if (order.output?.tiktok_publish) return NextResponse.json({error:'已有 TikTok 发布记录，请查询原任务，不能重复上传'},{status:409})
   // Same on-camera consent gate as the Facebook paths (lib/factory/talent-consent.ts); TikTok is its own use.
   const consent = consentVerdict({brief:order.brief,output:order.output,use:'tiktok_organic'})

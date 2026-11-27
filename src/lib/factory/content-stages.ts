@@ -3,7 +3,7 @@
 // 背景：内容工厂看板把内容分 5 段展示：选题 → 备料 → 出片 → 发布 → 看表现。
 // 数据来自两处，零 migration：
 //   - 前两段（选题/备料）= content_posts 候选（选题助理产出，人确认后备料）
-//   - 后三段（出片/发布/看表现）= content_work_orders 工单（生产生命周期，已有 16 态）
+//   - 后三段（出片/发布/看表现）= content_work_orders 工单（生产生命周期）
 // 桥：候选备料齐了才建一条工单，进入出片段。
 //
 // 穷举护栏（魏征 H1/H2）：
@@ -16,7 +16,7 @@ import type { WorkOrderStatus } from './types'
 export const FACTORY_STAGES = ['选题', '备料', '出片', '发布', '看表现'] as const
 export type FactoryStage = (typeof FACTORY_STAGES)[number]
 
-/** content_work_orders 16 态 → 5 段。工单最早从「出片」开始（选题/备料在工单之前的候选阶段）。 */
+/** content_work_orders 状态 → 5 段。工单最早从「出片」开始（选题/备料在工单之前的候选阶段）。 */
 export const WORK_ORDER_STAGE: Record<WorkOrderStatus, FactoryStage> = {
   // 出片：装配中 / 已出片（rendered 为历史停用态，仍归出片）
   queued: '出片',
@@ -31,6 +31,7 @@ export const WORK_ORDER_STAGE: Record<WorkOrderStatus, FactoryStage> = {
   approved: '发布',
   publishing: '发布',
   publish_failed: '发布',
+  platform_draft: '发布',
   published: '发布',
   // 看表现：统计效果 / 收尾 / 归档
   measuring: '看表现',

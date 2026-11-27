@@ -5,6 +5,7 @@
  * 这里是唯一碰数据库的地方。supabaseAdmin 只在函数体内引用,不在模块加载时触发副作用。
  */
 
+import { ON_PLATFORM_ORDER_STATUSES } from '@/lib/factory/platform-draft-status'
 import { supabaseAdmin } from '@/lib/supabase'
 import { TRAFFIC_ACTION_TYPE } from './types'
 import type { PromoteOrder, PromoteStore, TrafficRow } from './types'
@@ -124,7 +125,7 @@ async function writeOrderPublishedRef(
     .update({ published_ref: nextRef, updated_at: new Date().toISOString() })
     .eq('id', id)
     .eq('updated_at', expectedUpdatedAt)
-    .eq('status', 'published')
+    .in('status', [...ON_PLATFORM_ORDER_STATUSES])
     .select('id')
   if (error) throw error
   return asRows(data).length === 1

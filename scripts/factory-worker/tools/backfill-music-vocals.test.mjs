@@ -63,6 +63,14 @@ describe('proposeRegistryEntries approvers', () => {
 })
 
 describe('proposeRegistryEntries skips', () => {
+  it('keeps a platform_draft order in the same pass as a published one', async () => {
+    const res = await proposeRegistryEntries({
+      orders: [order({ status: 'platform_draft' })], existingRegistry: [], locateFileFn: locate, shaFn: sha,
+    })
+    expect(res.skipped).toHaveLength(0)
+    expect(res.entries).toHaveLength(1)
+  })
+
   it('skips unpublished orders', async () => {
     const res = await proposeRegistryEntries({
       orders: [order({ status: 'draft' })], existingRegistry: [], locateFileFn: locate, shaFn: sha,

@@ -1,6 +1,7 @@
 // 已公开之后的收尾入口:补首评(首评失败后重试)与补做收尾回执。
 // 与草稿转公开共用令牌/抢占/栅栏;不调 Meta 转公开,只补首评、回读红线、写回执。
 
+import { isOnPlatformOrderStatus } from '@/lib/factory/platform-draft-status'
 import { buildReelFirstComment } from '@/lib/social/reel-publishing'
 import { asRecord, computeFingerprint, redlineSurface } from './guards'
 import { recheckReelFacts } from './fact-recheck'
@@ -38,7 +39,7 @@ export interface ResumeContext {
 export async function resumeContext(deps: PromoteDeps, order: PromoteOrder): Promise<ResumeContext | Fail | null> {
   const ref = asRecord(order.published_ref)
   const requestId = ref['promote_request_id']
-  if (order.status !== 'published' || ref['video_state'] !== 'PUBLISHED' || typeof requestId !== 'string') return null
+  if (!isOnPlatformOrderStatus(order.status) || ref['video_state'] !== 'PUBLISHED' || typeof requestId !== 'string') return null
   const rows = await deps.store.loadTrafficRows(order.id, order.client_id)
   if (rows.length !== 1) return null
   const auth = readAuth(asRecord(rows[0].payload))
