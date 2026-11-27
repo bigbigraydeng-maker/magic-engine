@@ -36,6 +36,14 @@ export interface ManifestReel {
   date_state: ReelDateState
 }
 
+export interface ManifestStillReview {
+  slot_date: string
+  role: 'story' | 'post'
+  verdict: 'pass' | 'fail'
+  reviewer: string
+  reasons: string[]
+}
+
 export interface WeekPackManifest {
   client_id: string
   week_start: string
@@ -45,6 +53,8 @@ export interface WeekPackManifest {
   story: ManifestStory
   posts: { readonly connected: false; readonly label: '尚未接入' }
   reels: { read_state: ReadState; truncated: boolean; items: ManifestReel[] }
+  /** Display only. Not part of the content fingerprint, and not a publish grant. */
+  still_reviews: { read_state: ReadState; items: ManifestStillReview[] }
 }
 
 export interface WeekPackLine {

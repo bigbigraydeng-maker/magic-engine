@@ -4,8 +4,10 @@
 
 import type { ConfirmationCardView } from '@/lib/confirmation-card/view'
 
+import { STILL_REVIEWER_ID } from '@/lib/factory/still-config'
+
 import { cadenceSentence, type WeeklyPackCadence } from './cadence'
-import type { WeekPackManifest, WeekPackReceipt } from './types'
+import type { ManifestStillReview, WeekPackManifest, WeekPackReceipt } from './types'
 
 export interface WeekPackCardView {
   run_id: string
@@ -101,7 +103,29 @@ function cardView(card: ConfirmationCardView): WeekPackCardView {
 }
 
 export function describeManifest(manifest: WeekPackManifest): string[] {
-  return [describeStory(manifest), ...describeReels(manifest)]
+  return [describeStory(manifest), ...describeStillReviews(manifest), ...describeReels(manifest)]
+}
+
+function describeStillReviews(manifest: WeekPackManifest): string[] {
+  if (manifest.still_reviews.read_state !== 'ok') return ['静图审片结果读不到，没有当成已经通过。']
+  return manifest.still_reviews.items.map(stillReviewLine)
+}
+
+function stillReviewLine(item: ManifestStillReview): string {
+  const kind = item.role === 'story' ? 'Story' : '图文'
+  const who = item.reviewer === STILL_REVIEWER_ID ? '静图审片' : reviewerName(item.reviewer)
+  if (item.verdict === 'pass') return `${item.slot_date} 的${kind}静图已通过，审片人 ${who}。`
+  const why = item.reasons.map(plain).filter((line) => line.length > 0).slice(0, 2).join('；') || '没有写下原因'
+  return `${item.slot_date} 的${kind}静图没有通过，没有拿去用。原因：${why}。`
+}
+
+function reviewerName(id: string): string {
+  const clean = plain(id)
+  return clean.length > 0 ? clean : '审片人不明'
+}
+
+function plain(text: string): string {
+  return text.replace(/[{}[\]`]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80)
 }
 
 function describeStory(manifest: WeekPackManifest): string {

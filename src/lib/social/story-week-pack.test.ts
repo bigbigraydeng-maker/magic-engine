@@ -26,6 +26,15 @@ describe('draftStoryWeekPack', () => {
     expect(inserts).toEqual(['story_packs', 'story_items'])
   })
 
+  it('does not use a still that has no review pass', async () => {
+    const inserts: string[] = []
+    const still = readyStill('2026-11-16')
+    delete (still.vision_metadata.factory_still as { review?: unknown }).review
+    const receipt = await draftStoryWeekPack('c1', { social_week: { story_per_week: 1 } }, NOW, fake(inserts, '12345', [still]))
+    expect(receipt).toMatchObject({ drafted: 0, skipped: 'no_factory_still' })
+    expect(inserts).toEqual([])
+  })
+
   it('does not insert when the page id is not a number', async () => {
     const inserts: string[] = []
     const receipt = await draftStoryWeekPack('c1', { social_week: { story_per_week: 1 } }, NOW, fake(inserts, 'page', [readyStill('2026-11-16')]))
@@ -43,6 +52,7 @@ function readyStill(date: string) {
       factory_still: {
         aspect: '9:16', role: 'story', slot_date: date, sha256: SHA,
         text_line: 'Harbour Walk', source_ref: 'https://example.com/tours', work_order_id: 'wo-1',
+        review: { verdict: 'pass', reviewer: 'system:still-review' },
       },
     },
   }

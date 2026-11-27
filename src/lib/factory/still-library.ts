@@ -16,6 +16,7 @@ export interface FactoryStill {
   textLine: string | null
   sourceRef: string | null
   workOrderId: string | null
+  reviewVerdict: 'pass' | null
 }
 
 const SHA = /^[0-9a-f]{64}$/
@@ -41,11 +42,12 @@ export function parseFactoryStill(row: {
     textLine: textLine(meta.text_line),
     sourceRef: typeof meta.source_ref === 'string' && meta.source_ref.startsWith('https://') ? meta.source_ref : null,
     workOrderId: typeof meta.work_order_id === 'string' ? meta.work_order_id : null,
+    reviewVerdict: reviewVerdict(meta.review),
   }
 }
 
 export function storyReady(still: FactoryStill): still is FactoryStill & { sha256: string; textLine: string; sourceRef: string } {
-  return still.role === 'story' && still.aspect === '9:16' && still.sha256 !== null && still.textLine !== null && still.sourceRef !== null
+  return still.role === 'story' && still.aspect === '9:16' && still.sha256 !== null && still.textLine !== null && still.sourceRef !== null && still.reviewVerdict === 'pass'
 }
 
 export async function loadFactoryStills(
@@ -66,6 +68,11 @@ export async function loadFactoryStills(
     if (still) out.push(still)
   }
   return out
+}
+
+function reviewVerdict(raw: unknown): 'pass' | null {
+  const review = record(raw)
+  return review?.verdict === 'pass' ? 'pass' : null
 }
 
 function textLine(raw: unknown): string | null {

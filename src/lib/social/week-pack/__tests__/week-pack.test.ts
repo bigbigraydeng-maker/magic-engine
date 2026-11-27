@@ -120,6 +120,7 @@ function videoOnly(clientId: string): WeekPackManifest {
     assembled_at: '2026-11-06T00:00:00.000Z',
     story: { read_state: 'ok', pack_id: null, title: null, state: null, content_hash: null, items: [] },
     posts: { connected: false, label: '尚未接入' },
+    still_reviews: { read_state: 'ok', items: [] },
     reels: {
       read_state: 'ok', truncated: false,
       items: [{
@@ -461,6 +462,22 @@ describe('promote guard and page copy', () => {
     const visible = [page.headline, page.posts_line, page.cadence_line, page.card?.display_scope, ...page.lines, ...describeManifest(manifest)].join('\n')
     expect(visible).toContain('尚未接入')
     expect(visible).not.toMatch(/[{}[\]]|核对码|fingerprint|hash/i)
+    const reviewed = sample({
+      still_reviews: {
+        read_state: 'ok',
+        items: [
+          { slot_date: '2026-11-16', role: 'story', verdict: 'pass', reviewer: 'system:still-review', reasons: [] },
+          { slot_date: '2026-11-18', role: 'post', verdict: 'fail', reviewer: 'system:still-review', reasons: ['有水印或其他品牌'] },
+        ],
+      },
+    })
+    const reviewText = describeManifest(reviewed).join('\n')
+    expect(reviewText).toContain('2026-11-16 的Story静图已通过，审片人 静图审片。')
+    expect(reviewText).toContain('2026-11-18 的图文静图没有通过，没有拿去用。原因：有水印或其他品牌。')
+    expect(manifestDigest(reviewed)).toBe(manifestDigest(manifest))
+    const unread = describeManifest(sample({ still_reviews: { read_state: 'unread', items: [] } })).join('\n')
+    expect(unread).toContain('静图审片结果读不到，没有当成已经通过。')
+    expect(unread).not.toMatch(/[{}[\]]|核对码|fingerprint|hash/i)
     expect(displayScope(built.facts.scope)).not.toContain(built.digest)
     expect(built.facts.scope.length).toBeLessThanOrEqual(180)
   })

@@ -21,6 +21,7 @@ function manifest(): WeekPackManifest {
     client_id: CLIENT, week_start: '2026-11-09', week_end: '2026-11-15', assembled_at: '2026-11-06T00:00:00.000Z',
     story: { read_state: 'ok', pack_id: null, title: null, state: null, content_hash: null, items: [] },
     posts: { connected: false, label: '尚未接入' },
+    still_reviews: { read_state: 'ok', items: [] },
     reels: { read_state: 'ok', truncated: false, items: [{ work_order_id: WO, title: '一条视频', fingerprint: null, scheduled_at_iso: '2026-11-10', video_state: 'DRAFT', date_state: 'in_week' }] },
   }
 }

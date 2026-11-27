@@ -9,6 +9,7 @@ import { FACTORY_DAILY_ORDER_CAP } from '@/lib/factory/constants'
 import { isoDate, nzCalendar } from '@/lib/social/week-pack/cadence'
 
 import { roundUsd } from './still-config'
+import type { StillWorkReview } from './still-review'
 import type { WeekWindow } from '@/lib/social/image-post-week'
 
 export interface StillOrder {
@@ -36,6 +37,23 @@ export async function openStillOrder(
   if (briefId === 'unreadable') return 'order_unreadable'
   if (!briefId) return 'no_master_brief'
   return insertStillOrder(supabase, clientId, week, capUsd, goalId, briefId)
+}
+
+export async function appendStillReview(
+  supabase: SupabaseClient,
+  orderId: string,
+  review: StillWorkReview,
+): Promise<boolean> {
+  const { data, error } = await supabase.from('content_work_orders').select('output').eq('id', orderId).limit(1)
+  if (error) return false
+  const row = (data ?? [])[0] as { output?: unknown } | undefined
+  if (!row) return false
+  const output = record(row.output) ?? {}
+  const prior = Array.isArray(output.stills) ? output.stills : []
+  const { error: updErr } = await supabase.from('content_work_orders').update({
+    output: { ...output, stills: [...prior, review].slice(-40) },
+  }).eq('id', orderId)
+  return !updErr
 }
 
 export async function recordStillSpend(
@@ -167,6 +185,10 @@ async function insertStillOrder(
   if (error) return 'order_unreadable'
   const id = rowId(data)
   return id ? { id, spentUsd: 0 } : 'order_unreadable'
+}
+
+function record(raw: unknown): Record<string, unknown> | null {
+  return typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? raw as Record<string, unknown> : null
 }
 
 function rowId(row: unknown): string | null {

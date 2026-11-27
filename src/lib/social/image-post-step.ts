@@ -6,6 +6,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { loadPublishedTourFacts } from '@/lib/tour-catalog/store-publish'
 import { loadFactoryStills, type FactoryStill } from '@/lib/factory/still-library'
+import { loadStillRedlines } from '@/lib/factory/still-review'
+import { scanRedlineHits } from '@/lib/factory/worker-guard'
 import { getActiveCampaigns } from '@/lib/content/campaign-injector'
 import { readSocialAgentSettings } from '@/lib/social/recipe/tier-defaults'
 import { checkFacts } from '@/lib/social/weekly-loop/fact-check'
@@ -187,19 +189,21 @@ async function writeImageDrafts(
   if (stills === 'unreadable') return emptyImageReceipt('factory_stills_unreadable', null, requested)
   const chosen = postStillsFor(dates, stills)
   if (chosen.size === 0) return emptyImageReceipt('no_factory_still', null, requested)
+  const redlines = await loadStillRedlines(deps.supabase, clientId)
+  if (!redlines) return emptyImageReceipt(null, 'redline_unreadable', requested)
   const tourRead = await loadPublishedTourFacts(deps.supabase, clientId, catalogDate)
   if (!tourRead.published || tourRead.tours.length === 0) return emptyImageReceipt('no_published_tours', null, requested)
   const campaigns = await getActiveCampaigns(clientId)
   if (campaigns.length === 0) return emptyImageReceipt('no_active_campaign', null, requested)
   const campaign = campaigns[0]
   if (!campaign) return emptyImageReceipt('no_active_campaign', null, requested)
-  return draftEachDate(clientId, dates, tourRead.tours, chosen, campaign.id, requested, deps)
+  return draftEachDate(clientId, dates, tourRead.tours, chosen, campaign.id, redlines, requested, deps)
 }
 
 function postStillsFor(dates: string[], stills: FactoryStill[]): Map<string, FactoryStill> {
   const chosen = new Map<string, FactoryStill>()
   for (const date of dates) {
-    const hit = stills.find((still) => still.role === 'post' && still.aspect === '4:5' && still.slotDate === date)
+    const hit = stills.find((still) => still.role === 'post' && still.aspect === '4:5' && still.slotDate === date && still.reviewVerdict === 'pass')
     if (hit) chosen.set(date, hit)
   }
   return chosen
@@ -211,6 +215,7 @@ async function draftEachDate(
   tours: PublishedTourFact[],
   stills: Map<string, FactoryStill>,
   campaignId: string,
+  redlines: { phrases: string[]; topics: string[] },
   requested: number | undefined,
   deps: ImagePostStepDeps,
 ): Promise<ImagePostStepReceipt> {
@@ -231,6 +236,8 @@ async function draftEachDate(
       copyDeps,
     )
     if (!result.ok) return finishDraft(planIds.length + 1, planIds, draftedDates, null, result.reason, requested)
+    const captionHit = scanRedlineHits([`${result.draft.hook}\n\n${result.draft.body}\n\n${result.draft.cta}`], redlines.phrases, redlines.topics)
+    if (captionHit.length > 0) return finishDraft(planIds.length + 1, planIds, draftedDates, null, 'brand_redline_hit', requested)
     const writeResult = await writeImagePostPlan(
       { clientId, campaignId, date: slotDate, draft: result.draft, tourSlug: result.tourSlug, poster: result.poster },
       { insertPlan: (row) => insertSocialPlan(deps.supabase, row) },

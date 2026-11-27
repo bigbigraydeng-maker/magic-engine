@@ -49,6 +49,7 @@ describe('produceFactoryStills', () => {
         provider_request_id: 'req-1', created_at: '2026-11-12T00:00:00.000Z', text_check: null,
       },
     }))
+    const reviewVisual = vi.fn()
     const receipt = await produceFactoryStills('c1', {
       factory_stills: { enabled: true, weekly_cap_usd: 0.04 },
       social_week: { post_per_week: 2 },
@@ -56,10 +57,13 @@ describe('produceFactoryStills', () => {
       supabase: supabase as never,
       compose,
       hashUrl: async () => 'ab'.repeat(32),
+      reviewCopy: passCopy,
+      reviewVisual,
     })
     expect(compose).toHaveBeenCalledTimes(1)
-    expect(receipt.drafted).toBe(1)
+    expect(receipt.drafted).toBe(0)
     expect(receipt.skipped).toBe('weekly_cap_reached')
+    expect(reviewVisual).not.toHaveBeenCalled()
     const ledger = inserts.find((row) => row.table === 'factory_balance_ledger')
     expect(ledger?.row).toMatchObject({ entry_type: 'spend', amount_usd: -0.038, work_order_id: 'wo-1' })
     const order = inserts.find((row) => row.table === 'content_work_orders')
@@ -93,9 +97,89 @@ describe('produceFactoryStills', () => {
     const ledger = inserts.find((row) => row.table === 'factory_balance_ledger')
     expect(ledger?.row).toMatchObject({ entry_type: 'spend', amount_usd: -0.04, work_order_id: 'wo-1' })
   })
+
+  it('stamps a pass and records the reviewer only after copy and image both pass', async () => {
+    const inserts: Array<{ table: string; row: Record<string, unknown> }> = []
+    const db = capSupabase(inserts)
+    const reviewVisual = vi.fn(async () => ({ pass: true, reasons: [], costUsd: 0.01, model: 'test-model', billed: true }))
+    const receipt = await produceFactoryStills('c1', {
+      factory_stills: { enabled: true, weekly_cap_usd: 1 },
+      social_week: { post_per_week: 1 },
+    }, WEEK_NOW, {
+      supabase: db as never,
+      compose: passCompose,
+      hashUrl: async () => 'ab'.repeat(32),
+      reviewCopy: passCopy,
+      reviewVisual,
+    })
+    expect(receipt.drafted).toBe(1)
+    expect(receipt.skipped).toBeNull()
+    expect(reviewVisual).toHaveBeenCalledTimes(1)
+    expect(db.assets[0]?.verified_by).toBe('system:still-review')
+    const stills = (db.orders[0]?.output as { stills?: Array<{ verdict?: string }> } | undefined)?.stills
+    expect(stills?.[0]?.verdict).toBe('pass')
+  })
+
+  it('drops a still when the copy gate fails and does not call the image check', async () => {
+    const inserts: Array<{ table: string; row: Record<string, unknown> }> = []
+    const db = capSupabase(inserts)
+    const reviewVisual = vi.fn()
+    const receipt = await produceFactoryStills('c1', {
+      factory_stills: { enabled: true, weekly_cap_usd: 1 },
+      social_week: { post_per_week: 1 },
+    }, WEEK_NOW, {
+      supabase: db as never,
+      compose: passCompose,
+      reviewCopy: async () => ({ pass: false, reasons: ['红线：Discover'], redlineHits: ['Discover'], factVerdict: 'pass' }),
+      reviewVisual,
+    })
+    expect(reviewVisual).not.toHaveBeenCalled()
+    expect(receipt.drafted).toBe(0)
+    expect(receipt.note).toContain('没有通过审片')
+    expect(db.assets[0]?.verified_by).toBeNull()
+    const stills = (db.orders[0]?.output as { stills?: Array<{ verdict?: string; reasons?: string[] }> } | undefined)?.stills
+    expect(stills?.[0]).toMatchObject({ verdict: 'fail', reasons: ['红线：Discover'] })
+  })
+
+  it('drops a still when the image check fails and keeps that cost', async () => {
+    const inserts: Array<{ table: string; row: Record<string, unknown> }> = []
+    const db = capSupabase(inserts)
+    const receipt = await produceFactoryStills('c1', {
+      factory_stills: { enabled: true, weekly_cap_usd: 1 },
+      social_week: { post_per_week: 1 },
+    }, WEEK_NOW, {
+      supabase: db as never,
+      compose: passCompose,
+      hashUrl: async () => 'ab'.repeat(32),
+      reviewCopy: passCopy,
+      reviewVisual: async () => ({ pass: false, reasons: ['有水印或其他品牌'], costUsd: 0.01, model: 'test-model', billed: true }),
+    })
+    expect(receipt.drafted).toBe(0)
+    expect(db.assets[0]?.verified_by).toBeNull()
+    expect(inserts.filter((row) => row.table === 'factory_balance_ledger').map((row) => row.row.amount_usd)).toEqual([-0.038, -0.01])
+  })
+})
+
+const passCopy = async () => ({ pass: true, reasons: [], redlineHits: [], factVerdict: 'pass' })
+
+const passCompose = async (): Promise<ComposeTourPosterResult> => ({
+  ok: true,
+  assetId: 'asset-1',
+  receipt: {
+    recipe_id: 'tour_poster_v1', recipe_version: 1, source_asset_id: 'photo-1', status: 'composed',
+    reason: null, poster_asset_id: 'asset-1', has_price: false, cost_usd: 0.038,
+    provider_request_id: 'req-1', created_at: '2026-11-12T00:00:00.000Z', text_check: null,
+  },
 })
 
 function capSupabase(inserts: Array<{ table: string; row: Record<string, unknown> }>) {
+  const orders: Array<Record<string, unknown>> = []
+  const assets: Array<Record<string, unknown>> = [{
+    id: 'asset-1',
+    storage_url: 'https://cdn.example/a.jpg',
+    verified_by: null,
+    vision_metadata: { poster: { recipe_id: 'tour_poster_v1', text_lines: ['Harbour Walk'] } },
+  }]
   const from = (table: string) => {
     const chain = {
       select: () => chain,
@@ -104,20 +188,27 @@ function capSupabase(inserts: Array<{ table: string; row: Record<string, unknown
       order: () => chain,
       is: () => chain,
       limit: () => Promise.resolve({
-        data: table === 'goals' || table === 'master_briefs' ? [{ id: `${table}-1` }] : table === 'client_assets'
-          ? [{ id: 'asset-1', storage_url: 'https://cdn.example/a.jpg', vision_metadata: { poster: { recipe_id: 'tour_poster_v1' } } }]
+        data: table === 'goals' || table === 'master_briefs' ? [{ id: `${table}-1` }]
+          : table === 'client_assets' ? assets
+          : table === 'content_work_orders' ? orders
           : [],
         error: null,
       }),
       insert: (row: Record<string, unknown>) => {
         inserts.push({ table, row })
+        if (table === 'content_work_orders') orders.push({ ...row, id: 'wo-1' })
         return { select: () => ({ single: () => Promise.resolve({ data: { id: 'wo-1' }, error: null }) }) }
       },
-      update: () => ({ eq: () => ({ eq: () => Promise.resolve({ error: null }) }) }),
+      update: (patch: Record<string, unknown>) => {
+        if (table === 'content_work_orders' && orders[0]) Object.assign(orders[0], patch)
+        if (table === 'client_assets' && assets[0]) Object.assign(assets[0], patch)
+        const eq = () => Object.assign(Promise.resolve({ error: null }), { eq })
+        return { eq }
+      },
     }
     return chain
   }
-  return { from }
+  return { from, assets, orders }
 }
 
 vi.mock('@/lib/tour-catalog/store-publish', () => ({
