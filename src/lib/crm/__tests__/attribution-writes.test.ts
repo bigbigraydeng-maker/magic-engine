@@ -196,7 +196,7 @@ describe('已有的人：只补空，绝不覆盖（first-touch 的护栏）', (
 })
 
 describe('官网表单 lead → CRM', () => {
-  it('utm 带广告参数时，触点上带着归因', async () => {
+  it('付费媒介的官网表单，触点记成 meta', async () => {
     mockDb([])
     const r = await mirrorWebFormLead({
       clientId: CLIENT,
@@ -205,11 +205,13 @@ describe('官网表单 lead → CRM', () => {
       phone: '021 363 598',
       email: 'chris@example.com',
       utmSource: 'facebook',
+      utmMedium: 'paid_social',
       utmCampaign: 'kiteroa-open-home',
       submittedAt: '2026-07-30T03:00:00Z',
     })
 
     expect(r.contactId).toBe('new-person')
+    expect(contactInserts[0]).toMatchObject({ attr_platform: 'meta' })
     expect(touchpointUpserts).toHaveLength(1)
     expect(touchpointUpserts[0]).toMatchObject({
       channel: 'web_form',
@@ -218,6 +220,26 @@ describe('官网表单 lead → CRM', () => {
       attr_campaign_id: 'kiteroa-open-home',
       // 幂等键 = leads.id，同一条 lead 重放不会写出第二条触点
       source_ref: 'lead-1',
+    })
+  })
+
+  it('只有 facebook 来源、没有媒介，触点记成自然社媒', async () => {
+    mockDb([])
+    await mirrorWebFormLead({
+      clientId: CLIENT,
+      leadId: 'lead-organic',
+      name: 'Chris',
+      phone: '021 363 598',
+      email: 'chris@example.com',
+      utmSource: 'facebook',
+      utmCampaign: 'page-post',
+    })
+    expect(contactInserts[0]).toMatchObject({ attr_platform: 'organic_social', attr_ad_id: null })
+    expect(touchpointUpserts[0]).toMatchObject({
+      attr_platform: 'organic_social',
+      attr_ad_id: null,
+      attr_campaign_id: 'page-post',
+      source_ref: 'lead-organic',
     })
   })
 

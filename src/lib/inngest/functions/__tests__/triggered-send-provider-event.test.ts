@@ -151,3 +151,23 @@ describe('cloud-triggered-send-provider-event', () => {
     expect(JSON.stringify(results)).not.toContain('@')
   })
 })
+
+describe('our own breaker after a bounce or complaint (design §4.3)', () => {
+  it('a complaint on a letter checks the client breaker in its own step', async () => {
+    applyReceipt.mockReset()
+    applyReceipt.mockResolvedValueOnce({ outcome: 'applied', sendId: 's1', status: 'complained' })
+    const checkBreaker = vi.fn(async () => ({ tripped: true, error: null }))
+    const s = steps()
+    await runProviderEventReceipt(DATA, s.tools, { ...deps(LOADED), checkBreaker })
+    expect(checkBreaker).toHaveBeenCalledWith('s1')
+    expect(s.ran).toContain('breaker')
+  })
+
+  it('a delivered receipt does not check the breaker', async () => {
+    applyReceipt.mockReset()
+    applyReceipt.mockResolvedValueOnce({ outcome: 'applied', sendId: 's1', status: 'delivered' })
+    const checkBreaker = vi.fn(async () => ({ tripped: false, error: null }))
+    await runProviderEventReceipt(DATA, steps().tools, { ...deps(LOADED), checkBreaker })
+    expect(checkBreaker).not.toHaveBeenCalled()
+  })
+})

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, type ReactNode } from 'react'
+import { isOnPlatformOrderStatus, isUploadedUnpublishedDraft } from '@/lib/factory/platform-draft-status'
 
 export interface ReelGoPublicFactCheck {
   verdict: string
@@ -108,10 +109,10 @@ export function promoteEntry(o: {
     first_comment_pending?: boolean
   } | null
 }): 'promote' | 'comment' | null {
-  if (o.status !== 'published') return null
+  if (!isOnPlatformOrderStatus(o.status)) return null
   const published = o.published
   if (!published) return null
-  if (published.video_state === 'DRAFT') return 'promote'
+  if (isUploadedUnpublishedDraft(o.status, published.video_state)) return 'promote'
   if (published.video_state === 'PUBLISHED' && published.first_comment_pending === true) {
     return 'comment'
   }

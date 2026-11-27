@@ -32,6 +32,7 @@ import {
   type ReceiptStore,
 } from '@/lib/messaging/triggered-send/receipt-consumer'
 import { createReceiptStore } from '@/lib/messaging/triggered-send/receipt-store-prod'
+import { checkClientBreaker } from '@/lib/messaging/triggered-send/reconcile-prod'
 
 export const TRIGGERED_SEND_PROVIDER_EVENT_ID = `${CLOUD_FN_PREFIX}triggered-send-provider-event`
 export const IN_FLIGHT_ATTEMPTS = 4
@@ -48,7 +49,15 @@ export interface ReceiptRunDeps {
   store: ReceiptStore
   now(): Date
   log(line: Record<string, string>): void
+  /**
+   * After a bounce or complaint lands on a letter: judge the client's breaker now instead of waiting for tomorrow's
+   * daily check (design §4.3: a complaint triggers the breaker check). Optional so older tests need no change.
+   */
+  checkBreaker?(sendId: string): Promise<{ tripped: boolean; error: string | null }>
 }
+
+/** Receipts that can push a client over its own breaker. */
+const BREAKER_STATUSES: ReadonlySet<string> = new Set(['bounced', 'complained'])
 
 export type ReceiptRunResult =
   | { outcome: 'skipped'; reason: string }
@@ -78,6 +87,12 @@ export async function runProviderEventReceipt(
     const result = await step.run(`apply-${attempt}`, () => applyReceipt(loaded, deps.store, { lastTry, now: deps.now() }))
     if (result.outcome !== 'in_flight' || lastTry) {
       logOutcome(result, deps)
+      if (result.outcome === 'applied' && BREAKER_STATUSES.has(result.status) && deps.checkBreaker !== undefined) {
+        const check = deps.checkBreaker
+        const judged = await step.run('breaker', () => check(result.sendId))
+        // A failed check must be visible (子牙 P2-2 / 魏征 P2-2): the daily check judges again at 07:30 either way.
+        deps.log({ evt: 'triggered_send_breaker', send_id: result.sendId, tripped: String(judged.tripped), error: judged.error ?? '' })
+      }
       return result
     }
     await step.sleep(`wait-${attempt}`, IN_FLIGHT_WAIT)
@@ -96,6 +111,7 @@ function realDeps(): ReceiptRunDeps {
     store: createReceiptStore(supabaseAdmin),
     now: () => new Date(),
     log: (line) => console.info(JSON.stringify(line)),
+    checkBreaker: (sendId) => checkClientBreaker(supabaseAdmin, sendId, new Date()),
   }
 }
 

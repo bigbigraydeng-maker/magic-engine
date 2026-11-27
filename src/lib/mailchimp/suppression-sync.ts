@@ -29,8 +29,18 @@
  * 解除抑制——CRM 那边没有等价的「不感兴趣被撤销」信号，`dnc_cleared` 只解除
  * `do_not_contact`，不解除 `not_interested`。所以本文件不做「摘掉抑制标签」
  * 这件事，那必须是人工确认后的动作。
+ *
+ * ## 第三个理由：ME 自己的退订（P2-2c-3，2026-11-27）
+ *
+ * 客人点了 ME 自动信的退订链接、或把 ME 的信标成垃圾邮件（`me_unsubscribe` 记录，
+ * `crm/email-unsubscribe.ts`），也要打同一个抑制标签：过渡期同一个客人还在 Mailchimp
+ * 名单上，不同步就会继续收到月信。这是新加的判据 `needsMailchimpSuppression`，
+ * `needsSuppression` 不变（发信关口在用它）。设计：
+ * `docs/specs/2026-11-02-me-send-gate-p2-design-v0.md` §16.10 契约 / §17 P2-2c-3。
+ * ME 退订同样「ME 里没有任何东西会自己撤销」，所以照旧只加不摘。
  */
 
+import { emailAddressSha256 } from '@/lib/crm/address-sha256'
 import { isDoNotContact, type DncTouch } from '@/lib/crm/dnc'
 import { applyMemberTags, type MailchimpTagsConfig } from './tags'
 
@@ -47,6 +57,18 @@ export interface ContactForSuppressionCheck {
   email: string | null
   doNotContactFlag: boolean
   touches: DncTouch[]
+  /**
+   * The guest unsubscribed from e-mail through ME's own link, or marked an ME letter as spam (a `me_unsubscribe`
+   * record, see `crm/email-unsubscribe.ts`). Work it out with `meEmailUnsubscribedContactIds`. Required on purpose:
+   * a caller that forgets it must not compile.
+   */
+  meEmailUnsubscribed: boolean
+}
+
+/** One ME unsubscribe record as the sync needs it: whose letter it was and the fingerprint of the address. */
+export interface MeEmailUnsubscribeMark {
+  contactId: string | null
+  addressSha256: string | null
 }
 
 export interface SuppressionSyncResult {
@@ -57,6 +79,8 @@ export interface SuppressionSyncResult {
   skippedNoEmail: number
   /** 判过要抑制、但邮箱压根不在这个 Mailchimp audience 里——不算错误。 */
   notInAudience: number
+  /** Contacts tagged (or checked) only because of an ME unsubscribe: neither do-not-contact nor not-interested. */
+  meUnsubscribeOnly: number
   errors: Array<{ contactId: string; reason: string }>
 }
 
@@ -71,6 +95,52 @@ export function needsSuppression(
   return isDoNotContact(c.doNotContactFlag, c.touches) || isNotInterested(c.touches)
 }
 
+const SHA256_RE = /^[0-9a-f]{64}$/
+
+/** The `me_unsubscribe` touchpoint rows as read from the table. A fingerprint that is not 64 hex is dropped. */
+export function toMeEmailUnsubscribeMarks(
+  rows: ReadonlyArray<{ contact_id: string | null; metadata: { address_sha256?: unknown } | null }>,
+): MeEmailUnsubscribeMark[] {
+  return rows.map((r) => {
+    const raw = r.metadata?.address_sha256
+    return { contactId: r.contact_id, addressSha256: typeof raw === 'string' && SHA256_RE.test(raw) ? raw : null }
+  })
+}
+
+/**
+ * Which contacts have an ME e-mail unsubscribe. Same matching as the sender's read (`readEmailUnsubscribed`):
+ * a record of this contact counts whatever its address; a record of another contact counts when its address
+ * fingerprint is this contact's address (the same address can sit on two contact records).
+ * Only the contact's current e-mail can be matched: the record keeps a fingerprint, not the address itself.
+ */
+export function meEmailUnsubscribedContactIds(
+  contacts: ReadonlyArray<{ contactId: string; email: string | null }>,
+  marks: readonly MeEmailUnsubscribeMark[],
+): Set<string> {
+  const byContact = new Set<string>()
+  const byAddress = new Set<string>()
+  for (const m of marks) {
+    if (m.contactId) byContact.add(m.contactId)
+    if (m.addressSha256) byAddress.add(m.addressSha256)
+  }
+  const out = new Set<string>()
+  for (const c of contacts) {
+    const ownRecord = byContact.has(c.contactId)
+    const addressRecord = c.email !== null && c.email.trim() !== '' && byAddress.has(emailAddressSha256(c.email))
+    if (ownRecord || addressRecord) out.add(c.contactId)
+  }
+  return out
+}
+
+/**
+ * Should the Mailchimp suppression tag go on. `needsSuppression` (do-not-contact or not-interested) is NOT changed:
+ * the sender's gate uses it and reads ME unsubscribes on its own. This adds the ME unsubscribe as a separate reason,
+ * so a guest who unsubscribed from an ME letter also stops getting the client's Mailchimp campaigns.
+ */
+export function needsMailchimpSuppression(c: Omit<ContactForSuppressionCheck, 'contactId' | 'email'>): boolean {
+  return needsSuppression(c) || c.meEmailUnsubscribed
+}
+
 export async function syncSuppressionTags(
   contacts: readonly ContactForSuppressionCheck[],
   mcConfig: MailchimpTagsConfig,
@@ -83,11 +153,13 @@ export async function syncSuppressionTags(
     alreadyTagged: 0,
     skippedNoEmail: 0,
     notInAudience: 0,
+    meUnsubscribeOnly: 0,
     errors: [],
   }
 
   for (const c of contacts) {
-    if (!needsSuppression(c)) continue
+    if (!needsMailchimpSuppression(c)) continue
+    if (!needsSuppression(c)) result.meUnsubscribeOnly++
     if (!c.email) {
       result.skippedNoEmail++
       continue

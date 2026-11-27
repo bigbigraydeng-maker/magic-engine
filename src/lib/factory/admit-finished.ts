@@ -316,7 +316,7 @@ async function queueReview(
   }
 }
 
-const CONSENT_EDITABLE_STATUSES = new Set(['in_review', 'approved', 'published'])
+const CONSENT_EDITABLE_STATUSES = new Set(['in_review', 'approved', 'published', 'platform_draft'])
 
 async function updateExistingConsent(
   supabase: SupabaseClient,
@@ -329,7 +329,7 @@ async function updateExistingConsent(
     return {
       ok: false,
       status: 409,
-      error: `consent can only be recorded while the order is in review, approved or published (now ${existing.status})`,
+      error: `consent can only be recorded while the order is in review, approved, published or a platform draft (now ${existing.status})`,
     }
   }
   const now = (deps.now ?? (() => new Date()))()

@@ -29,14 +29,14 @@ export const STOPLINE_EVENT_DUE = 'crm.followup_stopline.due'
 
 const CHUNK = 100
 
-interface GuestRow {
+export interface GuestRow {
   id: string
   ai_takeover_since: string
   do_not_contact: boolean | null
   stage: string | null
 }
 
-interface TouchRow extends CameBackRow {
+export interface TouchRow extends CameBackRow {
   id: string
   contact_id: string
 }
@@ -86,7 +86,8 @@ function chunks<T>(items: T[]): T[][] {
   return out
 }
 
-async function loadClientInputs(sb: SupabaseClient, clientId: string) {
+/** One client's guests in takeover, stages, their full touch history and active bookings. Throws on a read error. */
+export async function loadClientInputs(sb: SupabaseClient, clientId: string) {
   const guests = await fetchAll<GuestRow>((from, to) =>
     sb.from('contacts').select('id, ai_takeover_since, do_not_contact, stage')
       .eq('client_id', clientId).not('ai_takeover_since', 'is', null).order('id', { ascending: true }).range(from, to),
@@ -111,6 +112,55 @@ async function loadClientInputs(sb: SupabaseClient, clientId: string) {
   return { guests, stages, touches: touchParts.flat(), bookings: bookingParts.flat() }
 }
 
+export type StopLineInputs = Awaited<ReturnType<typeof loadClientInputs>>
+type StageRow = StopLineInputs['stages'][number]
+export interface StopLineContext {
+  stageOf: Map<string, StageRow>
+  touchesOf: Map<string, TouchRow[]>
+  bookingOf: Map<string, { id: string; contact_id: string }>
+}
+
+/** Index one client's inputs by guest. */
+export function stopLineContext(inputs: StopLineInputs): StopLineContext {
+  const touchesOf = new Map<string, TouchRow[]>()
+  for (const t of inputs.touches) touchesOf.set(t.contact_id, [...(touchesOf.get(t.contact_id) ?? []), t])
+  return {
+    stageOf: new Map(inputs.stages.map((s) => [s.stage_key, s])),
+    touchesOf,
+    bookingOf: new Map(inputs.bookings.map((b) => [b.contact_id, b])),
+  }
+}
+
+/** The stop-line verdict for one guest, from the same inputs the daily run reads (also used live by the day-7 list). */
+export function stopDecisionFor(g: GuestRow, ctx: StopLineContext, now: Date): ReturnType<typeof decideStopLine> {
+  // Timestamps are compared as instants, never as strings (precision differs between rows).
+  const sinceMs = Date.parse(g.ai_takeover_since)
+  const all = ctx.touchesOf.get(g.id) ?? []
+  const mine = all.filter((t) => Date.parse(t.occurred_at) > sinceMs)
+  const stageRow = g.stage ? ctx.stageOf.get(g.stage) : undefined
+  return decideStopLine({
+    since: g.ai_takeover_since,
+    now,
+    hasActiveBooking: ctx.bookingOf.get(g.id) ?? null,
+    doNotContact: isDoNotContact(g.do_not_contact === true, all.map((t) => ({
+      outcome: typeof t.metadata?.outcome === 'string' ? t.metadata.outcome : null,
+      flagged: t.metadata?.do_not_contact === true,
+      occurredAt: t.occurred_at,
+    }))),
+    stage: stageRow
+      ? {
+          key: stageRow.stage_key,
+          label: stageRow.label,
+          stopsMarketing: stageSuppressesWorklist(isMarketingAction(stageRow.marketing_action) ? stageRow.marketing_action : 'suppress', stageRow.is_terminal),
+        }
+      : null,
+    inbound: mine.filter((t) => t.direction === 'inbound').map(toReengageTouchRow),
+    outboundPhone: mine
+      .filter((t) => t.direction === 'outbound' && t.channel === 'phone')
+      .map((t): StaffTouch => ({ id: t.id, channel: t.channel, source: t.source, occurredAt: t.occurred_at, metadata: t.metadata })),
+  })
+}
+
 async function checkClient(
   sb: SupabaseClient,
   clientId: string,
@@ -124,41 +174,13 @@ async function checkClient(
   } catch (err) {
     return { client_id: clientId, in_takeover: 0, stopped: [], unknown_stage: [], error: err instanceof Error ? err.message : String(err) }
   }
-  const stageOf = new Map(inputs.stages.map((s) => [s.stage_key, s]))
-  const touchesOf = new Map<string, TouchRow[]>()
-  for (const t of inputs.touches) touchesOf.set(t.contact_id, [...(touchesOf.get(t.contact_id) ?? []), t])
-  const bookingOf = new Map(inputs.bookings.map((b) => [b.contact_id, b]))
-
   const stopped: StoplineGuestResult[] = []
   const unknownStage: string[] = []
+  const ctx = stopLineContext(inputs)
   for (const g of inputs.guests) {
-    // Timestamps are compared as instants, never as strings (precision differs between rows).
     const sinceMs = Date.parse(g.ai_takeover_since)
-    const all = touchesOf.get(g.id) ?? []
-    const mine = all.filter((t) => Date.parse(t.occurred_at) > sinceMs)
-    const stageRow = g.stage ? stageOf.get(g.stage) : undefined
-    if (g.stage && stageRow === undefined) unknownStage.push(g.id)
-    const decision = decideStopLine({
-      since: g.ai_takeover_since,
-      now,
-      hasActiveBooking: bookingOf.get(g.id) ?? null,
-      doNotContact: isDoNotContact(g.do_not_contact === true, all.map((t) => ({
-        outcome: typeof t.metadata?.outcome === 'string' ? t.metadata.outcome : null,
-        flagged: t.metadata?.do_not_contact === true,
-        occurredAt: t.occurred_at,
-      }))),
-      stage: stageRow
-        ? {
-            key: stageRow.stage_key,
-            label: stageRow.label,
-            stopsMarketing: stageSuppressesWorklist(isMarketingAction(stageRow.marketing_action) ? stageRow.marketing_action : 'suppress', stageRow.is_terminal),
-          }
-        : null,
-      inbound: mine.filter((t) => t.direction === 'inbound').map(toReengageTouchRow),
-      outboundPhone: mine
-        .filter((t) => t.direction === 'outbound' && t.channel === 'phone')
-        .map((t): StaffTouch => ({ id: t.id, channel: t.channel, source: t.source, occurredAt: t.occurred_at, metadata: t.metadata })),
-    })
+    if (g.stage && !ctx.stageOf.has(g.stage)) unknownStage.push(g.id)
+    const decision = stopDecisionFor(g, ctx, now)
     if (decision === null) continue
     const base = { contact_id: g.id, rule: decision.rule, evidence_ref: decision.evidenceRef }
     if (dryRun) {

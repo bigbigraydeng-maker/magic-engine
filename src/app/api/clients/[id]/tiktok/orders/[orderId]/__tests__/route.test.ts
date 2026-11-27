@@ -75,6 +75,17 @@ describe('ordinary completed video TikTok publishing gate',()=>{
   expect(JSON.stringify(await result.json())).toContain('出镜授权')
   expect(m.creator).not.toHaveBeenCalled();expect(m.publish).not.toHaveBeenCalled()
  })
+ it('lets a platform draft through the same finished-video gate as a published reel',async()=>{
+  m.single.mockResolvedValue({data:{id:'order',client_id:'cts',status:'platform_draft',updated_at:'2026-10-13T00:00:00.000Z',output:{video_path:'renders/video.mp4'}}})
+  m.creator.mockResolvedValue({accountId:'account',creator_nickname:'CTS',privacy_level_options:['SELF_ONLY'],comment_disabled:false,duet_disabled:false,stitch_disabled:false,max_video_post_duration_sec:30})
+  m.proof.mockResolvedValue({sha256:'a'.repeat(64),durationSeconds:12})
+  m.updated.mockReturnValue({data:[],error:null})
+  const review={accountId:'account',videoUrl:'https://example.com/storage/v1/object/public/content-factory/renders/video.mp4',videoSha256:'a'.repeat(64),privacy:'SELF_ONLY',caption:'Test',allowComment:false,allowDuet:false,allowStitch:false,ownBrand:false,brandedContent:false,musicConsent:true,confirmed:true,durationSeconds:12}
+  const result=await POST(new Request('https://test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({review})}),context)
+  expect(result.status).toBe(400)
+  expect(m.eq).toHaveBeenCalledWith('status','platform_draft')
+  expect(m.publish).not.toHaveBeenCalled()
+ })
  it('rejects unreviewed video without uploading',async()=>{
   m.single.mockResolvedValue({data:{id:'order',client_id:'cts',status:'in_review',output:{video_path:'renders/video.mp4'}}})
   expect((await POST(new Request('https://test',{method:'POST'}),context)).status).toBe(409)

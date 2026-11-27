@@ -7,10 +7,10 @@ import {
 } from './content-stages'
 
 describe('content-stages · 状态归段', () => {
-  it('工单 16 态全部映射到某一段（无遗漏）', () => {
+  it('工单状态全部映射到某一段（无遗漏）', () => {
     const all = [
       'queued', 'claimed', 'producing', 'rendered', 'in_review', 'review_rejected',
-      'approved', 'publishing', 'publish_failed', 'published', 'measuring', 'closed',
+      'approved', 'publishing', 'publish_failed', 'platform_draft', 'published', 'measuring', 'closed',
       'failed', 'dead_letter', 'archived', 'superseded',
     ] as const
     expect(Object.keys(WORK_ORDER_STAGE).sort()).toEqual([...all].sort())
@@ -24,6 +24,7 @@ describe('content-stages · 状态归段', () => {
     expect(stageOfWorkOrder('rendered')).toBe('出片')
     expect(stageOfWorkOrder('dead_letter')).toBe('出片')  // 卡死留在出片显眼
     expect(stageOfWorkOrder('in_review')).toBe('发布')
+    expect(stageOfWorkOrder('platform_draft')).toBe('发布')
     expect(stageOfWorkOrder('published')).toBe('发布')
     expect(stageOfWorkOrder('measuring')).toBe('看表现')
     expect(stageOfWorkOrder('closed')).toBe('看表现')

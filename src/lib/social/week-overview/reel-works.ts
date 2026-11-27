@@ -180,8 +180,10 @@ export function describeReelTemplate(template: string | null): string | null {
 /** The one small state tag of a Reel. Uses the same "was it uploaded" rule as the rest of the social pages. */
 export function describeReelTag(reel: Pick<OverviewReel, 'status' | 'published_at' | 'video_state'>): ReelTag {
   if (isRecordedUploaded(reel)) {
-    if (reel.video_state === 'DRAFT') return { kind: 'draft', label: '草稿', hint: '已传到 Facebook，但还没公开。' }
     if (reel.video_state === 'PUBLISHED') return { kind: 'sent', label: '已发出', hint: '已在 Facebook 公开。' }
+    if (reel.video_state === 'DRAFT' || reel.status === 'platform_draft') {
+      return { kind: 'draft', label: '草稿', hint: '已传到 Facebook，但还没公开。' }
+    }
     return { kind: 'uploaded', label: '已上传（未核对）', hint: '系统记录已经上传，但还没核对它在 Facebook 上是公开还是草稿。' }
   }
   switch (reel.status) {

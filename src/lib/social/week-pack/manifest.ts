@@ -3,6 +3,7 @@
  * A failed read is `unread`, never an empty list that looks like "nothing this week".
  */
 
+import { isUploadedUnpublishedDraft } from '@/lib/factory/platform-draft-status'
 import { canonicalHashOfInput } from '@/lib/kernel/canonical-hash'
 
 import type { ManifestReel, ManifestStory, ReelDateState, WeekPackManifest } from './types'
@@ -80,7 +81,9 @@ export function selectReels(rows: readonly ReelInput[], weekStart: string, weekE
   const selected: ManifestReel[] = []
   for (const row of rows) {
     if (row.asset_only || row.video_state === 'PUBLISHED') continue
-    const passed = row.status === 'approved' || (row.video_state === 'DRAFT' && Boolean(row.approved_at))
+    const passed = row.status === 'approved'
+      || (row.video_state === 'DRAFT' && Boolean(row.approved_at))
+      || (isUploadedUnpublishedDraft(row.status, row.video_state) && Boolean(row.approved_at))
     if (!passed) continue
     if (row.status === 'published' && row.video_state == null) {
       selected.push(reelRow(row, null, 'unverified'))

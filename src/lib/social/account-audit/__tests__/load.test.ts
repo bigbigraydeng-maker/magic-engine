@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { toAuditReel } from '../load'
+import { loadAuditReels, toAuditReel } from '../load'
 
 describe('toAuditReel', () => {
   it('reads template, music, scenes, brand colour, variant, tags', () => {
@@ -25,6 +25,29 @@ describe('toAuditReel', () => {
   it('unreadable fields stay null, never a default', () => {
     const r = toAuditReel({ id: 'abcdef12-0', created_at: '2026-10-01T00:00:00Z', brief: 'garbage' })
     expect(r).toMatchObject({ template: null, music: null, scenes: null, brandColor: null, variantOf: null, format: null, pillar: null })
+  })
+
+  it('the audit query includes platform_draft so an uploaded draft is not skipped', async () => {
+    const seen: unknown[][] = []
+    const db = {
+      from() {
+        const chain = {
+          select: () => chain,
+          eq: () => chain,
+          in: (_col: string, vals: unknown[]) => { seen.push(vals); return chain },
+          gte: () => chain,
+          order: () => chain,
+          limit: async () => ({
+            data: [{ id: 'abcdef12-0000-4000-8000-000000000000', created_at: '2026-11-01T00:00:00Z', status: 'platform_draft', brief: {} }],
+            error: null,
+          }),
+        }
+        return chain
+      },
+    }
+    const rows = await loadAuditReels(db as never, '11111111-1111-4111-8111-111111111111', '2026-10-01T00:00:00Z')
+    expect(seen[0]).toEqual(expect.arrayContaining(['published', 'platform_draft']))
+    expect(rows).toHaveLength(1)
   })
 
   it('rows without an id or a date are dropped', () => {

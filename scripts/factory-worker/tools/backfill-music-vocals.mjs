@@ -35,7 +35,7 @@ function isValidIso(v) {
 // Decide whether an order qualifies and extract its music window.
 function classifyOrder(order) {
   if (!order || typeof order !== 'object') return { skip: 'invalid order' }
-  if (order.status !== 'published') return { skip: 'not published' }
+  if (order.status !== 'published' && order.status !== 'platform_draft') return { skip: 'not published' }
   const approvedBy = order.review_ref?.approved_by
   if (!PM_EMAILS.includes(approvedBy)) return { skip: 'not PM-approved' }
   const props = order.brief?.remotion?.props
@@ -191,7 +191,7 @@ export function makeLocateFileFn(studioRoot) {
 
 // Fetch published work orders from Supabase REST (read-only).
 async function fetchOrders(url, key) {
-  const endpoint = `${url}/rest/v1/content_work_orders?select=id,status,brief,output,review_ref&status=eq.published&limit=1000`
+  const endpoint = `${url}/rest/v1/content_work_orders?select=id,status,brief,output,review_ref&status=in.(published,platform_draft)&limit=1000`
   const res = await fetch(endpoint, {
     headers: { apikey: key, Authorization: `Bearer ${key}` },
   })

@@ -17,6 +17,7 @@ export const STATUS_META: Record<WorkOrderStatus, { label: string; color: string
   approved: { label: '已通过', color: 'bg-emerald-100 text-emerald-700' },
   publishing: { label: '发布中', color: 'bg-teal-100 text-teal-700' },
   publish_failed: { label: '发布失败', color: 'bg-red-100 text-red-700' },
+  platform_draft: { label: '草稿未公开', color: 'bg-amber-100 text-amber-800' },
   published: { label: '已发布', color: 'bg-green-100 text-green-700' },
   measuring: { label: '统计效果中', color: 'bg-cyan-100 text-cyan-700' },
   closed: { label: '已完成', color: 'bg-slate-100 text-slate-500' },
@@ -29,7 +30,7 @@ export const STATUS_META: Record<WorkOrderStatus, { label: string; color: string
 /** 看板分组展示顺序(要拍板的状态在前:死信/发布失败/待审) */
 export const STATUS_ORDER = [
   'dead_letter', 'publish_failed', 'in_review', 'rendered', 'review_rejected',
-  'producing', 'claimed', 'queued', 'approved', 'publishing', 'published',
+  'producing', 'claimed', 'queued', 'approved', 'publishing', 'platform_draft', 'published',
   'measuring', 'failed', 'closed', 'archived', 'superseded',
 ] as const satisfies readonly WorkOrderStatus[]
 
@@ -49,5 +50,6 @@ export function publishedBadge(p: PublishedView | null): { label: string; color:
 /** statuses whose reject_reason is a real failure/rejection reason (not stale text from an earlier attempt). queued: worker/[id]/fail 把可重试失败退回 queued 并写原因 */
 export const REASON_STATUSES: readonly WorkOrderStatus[] = ['queued', 'publish_failed', 'failed', 'dead_letter', 'review_rejected']
 
-// 发布后阶段(已发布 / 监测中 / 已关闭):审片区的「已发布」历史卡片统一用这组状态
+// 发布后阶段(已发布 / 监测中 / 已关闭):审片区的「已发布」历史卡片统一用这组状态。
+// platform_draft 是已上传但未公开,不算发布后。旧的 published+DRAFT 行状态仍是 published,归组不变。
 export const POST_PUBLISH: readonly WorkOrderStatus[] = ['published', 'measuring', 'closed']

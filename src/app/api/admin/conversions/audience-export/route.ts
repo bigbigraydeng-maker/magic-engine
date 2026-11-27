@@ -8,7 +8,8 @@
  * 口径与"今日名单"完全同源：同一套 contacts + contact_touchpoints，
  * 同一个 isDoNotContact（真相源触点，不是 contacts 那一列），
  * 同一个 contactKindOf（按邮箱域名分终端/同行/员工）。
- * 只多加一条"来自广告=有同意"的筛。逻辑全在 lib/conversions/audience-export（已测）。
+ * 只多加一条"来自广告=有同意"的筛。名单怎么筛在 lib/conversions/audience-export；
+ * 「来自广告」仍是 platform 为 meta 或有广告编号（storedMetaAdConsent），这句口径没改。
  *
  * `format=stats`（默认）只返回数字，不含任何 PII —— 让人先看池子多大、够不够门槛，
  * 再决定要不要真下载。`format=csv` 才吐明文。
@@ -28,6 +29,7 @@ import {
   buildMetaAudienceA,
   type AudienceContact,
 } from '@/lib/conversions/audience-export'
+import { storedMetaAdConsent } from '@/lib/crm/meta-touch'
 
 export const dynamic = 'force-dynamic'
 
@@ -169,7 +171,7 @@ async function handleGet(request: Request) {
     email: c.primary_email,
     phone: c.primary_phone,
     kind: contactKindOf(emailsByContact.get(c.id) ?? [], rules),
-    fromAd: c.attr_platform === 'meta' || c.attr_ad_id != null,
+    fromAd: storedMetaAdConsent(c.attr_platform, c.attr_ad_id),
     doNotContact: isDoNotContact(
       c.do_not_contact,
       (touchesByContact.get(c.id) ?? []).map((t) => ({

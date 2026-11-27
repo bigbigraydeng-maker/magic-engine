@@ -283,6 +283,12 @@ export interface SiteReading {
   tours: string[]
   brochureVisits: number
   lastAt: string
+  /**
+   * His latest human click / page view on a link in a mail WE sent (CRM mailbox, not Mailchimp), up to 60 days back.
+   * Counts as "he clicked our link" for the clicked-link group, same as a Mailchimp click (PM 11-27: guests who opened
+   * the 2027 catalogue we sent were never put back on the staff list).
+   */
+  lastClickAt?: string
 }
 
 /** 「正在看手册」的门槛：看了 2 个以上团页面，或者隔了半天以上又回来看手册。 */
@@ -744,6 +750,7 @@ export function segmentContact(
   const lastClick = Math.max(
     0,
     ...tps.filter((t) => t.engagement === 'click').map((t) => ts(t.occurredAt)),
+    ts(contact.siteReading?.lastClickAt),
   )
   const clickPending =
     lastClick > 0 && nowMs - lastClick <= CLICK_WINDOW_MS && lastOutbound < lastClick

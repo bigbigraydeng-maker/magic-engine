@@ -33,8 +33,11 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { startCronRun } from '@/lib/cron/run-logger'
 import { fetchAll } from '@/lib/supabase-paginate'
 import { readAudienceId } from '@/lib/mailchimp/audience-config'
+import { EMAIL_UNSUBSCRIBE_SOURCE } from '@/lib/crm/email-unsubscribe'
 import {
   syncSuppressionTags,
+  meEmailUnsubscribedContactIds,
+  toMeEmailUnsubscribeMarks,
   DEFAULT_SUPPRESS_TAG,
   type ContactForSuppressionCheck,
 } from '@/lib/mailchimp/suppression-sync'
@@ -52,6 +55,11 @@ interface TouchpointRow {
   contact_id: string
   metadata: { outcome?: string } | null
   occurred_at: string
+}
+
+interface UnsubscribeRow {
+  contact_id: string | null
+  metadata: { address_sha256?: unknown } | null
 }
 
 /**
@@ -91,11 +99,29 @@ async function loadContactsForClient(clientId: string): Promise<ContactForSuppre
     touchesByContact.set(tp.contact_id, list)
   }
 
+  // ME's own unsubscribe records (no `outcome`, so the query above never sees them). A failed read throws, like the
+  // two reads above: the run fails visibly instead of quietly leaving unsubscribed guests on the Mailchimp list.
+  const unsubscribes = await fetchAll<UnsubscribeRow>((from, to) =>
+    supabaseAdmin
+      .from('contact_touchpoints')
+      .select('contact_id, metadata')
+      .eq('client_id', clientId)
+      .eq('source', EMAIL_UNSUBSCRIBE_SOURCE)
+      .eq('channel', 'email')
+      .order('id', { ascending: true })
+      .range(from, to),
+  )
+  const unsubscribed = meEmailUnsubscribedContactIds(
+    contacts.map((c) => ({ contactId: c.id, email: c.primary_email })),
+    toMeEmailUnsubscribeMarks(unsubscribes),
+  )
+
   return contacts.map((c) => ({
     contactId: c.id,
     email: c.primary_email,
     doNotContactFlag: c.do_not_contact === true,
     touches: touchesByContact.get(c.id) ?? [],
+    meEmailUnsubscribed: unsubscribed.has(c.id),
   }))
 }
 
@@ -149,6 +175,7 @@ async function run(dryRun: boolean): Promise<NextResponse> {
       alreadyTagged: r.alreadyTagged,
       skippedNoEmail: r.skippedNoEmail,
       notInAudience: r.notInAudience,
+      meUnsubscribeOnly: r.meUnsubscribeOnly,
       errors: r.errors,
     })
   }

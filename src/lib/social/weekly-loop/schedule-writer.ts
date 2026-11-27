@@ -1,10 +1,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { CONFIRMATION_ACTION_KEY } from '@/lib/kernel/registry-confirmation'
+import { isUploadedUnpublishedDraft } from '@/lib/factory/platform-draft-status'
 import { toPublishedView } from '@/lib/factory/publish/publish-display'
-import { TRAFFIC_ACTION_TYPE } from '@/lib/factory/publish/promote/types'
-import { readApprovedAt, readPublishOn } from '@/lib/social/week-pack/manifest'
-import { weekPackSubject } from '@/lib/social/week-pack/facts'
 import { isExcludedByCard } from '@/lib/factory/publish/promote/scheduled-authorize-list'
+import { TRAFFIC_ACTION_TYPE } from '@/lib/factory/publish/promote/types'
+import { CONFIRMATION_ACTION_KEY } from '@/lib/kernel/registry-confirmation'
+import { weekPackSubject } from '@/lib/social/week-pack/facts'
+import { readApprovedAt, readPublishOn } from '@/lib/social/week-pack/manifest'
 
 export type SkipReason =
   | 'not_found'
@@ -129,9 +130,11 @@ function refusalFor(
   if (published?.video_state === 'PUBLISHED') return 'already_public'
   if (promote === 'failed') return 'promote_check_failed'
   if (promote === 'exists') return 'promote_record_exists'
+  const videoState = published?.video_state ?? null
   const passed =
     row.status === 'approved' ||
-    (published?.video_state === 'DRAFT' && readApprovedAt(row.review_ref) !== null)
+    (videoState === 'DRAFT' && readApprovedAt(row.review_ref) !== null) ||
+    (isUploadedUnpublishedDraft(row.status, videoState) && readApprovedAt(row.review_ref) !== null)
   if (!passed) return 'not_review_passed_draft'
   if (readPublishOn(row.brief) !== null) return 'already_scheduled'
   if (isExcludedByCard(row.brief)) return 'excluded_by_card'

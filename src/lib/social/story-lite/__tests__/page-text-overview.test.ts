@@ -263,6 +263,7 @@ describe('review fixes (draft week, grace period, one "uploaded" rule, small sam
 
   it('"recorded as uploaded" is one rule: published, measuring and closed all count, in review does not', () => {
     expect(isRecordedUploaded({ status: 'published', published_at: null })).toBe(true)
+    expect(isRecordedUploaded({ status: 'platform_draft', published_at: null })).toBe(true)
     expect(isRecordedUploaded({ status: 'measuring', published_at: null })).toBe(true)
     expect(isRecordedUploaded({ status: 'closed', published_at: '2026-10-13T00:00:00Z' })).toBe(true)
     expect(isRecordedUploaded({ status: 'in_review', published_at: null })).toBe(false)
@@ -284,6 +285,7 @@ describe('review fixes (draft week, grace period, one "uploaded" rule, small sam
 describe('describeReelUploadState / headline with the platform video state', () => {
   it('says draft / public / unknown in plain words and stays silent for a Reel that was never uploaded', () => {
     expect(describeReelUploadState({ status: 'in_review', published_at: null, video_state: null })).toBeNull()
+    expect(describeReelUploadState({ status: 'platform_draft', published_at: null, video_state: null })).toBe('Facebook 草稿，未公开')
     expect(describeReelUploadState({ status: 'published', published_at: '2026-10-13T00:00:00Z', video_state: 'DRAFT' })).toBe('Facebook 草稿，未公开')
     expect(describeReelUploadState({ status: 'published', published_at: '2026-10-13T00:00:00Z', video_state: 'PUBLISHED' })).toBe('已公开（Facebook）')
     expect(describeReelUploadState({ status: 'published', published_at: '2026-10-13T00:00:00Z', video_state: null })).toBe('库里记为已上传 · 平台状态未核')
@@ -298,7 +300,8 @@ describe('describeReelUploadState / headline with the platform video state', () 
         { status: 'published', published_at: '2026-10-12T00:00:00Z', video_state: 'DRAFT' },
         { status: 'published', published_at: '2026-10-11T00:00:00Z', video_state: 'PUBLISHED' },
         { status: 'published', published_at: '2026-10-10T00:00:00Z', video_state: null },
+        { status: 'platform_draft', published_at: null, video_state: null },
       ]),
-    ).toBe('Reel：在审 1 · Facebook 草稿 2 · 已公开 1 · 库里记为已上传但平台状态未核 1')
+    ).toBe('Reel：在审 1 · Facebook 草稿 3 · 已公开 1 · 库里记为已上传但平台状态未核 1')
   })
 })

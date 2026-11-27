@@ -17,6 +17,8 @@ export type OrderType = 'variant_from_winner' | 'fresh_angle' | 'clip_generation
  * (statusMeta.ts,两者都有编译期穷举断言会报错兜底)。这是 CLAUDE.md「改 enum 必全仓
  * grep 同步」的着力点——以前是裸 string,没地方 grep。
  * 分段:M1 生产 → M2 审核 → M3 发布/归因 → 终态。
+ * 'platform_draft' 先只进类型和读侧:草稿已上传、未公开。旧行仍是 published + video_state=DRAFT。
+ * 放宽 CHECK、以及发布 worker 改写成这个状态,都不在这次。
  */
 export type WorkOrderStatus =
   // ⚠️ 'rendered' 已停止产出(2026-07-23):交付直接落 'in_review'。原先靠 factory-review-sweeper
@@ -24,7 +26,7 @@ export type WorkOrderStatus =
   //    保留此值仅为读取历史行,**不要再往里写**——写进去的工单不会出现在任何审片队列。
   | 'queued' | 'claimed' | 'producing' | 'rendered'          // M1/M2 生产
   | 'in_review' | 'review_rejected' | 'approved'             // 审核
-  | 'publishing' | 'publish_failed' | 'published' | 'measuring' | 'closed' // M3 发布/归因
+  | 'publishing' | 'publish_failed' | 'platform_draft' | 'published' | 'measuring' | 'closed' // M3
   | 'failed' | 'dead_letter' | 'archived' | 'superseded'     // 终态
 
 /** 打回分类(migration content_work_orders.reject_category CHECK) */

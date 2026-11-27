@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { publishedBadge, REASON_STATUSES } from './statusMeta'
+import { POST_PUBLISH, STATUS_META, publishedBadge, REASON_STATUSES } from './statusMeta'
 
 const view = (o: Partial<{ video_state: 'DRAFT' | 'PUBLISHED' | null; permalink: string | null; provisional: boolean }>) => ({
   video_state: null, permalink: null, published_at: null, provisional: false, ...o,
@@ -25,5 +25,11 @@ describe('publishedBadge', () => {
     expect(REASON_STATUSES).toContain('publish_failed')
     expect(REASON_STATUSES).toContain('queued') // retryable worker failure goes back to queued WITH a reason; must stay visible
     expect(REASON_STATUSES).not.toContain('published')
+    expect(REASON_STATUSES).not.toContain('platform_draft')
+  })
+  it('a platform draft is labelled unpublished and is not a post-publish status', () => {
+    expect(STATUS_META.platform_draft.label).toBe('草稿未公开')
+    expect(POST_PUBLISH).not.toContain('platform_draft')
+    expect(POST_PUBLISH).toContain('published')
   })
 })
