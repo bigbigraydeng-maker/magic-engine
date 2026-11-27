@@ -51,6 +51,8 @@ export interface PickupListDeps {
   loadNames(ids: string[]): Promise<Map<string, string>>
   /** Catalogues this client already sent (or may have sent) today, in the client's time zone. */
   sentToday(today: string): Promise<number>
+  /** Of these guests, the ones the catalogue send would refuse as "already has it" (the send's own gate). Throws on a read error. */
+  hasCatalogue(ids: string[]): Promise<Set<string>>
 }
 
 /** How many mail checks run at once. */
@@ -100,7 +102,11 @@ export async function loadPickupList(
       status: f.contactedToday ? 'tomorrow' : 'queued' }
   })
   const rows = [...askRows, ...pickRows]
-  for (const r of rows) r.message = r.status === 'tomorrow' ? '今天已经联系过，明天再发。' : '今天的名额满了，排到后面几天。'
+  // The send refuses a guest who already has the catalogue (an earlier enquiry, sent without the AI mark): say so here
+  // instead of offering a row that can never go, and do not let it use a place.
+  const has = await deps.hasCatalogue(rows.map((r) => r.contactId))
+  for (const r of rows) if (has.has(r.contactId)) r.status = 'cannot_send'
+  for (const r of rows) r.message = r.status === 'cannot_send' ? '这位客人已经发过目录了，不再发第二份。' : r.status === 'tomorrow' ? '今天已经联系过，明天再发。' : '今天的名额满了，排到后面几天。'
   // Mail checks run a few at a time (each is a dozen reads; one by one took over a minute in production), in list
   // order, never more at once than the room left, so the oldest enquiries still get the places.
   const open = rows.filter((r) => r.status === 'queued')

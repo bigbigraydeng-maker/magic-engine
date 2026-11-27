@@ -4,7 +4,7 @@ import type { PreviewResult } from '@/lib/crm/email-templates/template-preview'
 import type { SendMailNewResult } from '@/lib/microsoft/mail-send-new'
 import type { SendCrash } from '@/lib/crm/email-templates/send-template-email'
 import { db } from '@/lib/crm/ai-takeover/__tests__/pickup-db'
-import { catalogueSentAt } from '../prod'
+import { catalogueSentAt, guestsWithCatalogue } from '../prod'
 import { CATALOGUE_ONCE_DAYS,
   sendCatalogueEmail, type CatalogueDeps, type SendCatalogueArgs } from '../send-catalogue'
 
@@ -204,20 +204,49 @@ describe('one catalogue per guest (whichever button the send came from)', () => 
   })
 })
 
-describe('catalogueSentAt (real Supabase client, stub network)', () => {
-  const q = { clientId: 'client-a', contactId: 'g1', templateKey: 'catalogue-send', exceptRequestId: 'r-this', sinceIso: '2026-06-01T00:00:00.000Z' }
-  const receipt = (over: Record<string, unknown>) => ({ client_id: 'client-a', contact_id: 'g1', template_key: 'catalogue-send', outcome: 'sent', request_id: 'r-other', created_at: '2026-11-20T01:00:00.000Z', ...over })
-  const read = (rows: Array<Record<string, unknown>>) => catalogueSentAt(db({ crm_email_send_receipts: rows }, []), q)
+describe('who already has the catalogue (real Supabase client, stub network)', () => {
+  const SINCE = '2026-06-01T00:00:00.000Z'
+  // A full receipt row, as the table stores it (the row parser refuses anything less).
+  const receipt = (over: Record<string, unknown>) => ({
+    id: `id-${Math.random()}`, client_id: 'client-a', contact_id: 'g1', request_id: 'r-other', actor_email: 'lisa@client.co.nz',
+    template_key: 'catalogue-send', template_version: 4, catalog_version: null, call_basis: 'none', outcome: 'sent',
+    block_reason: null, block_detail: null, mailbox: 'info@client.co', conversation_id: 'conv', provider_message_id: 'm1',
+    edited_after_render: false, warnings: [], rendered_sha256: 'a'.repeat(64), final_sha256: 'a'.repeat(64),
+    auth_basis: 'human_click', created_at: '2026-11-20T01:00:00.000Z', ...over,
+  })
+  const q = { clientId: 'client-a', contactId: 'g1', templateKey: 'catalogue-send', exceptRequestId: 'r-this', sinceIso: SINCE }
+  const at = (rows: Array<Record<string, unknown>>) => catalogueSentAt(db({ crm_email_send_receipts: rows }, []), q)
+  const who = (rows: Array<Record<string, unknown>>, ids = ['g1', 'g2']) =>
+    guestsWithCatalogue(db({ crm_email_send_receipts: rows }, []), { clientId: 'client-a', templateKey: 'catalogue-send', sinceIso: SINCE, contactIds: ids }).then((s) => [...s].sort())
 
-  it('finds another request\'s sent or unknown catalogue for this guest', async () => {
-    expect(await read([receipt({})])).toBe('2026-11-20T01:00:00.000Z')
-    expect(await read([receipt({ outcome: 'unknown' })])).toBe('2026-11-20T01:00:00.000Z')
+  it('another request\'s sent or unknown catalogue counts; the latest one is reported', async () => {
+    expect(await at([receipt({})])).toBe('2026-11-20T01:00:00.000Z')
+    expect(await at([receipt({ outcome: 'unknown', provider_message_id: null })])).toBe('2026-11-20T01:00:00.000Z')
+    expect(await at([receipt({ created_at: '2026-11-01T01:00:00.000Z' }), receipt({ request_id: 'r-3', created_at: '2026-11-25T01:00:00.000Z' })])).toBe('2026-11-25T01:00:00.000Z')
   })
 
-  it('ignores this same request (a replay), blocked sends, other templates, other guests, other clients, and old ones', async () => {
-    expect(await read([
-      receipt({ request_id: 'r-this' }), receipt({ outcome: 'blocked' }), receipt({ template_key: 'thank-you' }),
+  it('this same request (a replay), blocked sends, other templates, other guests, other clients and old ones do not count', async () => {
+    expect(await at([
+      receipt({ request_id: 'r-this' }), receipt({ outcome: 'blocked', block_reason: 'frequency_cap', provider_message_id: null }), receipt({ template_key: 'thank-you' }),
       receipt({ contact_id: 'g2' }), receipt({ client_id: 'client-b' }), receipt({ created_at: '2026-01-01T00:00:00.000Z' }),
     ])).toBeNull()
+  })
+
+  it('an unknown send later settled as failed never went out: the guest is not locked out', async () => {
+    const rows = [
+      receipt({ outcome: 'unknown', provider_message_id: null, created_at: '2026-11-20T01:00:00.000Z' }),
+      receipt({ outcome: 'failed', provider_message_id: null, block_reason: 'reconcile_failed', created_at: '2026-11-20T01:10:00.000Z' }),
+    ]
+    expect(await at(rows)).toBeNull()
+    expect(await who(rows)).toEqual([])
+  })
+
+  it('in bulk for the lists: the same rule, per guest', async () => {
+    expect(await who([
+      receipt({}), receipt({ contact_id: 'g2', outcome: 'unknown', provider_message_id: null }),
+      receipt({ contact_id: 'g3' }), receipt({ contact_id: 'g2', template_key: 'thank-you' }),
+    ])).toEqual(['g1', 'g2'])
+    expect(await who([receipt({ outcome: 'blocked', provider_message_id: null }), receipt({ client_id: 'client-b' }), receipt({ created_at: '2026-01-01T00:00:00.000Z' })])).toEqual([])
+    expect(await who([receipt({})], [])).toEqual([])
   })
 })

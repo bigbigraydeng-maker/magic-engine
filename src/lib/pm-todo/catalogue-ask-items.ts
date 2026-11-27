@@ -15,6 +15,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { askAll } from '@/lib/crm/ai-takeover/catalogue-ask'
 import { DEFAULT_PICKUP_CONFIG } from '@/lib/crm/ai-takeover/pickup'
 import { decideAll, latestEnquiries, loadInputs, PickupNotConfiguredError } from '@/lib/crm/ai-takeover/pickup-run'
+import { guestsWithCatalogue } from '@/lib/crm/catalogue-line/prod'
+import { CATALOGUE_ONCE_DAYS } from '@/lib/crm/catalogue-line/send-catalogue'
 import { loadEmailSettings } from '@/lib/crm/email-templates/settings-store'
 import { APP_BASE } from './binding-request-items'
 import type { ManualItem } from './manual-item-types'
@@ -54,7 +56,8 @@ export interface CatalogueAskDeps {
 export const defaultCatalogueAskDeps: CatalogueAskDeps = {
   async countWaiting(supabase, clientId, now) {
     const loaded = await loadEmailSettings(supabase, clientId)
-    if (loaded.kind !== 'ok' || !loaded.settings.enabled || !loaded.settings.providers.catalogue) return null
+    const catalogue = loaded.kind === 'ok' && loaded.settings.enabled ? loaded.settings.providers.catalogue : undefined
+    if (catalogue === undefined) return null
     const leads = await latestEnquiries(supabase, clientId, now)
     if (leads.size === 0) return 0
     let inputs: Awaited<ReturnType<typeof loadInputs>>
@@ -67,7 +70,14 @@ export const defaultCatalogueAskDeps: CatalogueAskDeps = {
     }
     // 名单页同一口径：交给 AI 的规则接走的人（含打完电话还在等一小时的）不算在这条里。
     const taken = new Set(decideAll(inputs, leads, now, { ...DEFAULT_PICKUP_CONFIG, afterLastCallMinutes: 0 }).map((p) => p.contactId))
-    return askAll(inputs, leads, now).filter((a) => !taken.has(a.contactId)).length
+    const asks = askAll(inputs, leads, now).filter((a) => !taken.has(a.contactId))
+    if (asks.length === 0) return 0
+    // 发信那一步会挡「已经发过目录」的人：他们不算在等。
+    const has = await guestsWithCatalogue(supabase, {
+      clientId, templateKey: catalogue.templateKey, contactIds: asks.map((a) => a.contactId),
+      sinceIso: new Date(now.getTime() - CATALOGUE_ONCE_DAYS * 86_400_000).toISOString(),
+    })
+    return asks.filter((a) => !has.has(a.contactId)).length
   },
 }
 

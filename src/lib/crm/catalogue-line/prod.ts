@@ -3,7 +3,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createPreviewData } from '@/lib/crm/email-templates/preview-prod'
 import { sendTemplateEmail } from '@/lib/crm/email-templates/send-template-email'
+import { findSentTemplateReceiptsSince } from '@/lib/crm/email-templates/receipt-store'
 import { loadEmailSettings } from '@/lib/crm/email-templates/settings-store'
+import { fetchAll } from '@/lib/supabase-paginate'
 import { previewTemplate } from '@/lib/crm/email-templates/template-preview'
 import { loadClientTimeZone } from '@/lib/crm/email-templates/time-zone'
 import { supabaseAdmin } from '@/lib/supabase'
@@ -50,25 +52,57 @@ export function createEligibilityData(db: SupabaseClient): EligibilityData {
   }
 }
 
-/** The latest catalogue receipt (sent, or outcome unknown) of another request for this guest; null = none. */
+/**
+ * When this guest was last sent this catalogue template by another request (sent, or outcome still unknown); null = none.
+ * An `unknown` send later settled as `failed` never went out and does not count (findSentTemplateReceiptsSince).
+ */
 export async function catalogueSentAt(
   db: SupabaseClient,
   q: { clientId: string; contactId: string; templateKey: string; exceptRequestId: string; sinceIso: string },
 ): Promise<string | null> {
-  const { data, error } = await db
-    .from('crm_email_send_receipts')
-    .select('created_at')
-    .eq('client_id', q.clientId)
-    .eq('contact_id', q.contactId)
-    .eq('template_key', q.templateKey)
-    .in('outcome', ['sent', 'unknown'])
-    .neq('request_id', q.exceptRequestId)
-    .gte('created_at', q.sinceIso)
-    .order('created_at', { ascending: false })
-    .limit(1)
-  if (error) throw new Error(`crm_email_send_receipts: ${error.message}`)
-  const row = ((data as Array<{ created_at: unknown }> | null) ?? [])[0]
-  return row !== undefined && typeof row.created_at === 'string' ? row.created_at : null
+  const rows = await findSentTemplateReceiptsSince(db, q.clientId, q.contactId, q.sinceIso)
+  let latest: string | null = null
+  for (const r of rows) {
+    if (r.templateKey !== q.templateKey || r.requestId === q.exceptRequestId) continue
+    if (latest === null || Date.parse(r.createdAt) > Date.parse(latest)) latest = r.createdAt
+  }
+  return latest
+}
+
+const ID_CHUNK = 100
+
+/**
+ * Of these guests, the ones who already have this catalogue template (sent, or outcome still unknown and not settled
+ * as failed) since `sinceIso` — the same rule as the send's own gate, read in bulk for the lists. Throws on a read error.
+ */
+export async function guestsWithCatalogue(
+  db: SupabaseClient,
+  q: { clientId: string; templateKey: string; sinceIso: string; contactIds: readonly string[] },
+): Promise<Set<string>> {
+  type R = { id: string; contact_id: string; request_id: string; outcome: string; created_at: string }
+  const rows: R[] = []
+  for (let i = 0; i < q.contactIds.length; i += ID_CHUNK) {
+    rows.push(...await fetchAll<R>((from, to) =>
+      db.from('crm_email_send_receipts').select('id, contact_id, request_id, outcome, created_at')
+        .eq('client_id', q.clientId).eq('template_key', q.templateKey).in('outcome', ['sent', 'unknown', 'failed'])
+        .gte('created_at', q.sinceIso).in('contact_id', q.contactIds.slice(i, i + ID_CHUNK))
+        .order('id', { ascending: true }).range(from, to)))
+  }
+  const failedAt = new Map<string, number>()
+  for (const r of rows) {
+    if (r.outcome !== 'failed') continue
+    const at = Date.parse(r.created_at)
+    if (Number.isFinite(at) && at > (failedAt.get(r.request_id) ?? -Infinity)) failedAt.set(r.request_id, at)
+  }
+  const out = new Set<string>()
+  for (const r of rows) {
+    if (r.outcome === 'failed') continue
+    const settled = failedAt.get(r.request_id)
+    const at = Date.parse(r.created_at)
+    if (r.outcome === 'unknown' && settled !== undefined && Number.isFinite(at) && settled >= at) continue
+    out.add(r.contact_id)
+  }
+  return out
 }
 
 export function createCatalogueDeps(clientId: string): CatalogueDeps {

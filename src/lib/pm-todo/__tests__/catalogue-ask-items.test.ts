@@ -40,6 +40,23 @@ describe('defaultCatalogueAskDeps.countWaiting (same rule as the list page)', ()
     expect(await defaultCatalogueAskDeps.countWaiting(db(tables, []), CLIENT, NOW)).toBe(1)
   })
 
+  it('a guest still inside the hour after an unanswered call is not counted (the pickup rule takes them once the hour is over)', async () => {
+    vi.mocked(loadEmailSettings).mockResolvedValue(settings())
+    const tables = world()
+    const vmAt = new Date(NOW.getTime() - 30 * 60_000).toISOString()
+    tables.contact_touchpoints = tables.contact_touchpoints.map((t) => (t.id === 'va' ? { ...t, occurred_at: vmAt } : t))
+    tables.contact_touchpoints.push({ ...note('na', 'a', 0, 'Left VM, send catalogue'), occurred_at: new Date(Date.parse(vmAt) + 60_000).toISOString() })
+    expect(await defaultCatalogueAskDeps.countWaiting(db(tables, []), CLIENT, NOW)).toBe(0)
+  })
+
+  it('a guest who already has the catalogue (the send would refuse) is not counted as waiting', async () => {
+    vi.mocked(loadEmailSettings).mockResolvedValue(settings())
+    const tables = world()
+    tables.contact_touchpoints.push(note('nb', 'b', 310, 'wants the catalogue again'))
+    tables.crm_email_send_receipts = [{ id: 'r1', client_id: CLIENT, contact_id: 'b', request_id: 'req-1', template_key: 'catalogue-send', outcome: 'sent', created_at: '2026-10-20T00:00:00.000Z' }]
+    expect(await defaultCatalogueAskDeps.countWaiting(db(tables, []), CLIENT, NOW)).toBe(0)
+  })
+
   it('a client that has not set its qualified stages has no list page, so no item (not a failure)', async () => {
     vi.mocked(loadEmailSettings).mockResolvedValue(settings())
     const tables = world()

@@ -10,6 +10,7 @@ function deps(over: Partial<PickupListDeps> = {}, composed: string[] = []): Pick
     timeZone: 'Pacific/Auckland',
     loadNames: async (ids) => new Map(ids.map((id) => [id, `Guest ${id}`])),
     sentToday: async () => 0,
+    hasCatalogue: async () => new Set<string>(),
     compose: async (id): Promise<ComposePreview> => {
       composed.push(id)
       return { canCompose: true, recipient: `${id}@x.co`, mailbox: 'info@client.co', sentToContactLast7Days: 1 }

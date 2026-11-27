@@ -73,6 +73,7 @@ function deps(over: Partial<PickupListDeps> = {}, composed: string[] = []): Pick
     timeZone: 'Pacific/Auckland',
     loadNames: async (ids) => new Map(ids.map((id) => [id, `Guest ${id}`])),
     sentToday: async () => 0,
+    hasCatalogue: async () => new Set<string>(),
     compose: async (id): Promise<ComposePreview> => {
       composed.push(id)
       return { canCompose: true, recipient: `${id}@x.co`, mailbox: 'info@client.co', sentToContactLast7Days: 0 }
@@ -187,6 +188,19 @@ describe('the "交给 AI 跟进" list with catalogue asks', () => {
     tables.contact_touchpoints.push({ ...note('na', 'a', 0, 'Left VM, send catalogue'), occurred_at: new Date(Date.parse(vmAt) + 60_000).toISOString() })
     const rows = await loadPickupList(db(tables, []), CLIENT, deps(), { now: NOW, dailyMax: 30 })
     expect(rows.filter((r) => r.contactId === 'a')).toEqual([])
+  })
+
+  it('a guest the send would refuse as "already has the catalogue" is shown as cannot-send with the reason, and uses no place', async () => {
+    const tables = world()
+    tables.contact_touchpoints.push(note('nb', 'b', 310, 'wants the catalogue'))
+    const composed: string[] = []
+    const rows = await loadPickupList(db(tables, []), CLIENT, deps({ hasCatalogue: async (ids) => new Set(ids.filter((id) => id === 'b' || id === 'c')) }, composed), { now: NOW, dailyMax: 1 })
+    expect(rows.map((r) => [r.contactId, r.status, r.message])).toEqual([
+      ['b', 'cannot_send', '这位客人已经发过目录了，不再发第二份。'],
+      ['c', 'cannot_send', '这位客人已经发过目录了，不再发第二份。'],
+      ['a', 'ready', null],
+    ])
+    expect(composed).toEqual(['a'])
   })
 
   it('a client can pass its own words', async () => {

@@ -80,7 +80,7 @@ const MESSAGES: Record<Exclude<CatalogueRefusal, EligibilityRefusal>, string> = 
   catalogue_expired: '手册已过期，目录没有发出。请等新版手册换上后再发。',
   catalogue_template_invalid: '目录信模板不能用（已停用、要选团、或要手填内容），目录没有发出，请找 Magic Lab 团队。',
   catalogue_render_failed: '目录信生成不完整（缺内容或没过文字检查），目录没有发出。',
-  catalogue_already_sent: '这位客人已经收过目录了，没有再发。',
+  catalogue_already_sent: '这位客人已经发过目录了（或上一封的结果还没确认），没有再发。',
   catalogue_history_unreadable: '暂时查不到这位客人有没有收过目录，目录没有发出，请稍后再试。',
 }
 
