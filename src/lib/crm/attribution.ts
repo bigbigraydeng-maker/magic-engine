@@ -1,3 +1,5 @@
+import { classifyMetaTouch, isMetaAdId } from '@/lib/crm/meta-touch'
+
 /**
  * 来源归因 —— 「这个人是哪条广告 / 哪条视频带来的」
  *
@@ -48,11 +50,11 @@
  * 渠道大类。真相源在这里,库里**不加 CHECK** —— 加渠道就要 migration + PM 拍板,
  * 漏同步则写入直接报错(CLAUDE.md 记的 superseded 事故)。
  *
- *   meta            Facebook / Instagram 付费(即时表单 / CTWA / 站外落地页)
+ *   meta            Facebook / Instagram 付费(有付费信号才用,见 meta-touch.ts)
  *   google          Google Ads
  *   email           邮件营销(Mailchimp 等)
  *   web             客户官网表单(自然流量或 utm 未知)
- *   organic_social  自然社媒(能确证不是广告时才用)
+ *   organic_social  自然社媒(Meta 来源但没有付费信号;私信读不到来源时仍留空)
  *   referral        转介绍 / 口碑
  *   manual          员工手工录入(线下认识的、电话打进来的)
  */
@@ -150,8 +152,8 @@ export function firstTouchColumns(
  *
  * platform 列(Meta 用 'fb' / 'ig' / 'facebook' / 'instagram' 之类)不进白名单,
  * 因为对 ME 来说 FB 和 IG 都是同一个买量渠道 'meta';要区分位置的时候看 adset。
- * 只要这一行来自 Meta lead 导出,platform 就是 'meta' —— 这是调用方给的事实,
- * 不是从数据里猜的。
+ * 只要这一行来自 Meta lead 导出,platform 就是 'meta' —— 走 classifyMetaTouch
+ * 的即时表单信号,不是从 utm 里猜的。Meta 的 is_organic 不进这个判断。
  */
 export function attributionFromMetaLeadRow(row: {
   ad_id?: string | null
@@ -161,8 +163,9 @@ export function attributionFromMetaLeadRow(row: {
   /** ME 出片管道给的素材指纹。Meta 不给,只能由调用方传。 */
   creative_ref?: string | null
 }): Attribution {
+  const paid = classifyMetaTouch({ sourceKind: 'meta_lead_form', adId: row.ad_id }) === 'meta_paid'
   return {
-    platform: 'meta',
+    platform: paid ? 'meta' : null,
     campaignId: clean(row.campaign_id),
     adsetId: clean(row.adset_id),
     adId: clean(row.ad_id),
@@ -175,36 +178,47 @@ export function attributionFromMetaLeadRow(row: {
  * 官网表单的 utm 参数 → 归因。
  *
  * utm 只到 campaign 级(utm_campaign 是人手写的字符串,不是 Meta 的 campaign_id),
- * 所以 adId / adsetId 一律 NULL —— 把 utm_campaign 塞进 attr_campaign_id 是
- * 唯一诚实的做法,但要知道它跟 Meta 后台的 campaign_id 对不上,聚合时按
- * platform 分开看。
+ * 所以没有广告编号时 adId / adsetId 一律 NULL。把 utm_campaign 塞进
+ * attr_campaign_id 是唯一诚实的做法,但要知道它跟 Meta 后台的 campaign_id 对不上。
+ *
+ * Meta 来源是否付费只问 classifyMetaTouch。邮件 / 转介绍媒介优先于「自然社媒」,
+ * 避免把写错来源的邮件记成社媒;它们都不是付费。
  */
 export function attributionFromUtm(input: {
   utm_source?: string | null
   utm_medium?: string | null
   utm_campaign?: string | null
   utm_content?: string | null
+  ad_id?: string | null
+  fbclid?: string | null
 }): Attribution {
   const source = clean(input.utm_source)?.toLowerCase() ?? null
   const medium = clean(input.utm_medium)?.toLowerCase() ?? null
+  const metaClass = classifyMetaTouch({
+    utmSource: input.utm_source,
+    utmMedium: input.utm_medium,
+    utmContent: input.utm_content,
+    adId: input.ad_id,
+    fbclid: input.fbclid,
+  })
 
-  // 'facebook' / 'fb' / 'ig' / 'instagram' 都是 Meta 买量;没写 utm 就是自然进站。
   let platform: AttributionPlatform | null = 'web'
-  if (source && ['facebook', 'fb', 'ig', 'instagram', 'meta'].includes(source)) platform = 'meta'
-  else if (source && ['google', 'adwords', 'googleads'].includes(source)) platform = 'google'
+  if (metaClass === 'meta_paid') platform = 'meta'
   else if (medium === 'email' || source === 'mailchimp') platform = 'email'
   else if (medium === 'referral') platform = 'referral'
+  else if (metaClass === 'organic_social') platform = 'organic_social'
+  else if (source && ['google', 'adwords', 'googleads'].includes(source)) platform = 'google'
 
-  // Meta 动态参数 {{ad.id}} 填进 utm_content 时是纯数字 —— 那是广告 id,不是素材指纹。
-  // 只在 Meta 来源时认;人手写的 'reel-food-01' 仍是 creativeRef。
+  // {{ad.id}} 填进 utm_content 时是纯数字。只在已经判成付费时认成广告编号。
   const content = clean(input.utm_content)
-  const contentIsAdId = platform === 'meta' && content !== null && /^\d{6,}$/.test(content)
+  const explicitAdId = platform === 'meta' ? clean(input.ad_id) : null
+  const contentIsAdId = platform === 'meta' && isMetaAdId(content)
 
   return {
     platform,
     campaignId: clean(input.utm_campaign),
     adsetId: null,
-    adId: contentIsAdId ? content : null,
+    adId: explicitAdId ?? (contentIsAdId ? content : null),
     adName: null,
     creativeRef: contentIsAdId ? null : content,
   }
