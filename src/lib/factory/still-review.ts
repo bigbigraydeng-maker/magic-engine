@@ -112,7 +112,14 @@ export async function loadStillRedlines(
 ): Promise<{ phrases: string[]; topics: string[] } | null> {
   const client = await supabase.from('clients').select('brand_redline_phrases').eq('id', clientId).limit(1)
   if (client.error) return null
-  const brief = await supabase.from('master_briefs').select('excluded_topics').eq('client_id', clientId).limit(1)
+  // Same choice as the still work order: the newest brief that is actually in use.
+  const brief = await supabase
+    .from('master_briefs')
+    .select('excluded_topics')
+    .eq('client_id', clientId)
+    .or('status.eq.active,is_active.eq.true')
+    .order('version', { ascending: false })
+    .limit(1)
   if (brief.error) return null
   const phrases = stringList(rowField(client.data, 'brand_redline_phrases'))
   const topics = stringList(rowField(brief.data, 'excluded_topics'))

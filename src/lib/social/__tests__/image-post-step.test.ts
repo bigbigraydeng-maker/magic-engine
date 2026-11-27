@@ -61,6 +61,7 @@ function fakeSupabase(inserted: Inserted[], existing: unknown[] = []): SupabaseC
     const chain = {
       select: () => chain,
       eq: () => chain,
+      or: () => chain,
       gte: () => chain,
       order: () => chain,
       is: () => chain,
@@ -173,6 +174,7 @@ function redlineSupabase(inserted: Inserted[], stills: unknown[], phrases: strin
     const chain = {
       select: () => chain,
       eq: () => chain,
+      or: () => chain,
       gte: () => chain,
       order: () => chain,
       is: () => chain,
@@ -193,6 +195,7 @@ function weekSupabase(inserted: Inserted[], plans: unknown[] = [], stills: unkno
     const chain = {
       select: () => chain,
       eq: () => chain,
+      or: () => chain,
       gte: () => { usedGte = true; return chain },
       order: () => chain,
       is: () => chain,
