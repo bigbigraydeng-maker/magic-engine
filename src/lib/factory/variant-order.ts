@@ -4,7 +4,7 @@
 import { isRemotionBrief } from './render-mode'
 import { checkRemotionProps, replaceRemotionMusic } from './remotion-music-options.mjs'
 
-export const VARIANT_BASE_STATUSES = ['in_review', 'published', 'superseded', 'review_rejected'] as const
+export const VARIANT_BASE_STATUSES = ['in_review', 'published', 'platform_draft', 'superseded', 'review_rejected'] as const
 export const MAX_HOOK_LINE_CHARS = 9
 export const MAX_VARIANT_ORDERS_PER_DAY = 10
 export const VARIANT_ORDER_SOURCE = 'me_variant_order'

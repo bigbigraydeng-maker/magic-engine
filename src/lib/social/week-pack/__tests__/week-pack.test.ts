@@ -187,9 +187,11 @@ describe('manifest', () => {
       reel('public', 'published', 'PUBLISHED', '2026-11-10'),
       reel('other-week', 'approved', null, '2026-12-01'),
       reel('waiting', 'in_review', null, '2026-11-10'),
+      reel('legacy-draft', 'published', 'DRAFT', '2026-11-11'),
+      reel('platform-draft', 'platform_draft', null, '2026-11-12'),
     ]
     const picked = selectReels(rows, '2026-11-09', '2026-11-15')
-    expect(picked.map((item) => item.work_order_id)).toEqual(['in-week', 'undated'])
+    expect(picked.map((item) => item.work_order_id)).toEqual(['in-week', 'undated', 'legacy-draft', 'platform-draft'])
     expect(picked[1].date_state).toBe('undated')
     expect(picked[1].scheduled_at_iso).toBeNull()
   })
@@ -505,6 +507,42 @@ describe('load', () => {
     expect(scopeLine(manifest, manifestDigest(manifest))).toContain('Reel 读不到')
   })
 
+  it('does not drop a platform_draft row from the reel query', async () => {
+    const store = new InMemoryLiteStore()
+    const id = '33333333-3333-4333-8333-333333333333'
+    const statuses: unknown[][] = []
+    const db = {
+      from() {
+        const chain = {
+          select: () => chain,
+          eq: () => chain,
+          in: (_col: string, vals: unknown[]) => { statuses.push(vals); return chain },
+          order: () => chain,
+          limit: async () => ({
+            data: [{
+              id,
+              status: 'platform_draft',
+              angle: 'Draft title',
+              review_ref: { approved_at: '2026-11-01T00:00:00.000Z' },
+              published_ref: { video_state: 'DRAFT' },
+              brief: { weekly_pack: { publish_on: '2026-11-10' } },
+            }],
+            error: null,
+          }),
+        }
+        return chain
+      },
+    }
+    const manifest = await loadWeekPackManifest({
+      ports: { store, adminEmails: { has: () => true }, checkFile: async () => 'OK', sendEvent: async () => {} },
+      db: db as never,
+      clientId: CLIENT,
+      now: FRIDAY_NZ,
+    })
+    expect(statuses[0]).toEqual(expect.arrayContaining(['published', 'platform_draft']))
+    expect(manifest.reels.items.map((item) => item.work_order_id)).toEqual([id])
+  })
+
   it('authorises a Friday click that includes the following Sunday', async () => {
     const store = new InMemoryLiteStore()
     store.seedClient(CLIENT, { facebook_page_id: 'page-fixture', client_status: 'active' })
@@ -610,7 +648,7 @@ function reel(
   publishOn: string | null,
 ): ReelInput {
   return {
-    id, status, video_state: video, approved_at: video === 'DRAFT' ? '2026-11-01T00:00:00.000Z' : null,
+    id, status, video_state: video, approved_at: video === 'DRAFT' || status === 'platform_draft' ? '2026-11-01T00:00:00.000Z' : null,
     publish_on: publishOn, fingerprint: 'f'.repeat(64), title: id, asset_only: false,
   }
 }

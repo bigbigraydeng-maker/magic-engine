@@ -54,6 +54,7 @@ describe('count helpers', () => {
     expect(countWorkOrders(['failed', 'published', 'queued', 'archived', 'superseded', 'weird'])).toEqual({
       doing: 1, published: 1, stuck: 1, other: 1,
     })
+    expect(countWorkOrders(['platform_draft'])).toEqual({ doing: 1, published: 0, stuck: 0, other: 0 })
   })
 
   it('广告草稿只认状态，认不出的不算已打开', () => {

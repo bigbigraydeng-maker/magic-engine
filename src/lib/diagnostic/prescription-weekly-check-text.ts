@@ -95,7 +95,7 @@ export interface PrescriptionCheckText {
 
 const DOING_WORK = new Set([
   'queued', 'claimed', 'producing', 'rendered', 'in_review',
-  'approved', 'publishing', 'measuring',
+  'approved', 'publishing', 'platform_draft', 'measuring',
 ])
 const PUBLISHED_WORK = new Set(['published', 'closed'])
 const STUCK_WORK = new Set(['failed', 'dead_letter', 'review_rejected', 'publish_failed'])

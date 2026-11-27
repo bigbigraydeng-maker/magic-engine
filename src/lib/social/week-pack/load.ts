@@ -113,7 +113,7 @@ async function loadReels(
     .from('content_work_orders')
     .select('id, status, angle, review_ref, published_ref, brief')
     .eq('client_id', clientId)
-    .in('status', ['approved', 'published'])
+    .in('status', ['approved', 'published', 'platform_draft'])
     .order('created_at', { ascending: false })
     .limit(REEL_CAP + 1)
   if (error) {

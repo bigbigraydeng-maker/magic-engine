@@ -234,6 +234,21 @@ describe('writeReelSchedule', () => {
     if (allowedResult.ok) {
       expect(allowedResult.written).toEqual([{ id: 'w1', publishOn: '2026-11-09' }])
     }
+
+    const platformDraft = baseState({
+      orders: {
+        w1: order({
+          status: 'platform_draft',
+          published_ref: {},
+          review_ref: { approved_at: '2026-11-01T00:00:00Z' },
+        }),
+      },
+    })
+    const draftResult = await writeReelSchedule(makeDb(platformDraft), ARGS)
+    expect(draftResult.ok).toBe(true)
+    if (draftResult.ok) {
+      expect(draftResult.written).toEqual([{ id: 'w1', publishOn: '2026-11-09' }])
+    }
   })
 
   it('never overwrites an existing publish_on', async () => {
@@ -390,6 +405,13 @@ describe('knife 2: exclusion, live grants, expiry', () => {
     const dry = baseState({ orders: { w1: order({ brief: { weekly_pack: { publish_on: '2026-11-04' } } }) } })
     expect(await expireUnapproved(makeDb(dry), { clientId: 'c1', ids: ['w1'], today: '2026-11-05', dryRun: true })).toEqual([{ id: 'w1', outcome: 'expired' }])
     expect(dry.updates).toHaveLength(0)
+  })
+
+  it('expireUnapproved still expires a platform draft whose day passed, and keeps one already public', async () => {
+    const draft = baseState({
+      orders: { w1: order({ status: 'platform_draft', brief: { weekly_pack: { publish_on: '2026-11-04' } }, published_ref: {} }) },
+    })
+    expect(await expireUnapproved(makeDb(draft), { clientId: 'c1', ids: ['w1'], today: '2026-11-05', dryRun: true })).toEqual([{ id: 'w1', outcome: 'expired' }])
   })
 
   it('expireUnapproved keeps a reel that is already public on Facebook', async () => {

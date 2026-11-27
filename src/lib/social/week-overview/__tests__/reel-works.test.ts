@@ -132,6 +132,7 @@ describe('describeReelTag', () => {
   })
 
   it('an uploaded Reel says draft / public, and never claims more than the record knows', () => {
+    expect(tag('platform_draft', { published_at: null, video_state: null })).toMatchObject({ kind: 'draft', label: '草稿' })
     expect(tag('published', { published_at: '2026-10-21T00:00:00Z', video_state: 'DRAFT' })).toMatchObject({ kind: 'draft', label: '草稿' })
     expect(tag('published', { published_at: '2026-10-21T00:00:00Z', video_state: 'PUBLISHED' })).toMatchObject({ kind: 'sent', label: '已发出' })
     const unchecked = tag('published', { published_at: '2026-10-21T00:00:00Z', video_state: null })

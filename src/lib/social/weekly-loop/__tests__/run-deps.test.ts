@@ -25,6 +25,7 @@ interface FakeState {
   updates: RecordedUpdate[]
   limits: number[]
   ors: string[]
+  ins: string[]
   eqs?: string[]
 }
 
@@ -79,7 +80,10 @@ function makeDb(state: FakeState): SupabaseClient {
         ;(state.eqs ??= []).push(`${col}=${String(val)}`)
         return builder
       },
-      in: (_col, _vals) => builder,
+      in: (col, vals) => {
+        state.ins.push(`${col}:${vals.join('|')}`)
+        return builder
+      },
       gte: (col, val) => {
         filters[`gte:${col}`] = val
         return builder
@@ -128,6 +132,7 @@ function baseState(overrides: Partial<FakeState> = {}): FakeState {
     updates: [],
     limits: [],
     ors: [],
+    ins: [],
     ...overrides,
   }
 }
@@ -215,6 +220,7 @@ describe('loadOrders', () => {
     expect(state.ors).toEqual([
       'published_ref->>video_state.is.null,published_ref->>video_state.neq.PUBLISHED',
     ])
+    expect(state.ins).toContain('status:approved|published|platform_draft|in_review')
   })
 })
 
@@ -227,6 +233,7 @@ describe('recentPublished', () => {
     const rows = await deps.recentPublished?.({ clientId: 'c1', sinceDay: '2026-10-29' })
     expect(rows?.map((r) => [r.id, r.publishedOn])).toEqual([['p1', '2026-11-04'], ['p2', '2026-11-04']])
     expect(state.eqs).toContain('published_ref->>video_state=PUBLISHED')
+    expect(state.ins).toContain('status:approved|published|platform_draft|measuring|closed')
   })
 
   it('a read failure throws (the scheduler turns it into a reported, non-blocking error)', async () => {

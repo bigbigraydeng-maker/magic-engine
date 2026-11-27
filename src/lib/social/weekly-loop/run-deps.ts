@@ -142,7 +142,7 @@ export function createWeeklyLoopDbDeps(db: SupabaseClient): WeeklyLoopDeps {
         .from('content_work_orders')
         .select('id, status, created_at, updated_at, angle, brief, output, review_ref, published_ref')
         .eq('client_id', clientId)
-        .in('status', ['approved', 'published', 'in_review'])
+        .in('status', ['approved', 'published', 'platform_draft', 'in_review'])
         // Already-public reels can never be scheduled; drop them in the query so they do not eat the read cap.
         .or('published_ref->>video_state.is.null,published_ref->>video_state.neq.PUBLISHED')
         .order('created_at', { ascending: false })
@@ -193,7 +193,8 @@ export function createWeeklyLoopDbDeps(db: SupabaseClient): WeeklyLoopDeps {
         .from('content_work_orders')
         .select('id, created_at, updated_at, brief')
         .eq('client_id', clientId)
-        .in('status', ['approved', 'published', 'measuring', 'closed'])
+        // platform_draft is included only together with video_state=PUBLISHED below, so a draft is not counted as sent.
+        .in('status', ['approved', 'published', 'platform_draft', 'measuring', 'closed'])
         .eq('published_ref->>video_state', 'PUBLISHED')
         .gte('updated_at', sinceDay)
         .order('updated_at', { ascending: false })
