@@ -18,6 +18,8 @@ import type { ManualItem } from './manual-item-types'
 import { readMaliangFromSnapshot } from '@/lib/maliang/render-check'
 import { MACHINE_REVIEWED_KEY } from '@/lib/maliang/review-disposition'
 import { isRemotionBrief } from '@/lib/factory/render-mode'
+import { EXTERNAL_UPLOAD_ENGINE, isExternalUpload } from '@/lib/factory/talent-consent'
+import { readDirectReadRecord } from '@/lib/maliang/direct-read-queue'
 import { NEEDS_REWORK_STATUS } from '@/lib/inngest/functions/maliang-render-check'
 
 export type MaliangItemKind =
@@ -157,6 +159,7 @@ export async function fetchMaliangTodos(
     }
   }
   todos.push(...await safeRemotionTodos(supabase, now))
+  todos.push(...await safeDirectReadGiveUps(supabase, now))
   return todos
 }
 
@@ -255,6 +258,53 @@ export async function fetchRemotionMaliangTodos(
     if (todo) todos.push(todo)
   }
   return todos
+}
+
+/** External upload the sweep stopped reading. Same todo kind as an unfinished check. */
+export function buildDirectReadGiveUpTodo(row: RemotionOrderRow): MaliangTodo | null {
+  if (row.status !== 'in_review' || !isExternalUpload(row.brief)) return null
+  const record = readDirectReadRecord(row.output)
+  if (!record?.skipped) return null
+  const title = row.angle?.trim() || '未命名成片'
+  return {
+    kind: 'maliang_check_unverifiable',
+    client_id: row.client_id,
+    what: `马良连续 ${record.attempts} 次读不了《${title}》这条外部成片，已停下不再自动重试：${record.last_reason}`,
+    how: '打开审片台看这条成片。文件读不了，机器已经停手。看完回我一句，说明是重传文件还是先放着',
+    href: factoryReviewUrl(),
+  }
+}
+
+export async function fetchDirectReadGiveUpTodos(
+  supabase: SupabaseClient,
+  now: Date,
+): Promise<MaliangTodo[]> {
+  const sinceIso = new Date(now.getTime() - RENDER_LOOKBACK_DAYS * 86_400_000).toISOString()
+  const { data, error } = await supabase
+    .from('content_work_orders')
+    .select('id, client_id, status, angle, output, updated_at, brief')
+    .eq('status', 'in_review')
+    .eq('brief->>engine', EXTERNAL_UPLOAD_ENGINE)
+    .gte('updated_at', sinceIso)
+    .order('updated_at', { ascending: false })
+    .limit(50)
+  if (error) throw new Error(`maliang direct-read give-up query failed: ${error.message}`)
+  const todos: MaliangTodo[] = []
+  for (const row of (data ?? []) as RemotionOrderRow[]) {
+    const todo = buildDirectReadGiveUpTodo(row)
+    if (todo) todos.push(todo)
+  }
+  return todos
+}
+
+async function safeDirectReadGiveUps(supabase: SupabaseClient, now: Date): Promise<MaliangTodo[]> {
+  try {
+    return await fetchDirectReadGiveUpTodos(supabase, now)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.warn('[maliang-todos] direct-read give-up query failed; other todos are kept:', message)
+    return []
+  }
 }
 
 export async function pushMaliangRenderItems(

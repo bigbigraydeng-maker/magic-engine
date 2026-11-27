@@ -8,8 +8,10 @@ vi.mock('@google/generative-ai/server', () => ({ GoogleAIFileManager: class {} }
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: {} }))
 
 import {
+  buildDirectReadGiveUpTodo,
   buildMaliangTodo,
   buildRemotionMaliangTodo,
+  factoryReviewUrl,
   fetchMaliangTodos,
   pushMaliangRenderItems,
   boardUrl,
@@ -90,6 +92,18 @@ function database(tables: {
         let data = [...(tables.content_work_orders ?? [])]
         const query = {
           select: () => query,
+          eq: (key: string, value: unknown) => {
+            if (key === 'brief->>engine') {
+              data = data.filter((r) => {
+                const brief = r.brief
+                return Boolean(brief) && typeof brief === 'object' && !Array.isArray(brief)
+                  && (brief as { engine?: unknown }).engine === value
+              })
+            } else {
+              data = data.filter((r) => r[key] === value)
+            }
+            return query
+          },
           in: (key: string, values: readonly unknown[]) => {
             data = data.filter((r) => values.includes(r[key]))
             return query
@@ -357,6 +371,55 @@ describe('buildRemotionMaliangTodo', () => {
     }), NOW)
     expect(todo?.kind).toBe('maliang_check_unverifiable')
     expect(todo?.how).toContain('审片队列')
+  })
+})
+
+describe('buildDirectReadGiveUpTodo', () => {
+  const row = (over: Record<string, unknown> = {}) => ({
+    id: 'wo-ext',
+    client_id: 'client-a',
+    status: 'in_review',
+    angle: 'Sample reel',
+    updated_at: ago(1),
+    brief: { engine: 'external_upload' },
+    output: {
+      video_path: 'a/external/reel.mp4',
+      maliang_direct_read: {
+        attempts: 3,
+        attempted_at: ago(1),
+        last_reason: 'video_url_mismatch',
+        skipped: true,
+      },
+    },
+    ...over,
+  })
+
+  it('raises the existing unverifiable todo after three failed reads', () => {
+    const todo = buildDirectReadGiveUpTodo(row())
+    expect(todo?.kind).toBe('maliang_check_unverifiable')
+    expect(todo?.what).toContain('video_url_mismatch')
+    expect(todo?.what).toContain('不再自动重试')
+    expect(todo?.href).toBe(factoryReviewUrl())
+  })
+
+  it('stays quiet before the third failure and for other order kinds', () => {
+    const early = row()
+    ;(early.output as { maliang_direct_read: { attempts: number; skipped: boolean } }).maliang_direct_read.attempts = 2
+    ;(early.output as { maliang_direct_read: { skipped: boolean } }).maliang_direct_read.skipped = false
+    expect(buildDirectReadGiveUpTodo(early)).toBeNull()
+    expect(buildDirectReadGiveUpTodo(row({ brief: { remotion: { template: 'postcard' } } }))).toBeNull()
+  })
+
+  it('shows up in the daily maliang list', async () => {
+    const todos = await fetchMaliangTodos(
+      database({
+        content_factory_render_jobs: [],
+        content_work_orders: [row()],
+      }),
+      NOW,
+    )
+    expect(todos.map((t) => t.kind)).toEqual(['maliang_check_unverifiable'])
+    expect(todos[0].what).toContain('Sample reel')
   })
 })
 
