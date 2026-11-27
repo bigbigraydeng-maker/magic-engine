@@ -489,6 +489,9 @@ const CRON_REGISTRY_ENTRIES = [
   // new leads legitimately writes no ledger row, hence emptyRoundsAreLegitimate (processed = contacts to decide).
   { service: 'inngest:cloud-triggered-send-welcome-sweep', jobName: 'triggered-send-welcome-sweep', schedule: '0 9 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-02',
     outputTables: [{ table: 'triggered_sends', freshnessHours: 26, timestampColumn: 'created_at', emptyRoundsAreLegitimate: true }] },
+  // The daily check over letters ME sent itself: overdue pending → unknown outcome, our own breaker revokes the
+  // authorization (src/lib/inngest/functions/triggered-send-reconcile.ts; its test asserts the schedule is equal).
+  { service: 'inngest:cloud-triggered-send-reconcile', jobName: 'triggered-send-reconcile', schedule: '30 7 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-27' },
 
   // 「别再联系」的客人自己回来：填表 / 接通的来电 → 自动解除；私信 / 回信只列进运行记录请人看。每 15 分钟（Inngest cron 带 TZ=Pacific/Auckland），
   // 每一轮都写一行运行记录。默认只演练：CRM_DNC_REENGAGE_WRITE_CLIENTS 名单里的客户才真写。设计稿 docs/specs/2026-11-08-crm-ai-takeover-and-dnc-reengage-design-v0.md §3。

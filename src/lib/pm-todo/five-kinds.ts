@@ -89,6 +89,11 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   // 推广计划每日检查：草稿等你批准 / 批准后内容被改 / 到期阶段检查没过 / 对账偏差——都是批准、花钱、改计划，要 PM 拍板
   promo_plan_watch: 'decide',
   catalogue_followup_check_failed: 'dev', // 「发目录之后没人跟」这一栏没算出来：我们这边的欠账
+  // ME 自己发出的信（triggered-send-items.ts）
+  triggered_send_complained: 'decide', // 客人投诉了 ME 自动发的信：要不要改信 / 先停发，由 PM 定
+  triggered_send_system_revoked: 'decide', // 系统自动停了自动发信：要不要重新授权，只有 PM 本人能批
+  triggered_send_receipts_missing: 'dev', // 发出 30 分钟没回执：回执链路断了，开发去查
+  triggered_send_check_failed: 'dev', // 这一栏没算出来：我们这边的欠账
   lead_followup_check_failed: 'dev', // 「填了表没人回」这一栏没算出来：我们这边的欠账
   promo_plan_watch_broken: 'dev', // 每日检查自己没跑成：我们这边的欠账，PM 那一栏会留一句「今天没查成」
   plan_draft_auto_failed: 'dev', // 同意前自动起草连续失败：系统没写成，不占批准决定
@@ -97,6 +102,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
 
   // ── 2 · 系统进不去、要人点一次的 ─────────────────────────────────────
   ai_provider_exhausted: 'one_click', // 充值
+  triggered_send_account_error: 'one_click', // 发信钥匙出错：钥匙只能 PM 本人粘进 Render
   // 某客户 AI 可见度探测整周全挂，多数是余额用光/钥匙失效，需要人去充值/换钥匙
   // （Codex 复审 2026-09-28 抓到：漏了这条会让 LANE_OF_KIND 穷举表类型检查过不了，
   // laneOf() 拿到 undefined，所有新告警从 PM 清单和邮件里彻底消失）
@@ -147,6 +153,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   lead_followup_due: 'client_side', // 客人填了表超过 24 小时没人回，转给客户的销售
   catalogue_followup_clicked: 'client_side', // 看了目录的客人挂着 AI 跟进却没人跟：转给客户的销售打电话
   catalogue_followup_quiet: 'client_side', // 发目录满 7 天没动静：转给客户的销售换个方式联系
+  triggered_send_hard_bounced: 'client_side', // ME 自动发的信被退回：转给客户的销售要一个能用的邮箱
   email_first_contact: 'client_side', // 陌生地址第一次来信：扫一眼主题，真询价就回
   lead_sheet_lead_skipped: 'client_side', // 线索没联系方式，去 Meta 后台查原始提交再补进客户的表
   // 线索写不进客户的表（不是授权问题）：先确认客户那张表还在、账号能编辑 —— 新线索没到销售手上
@@ -191,6 +198,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   auto_publish_record_conflict: 'truth', // 记录说撤回了、回执说又发了：帖子到底在不在主页，只有看主页的人知道
 
   // ── 5 · 系统判不了真假的 ─────────────────────────────────────────────
+  triggered_send_unknown_outcome: 'truth', // ME 自动发的信结果不明：系统判不了发没发出去，要人核对后标
   cross_client_leak: 'truth',
   dnc_maybe_wrong: 'truth',
   dm_maybe_stop: 'truth',

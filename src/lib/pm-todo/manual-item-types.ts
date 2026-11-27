@@ -39,6 +39,7 @@ import type { PlatformConnectionItemKind } from './platform-connection-items'
 import type { FacebookSyncItemKind } from './facebook-sync-items'
 import type { LeadFollowupItemKind } from './lead-followup-items'
 import type { CatalogueFollowupItemKind } from './catalogue-followup-items'
+import type { TriggeredSendItemKind } from './triggered-send-items'
 import type { AdsAutonomyItemKind } from './ads-autonomy-items'
 import type { AdsRuleFindingItemKind } from './ads-rule-finding-items'
 import type { AdsTuneTicketKind } from '@/lib/ads-tune/ticket'
@@ -100,6 +101,15 @@ export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
   // lead_followup_due：链接是登录后台页，探活易判成坏链接；这条丢了 = 有人填了表没人知道。
   'lead_followup_due',
   'lead_followup_check_failed',
+  // ME 自己发出的信（triggered-send-items.ts）：链接都是要登录的 CRM 页，探活多半判成坏链接。
+  //   投诉、结果不明、系统停了自动发信都是不能静默消失的事；「没算出来」那条正是防静默的。
+  'triggered_send_unknown_outcome',
+  'triggered_send_hard_bounced',
+  'triggered_send_complained',
+  'triggered_send_receipts_missing',
+  'triggered_send_account_error',
+  'triggered_send_system_revoked',
+  'triggered_send_check_failed',
   // whatsapp_number_unclaimed：链接指向需要登录的后台页，探活可能判成坏链接 —— 消息正在丢，宁可让人自己找入口，也不能静默消失。
   'whatsapp_number_unclaimed',
   'ai_provider_exhausted',
@@ -437,6 +447,8 @@ export type ManualItemKind =
   | LeadFollowupItemKind
   /** 发出目录之后没人跟的客人（挂着「AI 跟进中」但没有后续动作）/ 这一栏没算出来 */
   | CatalogueFollowupItemKind
+  /** ME 自己发出的信：结果不明 / 硬退信 / 投诉 / 回执没回来 / 钥匙出错 / 系统自动停了授权 / 这一栏没算出来 */
+  | TriggeredSendItemKind
   /** Magic Bridge 全平台免费额度用到 80% 以上 —— 要不要加额度由 PM 定 */
   | 'magic_bridge_quota'
   /** Tools Lab 全站每月合计花费/次数上限用到 80% 以上（网站诊断+广告体检共用）—— 要不要加名额由 PM 定 */
