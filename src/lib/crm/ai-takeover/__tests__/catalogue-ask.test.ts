@@ -15,7 +15,7 @@ const note = (id: string, contact: string, minutes: number, raw: string, metadat
 const input = (over: Partial<AskInput> = {}): AskInput => ({
   leadAt: LEAD,
   notes: [{ occurredAt: at(90), text: 'Please follow up 2027 catalogue', search: 'Please follow up 2027 catalogue', automated: false }],
-  hasTakeoverHistory: false, eligible: true, hasActiveBooking: false, hasEmail: true, crmMailedSinceLead: false,
+  hasTakeoverHistory: false, eligible: true, hasActiveBooking: false, hasEmail: true, crmMailedSinceLead: false, staffMessagedSinceLead: false,
   ...over,
 })
 
@@ -39,6 +39,20 @@ describe('decideCatalogueAsk', () => {
     expect(d).toMatchObject({ noteAt: at(200), note: 'left voicemail, send catalogue' })
   })
 
+  it('a later staff note withdraws the ask: the ask must be the latest thing staff wrote', () => {
+    expect(decideCatalogueAsk(input({ notes: [
+      { occurredAt: at(90), text: 'send catalogue', search: 'send catalogue', automated: false },
+      { occurredAt: at(400), text: '客人说不用发了', search: '客人说不用发了', automated: false },
+    ] }))).toBeNull()
+  })
+
+  it('a later system-written note does not hide the ask', () => {
+    expect(decideCatalogueAsk(input({ notes: [
+      { occurredAt: at(90), text: 'send catalogue', search: 'send catalogue', automated: false },
+      { occurredAt: at(400), text: '系统修改', search: '系统修改', automated: true },
+    ] }))).toMatchObject({ noteAt: at(90) })
+  })
+
   it.each<[string, Partial<AskInput>]>([
     ['no enquiry in the window', { leadAt: null }],
     ['already mailed from the CRM mailbox since the enquiry (never a second catalogue)', { crmMailedSinceLead: true }],
@@ -46,6 +60,7 @@ describe('decideCatalogueAsk', () => {
     ['not eligible (do-not-contact, stage, snooze)', { eligible: false }],
     ['has an active booking', { hasActiveBooking: true }],
     ['has no email address', { hasEmail: false }],
+    ['staff messaged the guest personally since the enquiry (the catalogue may have gone from their own mailbox)', { staffMessagedSinceLead: true }],
     ['the only asking note was written by the system', { notes: [{ occurredAt: at(90), text: 'catalogue', search: 'catalogue', automated: true }] }],
     ['no note', { notes: [] }],
   ])('not listed: %s', (_name, over) => {
@@ -110,6 +125,68 @@ describe('the "交给 AI 跟进" list with catalogue asks', () => {
     tables.conversation_outbound_log = [{ id: 'log1', client_id: CLIENT, conversation_id: 'conv-b', messaging_type: 'email', status: 'sent', created_at: '2026-11-16T18:00:00.000Z' }]
     const rows = await loadPickupList(db(tables, []), CLIENT, deps(), { now: NOW, dailyMax: 30 })
     expect(rows.map((r) => r.contactId)).toEqual(['c', 'a'])
+  })
+
+  const listed = async (tables: Record<string, Row[]>) =>
+    (await loadPickupList(db(tables, []), CLIENT, deps(), { now: NOW, dailyMax: 30 })).filter((r) => r.rule === 'catalogue_asked').map((r) => r.contactId)
+
+  it('reads the real rows: only staff notes after the enquiry count, and each "do not list" fact is read from the data', async () => {
+    const base = () => { const t = world(); t.contact_touchpoints.push(note('nb', 'b', 310, 'wants the catalogue')); return t }
+    expect(await listed(base())).toEqual(['b'])
+
+    const before = world() // the note is older than the enquiry
+    before.contact_touchpoints.push(note('nb', 'b', -30, 'wants the catalogue'))
+    expect(await listed(before)).toEqual([])
+
+    const notANote = world() // a mail row that happens to mention the word is not a staff note
+    notANote.contact_touchpoints.push({ ...note('nb', 'b', 310, 'Our 2027 catalogue'), channel: 'email', source: 'mailchimp' })
+    expect(await listed(notANote)).toEqual([])
+
+    const system = world()
+    system.contact_touchpoints.push(note('nb', 'b', 310, 'catalogue', { automated: true }))
+    expect(await listed(system)).toEqual([])
+
+    const sheet = world() // imported sheet rows carry the enquiry's time, not when it was written
+    sheet.contact_touchpoints.push({ ...note('nb', 'b', 310, 'brochure sent', { time_is_approximate: true }), source: 'sheet_followup' })
+    expect(await listed(sheet)).toEqual([])
+
+    const dnc = base() // "do not contact" said on a call
+    dnc.contact_touchpoints.push({ ...note('nx', 'b', 300, 'asked us to stop', { outcome: 'do_not_contact' }) })
+    expect(await listed(dnc)).toEqual([])
+
+    const snoozed = base()
+    snoozed.contacts = snoozed.contacts.map((c) => (c.id === 'b' ? { ...c, snooze_until: '2027-01-01T00:00:00.000Z' } : c))
+    expect(await listed(snoozed)).toEqual([])
+
+    const booked = base()
+    booked.crm_bookings = [{ id: 'bk', client_id: CLIENT, contact_id: 'b', status: 'active' }]
+    expect(await listed(booked)).toEqual([])
+
+    const noEmail = base()
+    noEmail.contact_identities = noEmail.contact_identities.filter((i) => i.contact_id !== 'b')
+    expect(await listed(noEmail)).toEqual([])
+
+    const history = base()
+    history.contact_automation_events = [{ id: 'ev', client_id: CLIENT, contact_id: 'b' }]
+    expect(await listed(history)).toEqual([])
+
+    const outlook = base() // staff emailed from their own mailbox, then wrote it down
+    outlook.contact_touchpoints.push({ id: 'ob', client_id: CLIENT, contact_id: 'b', channel: 'email', direction: 'outbound', occurred_at: at(305), summary: 'Our 2027 brochure', raw: null, metadata: {}, source: 'microsoft_mail' })
+    expect(await listed(outlook)).toEqual([])
+
+    const withdrawn = base()
+    withdrawn.contact_touchpoints.push(note('nb2', 'b', 400, '客人说不用发了'))
+    expect(await listed(withdrawn)).toEqual([])
+  })
+
+  it('a guest still inside the hour after an unanswered call is not listed as an ask (the pickup rule takes them once the hour is over)', async () => {
+    const tables = world()
+    // a: voicemail 30 minutes before NOW, note one minute after it
+    const vmAt = new Date(NOW.getTime() - 30 * 60_000).toISOString()
+    tables.contact_touchpoints = tables.contact_touchpoints.map((t) => (t.id === 'va' ? { ...t, occurred_at: vmAt } : t))
+    tables.contact_touchpoints.push({ ...note('na', 'a', 0, 'Left VM, send catalogue'), occurred_at: new Date(Date.parse(vmAt) + 60_000).toISOString() })
+    const rows = await loadPickupList(db(tables, []), CLIENT, deps(), { now: NOW, dailyMax: 30 })
+    expect(rows.filter((r) => r.contactId === 'a')).toEqual([])
   })
 
   it('a client can pass its own words', async () => {

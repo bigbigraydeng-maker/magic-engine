@@ -77,8 +77,11 @@ export async function loadPickupList(
   const leads = await latestEnquiries(sb, clientId, now)
   const inputs = await loadInputs(sb, clientId, [...leads.keys()])
   const picks = decideAll(inputs, leads, now, opts.cfg ?? DEFAULT_PICKUP_CONFIG)
-  const taken = new Set(picks.map((p) => p.contactId))
-  // A guest the pickup rules already take keeps that rule (rang, never reached: the AI follows up, PM 11-16).
+  // A guest the pickup rules take keeps that rule (rang, never reached: the AI follows up, PM 11-16) — including one
+  // they will take once the wait after the last call is over, so the same guest never goes one way at 10:30 and the
+  // other at 11:30.
+  const cfg = opts.cfg ?? DEFAULT_PICKUP_CONFIG
+  const taken = new Set(decideAll(inputs, leads, now, { ...cfg, afterLastCallMinutes: 0 }).map((p) => p.contactId))
   const asks = askAll(inputs, leads, now, opts.askWords ?? DEFAULT_ASK_WORDS).filter((a) => !taken.has(a.contactId))
   const names = await deps.loadNames([...asks.map((a) => a.contactId), ...picks.map((p) => p.contactId)])
   const today = todayInZone(now, deps.timeZone)

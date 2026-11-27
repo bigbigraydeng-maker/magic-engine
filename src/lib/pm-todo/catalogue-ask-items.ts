@@ -14,7 +14,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { askAll } from '@/lib/crm/ai-takeover/catalogue-ask'
 import { DEFAULT_PICKUP_CONFIG } from '@/lib/crm/ai-takeover/pickup'
-import { decideAll, latestEnquiries, loadInputs } from '@/lib/crm/ai-takeover/pickup-run'
+import { decideAll, latestEnquiries, loadInputs, PickupNotConfiguredError } from '@/lib/crm/ai-takeover/pickup-run'
 import { loadEmailSettings } from '@/lib/crm/email-templates/settings-store'
 import { APP_BASE } from './binding-request-items'
 import type { ManualItem } from './manual-item-types'
@@ -37,10 +37,10 @@ export function buildCatalogueAskItems(clientId: string, clientName: string, wai
     client_name: clientName,
     what:
       `${clientName} 有 ${waiting} 位客人，员工留言写了要发目录，目录还没发出去。` +
-      '留言本身不会发信，客人还在等',
+      '留言本身不会发信，客人还在等（个别发不了的，名单页会写原因）',
     how:
-      '请转给客户的销售：点链接打开「交给 AI 跟进」，标着「员工留言要目录」的排在最前面，看一眼留言、勾上、点一次发送。' +
-      '这些客人只收目录，仍留在员工名单上。留言不是要目录的（例如「客人已经有目录了」），取消勾选就行。',
+      '请转给客户的销售：点链接打开「交给 AI 跟进」，标着「员工留言要目录」的排在最前面，逐位看一眼留言、勾上、点一次发送（这些默认不勾）。' +
+      '这些客人只收目录，仍留在员工名单上。留言不是要目录的（例如「客人已经有目录了」），不勾就行。',
     href: pickupHref(clientId),
   }]
 }
@@ -57,9 +57,16 @@ export const defaultCatalogueAskDeps: CatalogueAskDeps = {
     if (loaded.kind !== 'ok' || !loaded.settings.enabled || !loaded.settings.providers.catalogue) return null
     const leads = await latestEnquiries(supabase, clientId, now)
     if (leads.size === 0) return 0
-    const inputs = await loadInputs(supabase, clientId, [...leads.keys()])
-    // 名单页同一口径：交给 AI 的规则已经接走的人不算在这条里。
-    const taken = new Set(decideAll(inputs, leads, now, DEFAULT_PICKUP_CONFIG).map((p) => p.contactId))
+    let inputs: Awaited<ReturnType<typeof loadInputs>>
+    try {
+      inputs = await loadInputs(supabase, clientId, [...leads.keys()])
+    } catch (err) {
+      // 没设「哪些阶段算合格客人」的客户，名单页本身就不出名单：没有这条，不是取数失败。
+      if (err instanceof PickupNotConfiguredError) return null
+      throw err
+    }
+    // 名单页同一口径：交给 AI 的规则接走的人（含打完电话还在等一小时的）不算在这条里。
+    const taken = new Set(decideAll(inputs, leads, now, { ...DEFAULT_PICKUP_CONFIG, afterLastCallMinutes: 0 }).map((p) => p.contactId))
     return askAll(inputs, leads, now).filter((a) => !taken.has(a.contactId)).length
   },
 }

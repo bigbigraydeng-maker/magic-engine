@@ -8,12 +8,19 @@
  * (PM 11-12: once a person is in touch the guest stays with people). A guest the pickup rules already take
  * (rang, never reached) keeps that rule and goes to the AI as before.
  *
- * The note is only a hint for the list: a person ticks and releases, and every send check still runs.
+ * Not listed when anything says the ask may be settled or withdrawn (lean to "do nothing"):
+ *   · a later staff note exists (it may say "no need" or "sent already": the ask must be the latest note),
+ *   · staff messaged the guest personally since the enquiry (email / WhatsApp / Messenger: the catalogue may have gone
+ *     from their own mailbox, which the send log does not see),
+ *   · notes written by the system or with an approximate time (imported sheets) never count.
+ * The note is only a hint for the list: rows are NOT pre-ticked, a person reads the note, ticks and releases, and
+ * every send check still runs (the send itself refuses a guest who already has the catalogue).
  * Words are the caller's (a client can pass its own); the default is the plain vocabulary for a catalogue.
  */
 
 import { isDoNotContact } from '@/lib/crm/dnc'
 import { judgeEligibility, type EligibilityStage } from '@/lib/crm/catalogue-line/eligibility'
+import { staffMessaged } from './pickup'
 import type { PickupInputs } from './pickup-run'
 
 export const DEFAULT_ASK_WORDS: readonly string[] = ['catalog', 'brochure', '目录', '宣传册', '手册']
@@ -27,6 +34,7 @@ export interface AskNote {
   text: string
   /** Everything searched for the words (the note as typed and as shown). */
   search: string
+  /** Written by the system, or with an approximate time (an imported sheet row): never an ask, never "the latest". */
   automated: boolean
 }
 
@@ -35,6 +43,8 @@ export interface AskInput {
   leadAt: string | null
   /** Staff notes after the enquiry. */
   notes: readonly AskNote[]
+  /** Staff sent the guest a personal email / chat message since the enquiry. */
+  staffMessagedSinceLead: boolean
   hasTakeoverHistory: boolean
   /** The catalogue line's eligibility (do-not-contact, stage, snooze). */
   eligible: boolean
@@ -59,11 +69,13 @@ export function mentionsCatalogue(text: string, words: readonly string[]): boole
 export function decideCatalogueAsk(input: AskInput, words: readonly string[] = DEFAULT_ASK_WORDS): AskDecision | null {
   if (input.leadAt === null || Number.isNaN(Date.parse(input.leadAt))) return null
   if (input.hasTakeoverHistory || !input.eligible || input.hasActiveBooking || !input.hasEmail || input.crmMailedSinceLead) return null
-  const asks = input.notes
-    .filter((n) => !n.automated && !Number.isNaN(Date.parse(n.occurredAt)) && mentionsCatalogue(n.search, words))
+  if (input.staffMessagedSinceLead) return null
+  const notes = input.notes
+    .filter((n) => !n.automated && !Number.isNaN(Date.parse(n.occurredAt)))
     .sort((a, b) => Date.parse(a.occurredAt) - Date.parse(b.occurredAt))
-  const last = asks[asks.length - 1]
-  if (last === undefined) return null
+  // The ask must be the latest thing staff wrote: a later note may withdraw it.
+  const last = notes[notes.length - 1]
+  if (last === undefined || !mentionsCatalogue(last.search, words)) return null
   return { leadAt: input.leadAt, noteAt: last.occurredAt, note: last.text.replace(/\s+/g, ' ').trim().slice(0, NOTE_MAX) }
 }
 
@@ -92,11 +104,16 @@ export function askAll(
       occurredAt: t.occurred_at,
     })))
     const mailed = inputs.crmMailed.get(c.id)
+    const after = all.filter((t) => Date.parse(t.occurred_at) > Date.parse(leadAt))
     const decision = decideCatalogueAsk({
       leadAt,
-      notes: all
-        .filter((t) => t.source !== null && NOTE_SOURCES.has(t.source) && Date.parse(t.occurred_at) > Date.parse(leadAt))
-        .map((t) => ({ occurredAt: t.occurred_at, text: t.raw ?? t.summary ?? '', search: `${t.raw ?? ''} ${t.summary ?? ''}`, automated: t.metadata?.automated === true })),
+      notes: after
+        .filter((t) => t.source !== null && NOTE_SOURCES.has(t.source))
+        .map((t) => ({
+          occurredAt: t.occurred_at, text: t.raw ?? t.summary ?? '', search: `${t.raw ?? ''} ${t.summary ?? ''}`,
+          automated: t.metadata?.automated === true || t.metadata?.time_is_approximate === true,
+        })),
+      staffMessagedSinceLead: staffMessaged(after.map((t) => ({ channel: t.channel, direction: t.direction, source: t.source, occurredAt: t.occurred_at, metadata: t.metadata }))),
       hasTakeoverHistory: withEvents.has(c.id),
       eligible: judgeEligibility({ doNotContact: dnc, stage: c.stage, snoozeUntil: c.snooze_until }, stages, now).ok,
       hasActiveBooking: booked.has(c.id),

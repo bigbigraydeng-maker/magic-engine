@@ -54,6 +54,20 @@ describe('POST catalogue-send', () => {
     expect(mocks.store.insertEvent.mock.calls[0][0]).toMatchObject({ actor: 'lisa@client.co.nz', kind: 'ai_takeover_on' })
   })
 
+  it('keepWithStaff: the catalogue goes out and NO takeover is written; without the flag the takeover is written', async () => {
+    mocks.sendCatalogueEmail.mockResolvedValue({
+      ok: true, messageId: 'm', conversationId: 'c', duplicate: false, templateKey: 'k', templateVersion: 1, versionLabel: 'v9', settingsVersion: 1,
+    })
+    const res = await POST(req({ requestId: RID, expectedRecipient: 'a@b.co', keepWithStaff: true }), ctx)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ ok: true, sent: true, since: null })
+    expect(mocks.sendCatalogueEmail).toHaveBeenCalledTimes(1)
+    expect(mocks.store.insertEvent).not.toHaveBeenCalled()
+    // anything but the literal true is the normal send-and-take-over
+    await POST(req({ requestId: RID, expectedRecipient: 'a@b.co', keepWithStaff: 'true' }), ctx)
+    expect(mocks.store.insertEvent).toHaveBeenCalledTimes(1)
+  })
+
   it('a refused send writes no takeover', async () => {
     mocks.sendCatalogueEmail.mockResolvedValue({ ok: false, status: 409, reason: 'do_not_contact', message: '别再联系', mayHaveSent: false })
     const res = await POST(req({ requestId: RID, expectedRecipient: 'a@b.co' }), ctx)

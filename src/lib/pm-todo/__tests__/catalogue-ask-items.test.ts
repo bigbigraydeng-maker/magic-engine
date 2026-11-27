@@ -40,6 +40,13 @@ describe('defaultCatalogueAskDeps.countWaiting (same rule as the list page)', ()
     expect(await defaultCatalogueAskDeps.countWaiting(db(tables, []), CLIENT, NOW)).toBe(1)
   })
 
+  it('a client that has not set its qualified stages has no list page, so no item (not a failure)', async () => {
+    vi.mocked(loadEmailSettings).mockResolvedValue(settings())
+    const tables = world()
+    tables.ad_strategy_configs = []
+    expect(await defaultCatalogueAskDeps.countWaiting(db(tables, []), CLIENT, NOW)).toBeNull()
+  })
+
   it('a client without a catalogue (or with sending off) has no such item', async () => {
     vi.mocked(loadEmailSettings).mockResolvedValue(settings({ providers: {} }))
     expect(await defaultCatalogueAskDeps.countWaiting(db(world(), []), CLIENT, NOW)).toBeNull()

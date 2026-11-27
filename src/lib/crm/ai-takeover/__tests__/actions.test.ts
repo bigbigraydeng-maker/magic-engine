@@ -124,6 +124,7 @@ function catalogueDeps(contact: { doNotContact: boolean }): CatalogueDeps & { se
     loadSettings: async () => ({ kind: 'ok' as const, version: 12, settings }),
     loadTimeZone: async () => 'Pacific/Auckland',
     eligibility: { loadContact: async () => ({ ...contact, stage: null, snoozeUntil: null }), loadStages: async () => [] },
+    catalogueSentAt: async () => null,
     preview: async () => preview,
     send,
     now: () => new Date('2026-11-10T02:00:00Z'),

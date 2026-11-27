@@ -3,7 +3,10 @@ import type { EmailSettings } from '@/lib/crm/email-templates/types'
 import type { PreviewResult } from '@/lib/crm/email-templates/template-preview'
 import type { SendMailNewResult } from '@/lib/microsoft/mail-send-new'
 import type { SendCrash } from '@/lib/crm/email-templates/send-template-email'
-import { sendCatalogueEmail, type CatalogueDeps, type SendCatalogueArgs } from '../send-catalogue'
+import { db } from '@/lib/crm/ai-takeover/__tests__/pickup-db'
+import { catalogueSentAt } from '../prod'
+import { CATALOGUE_ONCE_DAYS,
+  sendCatalogueEmail, type CatalogueDeps, type SendCatalogueArgs } from '../send-catalogue'
 
 // Design §5 rows 9, 14-18 and the order of §3.5.
 
@@ -56,6 +59,7 @@ function deps(over: Partial<CatalogueDeps> = {}): CatalogueDeps {
       loadContact: vi.fn(async () => ({ doNotContact: false, stage: null, snoozeUntil: null })),
       loadStages: vi.fn(async () => []),
     },
+    catalogueSentAt: vi.fn(async (): Promise<string | null> => null),
     preview: vi.fn(async () => preview()),
     send: vi.fn(async (): Promise<SendMailNewResult | SendCrash> => SENT),
     now: () => NOW,
@@ -172,5 +176,48 @@ describe('sendCatalogueEmail', () => {
     expect(await sendCatalogueEmail(ARGS, d)).toMatchObject({ ok: false, status: 503, mayHaveSent: true })
     const unknown = deps({ send: vi.fn(async (): Promise<SendMailNewResult> => ({ ok: false, status: 502, reason: 'send_unknown', error: 'x' })) })
     expect(await sendCatalogueEmail(ARGS, unknown)).toMatchObject({ ok: false, mayHaveSent: true })
+  })
+})
+
+describe('one catalogue per guest (whichever button the send came from)', () => {
+  it('asks for other requests of this template inside the window, never this request itself', async () => {
+    const d = deps()
+    await sendCatalogueEmail(ARGS, d)
+    expect(d.catalogueSentAt).toHaveBeenCalledWith({
+      clientId: 'client-a', contactId: ARGS.contactId, templateKey: 'catalogue-send', exceptRequestId: ARGS.requestId,
+      sinceIso: new Date(NOW.getTime() - CATALOGUE_ONCE_DAYS * 86_400_000).toISOString(),
+    })
+  })
+
+  it('a guest who already has the catalogue (another request, sent or unknown) gets no second one', async () => {
+    const d = deps({ catalogueSentAt: vi.fn(async () => '2026-11-20T01:00:00.000Z') })
+    const r = await sendCatalogueEmail(ARGS, d)
+    expect(r).toMatchObject({ ok: false, status: 409, reason: 'catalogue_already_sent', mayHaveSent: false })
+    expect(r.ok === false && r.message).toContain('2026-11-20')
+    expect(d.send).not.toHaveBeenCalled()
+  })
+
+  it('history unreadable → refused, nothing sent', async () => {
+    const d = deps({ catalogueSentAt: vi.fn(async () => { throw new Error('down') }) })
+    expect(await sendCatalogueEmail(ARGS, d)).toMatchObject({ ok: false, status: 503, reason: 'catalogue_history_unreadable', mayHaveSent: false })
+    expect(d.send).not.toHaveBeenCalled()
+  })
+})
+
+describe('catalogueSentAt (real Supabase client, stub network)', () => {
+  const q = { clientId: 'client-a', contactId: 'g1', templateKey: 'catalogue-send', exceptRequestId: 'r-this', sinceIso: '2026-06-01T00:00:00.000Z' }
+  const receipt = (over: Record<string, unknown>) => ({ client_id: 'client-a', contact_id: 'g1', template_key: 'catalogue-send', outcome: 'sent', request_id: 'r-other', created_at: '2026-11-20T01:00:00.000Z', ...over })
+  const read = (rows: Array<Record<string, unknown>>) => catalogueSentAt(db({ crm_email_send_receipts: rows }, []), q)
+
+  it('finds another request\'s sent or unknown catalogue for this guest', async () => {
+    expect(await read([receipt({})])).toBe('2026-11-20T01:00:00.000Z')
+    expect(await read([receipt({ outcome: 'unknown' })])).toBe('2026-11-20T01:00:00.000Z')
+  })
+
+  it('ignores this same request (a replay), blocked sends, other templates, other guests, other clients, and old ones', async () => {
+    expect(await read([
+      receipt({ request_id: 'r-this' }), receipt({ outcome: 'blocked' }), receipt({ template_key: 'thank-you' }),
+      receipt({ contact_id: 'g2' }), receipt({ client_id: 'client-b' }), receipt({ created_at: '2026-01-01T00:00:00.000Z' }),
+    ])).toBeNull()
   })
 })

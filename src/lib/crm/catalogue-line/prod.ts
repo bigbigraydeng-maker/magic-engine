@@ -50,8 +50,30 @@ export function createEligibilityData(db: SupabaseClient): EligibilityData {
   }
 }
 
+/** The latest catalogue receipt (sent, or outcome unknown) of another request for this guest; null = none. */
+export async function catalogueSentAt(
+  db: SupabaseClient,
+  q: { clientId: string; contactId: string; templateKey: string; exceptRequestId: string; sinceIso: string },
+): Promise<string | null> {
+  const { data, error } = await db
+    .from('crm_email_send_receipts')
+    .select('created_at')
+    .eq('client_id', q.clientId)
+    .eq('contact_id', q.contactId)
+    .eq('template_key', q.templateKey)
+    .in('outcome', ['sent', 'unknown'])
+    .neq('request_id', q.exceptRequestId)
+    .gte('created_at', q.sinceIso)
+    .order('created_at', { ascending: false })
+    .limit(1)
+  if (error) throw new Error(`crm_email_send_receipts: ${error.message}`)
+  const row = ((data as Array<{ created_at: unknown }> | null) ?? [])[0]
+  return row !== undefined && typeof row.created_at === 'string' ? row.created_at : null
+}
+
 export function createCatalogueDeps(clientId: string): CatalogueDeps {
   return {
+    catalogueSentAt: (q) => catalogueSentAt(supabaseAdmin, q),
     loadSettings: (id) => loadEmailSettings(supabaseAdmin, id),
     loadTimeZone: (id) => loadClientTimeZone(supabaseAdmin, id),
     eligibility: createEligibilityData(supabaseAdmin),

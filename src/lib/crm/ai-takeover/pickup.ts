@@ -91,7 +91,7 @@ function ms(v: string): number {
 const STAFF_MESSAGE_CHANNELS: ReadonlySet<string> = new Set(['email', 'whatsapp', 'messenger'])
 
 /** A personal email / chat message from staff (not Mailchimp, not an automated send) since the enquiry: staff is on it. */
-function staffMessaged(touches: readonly PickupTouch[]): boolean {
+export function staffMessaged(touches: readonly PickupTouch[]): boolean {
   return touches.some((t) => STAFF_MESSAGE_CHANNELS.has(t.channel) && t.direction === 'outbound' && t.source !== 'mailchimp' && t.metadata?.automated !== true)
 }
 

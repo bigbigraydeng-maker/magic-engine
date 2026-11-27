@@ -95,7 +95,7 @@ function RowCard({ clientId, row, checked, onToggle, result }: { clientId: strin
           <span className="rounded bg-me-charcoal/5 px-1.5 py-0.5 text-[11.5px] text-me-charcoal/70">{RULE_LABEL[row.rule]}</span>
           <span className="text-[12px] text-me-charcoal/50">询价 {day(row.leadAt)}{row.dials > 0 ? ` · 打了 ${row.dials} 次，最后 ${day(row.lastCallAt)}` : ''}</span>
         </div>
-        {row.lastNote && <p className="mt-0.5 truncate text-[12.5px] text-me-charcoal/70">员工记的：{row.lastNote}</p>}
+        {row.lastNote && <p className={`mt-0.5 text-[12.5px] text-me-charcoal/70 ${row.keepWithStaff ? '' : 'truncate'}`}>员工记的：{row.lastNote}</p>}
         {row.recipient && <p className="mt-0.5 text-[12px] text-me-charcoal/50">发到 {row.recipient} · 近 7 天已收 {row.sentLast7Days ?? 0} 封</p>}
         {row.message && row.status !== 'ready' && <p className="mt-0.5 text-[12px] text-me-charcoal/50">{row.message}</p>}
         <ResultLine r={result} />
@@ -125,7 +125,8 @@ export default function CrmAiPickupPage({ params }: { params: { id: string } }) 
 
   const ready = data?.rows.filter((r) => r.status === 'ready') ?? []
   useEffect(() => {
-    setTicked(new Set((data?.rows ?? []).filter((r) => r.status === 'ready').map((r) => r.contactId)))
+    // 「员工留言要目录」的不预先勾：留言只是线索（可能写的是「已经有目录了」），要人看过再勾。
+    setTicked(new Set((data?.rows ?? []).filter((r) => r.status === 'ready' && !r.keepWithStaff).map((r) => r.contactId)))
   }, [data])
   const chosen = ready.filter((r) => ticked.has(r.contactId) && results[r.contactId]?.kind !== 'sent')
 
@@ -152,7 +153,7 @@ export default function CrmAiPickupPage({ params }: { params: { id: string } }) 
       <h1 className="mb-1 text-lg font-semibold text-me-charcoal">交给 AI 跟进</h1>
       <p className="mb-4 text-sm text-me-charcoal/70">
         员工打了没接通、或询价 7 天还没人打的客人。点发送后，每位收到一封 2027 目录，挂上「AI 跟进中」，离开「今天先联系」；客人回信、回电或发消息会自动回到员工名单。没点之前，他们一直在员工名单上。
-        员工留言写了要发目录的客人排在最前面：他们只收目录，仍留在员工名单上。
+        员工留言写了要发目录的客人排在最前面，默认不勾：看一眼留言，确实要发再勾上。他们只收目录，仍留在员工名单上。
       </p>
       <p className="mb-4 text-sm">
         <a href={`/dashboard/clients/${clientId}/crm/day7-followup`} className="font-semibold text-me-charcoal underline">发了目录满 7 天的客人：写第 7 天跟进信 →</a>
