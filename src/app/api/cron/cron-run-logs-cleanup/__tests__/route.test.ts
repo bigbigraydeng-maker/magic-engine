@@ -7,8 +7,17 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { NextRequest } from 'next/server'
 
+const { purgeCronRunLogsBatched } = vi.hoisted(() => ({
+  purgeCronRunLogsBatched: vi.fn(),
+}))
+
 vi.mock('@/lib/supabase', () => ({
-  supabaseAdmin: { rpc: vi.fn() },
+  supabaseAdmin: {},
+}))
+
+vi.mock('@/lib/cron/cron-run-logs-purge', () => ({
+  purgeCronRunLogsBatched,
+  PURGE_TIME_BUDGET_MS: 95_000,
 }))
 
 const finish = vi.fn(async () => {})
@@ -21,7 +30,6 @@ vi.mock('@/lib/cron/abandon-stale-runs', () => ({
 }))
 
 import { GET } from '../route'
-import { supabaseAdmin } from '@/lib/supabase'
 import { startCronRun } from '@/lib/cron/run-logger'
 import { abandonStaleRunningRuns } from '@/lib/cron/abandon-stale-runs'
 
@@ -40,38 +48,34 @@ describe('GET /api/cron/cron-run-logs-cleanup', () => {
   it('没带钥匙 → 401，而且一行都没删', async () => {
     const res = await GET(makeReq())
     expect(res.status).toBe(401)
-    expect(supabaseAdmin.rpc).not.toHaveBeenCalled()
+    expect(purgeCronRunLogsBatched).not.toHaveBeenCalled()
   })
 
   it('钥匙不对 → 401', async () => {
     expect((await GET(makeReq('Bearer wrong'))).status).toBe(401)
-    expect(supabaseAdmin.rpc).not.toHaveBeenCalled()
+    expect(purgeCronRunLogsBatched).not.toHaveBeenCalled()
   })
 
   it('服务器没配钥匙 → 500，不许当成「没配就放行」', async () => {
     delete process.env.CRON_SECRET
     const res = await GET(makeReq('Bearer anything'))
     expect(res.status).toBe(500)
-    expect(supabaseAdmin.rpc).not.toHaveBeenCalled()
+    expect(purgeCronRunLogsBatched).not.toHaveBeenCalled()
   })
 
-  it('正常跑完：调的是保留规则那个函数，删了多少行写进运行记录', async () => {
-    ;(supabaseAdmin.rpc as any).mockResolvedValue({
-      data: {
-        purged_noise: 12,
-        purged_expired: 3,
-        remaining: 31000,
-        oldest_started_at: '2026-07-07T00:00:32.615874+00:00',
-      },
-      error: null,
+  it('正常跑完：分批清理，删了多少行写进运行记录', async () => {
+    purgeCronRunLogsBatched.mockResolvedValue({
+      purged_noise: 12,
+      purged_expired: 3,
+      remaining: 31000,
+      oldest_started_at: '2026-07-07T00:00:32.615874+00:00',
     })
 
     const res = await GET(makeReq('Bearer test-secret-123'))
     expect(res.status).toBe(200)
     expect(await res.json()).toMatchObject({ purged_noise: 12, purged_expired: 3, abandoned: 0 })
 
-    // 🔴 函数名写错 = 生产上直接 404，而单测照样绿。所以断言的是具体名字。
-    expect(supabaseAdmin.rpc).toHaveBeenCalledWith('cron_run_logs_purge')
+    expect(purgeCronRunLogsBatched).toHaveBeenCalled()
     expect(startCronRun).toHaveBeenCalledWith('cron-run-logs-cleanup')
     expect(finish).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -88,27 +92,46 @@ describe('GET /api/cron/cron-run-logs-cleanup', () => {
     )
   })
 
-  it('数据库报错 → 500 且运行记录记成失败，不许静默当成功', async () => {
-    ;(supabaseAdmin.rpc as any).mockResolvedValue({
-      data: null,
-      error: { message: 'function public.cron_run_logs_purge() does not exist' },
-    })
+  it('清理抛错 → 500 且运行记录记成失败，不许静默当成功', async () => {
+    purgeCronRunLogsBatched.mockRejectedValue(new Error('canceling statement due to statement timeout'))
 
     const res = await GET(makeReq('Bearer test-secret-123'))
     expect(res.status).toBe(500)
     expect(finish).toHaveBeenCalledWith(
       expect.objectContaining({
         failed: 1,
-        error: 'function public.cron_run_logs_purge() does not exist',
+        error: 'canceling statement due to statement timeout',
       }),
     )
     expect(abandonStaleRunningRuns).not.toHaveBeenCalled()
   })
 
+  it('时间预算内没删完 → 仍算成功，summary 带 remaining', async () => {
+    purgeCronRunLogsBatched.mockResolvedValue({
+      purged_noise: 5000,
+      purged_expired: 0,
+      remaining: 97853,
+      oldest_started_at: '2026-07-07T00:00:32.615874+00:00',
+      stopped_early: true,
+      stop_reason: 'time_budget',
+    })
+
+    const res = await GET(makeReq('Bearer test-secret-123'))
+    expect(res.status).toBe(200)
+    expect(finish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        failed: 0,
+        summary: expect.objectContaining({ stopped_early: true, remaining: 97853 }),
+      }),
+    )
+  })
+
   it('收掉过期的 running 行，并把条数写进运行记录', async () => {
-    ;(supabaseAdmin.rpc as any).mockResolvedValue({
-      data: { purged_noise: 1, purged_expired: 0, remaining: 10, oldest_started_at: null },
-      error: null,
+    purgeCronRunLogsBatched.mockResolvedValue({
+      purged_noise: 1,
+      purged_expired: 0,
+      remaining: 10,
+      oldest_started_at: null,
     })
     vi.mocked(abandonStaleRunningRuns).mockResolvedValue({ abandoned: 2 })
 
@@ -126,9 +149,11 @@ describe('GET /api/cron/cron-run-logs-cleanup', () => {
   })
 
   it('收口写不进去 → 清理自己记成失败，不许假装清完了', async () => {
-    ;(supabaseAdmin.rpc as any).mockResolvedValue({
-      data: { purged_noise: 1, purged_expired: 0, remaining: 10, oldest_started_at: null },
-      error: null,
+    purgeCronRunLogsBatched.mockResolvedValue({
+      purged_noise: 1,
+      purged_expired: 0,
+      remaining: 10,
+      oldest_started_at: null,
     })
     vi.mocked(abandonStaleRunningRuns).mockResolvedValue({ abandoned: 0, error: 'update failed' })
 
