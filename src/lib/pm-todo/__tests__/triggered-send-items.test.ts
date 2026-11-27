@@ -34,6 +34,7 @@ const row = (over: Partial<LedgerRow> = {}): LedgerRow => ({
   sentAt: minAgo(10),
   lastEventType: null,
   updatedAt: minAgo(10),
+  lastEventAt: null,
   ...over,
 })
 
@@ -58,6 +59,9 @@ describe('classifyLedgerRow', () => {
   it('any complaint within 7 days counts', () => {
     expect(classifyLedgerRow(row({ status: 'complained', updatedAt: dayAgo(3) }), NOW)).toBe('complained')
     expect(classifyLedgerRow(row({ status: 'complained', updatedAt: dayAgo(8) }), NOW)).toBeNull()
+    // By when it happened, not when the row was last touched (魏征 P2-5, 子牙 P2-4).
+    expect(classifyLedgerRow(row({ status: 'complained', updatedAt: dayAgo(1), lastEventAt: dayAgo(9) }), NOW)).toBeNull()
+    expect(classifyLedgerRow(row({ status: 'bounced', bounceKind: 'permanent', updatedAt: dayAgo(1), lastEventAt: dayAgo(9) }), NOW)).toBeNull()
   })
 
   it('sent with no receipt: only after 30 minutes; any receipt or a person-confirmed send clears it', () => {

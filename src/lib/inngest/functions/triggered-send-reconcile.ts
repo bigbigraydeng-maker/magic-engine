@@ -4,8 +4,9 @@
  * Every day at 07:30 Pacific/Auckland, before the welcome sweep (09:00):
  *   1. overdue pending letters (handed over more than 20 hours ago, outcome never written) → `unknown_outcome`, so a
  *      person is asked "did it go?" — whatever the authorization and switches say (`reconcile.ts`);
- *   2. our own breaker: bounces / complaints / refusals beyond the §4.3 thresholds revoke the client's sending
- *      authorization as the system (`system:HEALTH_BREAKER` / `system:PROVIDER_FAILURE`), so the next letter does not go.
+ *   2. our own breaker: bounces / complaints / refusals beyond the stop lines the PM approved (each authorization's own
+ *      `send.health_breaker`, counted from when it was switched on) revoke that authorization as the system
+ *      (`system:HEALTH_BREAKER` / `system:PROVIDER_FAILURE`), so the next letter does not go.
  *
  * 🔴 **Never sends anything** and never reads an address. The only writes are the guarded status move and the revoke.
  * 🔴 **Half a read trips nothing**: a failed or full ledger read is logged as an error, no letter moves, nothing is revoked.
@@ -43,13 +44,13 @@ export interface ReconcileReceipt {
   status: 'done' | 'read_failed'
   expired: number
   moved: number
-  tripped: Array<{ clientId: string; code: string; revoked: number }>
+  tripped: Array<{ clientId: string; trigger: string; code: string; revoked: boolean }>
   no_send: true
   errors: string[]
 }
 
 function tripsOf(results: readonly BreakerResult[]): ReconcileReceipt['tripped'] {
-  return results.filter((r) => r.verdict.trip).map((r) => ({ clientId: r.clientId, code: r.verdict.trip ? r.verdict.code : '', revoked: r.revoked.length }))
+  return results.flatMap((r) => (r.verdict.trip ? [{ clientId: r.clientId, trigger: r.triggerKey, code: r.verdict.code, revoked: r.revoked }] : []))
 }
 
 /** One daily check. Exported for tests; the Inngest function below only wires production pieces into it. */

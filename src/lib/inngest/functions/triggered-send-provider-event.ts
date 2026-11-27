@@ -89,7 +89,9 @@ export async function runProviderEventReceipt(
       logOutcome(result, deps)
       if (result.outcome === 'applied' && BREAKER_STATUSES.has(result.status) && deps.checkBreaker !== undefined) {
         const check = deps.checkBreaker
-        await step.run('breaker', () => check(result.sendId))
+        const judged = await step.run('breaker', () => check(result.sendId))
+        // A failed check must be visible (子牙 P2-2 / 魏征 P2-2): the daily check judges again at 07:30 either way.
+        deps.log({ evt: 'triggered_send_breaker', send_id: result.sendId, tripped: String(judged.tripped), error: judged.error ?? '' })
       }
       return result
     }

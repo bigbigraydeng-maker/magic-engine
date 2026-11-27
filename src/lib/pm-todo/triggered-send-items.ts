@@ -62,6 +62,8 @@ export interface LedgerRow {
   sentAt: string | null
   lastEventType: string | null
   updatedAt: string
+  /** When the last receipt's event happened (bounce / complaint time); null when no receipt moved the row. */
+  lastEventAt: string | null
 }
 
 export interface RevokedAuthRow {
@@ -98,8 +100,8 @@ function within(iso: string | null, now: Date, days: number): boolean {
 export function classifyLedgerRow(r: LedgerRow, now: Date): LedgerCategory | null {
   if (!isLiveScope(r.dedupeScope)) return null
   if (r.status === 'unknown_outcome') return 'unknown'
-  if (r.status === 'bounced') return r.bounceKind === 'permanent' && within(r.updatedAt, now, RECENT_DAYS) ? 'hardBounced' : null
-  if (r.status === 'complained') return within(r.updatedAt, now, RECENT_DAYS) ? 'complained' : null
+  if (r.status === 'bounced') return r.bounceKind === 'permanent' && within(r.lastEventAt ?? r.updatedAt, now, RECENT_DAYS) ? 'hardBounced' : null
+  if (r.status === 'complained') return within(r.lastEventAt ?? r.updatedAt, now, RECENT_DAYS) ? 'complained' : null
   if (r.status === 'sent') {
     if (r.lastEventType !== null || r.reasonCode === SENT_CONFIRMED) return null
     const age = ageMs(r.sentAt, now)
@@ -227,7 +229,7 @@ function hardBouncedItem(b: ItemBase, c: CategoryCount): ManualItem {
     what: `${b.clientName} 近 7 天有 ${countPhrase(c)}被退回来了（邮箱地址不存在或收不了信）。这些客人没收到信，以后发给这个地址也收不到`,
     how:
       '请转给客户的销售：点链接看「最近发送」里标「退信」的那几位，点「看客人」进资料页，打电话或发 WhatsApp 问一个能用的邮箱，' +
-      '改好记一笔。退信多了系统会自动停发（安全线：30 天里至少 50 封、硬退信 3 封以上且超过 4%）。',
+      '改好记一笔。退信超过授权时你批的安全线，系统会自动停发（安全线在「欢迎信自动发送」页的规则摘要里）。',
     href: lettersHref(b.clientId, Object.keys(c.byTrigger)),
   }
 }
@@ -239,7 +241,7 @@ function complainedItem(b: ItemBase, c: CategoryCount): ManualItem {
     client_name: b.clientName,
     what:
       `${b.clientName} 近 7 天有 ${countPhrase(c)}被客人点了「垃圾邮件 / 投诉」。一封都算急事：投诉多了会连累这个客户所有邮件进垃圾箱，` +
-      '30 天里有 2 次系统就会自动停掉自动发信',
+      '投诉次数到了授权时你批的安全线，系统会自动停掉自动发信',
     how:
       '点链接看「最近发送」里标「投诉」的那几位。系统已经把投诉的人记成邮件退订，自动信不会再发给他；请转告客户的销售也别再给他发邮件。' +
       '再看一眼这封信的内容和发信时间是不是让人反感，要改信或先停发就回我一句「停发」或「改信」。',
@@ -253,7 +255,7 @@ function receiptsMissingItem(b: ItemBase, c: CategoryCount): ManualItem {
     client_id: b.clientId,
     client_name: b.clientName,
     what:
-      `${b.clientName} 近 7 天有 ${countPhrase(c)}发出超过 30 分钟，一条回执都没回来（送没送到、退没退信都不知道）。` +
+      `${b.clientName} 近 7 天有 ${countPhrase(c)}发出超过 30 分钟，还没有送达或退信的回执（送没送到、退没退信都不知道）。` +
       '回执断了，退信和投诉也会看不见，自动停发的安全线跟着失灵',
     how:
       '开发窗口查：1. 发信服务后台这几封的事件有没有推过来（回执地址配没配对）；2. ME 收回执的接口和处理回执的后台任务有没有报错；' +
@@ -315,7 +317,7 @@ export function buildRevocationItem(r: SystemRevocation, clientName: string): Ma
 
 // ── 读库（只读）─────────────────────────────────────────────────────────
 
-const LEDGER_COLUMNS = 'id, client_id, trigger_key, dedupe_scope, status, reason_code, bounce_kind, sent_at, last_event_type, updated_at'
+const LEDGER_COLUMNS = 'id, client_id, trigger_key, dedupe_scope, status, reason_code, bounce_kind, sent_at, last_event_type, last_event_at, updated_at'
 
 interface LedgerRead extends LedgerRow {
   id: string
@@ -344,6 +346,7 @@ function toLedgerRow(v: unknown): LedgerRead | null {
     sentAt: str(r.sent_at),
     lastEventType: str(r.last_event_type),
     updatedAt,
+    lastEventAt: str(r.last_event_at),
   }
 }
 
@@ -382,9 +385,10 @@ async function readCategory(supabase: SupabaseClient, ids: readonly string[], no
     case 'unknown':
       return q.eq('status', 'unknown_outcome').limit(READ_LIMIT)
     case 'hardBounced':
-      return q.eq('status', 'bounced').eq('bounce_kind', 'permanent').gte('updated_at', ago(RECENT_DAYS * DAY_MS)).limit(READ_LIMIT)
+      return q.eq('status', 'bounced').eq('bounce_kind', 'permanent').gte('last_event_at', ago(RECENT_DAYS * DAY_MS)).limit(READ_LIMIT)
     case 'complained':
-      return q.eq('status', 'complained').gte('updated_at', ago(RECENT_DAYS * DAY_MS)).limit(READ_LIMIT)
+      // By when the bounce / complaint happened, not when the row was last touched (魏征 P2-5, 子牙 P2-4).
+      return q.eq('status', 'complained').gte('last_event_at', ago(RECENT_DAYS * DAY_MS)).limit(READ_LIMIT)
     case 'receiptsMissing':
       return q
         .eq('status', 'sent')
