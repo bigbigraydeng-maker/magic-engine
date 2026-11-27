@@ -88,12 +88,11 @@ async function finishVisual(
   if (!visual.pass) return drop(deps, slot, order, assetId, { ...copy, pass: false, reasons: visual.reasons }, null, visual.model)
   const hash = await (deps.hashUrl ?? sha256OfHttps)(loaded.url)
   if (!hash) return drop(deps, slot, order, assetId, failCopy(['文件校验算不出来'], copy.factVerdict), null, visual.model)
+  const recorded = await remember(deps, slot, order, assetId, 'pass', ['画面和文字都过了'], copy, visual.model)
+  if (!recorded) return { ok: false, spent, stopped: 'still_review_unrecorded' }
   const stamped = await stampPassed(deps, clientId, assetId, loaded.meta, slot, order.id, website, tour.name, hash)
   if (!stamped) return { ok: false, spent, stopped: 'still_stamp_failed' }
-  const recorded = await remember(deps, slot, order, assetId, 'pass', ['画面和文字都过了'], copy, visual.model)
-  if (recorded) return { ok: true, spent, stopped: null }
-  await clearPass(deps.supabase, clientId, assetId, loaded.meta)
-  return { ok: false, spent, stopped: 'still_review_unrecorded' }
+  return { ok: true, spent, stopped: null }
 }
 
 function failCopy(reasons: string[], factVerdict: string): StillCopyVerdict {
@@ -205,19 +204,6 @@ async function stampPassed(
     },
   }).eq('id', assetId).eq('client_id', clientId)
   return !error
-}
-
-async function clearPass(
-  supabase: SupabaseClient,
-  clientId: string,
-  assetId: string,
-  meta: Record<string, unknown>,
-): Promise<void> {
-  await supabase.from('client_assets').update({
-    verified_by: null,
-    verified_at: null,
-    vision_metadata: meta,
-  }).eq('id', assetId).eq('client_id', clientId)
 }
 
 function sha256OfHttps(url: string): Promise<string | null> {

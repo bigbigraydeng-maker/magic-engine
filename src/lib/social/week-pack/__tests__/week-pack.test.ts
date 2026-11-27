@@ -483,6 +483,17 @@ describe('promote guard and page copy', () => {
   })
 })
 
+function looseChain(rows: unknown[]) {
+  const chain = {
+    select: () => chain,
+    eq: () => chain,
+    in: () => chain,
+    order: () => chain,
+    limit: async () => ({ data: rows, error: null }),
+  }
+  return chain
+}
+
 describe('load', () => {
   it('reads this client only and reports an unreadable Reel list instead of zero', async () => {
     const store = new InMemoryLiteStore()
@@ -522,6 +533,26 @@ describe('load', () => {
     expect(scopeLine(manifest, manifestDigest(manifest))).toContain('Reel 读不到')
   })
 
+  it('selects this week’s still order before the row limit', async () => {
+    const store = new InMemoryLiteStore()
+    const filters: unknown[][] = []
+    const chain = {
+      select: () => chain,
+      eq: (...args: unknown[]) => { filters.push(args); return chain },
+      in: () => chain,
+      order: () => chain,
+      limit: async () => ({ data: [], error: null }),
+    }
+    await loadWeekPackManifest({
+      ports: { store, adminEmails: { has: () => true }, checkFile: async () => 'OK', sendEvent: async () => {} },
+      db: { from: () => chain } as never,
+      clientId: CLIENT,
+      now: FRIDAY_NZ,
+    })
+    expect(filters).toContainEqual(['brief->>engine', 'still'])
+    expect(filters).toContainEqual(['brief->factory_stills->>week_start', '2026-11-09'])
+  })
+
   it('authorises a Friday click that includes the following Sunday', async () => {
     const store = new InMemoryLiteStore()
     store.seedClient(CLIENT, { facebook_page_id: 'page-fixture', client_status: 'active' })
@@ -555,7 +586,7 @@ describe('load', () => {
 
     const manifest = await loadWeekPackManifest({
       ports: litePorts,
-      db: { from: () => ({ select: () => ({ eq: () => ({ in: () => ({ order: () => ({ limit: async () => ({ data: [], error: null }) }) }) }) }) }) } as never,
+      db: { from: () => looseChain([]) } as never,
       clientId: CLIENT,
       now: FRIDAY_NZ,
     })

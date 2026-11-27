@@ -140,7 +140,9 @@ async function loadStillReviews(
     .from('content_work_orders')
     .select('id, status, brief, output')
     .eq('client_id', clientId)
-    .in('status', ['closed'])
+    .eq('status', 'closed')
+    .eq('brief->>engine', 'still')
+    .eq('brief->factory_stills->>week_start', weekStart)
     .order('created_at', { ascending: false })
     .limit(8)
   if (error) return { read_state: 'unread', items: [] }

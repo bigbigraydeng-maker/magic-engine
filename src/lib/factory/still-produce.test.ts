@@ -158,6 +158,24 @@ describe('produceFactoryStills', () => {
     expect(db.assets[0]?.verified_by).toBeNull()
     expect(inserts.filter((row) => row.table === 'factory_balance_ledger').map((row) => row.row.amount_usd)).toEqual([-0.038, -0.01])
   })
+
+  it('does not mark a still usable when the review cannot be saved', async () => {
+    const inserts: Array<{ table: string; row: Record<string, unknown> }> = []
+    const db = capSupabase(inserts, { failReviewWrite: true })
+    const receipt = await produceFactoryStills('c1', {
+      factory_stills: { enabled: true, weekly_cap_usd: 1 },
+      social_week: { post_per_week: 1 },
+    }, WEEK_NOW, {
+      supabase: db as never,
+      compose: passCompose,
+      hashUrl: async () => 'ab'.repeat(32),
+      reviewCopy: passCopy,
+      reviewVisual: async () => ({ pass: true, reasons: [], costUsd: 0, model: 'test-model', billed: true }),
+    })
+    expect(receipt).toMatchObject({ drafted: 0, skipped: 'still_review_unrecorded' })
+    expect(db.assets[0]?.verified_by).toBeNull()
+    expect(JSON.stringify(db.assets[0]?.vision_metadata)).not.toContain('factory_still')
+  })
 })
 
 const passCopy = async () => ({ pass: true, reasons: [], redlineHits: [], factVerdict: 'pass' })
@@ -172,7 +190,10 @@ const passCompose = async (): Promise<ComposeTourPosterResult> => ({
   },
 })
 
-function capSupabase(inserts: Array<{ table: string; row: Record<string, unknown> }>) {
+function capSupabase(
+  inserts: Array<{ table: string; row: Record<string, unknown> }>,
+  opts: { failReviewWrite?: boolean } = {},
+) {
   const orders: Array<Record<string, unknown>> = []
   const assets: Array<Record<string, unknown>> = [{
     id: 'asset-1',
@@ -200,9 +221,10 @@ function capSupabase(inserts: Array<{ table: string; row: Record<string, unknown
         return { select: () => ({ single: () => Promise.resolve({ data: { id: 'wo-1' }, error: null }) }) }
       },
       update: (patch: Record<string, unknown>) => {
-        if (table === 'content_work_orders' && orders[0]) Object.assign(orders[0], patch)
-        if (table === 'client_assets' && assets[0]) Object.assign(assets[0], patch)
-        const eq = () => Object.assign(Promise.resolve({ error: null }), { eq })
+        const fail = opts.failReviewWrite === true && table === 'content_work_orders' && 'output' in patch
+        if (!fail && table === 'content_work_orders' && orders[0]) Object.assign(orders[0], patch)
+        if (!fail && table === 'client_assets' && assets[0]) Object.assign(assets[0], patch)
+        const eq = () => Object.assign(Promise.resolve({ error: fail ? { message: 'write failed' } : null }), { eq })
         return { eq }
       },
     }
