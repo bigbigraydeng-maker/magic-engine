@@ -86,7 +86,8 @@ export async function loadDay7List(sb: SupabaseClient, clientId: string, deps: D
       touches: ctx.touchesOf.get(g.id) ?? [],
       lastClickAt: clicks.get(g.id) ?? null,
       lastSendAt: sends.get(g.id) ?? null,
-      stopped: stopDecisionFor(g, ctx, now) !== null,
+      // A stage missing from the client's stage list cannot be judged: leave the guest to staff (魏征 R2 P2).
+      stopped: stopDecisionFor(g, ctx, now) !== null || (g.stage !== null && g.stage !== '' && !ctx.stageOf.has(g.stage)),
       timeZone: deps.timeZone,
     }, now)
     counts[v.status] += 1

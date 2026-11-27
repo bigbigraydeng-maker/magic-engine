@@ -191,7 +191,7 @@ function Card({ row, state, clientId, locked, onEdit, onToggle, onRetry }: CardP
         <div className="mt-2 space-y-2">
           <input aria-label="主题" disabled={!editable} value={draft.subject} onChange={(e) => onEdit(row.contactId, { subject: e.target.value })} className="w-full rounded border border-me-charcoal/20 px-2 py-1 text-sm" />
           <textarea aria-label="正文" disabled={!editable} value={draft.body} onChange={(e) => onEdit(row.contactId, { body: e.target.value })} rows={8} className="w-full rounded border border-me-charcoal/20 px-2 py-1 text-sm" />
-          {draft.edited && <p className="text-xs text-amber-700">⚠ 你改过正文，下面的检查还是 AI 原稿的结果；价格、日期、团名请自己再核一遍。</p>}
+          {draft.edited && <p className="text-xs text-amber-700">⚠ 你改过正文，下面的检查还是 AI 原稿的结果；价格、日期、产品名请自己再核一遍。</p>}
           <ul className="text-xs">
             {draft.checks.map((c) => <li key={c.id} className={CHECK_TONE[c.status]}>{CHECK_ICON[c.status]} {c.label}{c.detail ? `：${c.detail}` : ''}</li>)}
           </ul>
