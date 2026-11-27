@@ -71,7 +71,10 @@ export async function loadReconcileRows(db: SupabaseClient, now: Date, clientId:
       if (clientId !== null) q = q.eq('client_id', clientId)
       return q.order('id', { ascending: true }).range(from, to)
     })
-    return { ok: true, rows: rows.map(toRow) }
+    // A row inserted between two pages shifts the next page by one: the same row can come back twice. One row per id,
+    // or one complaint would count as two and trip the breaker (魏征 R2 P2).
+    const byId = new Map(rows.map((r) => [r.id, r]))
+    return { ok: true, rows: [...byId.values()].map(toRow) }
   } catch (err) {
     return { ok: false, error: `ledger read: ${err instanceof Error ? err.message : 'failed'}` }
   }
@@ -129,7 +132,10 @@ async function judgeAuthorization(
   const { limits, error } = limitsOf(record)
   const startedAt = record.activatedAt ?? record.authorizedAt ?? now.toISOString()
   const own = rows.filter((r) => r.clientId === record.clientId && r.triggerKey === record.triggerKey)
-  const verdict = judgeHealth(own, limits, startedAt, now)
+  // An unreadable rule is itself the reason to stop (as the sender says it, 子牙 R2 P2): no breaker wording for it.
+  const judged = judgeHealth(own, limits, startedAt, now)
+  const verdict: BreakerVerdict =
+    error !== null && judged.trip ? { ...judged, code: 'RULE_INVALID', reason: '授权里存的发信规则读不懂了' } : judged
   const base = { clientId: record.clientId, triggerKey: record.triggerKey, authorizationId: record.id, verdict, revoked: false, errors: error === null ? [] : [error] }
   if (!verdict.trip) return base
   const done = await revokeAsSystem(createAuthorizationDeps(db, record.triggerKey as (typeof TRIGGER_KEYS)[number]), record, verdict.code, `daily check: ${verdict.reason}`).catch(() => 'failed' as const)

@@ -86,6 +86,26 @@ describe('loadReconcileRows', () => {
     expect((await loadReconcileRows(db, NOW)).ok).toBe(false)
   })
 
+  it('a row served twice across two pages is counted once', async () => {
+    // A write between two pages shifts the next page by one: the last row of page 1 comes back first on page 2.
+    const { db } = pagedDb(1500)
+    const base = db.from
+    let call = 0
+    const shifted = {
+      from: (t: string) => {
+        const chain = base(t) as unknown as Record<string, (...a: unknown[]) => unknown>
+        const range = chain.range
+        chain.range = async (from: unknown, to: unknown) => {
+          call += 1
+          return range(call === 2 ? 999 : from, to)
+        }
+        return chain
+      },
+    } as unknown as SupabaseClient // 实测 shape: same chain; 变异验证 — without the de-duplication this returns 1501 rows
+    const out = await loadReconcileRows(shifted, NOW)
+    expect(out.ok && out.rows.length).toBe(1500)
+  })
+
   it('reads only one client when asked (the receipt-time check)', async () => {
     const { db, eqs } = pagedDb(3)
     await loadReconcileRows(db, NOW, 'c9')

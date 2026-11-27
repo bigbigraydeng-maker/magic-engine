@@ -87,7 +87,7 @@ export function overduePending(rows: readonly ReconcileRow[], now: Date): Reconc
 
 export type BreakerVerdict =
   | { trip: false; sent: number; hardBounces: number; complaints: number }
-  | { trip: true; code: 'HEALTH_BREAKER' | 'PROVIDER_FAILURE'; reason: string; sent: number; hardBounces: number; complaints: number }
+  | { trip: true; code: 'HEALTH_BREAKER' | 'PROVIDER_FAILURE' | 'RULE_INVALID'; reason: string; sent: number; hardBounces: number; complaints: number }
 
 function lastAttempts(rows: readonly ReconcileRow[], n: number): ReconcileRow[] {
   return rows
