@@ -1,6 +1,7 @@
 /**
  * A still counts as finished only after the copy gate and the image check pass.
- * A miss is not usable. A failed image check is marked on the asset so the same picture is not reviewed again.
+ * A miss is not usable. Once this week's budget has been spent, a later failure is marked
+ * on the asset when one exists, and on the work order, so the same slot is not billed again.
  */
 
 import { createHash } from 'node:crypto'
@@ -13,6 +14,7 @@ import { appendStillReview, recordStillSpend, type StillOrder } from './still-or
 import { STILL_REVIEWER_ID, STILL_VISUAL_COST_ESTIMATE_USD } from './still-config'
 import {
   buildStillReview,
+  plainReviewReason,
   reviewStillCopy,
   reviewStillImage,
   stillFactLink,
@@ -45,12 +47,12 @@ export async function acceptFactoryStill(
   deps: StillAcceptDeps,
 ): Promise<{ ok: boolean; spent: number | null; stopped: string | null }> {
   const loaded = await loadStillAsset(deps.supabase, clientId, assetId)
-  if (!loaded) return drop(deps, slot, order, assetId, failCopy(['静图成片读不到'], 'unreadable'), null)
+  if (!loaded) return drop(deps, clientId, slot, order, assetId, tour, failCopy(['静图成片读不到'], 'unreadable'), null)
   const overlay = overlayOf(loaded.meta)
   const caption = tour.name.trim()
   const place = tour.destination.trim()
   if (!overlay || !caption || !place) {
-    return drop(deps, slot, order, assetId, failCopy(['没有可核对的画面文字、说明或目的地'], 'unreadable'), null)
+    return drop(deps, clientId, slot, order, assetId, tour, failCopy(['没有可核对的画面文字、说明或目的地'], 'unreadable'), null)
   }
   const now = (deps.now ?? (() => new Date()))()
   const copy = await (deps.reviewCopy ?? reviewStillCopy)({
@@ -61,9 +63,9 @@ export async function acceptFactoryStill(
     linkUrl: stillFactLink(website, tour.slug),
     today: factCheckToday(now),
   })
-  if (!copy.pass) return drop(deps, slot, order, assetId, copy, null)
+  if (!copy.pass) return drop(deps, clientId, slot, order, assetId, tour, copy, null)
   if (order.spentUsd + STILL_VISUAL_COST_ESTIMATE_USD > cap + 1e-9) {
-    return drop(deps, slot, order, assetId, failCopy(['本周静图花费不够做画面审'], copy.factVerdict), 'weekly_cap_reached')
+    return drop(deps, clientId, slot, order, assetId, tour, failCopy(['本周静图花费不够做画面审'], copy.factVerdict), 'weekly_cap_reached')
   }
   return finishVisual(clientId, slot, tour, website, assetId, order, loaded, overlay, place, copy, deps)
 }
@@ -83,17 +85,21 @@ async function finishVisual(
 ): Promise<{ ok: boolean; spent: number | null; stopped: string | null }> {
   const visual = await (deps.reviewVisual ?? reviewStillImage)({ imageUrl: loaded.url, place, overlay })
   const spent = await chargeVisual(deps.supabase, order, visual)
-  if (spent === 'ledger_failed') return { ok: false, spent: null, stopped: 'ledger_failed' }
+  if (spent === 'ledger_failed') {
+    await noteFailedStill(deps, clientId, slot, order, assetId, tour, visual.reasons.length > 0 ? visual.reasons : ['画面审花费记不进账'], copy, visual.model)
+    return { ok: false, spent: null, stopped: 'ledger_failed' }
+  }
   order.spentUsd = spent
   if (!visual.pass) {
-    const marked = await stampFailed(deps, clientId, assetId, loaded.meta, slot, order.id, tour, visual.reasons)
-    if (!marked) return { ok: false, spent, stopped: 'still_stamp_failed' }
-    return drop(deps, slot, order, assetId, { ...copy, pass: false, reasons: visual.reasons }, null, visual.model)
+    return drop(deps, clientId, slot, order, assetId, tour, { ...copy, pass: false, reasons: visual.reasons }, null, visual.model)
   }
   const hash = await (deps.hashUrl ?? sha256OfHttps)(loaded.url)
-  if (!hash) return drop(deps, slot, order, assetId, failCopy(['文件校验算不出来'], copy.factVerdict), null, visual.model)
+  if (!hash) return drop(deps, clientId, slot, order, assetId, tour, failCopy(['文件校验算不出来'], copy.factVerdict), null, visual.model)
   const recorded = await remember(deps, slot, order, assetId, 'pass', ['画面和文字都过了'], copy, visual.model)
-  if (!recorded) return { ok: false, spent, stopped: 'still_review_unrecorded' }
+  if (!recorded) {
+    await noteFailedStill(deps, clientId, slot, order, assetId, tour, ['审片结果写不进工单'], copy, visual.model)
+    return { ok: false, spent, stopped: 'still_review_unrecorded' }
+  }
   const stamped = await stampPassed(deps, clientId, assetId, loaded.meta, slot, order.id, website, tour, hash)
   if (!stamped) return { ok: false, spent, stopped: 'still_stamp_failed' }
   return { ok: true, spent, stopped: null }
@@ -105,16 +111,37 @@ function failCopy(reasons: string[], factVerdict: string): StillCopyVerdict {
 
 async function drop(
   deps: StillAcceptDeps,
+  clientId: string,
   slot: StillSlot,
   order: StillOrder,
   assetId: string | null,
+  tour: PublishedTourFact,
   copy: StillCopyVerdict,
   stopped: string | null,
   model: string | null = null,
 ): Promise<{ ok: boolean; spent: number | null; stopped: string | null }> {
-  const recorded = await remember(deps, slot, order, assetId, 'fail', copy.reasons, copy, model)
-  if (!recorded) return { ok: false, spent: order.spentUsd, stopped: 'still_review_unrecorded' }
+  const noted = await noteFailedStill(deps, clientId, slot, order, assetId, tour, copy.reasons, copy, model)
+  if (noted === 'unrecorded') return { ok: false, spent: order.spentUsd, stopped: 'still_review_unrecorded' }
+  if (noted === 'stamp_failed') return { ok: false, spent: order.spentUsd, stopped: 'still_stamp_failed' }
   return { ok: false, spent: order.spentUsd, stopped }
+}
+
+export async function noteFailedStill(
+  deps: StillAcceptDeps,
+  clientId: string,
+  slot: StillSlot,
+  order: StillOrder,
+  assetId: string | null,
+  tour: PublishedTourFact,
+  reasons: string[],
+  copy: { redlineHits: string[]; factVerdict: string },
+  model: string | null,
+): Promise<'ok' | 'stamp_failed' | 'unrecorded'> {
+  const lines = reasons.map(plainReviewReason).filter((line) => line.length > 0).slice(0, 4)
+  const stamped = await stampFailed(deps, clientId, assetId, slot, order.id, tour, lines)
+  const recorded = await remember(deps, slot, order, assetId, 'fail', lines, { pass: false, reasons: lines, redlineHits: copy.redlineHits, factVerdict: copy.factVerdict }, model)
+  if (!recorded) return 'unrecorded'
+  return stamped ? 'ok' : 'stamp_failed'
 }
 
 async function remember(
@@ -179,17 +206,19 @@ function overlayOf(meta: Record<string, unknown>): string {
 async function stampFailed(
   deps: StillAcceptDeps,
   clientId: string,
-  assetId: string,
-  meta: Record<string, unknown>,
+  assetId: string | null,
   slot: StillSlot,
   workOrderId: string,
   tour: PublishedTourFact,
   reasons: string[],
 ): Promise<boolean> {
+  if (!assetId) return true
+  const loaded = await loadStillAsset(deps.supabase, clientId, assetId)
+  if (!loaded) return false
   const tourId = tour.id.trim()
   const { error } = await deps.supabase.from('client_assets').update({
     vision_metadata: {
-      ...meta,
+      ...loaded.meta,
       kind: 'factory_still',
       factory_still: {
         work_order_id: workOrderId,
@@ -197,11 +226,7 @@ async function stampFailed(
         role: slot.role,
         slot_date: slot.date,
         tour_id: tourId.length > 0 ? tourId : null,
-        review: {
-          verdict: 'fail',
-          reviewer: STILL_REVIEWER_ID,
-          reasons: reasons.filter((line) => line.trim().length > 0).slice(0, 4),
-        },
+        review: { verdict: 'fail', reviewer: STILL_REVIEWER_ID, reasons },
       },
     },
   }).eq('id', assetId).eq('client_id', clientId)

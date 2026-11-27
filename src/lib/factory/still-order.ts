@@ -39,6 +39,36 @@ export async function openStillOrder(
   return insertStillOrder(supabase, clientId, week, capUsd, goalId, briefId)
 }
 
+export interface HandledStillSlot {
+  role: 'story' | 'post'
+  aspect: '9:16' | '4:5'
+  slotDate: string
+}
+
+/** Slots this week's still order already finished or failed. A miss here is not made again. */
+export async function loadHandledStillSlots(
+  supabase: SupabaseClient,
+  clientId: string,
+  weekStart: string,
+): Promise<HandledStillSlot[] | 'unreadable'> {
+  const { data, error } = await supabase
+    .from('content_work_orders')
+    .select('output')
+    .eq('client_id', clientId)
+    .eq('brief->factory_stills->>week_start', weekStart)
+    .order('created_at', { ascending: false })
+    .limit(1)
+  if (error) return 'unreadable'
+  const output = record(record((data ?? [])[0])?.output)
+  const stills = Array.isArray(output?.stills) ? output.stills : []
+  const handled: HandledStillSlot[] = []
+  for (const raw of stills) {
+    const slot = handledSlot(raw)
+    if (slot) handled.push(slot)
+  }
+  return handled
+}
+
 export async function appendStillReview(
   supabase: SupabaseClient,
   orderId: string,
@@ -185,6 +215,15 @@ async function insertStillOrder(
   if (error) return 'order_unreadable'
   const id = rowId(data)
   return id ? { id, spentUsd: 0 } : 'order_unreadable'
+}
+
+function handledSlot(raw: unknown): HandledStillSlot | null {
+  const row = record(raw)
+  if (!row) return null
+  if (row.role !== 'story' && row.role !== 'post') return null
+  if (row.aspect !== '9:16' && row.aspect !== '4:5') return null
+  if (typeof row.slot_date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(row.slot_date)) return null
+  return { role: row.role, aspect: row.aspect, slotDate: row.slot_date }
 }
 
 function record(raw: unknown): Record<string, unknown> | null {

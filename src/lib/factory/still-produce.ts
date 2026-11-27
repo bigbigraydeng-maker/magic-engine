@@ -12,11 +12,11 @@ import { isoDate, nzCalendar, targetWeek } from '@/lib/social/week-pack/cadence'
 import type { WeekWindow } from '@/lib/social/image-post-week'
 
 import { loadFactoryStills, type FactoryStill } from './still-library'
-import { openStillOrder, recordStillSpend, type StillOrder } from './still-order'
+import { loadHandledStillSlots, openStillOrder, recordStillSpend, type HandledStillSlot, type StillOrder } from './still-order'
 import { planStillSlots, roomForAnother, type StillSlot } from './still-plan'
 import { FACTORY_STILL_COST_ESTIMATE_USD, readFactoryStillConfig } from './still-config'
 import { composeFactoryStill } from './still-compose'
-import { acceptFactoryStill, type StillAcceptDeps } from './still-accept'
+import { acceptFactoryStill, noteFailedStill, type StillAcceptDeps } from './still-accept'
 
 export interface StillProduceReceipt {
   drafted: number
@@ -68,7 +68,9 @@ async function fillSlots(
 ): Promise<StillProduceReceipt> {
   const have = await loadFactoryStills(deps.supabase, clientId)
   if (have === 'unreadable') return fail('factory_stills_unreadable', '已有静图读不到，为避免重复没有再生成。')
-  const missing = slots.filter((slot) => !have.some((still) => sameSlot(still, slot)))
+  const handled = await loadHandledStillSlots(deps.supabase, clientId, week.weekStart)
+  if (handled === 'unreadable') return fail('order_unreadable', '工单读不到，没有生成。')
+  const missing = slots.filter((slot) => !slotTaken(have, handled, slot))
   if (missing.length === 0) {
     return { drafted: 0, skipped: 'stills_already_made', error: null, spentUsd: 0, note: '这一周的静图成片已经有了。' }
   }
@@ -129,10 +131,32 @@ async function makeOne(
   const spent = await recordStillSpend(deps.supabase, order, billed, `${slot.role}-${slot.date}`)
   if (spent === 'ledger_failed') return { ok: false, spent: null, stopped: 'ledger_failed' }
   order.spentUsd = spent
-  if (unknownBill) return { ok: false, spent, stopped: 'provider_unknown_billing' }
-  if (!result.ok) return { ok: false, spent, stopped: null }
+  if (unknownBill || !result.ok) {
+    const blocked = billed > 0
+      ? await markChargedMiss(deps, clientId, slot, tour, order, result, unknownBill)
+      : null
+    if (blocked) return { ok: false, spent, stopped: blocked }
+    if (unknownBill) return { ok: false, spent, stopped: 'provider_unknown_billing' }
+    return { ok: false, spent, stopped: null }
+  }
   return acceptFactoryStill(clientId, slot, tour, website, result.assetId, order, cap, deps)
 }
+
+async function markChargedMiss(
+  deps: StillProduceDeps,
+  clientId: string,
+  slot: StillSlot,
+  tour: PublishedTourFact,
+  order: StillOrder,
+  result: ComposeTourPosterResult,
+  unknownBill: boolean,
+): Promise<string | null> {
+  const assetId = result.ok ? null : (typeof result.receipt.poster_asset_id === 'string' ? result.receipt.poster_asset_id : null)
+  const reason = unknownBill || result.ok ? '改图没有回报价，已按估价记账' : result.reason
+  const noted = await noteFailedStill(deps, clientId, slot, order, assetId, tour, [reason], { redlineHits: [], factVerdict: 'unreadable' }, null)
+  return noted === 'unrecorded' ? 'still_review_unrecorded' : null
+}
+
 function unknownProviderBill(result: ComposeTourPosterResult): boolean {
   if (result.ok || !result.reason.includes('edit_failed_maybe_billed')) return false
   const requestId = result.receipt.provider_request_id
@@ -145,6 +169,11 @@ function knownBill(result: ComposeTourPosterResult): number {
 
 function sameSlot(still: FactoryStill, slot: StillSlot): boolean {
   return still.role === slot.role && still.aspect === slot.aspect && still.slotDate === slot.date
+}
+
+function slotTaken(have: FactoryStill[], handled: HandledStillSlot[], slot: StillSlot): boolean {
+  if (have.some((still) => sameSlot(still, slot))) return true
+  return handled.some((row) => row.role === slot.role && row.aspect === slot.aspect && row.slotDate === slot.date)
 }
 
 function fail(skipped: string, note: string): StillProduceReceipt {
