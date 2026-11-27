@@ -39,6 +39,7 @@ import type { PlatformConnectionItemKind } from './platform-connection-items'
 import type { FacebookSyncItemKind } from './facebook-sync-items'
 import type { LeadFollowupItemKind } from './lead-followup-items'
 import type { CatalogueFollowupItemKind } from './catalogue-followup-items'
+import type { CatalogueAskItemKind } from './catalogue-ask-items'
 import type { TriggeredSendItemKind } from './triggered-send-items'
 import type { AdsAutonomyItemKind } from './ads-autonomy-items'
 import type { AdsRuleFindingItemKind } from './ads-rule-finding-items'
@@ -447,6 +448,8 @@ export type ManualItemKind =
   | LeadFollowupItemKind
   /** 发出目录之后没人跟的客人（挂着「AI 跟进中」但没有后续动作）/ 这一栏没算出来 */
   | CatalogueFollowupItemKind
+  /** 员工留言要发目录、目录还没发出去 / 这一栏没算出来 */
+  | CatalogueAskItemKind
   /** ME 自己发出的信：结果不明 / 硬退信 / 投诉 / 回执没回来 / 钥匙出错 / 系统自动停了授权 / 这一栏没算出来 */
   | TriggeredSendItemKind
   /** Magic Bridge 全平台免费额度用到 80% 以上 —— 要不要加额度由 PM 定 */

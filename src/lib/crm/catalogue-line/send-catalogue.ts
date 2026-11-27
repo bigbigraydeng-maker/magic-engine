@@ -3,8 +3,10 @@
  * Design: docs/specs/2026-11-09-crm-catalogue-send-b0-b3-design-v0.md §3.5.
  *
  * Order (any step that fails stops, with the reason in plain Chinese):
- *   settings (versioned, catalogue configured, not expired) → the catalogue line's own eligibility → the catalogue
- *   template (active, no picks, no content source, no staff-typed boxes) → a server-side render with no gaps or blocks
+ *   settings (versioned, catalogue configured, not expired) → the catalogue line's own eligibility → this guest has
+ *   not been sent the catalogue already (another request, sent or outcome unknown, in the last CATALOGUE_ONCE_DAYS:
+ *   a second click from another tab, another staff member or the guest's own card is refused here, whichever button
+ *   it came from) → the catalogue template (active, no picks, no content source, no staff-typed boxes) → a server-side render with no gaps or blocks
  *   → sendTemplateEmail, where every send gate runs again (cap, cooldown, do-not-contact, allow-list, link checks,
  *   the catalogue gate).
  *
@@ -39,6 +41,8 @@ export type CatalogueRefusal =
   | 'catalogue_expired'
   | 'catalogue_template_invalid'
   | 'catalogue_render_failed'
+  | 'catalogue_already_sent'
+  | 'catalogue_history_unreadable'
 
 export type SendCatalogueResult =
   | {
@@ -57,10 +61,18 @@ export interface CatalogueDeps {
   loadSettings(clientId: string): Promise<LoadSettingsResult>
   loadTimeZone(clientId: string): Promise<string>
   eligibility: EligibilityData
+  /**
+   * When this guest was last sent this catalogue template by ANOTHER request (sent, or outcome not yet known) since
+   * `sinceIso`; null = never. Throws when it cannot be read (the send is then refused).
+   */
+  catalogueSentAt(q: { clientId: string; contactId: string; templateKey: string; exceptRequestId: string; sinceIso: string }): Promise<string | null>
   preview(args: PreviewArgs): Promise<PreviewResult>
   send(args: SendTemplateEmailArgs): Promise<SendMailNewResult | SendCrash>
   now(): Date
 }
+
+/** One catalogue per guest per catalogue season: a second one inside this window is refused. */
+export const CATALOGUE_ONCE_DAYS = 180
 
 const MESSAGES: Record<Exclude<CatalogueRefusal, EligibilityRefusal>, string> = {
   settings_unavailable: '这个客户的发信设置还没开通或无效，目录没有发出。',
@@ -68,6 +80,8 @@ const MESSAGES: Record<Exclude<CatalogueRefusal, EligibilityRefusal>, string> = 
   catalogue_expired: '手册已过期，目录没有发出。请等新版手册换上后再发。',
   catalogue_template_invalid: '目录信模板不能用（已停用、要选团、或要手填内容），目录没有发出，请找 Magic Lab 团队。',
   catalogue_render_failed: '目录信生成不完整（缺内容或没过文字检查），目录没有发出。',
+  catalogue_already_sent: '这位客人已经发过目录了（或上一封的结果还没确认），没有再发。',
+  catalogue_history_unreadable: '暂时查不到这位客人有没有收过目录，目录没有发出，请稍后再试。',
 }
 
 type Refusal = Extract<SendCatalogueResult, { ok: false }>
@@ -124,6 +138,22 @@ async function renderCatalogue(args: SendCatalogueArgs, ready: Ready, deps: Cata
   return { subject: preview.rendered.subject, body: preview.rendered.body, templateVersion: preview.template.version }
 }
 
+/** Null when this guest has not had this catalogue from another request inside the window; otherwise the refusal. */
+async function refuseSecondCatalogue(args: SendCatalogueArgs, ready: Ready, deps: CatalogueDeps, now: Date): Promise<Refusal | null> {
+  let sentBefore: string | null
+  try {
+    sentBefore = await deps.catalogueSentAt({
+      clientId: args.clientId, contactId: args.contactId, templateKey: ready.catalogue.templateKey, exceptRequestId: args.requestId,
+      sinceIso: new Date(now.getTime() - CATALOGUE_ONCE_DAYS * 86_400_000).toISOString(),
+    })
+  } catch {
+    return refuse(503, 'catalogue_history_unreadable')
+  }
+  if (sentBefore === null) return null
+  const zone = await deps.loadTimeZone(args.clientId).catch(() => 'UTC')
+  return refuse(409, 'catalogue_already_sent', `上一封 ${todayInZone(new Date(sentBefore), zone)}`)
+}
+
 export async function sendCatalogueEmail(args: SendCatalogueArgs, deps: CatalogueDeps): Promise<SendCatalogueResult> {
   const now = deps.now()
   const ready = await readyConfig(args, deps, now)
@@ -131,6 +161,9 @@ export async function sendCatalogueEmail(args: SendCatalogueArgs, deps: Catalogu
 
   const eligible = await checkCatalogueEligibility({ clientId: args.clientId, contactId: args.contactId, now }, deps.eligibility)
   if (!eligible.ok) return { ok: false, status: 409, reason: eligible.reason, message: eligible.message, mayHaveSent: false }
+
+  const once = await refuseSecondCatalogue(args, ready, deps, now)
+  if (once !== null) return once
 
   const rendered = await renderCatalogue(args, ready, deps, now)
   if ('ok' in rendered) return rendered

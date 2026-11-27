@@ -13,8 +13,10 @@ const META_PARAMS = new Set(['select', 'order', 'offset', 'limit'])
 function matches(row: Row, key: string, cond: string): boolean {
   const v = row[key]
   if (cond.startsWith('eq.')) return String(v) === cond.slice(3)
+  if (cond.startsWith('neq.')) return String(v) !== cond.slice(4)
   if (cond.startsWith('in.(')) return new Set(cond.slice(4, -1).split(',').map((s) => s.replace(/^"|"$/g, ''))).has(String(v))
   if (cond.startsWith('gte.')) return Date.parse(String(v)) >= Date.parse(cond.slice(4))
+  if (cond === 'not.is.null') return v !== null && v !== undefined
   throw new Error(`stub does not understand ${key}=${cond}`)
 }
 

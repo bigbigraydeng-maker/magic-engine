@@ -14,6 +14,8 @@ import { loadPickupList } from '@/lib/crm/ai-takeover/pickup-list'
 import { todayInZone } from '@/lib/crm/email-templates/send-gates'
 import { pickupSwitches } from '@/lib/crm/ai-takeover/pickup-run'
 import { loadCatalogue } from '@/lib/crm/ai-takeover/view'
+import { guestsWithCatalogue } from '@/lib/crm/catalogue-line/prod'
+import { CATALOGUE_ONCE_DAYS } from '@/lib/crm/catalogue-line/send-catalogue'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120
@@ -48,6 +50,10 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       timeZone,
       loadNames,
       sentToday: (today) => sentToday(params.id, timeZone, today),
+      hasCatalogue: async (ids) => catalogue === null ? new Set<string>() : guestsWithCatalogue(supabaseAdmin, {
+        clientId: params.id, templateKey: catalogue.templateKey, contactIds: ids,
+        sinceIso: new Date(Date.now() - CATALOGUE_ONCE_DAYS * 86_400_000).toISOString(),
+      }),
       compose: (contactId) => previewCompose({ clientId: params.id, contactId }, mailDeps),
     }, { dailyMax })
     return NextResponse.json({ catalogue, dailyMax, rows })

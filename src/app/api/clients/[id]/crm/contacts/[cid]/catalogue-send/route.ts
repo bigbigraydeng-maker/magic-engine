@@ -5,7 +5,8 @@
  * 「AI 跟进中」（lib/crm/ai-takeover/actions.ts）。被挡、或发没发出去不确定时，什么都不写。
  * 不改阶段。
  *
- * Body: { requestId: uuid, expectedRecipient: string }
+ * Body: { requestId: uuid, expectedRecipient: string, keepWithStaff?: true }
+ *   keepWithStaff（员工留言要发目录的客人）：只发目录，不挂「AI 跟进中」，客人留在员工名单上。
  *   requestId 每次点击一个：双击 / 重试同一个 → 不重发、不重记。
  * 发信人只取登录身份，不读请求体。
  */
@@ -14,7 +15,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { sendCatalogueEmail } from '@/lib/crm/catalogue-line/send-catalogue'
 import { createCatalogueDeps } from '@/lib/crm/catalogue-line/prod'
-import { sendCatalogueAndTakeOver } from '@/lib/crm/ai-takeover/actions'
+import { sendCatalogueAndTakeOver, sendCatalogueKeepWithStaff } from '@/lib/crm/ai-takeover/actions'
 import { createTakeoverStore } from '@/lib/crm/ai-takeover/prod'
 
 interface RouteParams {
@@ -39,7 +40,8 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
   }
 
   try {
-    const result = await sendCatalogueAndTakeOver(
+    const run = body.keepWithStaff === true ? sendCatalogueKeepWithStaff : sendCatalogueAndTakeOver
+    const result = await run(
       { clientId: params.id, contactId: params.cid, actorEmail, requestId, expectedRecipient },
       { sendCatalogue: (a) => sendCatalogueEmail(a, createCatalogueDeps(params.id)), store: createTakeoverStore() },
     )

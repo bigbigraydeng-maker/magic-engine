@@ -9,6 +9,8 @@
  *   cannot_send  — the mail check says no (no usable email, mailbox not connected, …), with its message
  *   ready        — can go today; at most `dailyMax` minus the catalogues already sent today (the client mailbox's daily
  *                  room, and the guests leave the staff list once sent) — so a refresh after a batch adds nobody
+ * Guests whose staff note asks for the catalogue (catalogue-ask.ts) come first, the same day the note is written
+ * (no "tomorrow" for them: the note IS today's contact), and stay with staff after the send (`keepWithStaff`).
  *   queued       — over today's room, or past the mail-check budget (2 × dailyMax checks per list, so a mailbox that
  *                  refuses everyone cannot make the list time out): on a later day's list
  */
@@ -16,6 +18,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ComposePreview } from '@/lib/microsoft/mail-send-new'
 import { todayInZone } from '@/lib/crm/email-templates/send-gates'
+import { askAll, DEFAULT_ASK_WORDS } from './catalogue-ask'
 import { isSystemCall } from './call-reach'
 import { DEFAULT_PICKUP_CONFIG, type PickupConfig, type PickupRule } from './pickup'
 import { decideAll, latestEnquiries, loadInputs, type PickupInputs } from './pickup-run'
@@ -25,7 +28,9 @@ export type PickupListStatus = 'ready' | 'tomorrow' | 'cannot_send' | 'queued'
 export interface PickupListRow {
   contactId: string
   name: string
-  rule: PickupRule
+  rule: PickupRule | 'catalogue_asked'
+  /** true = send the catalogue only; the guest stays on the staff list (no "AI 跟进中"). */
+  keepWithStaff: boolean
   why: string
   leadAt: string
   /** Staff dial-outs through the phone system since the enquiry. */
@@ -46,6 +51,8 @@ export interface PickupListDeps {
   loadNames(ids: string[]): Promise<Map<string, string>>
   /** Catalogues this client already sent (or may have sent) today, in the client's time zone. */
   sentToday(today: string): Promise<number>
+  /** Of these guests, the ones the catalogue send would refuse as "already has it" (the send's own gate). Throws on a read error. */
+  hasCatalogue(ids: string[]): Promise<Set<string>>
 }
 
 /** How many mail checks run at once. */
@@ -66,23 +73,40 @@ export async function loadPickupList(
   sb: SupabaseClient,
   clientId: string,
   deps: PickupListDeps,
-  opts: { now?: Date; dailyMax: number; cfg?: PickupConfig },
+  opts: { now?: Date; dailyMax: number; cfg?: PickupConfig; askWords?: readonly string[] },
 ): Promise<PickupListRow[]> {
   const now = opts.now ?? new Date()
   const leads = await latestEnquiries(sb, clientId, now)
   const inputs = await loadInputs(sb, clientId, [...leads.keys()])
   const picks = decideAll(inputs, leads, now, opts.cfg ?? DEFAULT_PICKUP_CONFIG)
-  const names = await deps.loadNames(picks.map((p) => p.contactId))
+  // A guest the pickup rules take keeps that rule (rang, never reached: the AI follows up, PM 11-16) — including one
+  // they will take once the wait after the last call is over, so the same guest never goes one way at 10:30 and the
+  // other at 11:30.
+  const cfg = opts.cfg ?? DEFAULT_PICKUP_CONFIG
+  const taken = new Set(decideAll(inputs, leads, now, { ...cfg, afterLastCallMinutes: 0 }).map((p) => p.contactId))
+  const asks = askAll(inputs, leads, now, opts.askWords ?? DEFAULT_ASK_WORDS).filter((a) => !taken.has(a.contactId))
+  const names = await deps.loadNames([...asks.map((a) => a.contactId), ...picks.map((p) => p.contactId)])
   const today = todayInZone(now, deps.timeZone)
   const room = Math.max(0, opts.dailyMax - (await deps.sentToday(today)))
   const checkBudget = opts.dailyMax * 2
-  const rows: PickupListRow[] = picks.map((p) => {
+  const askRows: PickupListRow[] = asks.map((a) => {
+    const f = facts(inputs, a.contactId, a.leadAt, today, deps.timeZone)
+    return { contactId: a.contactId, name: names.get(a.contactId) ?? '（没名字）', rule: 'catalogue_asked', keepWithStaff: true,
+      why: '员工留言要发目录。发出后客人仍留在员工名单上，不交给 AI。', leadAt: a.leadAt,
+      dials: f.dials, lastCallAt: f.lastCallAt, lastNote: a.note, recipient: null, sentLast7Days: null, message: null, status: 'queued' }
+  })
+  const pickRows: PickupListRow[] = picks.map((p) => {
     const f = facts(inputs, p.contactId, p.leadAt, today, deps.timeZone)
-    return { contactId: p.contactId, name: names.get(p.contactId) ?? '（没名字）', rule: p.rule, why: p.why, leadAt: p.leadAt,
+    return { contactId: p.contactId, name: names.get(p.contactId) ?? '（没名字）', rule: p.rule, keepWithStaff: false, why: p.why, leadAt: p.leadAt,
       dials: f.dials, lastCallAt: f.lastCallAt, lastNote: f.lastNote, recipient: null, sentLast7Days: null, message: null,
       status: f.contactedToday ? 'tomorrow' : 'queued' }
   })
-  for (const r of rows) r.message = r.status === 'tomorrow' ? '今天已经联系过，明天再发。' : '今天的名额满了，排到后面几天。'
+  const rows = [...askRows, ...pickRows]
+  // The send refuses a guest who already has the catalogue (an earlier enquiry, sent without the AI mark): say so here
+  // instead of offering a row that can never go, and do not let it use a place.
+  const has = await deps.hasCatalogue(rows.map((r) => r.contactId))
+  for (const r of rows) if (has.has(r.contactId)) r.status = 'cannot_send'
+  for (const r of rows) r.message = r.status === 'cannot_send' ? '这位客人已经发过目录了，不再发第二份。' : r.status === 'tomorrow' ? '今天已经联系过，明天再发。' : '今天的名额满了，排到后面几天。'
   // Mail checks run a few at a time (each is a dozen reads; one by one took over a minute in production), in list
   // order, never more at once than the room left, so the oldest enquiries still get the places.
   const open = rows.filter((r) => r.status === 'queued')

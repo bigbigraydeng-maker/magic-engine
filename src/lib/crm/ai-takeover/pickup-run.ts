@@ -149,6 +149,9 @@ async function crmMailedAt(sb: SupabaseClient, clientId: string, ids: string[]):
   return latest
 }
 
+/** The client has not said which stages are qualified leads: the pickup rules do not judge this client at all. */
+export class PickupNotConfiguredError extends Error {}
+
 /** The client's qualified stages (ad strategy config) and the first phone-system call. Unreadable = throw (fail closed). */
 async function clientFacts(sb: SupabaseClient, clientId: string): Promise<{ qualifiedKeys: Set<string>; callsTrackedSince: string | null }> {
   const cfg = await sb.from('ad_strategy_configs').select('qualified_stage_keys').eq('client_id', clientId).maybeSingle()
@@ -156,7 +159,7 @@ async function clientFacts(sb: SupabaseClient, clientId: string): Promise<{ qual
   const raw = (cfg.data as { qualified_stage_keys?: unknown } | null)?.qualified_stage_keys
   const qualifiedKeys = new Set(Array.isArray(raw) ? raw.filter((k): k is string => typeof k === 'string') : [])
   // Without the client's qualified stages, high-intent guests cannot be told apart: do not judge this client at all.
-  if (qualifiedKeys.size === 0) throw new Error('这个客户还没设「哪些阶段算合格客人」，不判（防止把已报价的客人交给 AI）')
+  if (qualifiedKeys.size === 0) throw new PickupNotConfiguredError('这个客户还没设「哪些阶段算合格客人」，不判（防止把已报价的客人交给 AI）')
   const first = await sb.from('contact_touchpoints').select('occurred_at').eq('client_id', clientId).eq('channel', 'phone')
     .in('source', [...SYSTEM_CALL_SOURCES]).order('occurred_at', { ascending: true }).limit(1)
   if (first.error) throw new Error(`读不到最早一通电话：${first.error.message}`)
