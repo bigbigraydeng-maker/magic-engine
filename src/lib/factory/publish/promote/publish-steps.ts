@@ -5,7 +5,7 @@
 // 租约与栅栏:抢占后授权状态一直保持 claimed,直到收尾写成 consumed(或失败时显式释放成 failed /
 // meta_published_db_pending);所有写入都带 attempt_id 栅栏,被别的请求接管就中止。
 
-import { isOnPlatformOrderStatus } from '@/lib/factory/platform-draft-status'
+import { PLATFORM_DRAFT_STATUS, isOnPlatformOrderStatus } from '@/lib/factory/platform-draft-status'
 import { sanitizeFailReason } from '../publish-display'
 import { asRecord, redlineSurface } from './guards'
 import { fenced, mutatePayload, readAuth, withAuth } from './payload-lock'
@@ -98,22 +98,34 @@ export async function writeOrder(deps: PromoteDeps, ctx: PromoteContext, facts: 
   return failure
 }
 
+function nextPublicRef(
+  cur: Record<string, unknown>,
+  facts: PublishedFacts,
+  requestId: string,
+  ctx: PromoteContext,
+): Record<string, unknown> {
+  const next: Record<string, unknown> = {
+    ...cur, video_state: 'PUBLISHED', published_at: facts.publishedAt, ...ctx.port.publishedRefExtras(),
+    promote_request_id: requestId,
+    ...(facts.permalink ? { permalink: facts.permalink } : {}),
+    ...(facts.estimated ? { published_at_estimated: true } : {}),
+  }
+  delete next['event_ids'] // 清掉旧发布信号回执,补发任务才会重新发
+  if (!facts.estimated) delete next['published_at_estimated']
+  return next
+}
+
 async function writeOrderOnce(deps: PromoteDeps, ctx: PromoteContext, facts: PublishedFacts, requestId: string): Promise<Fail | null> {
   for (let attempt = 0; attempt < 3; attempt++) {
     const fresh = await deps.store.loadOrder(ctx.order.id)
     if (!fresh || !isOnPlatformOrderStatus(fresh.status)) return fail(409, '工单状态在转公开过程中变了,请核对')
     const cur = asRecord(fresh.published_ref)
-    if (cur['video_state'] === 'PUBLISHED' && cur['promote_request_id'] === requestId) return null
-    if (cur['video_state'] !== 'DRAFT') return fail(409, '工单已不是草稿状态,请核对')
-    const next: Record<string, unknown> = {
-      ...cur, video_state: 'PUBLISHED', published_at: facts.publishedAt, ...ctx.port.publishedRefExtras(),
-      promote_request_id: requestId,
-      ...(facts.permalink ? { permalink: facts.permalink } : {}),
-      ...(facts.estimated ? { published_at_estimated: true } : {}),
-    }
-    delete next['event_ids'] // 清掉旧发布信号回执,补发任务才会重新发
-    if (!facts.estimated) delete next['published_at_estimated']
-    if (await deps.store.writeOrderPublishedRef(ctx.order.id, fresh.updated_at, next)) return null
+    const already = cur['video_state'] === 'PUBLISHED' && cur['promote_request_id'] === requestId
+    if (already && fresh.status !== PLATFORM_DRAFT_STATUS) return null
+    if (!already && cur['video_state'] !== 'DRAFT') return fail(409, '工单已不是草稿状态,请核对')
+    const next = already ? cur : nextPublicRef(cur, facts, requestId, ctx)
+    const wrote = await deps.store.writeOrderPublishedRef(ctx.order.id, fresh.updated_at, next, { status: 'published' })
+    if (wrote) return null
   }
   deps.alert(`Meta 已公开但工单写库失败 order=${ctx.order.id}`)
   return fail(500, 'Facebook 已公开,流量记录已对齐,但工单没写成功;请再点一次「转公开」')

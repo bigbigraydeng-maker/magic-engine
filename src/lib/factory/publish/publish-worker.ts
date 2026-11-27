@@ -24,6 +24,12 @@ import { ASSET_ONLY_NOT_PUBLISHABLE, isAssetOnly } from '../deliverable'
 import { CONSENT_REASON_ZH, consentVerdict } from '@/lib/factory/talent-consent'
 import { recheckReelFacts } from './promote/fact-recheck'
 import { loadSocialFactSource } from '@/lib/social/weekly-loop/fact-aliases'
+import {
+  PLATFORM_DRAFT_STATUS,
+  isWorkOrderStatusCheckViolation,
+  platformDraftWriteEnabled,
+  statusForConfirmedUpload,
+} from '../platform-draft-status'
 
 const MAX_PUBLISH_ATTEMPTS = 3
 const RETRY_BACKOFF_MIN = 10 // 失败退避基数(分钟)· 指数
@@ -45,6 +51,7 @@ interface PublishOutcome {
 }
 
 // ── 原子领取(防双发):status 守卫式条件 UPDATE,只有第一个能把 approved→publishing ──
+// 不领 published / platform_draft。草稿已在平台上,再领会重新上传。转公开不走这里。
 async function claimOne(workerId: string): Promise<Record<string, unknown> | null> {
   const nowIso = new Date().toISOString()
   const { data: cand } = await supabaseAdmin
@@ -383,22 +390,59 @@ async function settleConfirmed(
 }
 
 // published_ref 硬事务 + 三落库尽力而为。回执已经是 Meta 确认过的 DRAFT 或 PUBLISHED。
-// 工单 status 仍写 published:库里没有单独的草稿取值,转公开也要求 status=published 且 video_state=DRAFT。
-// 「已公开」只认 video_state=PUBLISHED(三本账、发布信号、发后读数都看这一戳)。
+// 草稿同时写 status 与 video_state='DRAFT'。新状态默认关;约束拒绝时退回旧组合。
+// 已公开仍写 status=published。「已公开」只认 video_state=PUBLISHED。
 async function recordPublished(
   id: string,
   ref: PublishedRef,
   clientId: string,
   label: string,
 ): Promise<void> {
-  await supabaseAdmin
-    .from('content_work_orders')
-    .update({ status: 'published', published_ref: ref, reject_reason: null, next_retry_at: null, updated_at: new Date().toISOString() })
-    .eq('id', id)
+  await persistConfirmedReceipt(id, ref)
   // 三落库(fde_work_logs + execution_items + flywheel_actions)best-effort,不阻塞、失败可后补
   await writeThreeBooks(id, ref, clientId, label).catch((e) =>
     console.error(`[publish-worker] 三落库失败(片已发出,不回滚) ${id}: ${e instanceof Error ? e.message : e}`),
   )
+}
+
+type ReceiptWriteError = { code?: string; message?: string; details?: string } | null
+
+async function updateConfirmedReceipt(
+  id: string,
+  status: 'published' | typeof PLATFORM_DRAFT_STATUS,
+  ref: PublishedRef,
+): Promise<ReceiptWriteError> {
+  const { error } = await supabaseAdmin
+    .from('content_work_orders')
+    .update({
+      status,
+      published_ref: ref,
+      reject_reason: null,
+      next_retry_at: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', id)
+  if (!error) return null
+  const row = error as { code?: string; message?: string; details?: string | null }
+  return { code: row.code, message: row.message, details: row.details ?? undefined }
+}
+
+/** Drafts keep video_state=DRAFT. A rejected platform_draft write falls back once to published. */
+async function persistConfirmedReceipt(id: string, ref: PublishedRef): Promise<void> {
+  const videoState = ref.video_state === 'DRAFT' ? 'DRAFT' : 'PUBLISHED'
+  const preferred = statusForConfirmedUpload(videoState, platformDraftWriteEnabled())
+  const first = await updateConfirmedReceipt(id, preferred, ref)
+  if (!first) return
+  if (preferred === PLATFORM_DRAFT_STATUS && isWorkOrderStatusCheckViolation(first)) {
+    const second = await updateConfirmedReceipt(id, 'published', ref)
+    if (!second) {
+      console.error(`[publish-worker] platform_draft 被状态约束拒绝,已回退成 published+DRAFT ${id}`)
+      return
+    }
+    console.error(`[publish-worker] 回执回退写入失败 ${id}: ${second.message ?? ''}`)
+    return
+  }
+  console.error(`[publish-worker] 回执写入失败 ${id}: ${first.message ?? ''}`)
 }
 
 /** Completed Reel projection shared by initial publish and promote receipts. No provider calls. */
@@ -508,8 +552,8 @@ export async function writeThreeBooks(
 //
 // 落点约束(魏征 B 复审):
 //  - 只在真·PUBLISHED 的 facebook Reel 上 emit —— 草稿不可 promote 成广告,绝不通知下游。
-//    靠 published_ref.video_state 戳区分(adapter 发布时盖),而不是 status='published'
-//    (草稿也会走到 status='published')。
+//    靠 published_ref.video_state 戳区分(adapter 发布时盖)。草稿的工单状态可能是
+//    platform_draft,也可能仍是旧的 published,都不能拿状态当「已公开」。
 //  - best-effort:片已发出,事件失败绝不回滚(回滚会致重发)。失败留待 reconcile 补发。
 //  - 幂等 id 固定(work_order+video):正常路径与补发路径撞车,Inngest 只算一次。
 //  - 恢复/补记路径(findExisting)video_state=undefined → 不喊(来路不明,宁可不喊)。
@@ -562,17 +606,19 @@ async function emitReelPublishedEvent(
 //
 // 为什么非补不可:emit 是 best-effort,一旦 Inngest 那一下失败,下游永远收不到"发了"→
 // 永远不建广告,且是静默的。这里每轮开工前扫最近几条已发但 event_ids 空的,补喊。
-// 只补真·PUBLISHED(video_state 戳),草稿绝不补喊。幂等 id 固定,补喊不会双发。
+// 只补真·PUBLISHED(video_state 戳)。published 与 platform_draft 都扫,但草稿(DRAFT)不补、
+// 也不重新上传。幂等 id 固定,补喊不会双发。
 export async function reconcileMissingReelEvents(limit = 25): Promise<void> {
   // DB 层先收窄到"真·PUBLISHED 的 facebook Reel"(->> 文本过滤,PostgREST 稳),
   // 再放宽窗口到 25 —— 一条持续 emit 失败的行 updated_at 不刷新,会被新片挤下去;
   // 收窄+放宽后,要挤出窗口得同一轮内冒出 25 条更新的 facebook PUBLISHED reel(worker 一轮
   // 只发 1 条,不可能)。理想是直接 `event_ids IS NULL` 过滤,但那要 jsonb null 过滤,
   // 语法脆且 build 抓不到,先用这个稳的口径 + 内存兜底(见下 event_ids 判空)。backlog 记账。
+  // status 含 platform_draft:转公开若已把 video_state 写成 PUBLISHED、状态还停在草稿,信号仍要补上。
   const { data: rows } = await supabaseAdmin
     .from('content_work_orders')
-    .select('id, client_id, published_ref')
-    .eq('status', 'published')
+    .select('id, client_id, status, published_ref')
+    .in('status', ['published', PLATFORM_DRAFT_STATUS])
     .eq('published_ref->>platform', 'facebook')
     .eq('published_ref->>video_state', 'PUBLISHED')
     .order('updated_at', { ascending: false })
@@ -580,6 +626,8 @@ export async function reconcileMissingReelEvents(limit = 25): Promise<void> {
   if (!Array.isArray(rows)) return
   for (const row of rows) {
     const ref = (row.published_ref ?? null) as PublishedRef | null
+    const status = typeof row.status === 'string' ? row.status : null
+    if (status && status !== 'published' && status !== PLATFORM_DRAFT_STATUS) continue
     if (!ref || ref.platform !== 'facebook' || ref.video_state !== 'PUBLISHED') continue
     if (ref.event_ids && ref.event_ids.length > 0) continue
     await emitReelPublishedEvent(String(row.id), ref, String(row.client_id))

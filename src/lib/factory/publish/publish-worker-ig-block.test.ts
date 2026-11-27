@@ -26,7 +26,7 @@ function install(rows: Array<Record<string, unknown>>): Rec {
   mockFrom.mockImplementation(() => {
     const b: Record<string, unknown> = {}
     let isUpdate = false
-    for (const m of ['select', 'eq', 'order', 'limit']) b[m] = () => b
+    for (const m of ['select', 'eq', 'order', 'limit', 'in']) b[m] = () => b
     b.or = (arg: string) => { rec.orArgs.push(arg); return b }
     b.update = (payload: Record<string, unknown>) => { isUpdate = true; rec.updates.push(payload); return b }
     b.maybeSingle = () => Promise.resolve({ data: null, error: null })
@@ -68,5 +68,6 @@ describe('recordPublished 的可达性', () => {
     expect(rec.orArgs).toHaveLength(1)
     expect(rec.orArgs[0]).toContain('status.eq.approved')
     expect(rec.orArgs[0]).not.toContain('status.eq.published')
+    expect(rec.orArgs[0]).not.toContain('platform_draft')
   })
 })

@@ -181,9 +181,13 @@ describe('发布信号 emit(只在真·PUBLISHED 喊)', () => {
   })
 })
 
+/** 补发对账发出的 status / video_state 过滤。mock 仍返回给定行,过滤靠这里核对。 */
+let reconcileFilters: Array<{ method: string; args: unknown[] }> = []
+
 /** 补发对账用的独立 mock:content_work_orders 的 select 直接返回一批行。 */
 function installReconcileMocks(rows: Array<Record<string, unknown>>) {
   woUpdates = []
+  reconcileFilters = []
   mockFrom.mockImplementation((table: string) => {
     const ctx = { isUpdate: false, payload: null as Record<string, unknown> | null }
     const resolve = (): { data: unknown; error: unknown } => {
@@ -192,7 +196,13 @@ function installReconcileMocks(rows: Array<Record<string, unknown>>) {
       return { data: null, error: null }
     }
     const b: Record<string, unknown> = {}
-    for (const m of ['eq', 'order', 'limit', 'not', 'filter', 'maybeSingle', 'single']) b[m] = () => b
+    const tap = (method: string) => (...args: unknown[]) => {
+      if (method === 'eq' || method === 'in') reconcileFilters.push({ method, args })
+      return b
+    }
+    for (const m of ['order', 'limit', 'not', 'filter', 'maybeSingle', 'single']) b[m] = () => b
+    b.eq = tap('eq')
+    b.in = tap('in')
     b.select = () => b
     b.update = (p: Record<string, unknown>) => { ctx.isUpdate = true; ctx.payload = p; return b }
     ;(b as { then: unknown }).then = (r: (v: { data: unknown; error: unknown }) => unknown) => r(resolve())
@@ -232,6 +242,33 @@ describe('补发对账(reconcileMissingReelEvents)', () => {
     ])
     await reconcileMissingReelEvents()
     expect(mockSend).not.toHaveBeenCalled()
+  })
+
+  it('scans published and platform_draft, but only a public video, and does not upload again', async () => {
+    installReconcileMocks([
+      {
+        id: WO_ID, client_id: CLIENT_ID, status: 'platform_draft',
+        published_ref: { platform: 'facebook', page_id: PAGE_ID, video_id: VIDEO_ID, post_id: VIDEO_ID, published_at: '2026-09-06T20:00:00.000Z', video_state: 'PUBLISHED' },
+      },
+    ])
+    await reconcileMissingReelEvents()
+    expect(mockSend).toHaveBeenCalledTimes(1)
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(reconcileFilters).toContainEqual({ method: 'in', args: ['status', ['published', 'platform_draft']] })
+    expect(reconcileFilters).toContainEqual({ method: 'eq', args: ['published_ref->>video_state', 'PUBLISHED'] })
+    expect(reconcileFilters.some((f) => f.method === 'eq' && f.args[0] === 'status' && f.args[1] === 'published')).toBe(false)
+  })
+
+  it('a platform_draft that is still DRAFT is not resent as a publish', async () => {
+    installReconcileMocks([
+      {
+        id: WO_ID, client_id: CLIENT_ID, status: 'platform_draft',
+        published_ref: { platform: 'facebook', page_id: PAGE_ID, video_id: VIDEO_ID, post_id: VIDEO_ID, published_at: '2026-09-06T20:00:00.000Z', video_state: 'DRAFT' },
+      },
+    ])
+    await reconcileMissingReelEvents()
+    expect(mockSend).not.toHaveBeenCalled()
+    expect(mockPublish).not.toHaveBeenCalled()
   })
 })
 

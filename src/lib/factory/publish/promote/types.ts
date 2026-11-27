@@ -74,8 +74,17 @@ export interface PromoteStore {
   loadTrafficRow(id: string, clientId: string): Promise<TrafficRow | null>
   /** 版本号乐观锁:expectedRev=null 表示 payload 里还没有 promote_rev。 */
   casPayload(id: string, clientId: string, expectedRev: string | null, nextPayload: Record<string, unknown>): Promise<boolean>
-  /** 按 updated_at 比对写 published_ref(且 status 必须仍是 published);true = 命中 1 行。 */
-  writeOrderPublishedRef(id: string, expectedUpdatedAt: string, nextRef: Record<string, unknown>): Promise<boolean>
+  /**
+   * 按 updated_at 比对写 published_ref。行必须仍是 published 或 platform_draft。
+   * options.status 只能是 published(转公开)。不许写成 approved,那会重新上传。
+   * true = 命中 1 行。
+   */
+  writeOrderPublishedRef(
+    id: string,
+    expectedUpdatedAt: string,
+    nextRef: Record<string, unknown>,
+    options?: { status?: 'published' },
+  ): Promise<boolean>
 }
 
 export interface MetaReelView {

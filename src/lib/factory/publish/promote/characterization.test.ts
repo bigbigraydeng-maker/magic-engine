@@ -74,10 +74,11 @@ function makeDeps(w: World): PromoteDeps {
         w.log.push('store.traffic')
         return true
       },
-      async writeOrderPublishedRef(_id, expectedUpdatedAt, nextRef) {
+      async writeOrderPublishedRef(_id, expectedUpdatedAt, nextRef, options) {
         if (w.orderWriteFails > 0) { w.orderWriteFails -= 1; w.log.push('store.order.conflict'); return false }
         if (expectedUpdatedAt !== w.order.updated_at) return false
         w.order.published_ref = structuredClone(nextRef)
+        if (options?.status === 'published') w.order.status = 'published'
         w.order.updated_at = `u${++w.seq + 1}`
         w.log.push('store.order')
         return true

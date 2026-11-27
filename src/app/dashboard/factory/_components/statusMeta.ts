@@ -51,5 +51,6 @@ export function publishedBadge(p: PublishedView | null): { label: string; color:
 export const REASON_STATUSES: readonly WorkOrderStatus[] = ['queued', 'publish_failed', 'failed', 'dead_letter', 'review_rejected']
 
 // 发布后阶段(已发布 / 监测中 / 已关闭):审片区的「已发布」历史卡片统一用这组状态。
-// platform_draft 是已上传但未公开,不算发布后。旧的 published+DRAFT 行状态仍是 published,归组不变。
+// platform_draft 的标签是「草稿未公开」,不算发布后。转公开必须把状态写成 published,
+// 否则看板会一直停在这个标签。旧的 published+DRAFT 行状态仍是 published,归组不变。
 export const POST_PUBLISH: readonly WorkOrderStatus[] = ['published', 'measuring', 'closed']

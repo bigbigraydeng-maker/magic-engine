@@ -198,6 +198,7 @@
 |---|---|---|
 | `MOCK_EXTERNAL_SERVICES` | 测试时 mock 全部外部 API | 本地 / CI |
 | `FACTORY_PUBLISH_LIVE` | 🔴 Factory 是否真发布。**未配 = 静默发 DRAFT**（片子落库全绿但 FB 上没人看得见） | Render-web |
+| `FACTORY_WRITE_PLATFORM_DRAFT` | 工厂草稿工单是否写成状态 `platform_draft`。必须严格等于 `true`。**未配 = 仍写旧组合**（状态已发布 + 平台标记草稿）。库约束还没放行时不要打开；打开后若约束拒绝，写入会自动退回旧组合。跟 `FACTORY_PUBLISH_LIVE` 不是同一件事 | Render-web |
 | `DAILY_PLAN_AUTO_PUBLISH_LIVE` | 🔴 每日计划图文 Post 自动发布是否**真发**。必须严格等于 `true`。**未配 = 只演练**（走完全部发布闸门、什么都不发也不写库，只在 cron_run_logs 留一行）。第一次真发必须 PM 明确说 go | Render-web |
 | `STORY_AUTO_PUBLISH_LIVE` | 🔴 Story 自动发布是否**真发**。必须严格等于 `true`。**未配 = 只演练**（走完全部检查、什么都不发，只记检查结果）。真发还要客户在 `STORY_AUTO_PUBLISH_CLIENTS` 名单里；第一次真发必须 PM 明确说 go | Render-web |
 | `TRIGGERED_SEND_LIVE` / `TRIGGERED_SEND_CLIENTS` | 🔴 ME 自动信（欢迎信等）是否**真发**：`TRIGGERED_SEND_LIVE` 必须严格等于 `true`，且客户在 `TRIGGERED_SEND_CLIENTS`（逗号分隔 client id）名单里，两者都满足才真发；**未配 = 只演练**。这只是「武装」不是刹车：刹车是在「欢迎信自动发送」页点撤销。只能 PM 本人改，改完要手动部署 | Render-web |

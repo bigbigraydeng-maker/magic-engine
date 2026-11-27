@@ -85,10 +85,11 @@ function makeDeps(w: World): PromoteDeps {
         w.log.push('traffic')
         return true
       },
-      async writeOrderPublishedRef(_id, expectedUpdatedAt, nextRef) {
+      async writeOrderPublishedRef(_id, expectedUpdatedAt, nextRef, options) {
         if (w.orderWriteFails > 0) { w.orderWriteFails -= 1; return false }
         if (expectedUpdatedAt !== w.order.updated_at) return false
         w.order.published_ref = structuredClone(nextRef)
+        if (options?.status === 'published') w.order.status = 'published'
         w.order.updated_at = `u${++w.seq + 1}`
         w.log.push('order')
         return true
@@ -274,6 +275,24 @@ describe('前置校验与红线', () => {
 })
 
 describe('转公开主链路', () => {
+  it('platform_draft 直接写成 published,不经过 approved,也不重新走上传领取', async () => {
+    w.order.status = 'platform_draft'
+    const r = await confirm(await tokenOf())
+    expect(r.ok && r.kind).toBe('promoted')
+    expect(w.order.status).toBe('published')
+    expect(w.order.published_ref['video_state']).toBe('PUBLISHED')
+    expect(w.log.filter((step) => step === 'meta.promote')).toHaveLength(1)
+    expect(w.log).not.toContain('approved')
+    expect(JSON.stringify(w.order)).not.toContain('"status":"approved"')
+  })
+
+  it('旧的 published+DRAFT 转公开后仍是 published,平台标记改为已公开', async () => {
+    const r = await confirm(await tokenOf())
+    expect(r.ok && r.kind).toBe('promoted')
+    expect(w.order.status).toBe('published')
+    expect(w.order.published_ref['video_state']).toBe('PUBLISHED')
+  })
+
   it('先流量记录后工单,两处同一个 published_at;工单带 ig_crosspost_blocked 并清掉旧 event_ids', async () => {
     const r = await confirm(await tokenOf())
     expect(r.ok && r.kind).toBe('promoted')
@@ -287,6 +306,7 @@ describe('转公开主链路', () => {
     expect(w.order.published_ref['published_at']).toBe(iso)
     expect(w.row?.payload['video_state']).toBe('PUBLISHED')
     expect(w.order.published_ref['video_state']).toBe('PUBLISHED')
+    expect(w.order.status).toBe('published')
     expect(w.order.published_ref['ig_crosspost_blocked']).toBe(true)
     expect(w.order.published_ref).not.toHaveProperty('event_ids')
     expect(auth().status).toBe('consumed')
