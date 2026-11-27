@@ -151,6 +151,9 @@ export default function CrmAiPickupPage({ params }: { params: { id: string } }) 
       <p className="mb-4 text-sm text-me-charcoal/70">
         员工打了没接通、或询价 7 天还没人打的客人。点发送后，每位收到一封 2027 目录，挂上「AI 跟进中」，离开「今天先联系」；客人回信、回电或发消息会自动回到员工名单。没点之前，他们一直在员工名单上。
       </p>
+      <p className="mb-4 text-sm">
+        <a href={`/dashboard/clients/${clientId}/crm/day7-followup`} className="font-semibold text-me-charcoal underline">发了目录满 7 天的客人：写第 7 天跟进信 →</a>
+      </p>
       {error && <p className="text-sm text-red-700">{error}</p>}
       {!data && !error && <p className="text-sm text-me-charcoal/60">正在读名单…</p>}
       {data && data.catalogue === null && <p className="text-sm text-me-charcoal/70">这个客户还没配目录，现在发不了。</p>}
