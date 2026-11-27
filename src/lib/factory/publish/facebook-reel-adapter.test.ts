@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 vi.mock('@/lib/meta/token-manager', () => ({ getStoredPageToken: vi.fn(async () => 'test-page-token') }))
-import { assertBrandMatches, encodeIdemTag, facebookReelAdapter, promoteReelToPublished } from './facebook-reel-adapter'
+import { assertBrandMatches, encodeIdemTag, facebookReelAdapter, promoteReelToPublished, videoStateFromReadback } from './facebook-reel-adapter'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -50,7 +50,7 @@ describe('Facebook Reel 首评', () => {
       if (url.includes('rupload.facebook.com')) return Response.json({ success: true })
       if (url.includes('/comments?')) return Response.json({ data: [] })
       if (url.endsWith('/comments')) return Response.json({ id: 'comment-1' })
-      if (url.includes('permalink_url')) return Response.json({ permalink_url: 'https://facebook.test/reel/video-1' })
+      if (url.includes('permalink_url')) return Response.json({ published: true, permalink_url: 'https://facebook.test/reel/video-1' })
       return Response.json({})
     }))
 
@@ -69,6 +69,67 @@ describe('Facebook Reel 首评', () => {
     const message = new URLSearchParams(String(commentRequest!.init?.body)).get('message')
     expect(message).toContain('Book now: https://example.test/?utm_source=facebook')
     expect(message).toMatch(/[⁣​‌]+$/)
+  })
+})
+
+describe('videoStateFromReadback', () => {
+  it('published true is the only live confirmation', () => {
+    expect(videoStateFromReadback({ published: true })).toBe('PUBLISHED')
+    expect(videoStateFromReadback({ published: false })).toBe('DRAFT')
+    expect(videoStateFromReadback({})).toBeNull()
+    expect(videoStateFromReadback({ published: 'PUBLISHED' })).toBeNull()
+  })
+})
+
+describe('Facebook Reel finish 回读', () => {
+  const target = { client_id: 'client-1', page_id: 'page-1', platform: 'facebook' as const }
+  const publishArgs = { videoUrl: 'https://storage.test/reel.mp4', caption: 'Discover China', target, idempotencyTag: 'work-order-1' }
+
+  function stubFinish(published: boolean | undefined) {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes('fields=name')) return Response.json({ name: 'Example Brand' })
+      const body = init?.body == null ? new URLSearchParams() : new URLSearchParams(String(init.body))
+      if (url.endsWith('/video_reels') && body.get('upload_phase') === 'start') return Response.json({ video_id: 'video-1' })
+      if (url.includes('rupload.facebook.com')) return Response.json({ success: true })
+      if (url.endsWith('/video_reels') && body.get('upload_phase') === 'finish') return Response.json({ success: true })
+      if (url.includes('fields=published')) return Response.json(published === undefined ? {} : { published, permalink_url: 'https://facebook.test/reel/video-1' })
+      return Response.json({})
+    }))
+  }
+
+  it('草稿请求且回读 published=false → 记 DRAFT,不发首评', async () => {
+    stubFinish(false)
+    const result = await facebookReelAdapter.publish({ ...publishArgs, draft: true, firstComment: 'Book now' })
+    expect(result.video_state).toBe('DRAFT')
+    expect(result.first_comment_id).toBeUndefined()
+  })
+
+  it('真发请求但回读一直不是 published=true → 抛错,不当已发布', async () => {
+    stubFinish(false)
+    await expect(facebookReelAdapter.publish({ ...publishArgs, draft: false })).rejects.toThrow(/未确认/)
+  })
+
+  it('回读没有 published 字段 → 抛错', async () => {
+    stubFinish(undefined)
+    await expect(facebookReelAdapter.publish({ ...publishArgs, draft: true })).rejects.toThrow(/未确认|没有回读|回读/)
+  })
+
+  it('对账命中后按回读的 published 盖戳', async () => {
+    const tag = encodeIdemTag('work-order-1')
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('fields=name')) return Response.json({ name: 'Example Brand' })
+      if (url.includes('/video_reels?')) {
+        return Response.json({ data: [{ id: 'video-9', description: `hello${tag}`, updated_time: '2026-10-18T00:00:00+0000' }] })
+      }
+      if (url.includes('fields=published')) return Response.json({ published: false, permalink_url: 'https://facebook.test/reel/video-9' })
+      return Response.json({})
+    }))
+    const found = await facebookReelAdapter.findExisting({ target, idempotencyTag: 'work-order-1' })
+    expect(found?.video_state).toBe('DRAFT')
+    expect(found?.video_id).toBe('video-9')
+    expect(found?.published_at).toBe('2026-10-18T00:00:00.000Z')
   })
 })
 
