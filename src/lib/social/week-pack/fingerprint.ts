@@ -1,6 +1,7 @@
 /**
  * Manifest digest. Sort is part of the contract so row order cannot change the card.
  * Assembled time is not included. Image posts are not included (they are not wired).
+ * Still-review lines are display only and are not included.
  */
 
 import { canonicalHashOfInput } from '@/lib/kernel/canonical-hash'

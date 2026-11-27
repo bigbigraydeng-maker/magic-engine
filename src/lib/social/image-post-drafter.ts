@@ -22,6 +22,8 @@ export interface ImagePostDrafterInput {
   assets: RankableAssetRow[]
   recentTourSlugs: string[] // slugs used in the last 7 days
   ctaBaseUrl: string // e.g. "https://www.ctstours.co.nz/tours"
+  /** When set, copy and link use this tour. A missing tour is not a pass. */
+  lockedTourId?: string
 }
 
 export interface ImagePostDrafterDeps {
@@ -118,40 +120,48 @@ function outboundClaimsOk(
 // Main
 // ---------------------------------------------------------------------------
 
+function tourForDraft(input: ImagePostDrafterInput): PublishedTourFact | null | 'unreadable' {
+  if (input.lockedTourId === undefined) return pickTour(input.tours, input.recentTourSlugs, input.date)
+  const id = input.lockedTourId.trim()
+  if (!id) return 'unreadable'
+  return input.tours.find((tour) => tour.id === id) ?? 'unreadable'
+}
+
+function imageForDraft(input: ImagePostDrafterInput, tour: PublishedTourFact): RankableAssetRow | null {
+  if (input.lockedTourId !== undefined) return input.assets[0] ?? null
+  return pickImage(input.assets, tour.destination, tour.slug, input.date)
+}
+
+function factReason(result: FactCheckResult): string {
+  return result.items.some((item) => item.kind === 'image_tour_mismatch')
+    ? 'image_tour_mismatch'
+    : `fact_check_${result.verdict}`
+}
+
 export async function draftImagePost(
   input: ImagePostDrafterInput,
   deps: ImagePostDrafterDeps,
 ): Promise<ImagePostDraftResult> {
-  const { tours, assets, recentTourSlugs, date, ctaBaseUrl } = input
-
-  // 1. Pick tour
-  const tour = pickTour(tours, recentTourSlugs, date)
+  const tour = tourForDraft(input)
+  if (tour === 'unreadable') return { ok: false, reason: 'still_tour_unreadable' }
   if (!tour) return { ok: false, reason: 'no_eligible_tour' }
 
-  // 2. Pick image
-  const image = pickImage(assets, tour.destination, tour.slug, date)
+  const image = imageForDraft(input, tour)
   if (!image) return { ok: false, reason: 'no_eligible_image' }
 
-  // 3. Generate copy via injected AI
   const copy = await deps.generateCopy(tour, image)
-
-  // 4. Build full text for checks
   const fullText = [copy.hook, copy.body, copy.cta].join('\n\n')
-  const ctaUrl = `${ctaBaseUrl}/${tour.slug}`
-
-  // 5. Fact check
-  const factInput: FactCheckInput = {
+  const ctaUrl = `${input.ctaBaseUrl}/${tour.slug}`
+  const factCheck = deps.checkFacts({
     texts: { overlay: null, caption: fullText, firstComment: null },
     linkUrl: ctaUrl,
-    tours,
+    tours: input.tours,
     aliasesByTourId: {},
     catalogVersion: 0,
-    today: date,
-  }
-  const factCheck = deps.checkFacts(factInput)
-  if (factCheck.verdict !== 'pass') {
-    return { ok: false, reason: `fact_check_${factCheck.verdict}` }
-  }
+    today: input.date,
+    ...(input.lockedTourId !== undefined ? { imageTourId: tour.id } : {}),
+  })
+  if (factCheck.verdict !== 'pass') return { ok: false, reason: factReason(factCheck) }
 
   // 6. Outbound claims scan
   const claims = deps.scanOutboundClaims(fullText)

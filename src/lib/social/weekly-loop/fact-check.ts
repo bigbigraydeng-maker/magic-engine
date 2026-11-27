@@ -24,6 +24,7 @@ export type FactItemKind =
   | 'tour_not_sellable'
   | 'ambiguous_tour_name'
   | 'ambiguous_tour_link'
+  | 'image_tour_mismatch'
   | 'check_error'
 
 export interface FactItem {
@@ -41,6 +42,8 @@ export interface FactCheckInput {
   aliasesByTourId: Record<string, string[]>
   catalogVersion: number
   today: string
+  /** Tour the picture was made for. When set, caption and link must name this tour. */
+  imageTourId?: string | null
 }
 
 export interface FactCheckResult {
@@ -586,6 +589,57 @@ function errorResult(input: FactCheckInput, err: unknown): FactCheckResult {
   }
 }
 
+function toursNamedIn(caption: string, tours: PublishedTourFact[]): PublishedTourFact[] {
+  return tours.filter((tour) => {
+    if (containsWholePhrase(caption, tour.name)) return true
+    return isNonEmptyString(tour.title) && containsWholePhrase(caption, tour.title)
+  })
+}
+
+function claimItemsFor(input: FactCheckInput, texts: SourcedText[], linkTarget: PublishedTourFact | null): FactItem[] {
+  if (input.imageTourId === undefined) return collectClaimItems(texts, linkTarget, input.today)
+  const overlay = texts.filter((row) => row.source === 'overlay')
+  const rest = texts.filter((row) => row.source !== 'overlay')
+  return [
+    ...collectClaimItems(overlay, imageTourOf(input), input.today),
+    ...collectClaimItems(rest, linkTarget, input.today),
+  ]
+}
+
+function imageTourOf(input: FactCheckInput): PublishedTourFact | null {
+  const imageId = typeof input.imageTourId === 'string' ? input.imageTourId.trim() : ''
+  return input.tours.find((tour) => tour.id === imageId) ?? null
+}
+
+function otherSellableNamedIn(text: string, imageId: string, input: FactCheckInput): PublishedTourFact[] {
+  return input.tours.filter((tour) => {
+    if (tour.id === imageId || !tour.isActive || tour.soldOut) return false
+    if (containsWholePhrase(text, tour.name)) return true
+    if (isNonEmptyString(tour.title) && containsWholePhrase(text, tour.title)) return true
+    const aliases = input.aliasesByTourId[tour.id]
+    return Array.isArray(aliases) && aliases.some((alias) => isNonEmptyString(alias) && containsWholePhrase(text, alias))
+  })
+}
+
+function imageTourItems(input: FactCheckInput, linkTarget: PublishedTourFact | null): FactItem[] {
+  if (input.imageTourId === undefined) return []
+  const imageTour = imageTourOf(input)
+  const named = toursNamedIn(input.texts.caption, input.tours)
+  const otherOnImage = imageTour ? otherSellableNamedIn(input.texts.overlay ?? '', imageTour.id, input) : []
+  const sameBody = imageTour !== null && named.length === 1 && named[0]?.id === imageTour.id
+  const sameLink = imageTour !== null && linkTarget?.id === imageTour.id
+  if (sameBody && sameLink && otherOnImage.length === 0) return []
+  const foreign = otherOnImage[0]?.name ?? ''
+  const claim = foreign || (input.texts.overlay ?? '').trim() || input.texts.caption.trim()
+  return [{
+    kind: 'image_tour_mismatch',
+    claim: claim.slice(0, 80) || 'image tour unreadable',
+    source: foreign ? 'overlay' : 'caption',
+    outcome: 'FAIL',
+    expected: imageTour?.name ?? null,
+  }]
+}
+
 // ---------------------------------------------------------------------------
 // Public entry point
 // ---------------------------------------------------------------------------
@@ -609,7 +663,8 @@ export function checkFacts(input: FactCheckInput): FactCheckResult {
       if (notSellable !== null) items.push(notSellable)
     }
 
-    items.push(...collectClaimItems(texts, target, input.today))
+    items.push(...claimItemsFor(input, texts, target))
+    items.push(...imageTourItems(input, target))
 
     return assembleResult(input, target, items)
   } catch (err) {

@@ -7,7 +7,7 @@
  * 所以要团队成员拿原图对一遍、签字，海报才可能配真实价格（发布时还会按原图当前来源再判）。
  */
 import { useState } from 'react'
-import { readPosterLineage } from '@/lib/assets/provenance'
+import { isPosterSigned, readPosterLineage } from '@/lib/assets/provenance'
 
 interface PosterAssetLike {
   id: string
@@ -32,7 +32,7 @@ export function posterSourceAssetId(asset: Pick<PosterAssetLike, 'vision_metadat
 /** 缩略图上的徽章：签过字 = 绿，没签 = 琥珀。 */
 export function PosterBadge({ asset }: { asset: PosterAssetLike }) {
   if (!isPosterAsset(asset)) return null
-  const signed = Boolean(asset.verified_by && asset.verified_at)
+  const signed = isPosterSigned(asset)
   const cls = signed ? 'bg-emerald-900/70 text-emerald-300' : 'bg-amber-900/70 text-amber-300'
   return (
     <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${cls}`}>
@@ -56,7 +56,7 @@ export function PosterReviewPanel({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   if (!isPosterAsset(asset)) return null
-  const signed = Boolean(asset.verified_by && asset.verified_at)
+  const signed = isPosterSigned(asset)
 
   async function send(action: 'confirm_poster' | 'revoke_poster') {
     setSaving(true)

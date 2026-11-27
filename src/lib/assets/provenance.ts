@@ -169,12 +169,11 @@ export interface AssetBackingInput {
   vision_metadata: unknown
 }
 
-/** 团队签过字：verified_by 非空且 verified_at 是合法时间。 */
+/** A person signed. An automated id such as system:still-review is a record, not this signature. */
 export function isPosterSigned(asset: Pick<AssetBackingInput, 'verified_by' | 'verified_at'>): boolean {
-  return (
-    typeof asset.verified_by === 'string' && asset.verified_by.trim().length > 0 &&
-    typeof asset.verified_at === 'string' && !Number.isNaN(Date.parse(asset.verified_at))
-  )
+  const who = typeof asset.verified_by === 'string' ? asset.verified_by.trim() : ''
+  if (who.length === 0 || who.startsWith('system:')) return false
+  return typeof asset.verified_at === 'string' && !Number.isNaN(Date.parse(asset.verified_at))
 }
 
 /**

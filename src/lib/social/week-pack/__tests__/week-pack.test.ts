@@ -120,6 +120,7 @@ function videoOnly(clientId: string): WeekPackManifest {
     assembled_at: '2026-11-06T00:00:00.000Z',
     story: { read_state: 'ok', pack_id: null, title: null, state: null, content_hash: null, items: [] },
     posts: { connected: false, label: '尚未接入' },
+    still_reviews: { read_state: 'ok', items: [] },
     reels: {
       read_state: 'ok', truncated: false,
       items: [{
@@ -463,10 +464,37 @@ describe('promote guard and page copy', () => {
     const visible = [page.headline, page.posts_line, page.cadence_line, page.card?.display_scope, ...page.lines, ...describeManifest(manifest)].join('\n')
     expect(visible).toContain('尚未接入')
     expect(visible).not.toMatch(/[{}[\]]|核对码|fingerprint|hash/i)
+    const reviewed = sample({
+      still_reviews: {
+        read_state: 'ok',
+        items: [
+          { slot_date: '2026-11-16', role: 'story', verdict: 'pass', reviewer: 'system:still-review', reasons: [] },
+          { slot_date: '2026-11-18', role: 'post', verdict: 'fail', reviewer: 'system:still-review', reasons: ['有水印或其他品牌'] },
+        ],
+      },
+    })
+    const reviewText = describeManifest(reviewed).join('\n')
+    expect(reviewText).toContain('2026-11-16 的Story静图已通过，审片人 静图审片。')
+    expect(reviewText).toContain('2026-11-18 的图文静图没有通过，没有拿去用。原因：有水印或其他品牌。')
+    expect(manifestDigest(reviewed)).toBe(manifestDigest(manifest))
+    const unread = describeManifest(sample({ still_reviews: { read_state: 'unread', items: [] } })).join('\n')
+    expect(unread).toContain('静图审片结果读不到，没有当成已经通过。')
+    expect(unread).not.toMatch(/[{}[\]]|核对码|fingerprint|hash/i)
     expect(displayScope(built.facts.scope)).not.toContain(built.digest)
     expect(built.facts.scope.length).toBeLessThanOrEqual(180)
   })
 })
+
+function looseChain(rows: unknown[]) {
+  const chain = {
+    select: () => chain,
+    eq: () => chain,
+    in: () => chain,
+    order: () => chain,
+    limit: async () => ({ data: rows, error: null }),
+  }
+  return chain
+}
 
 describe('load', () => {
   it('reads this client only and reports an unreadable Reel list instead of zero', async () => {
@@ -505,6 +533,26 @@ describe('load', () => {
     expect(manifest.reels.items).toHaveLength(0)
     expect(calls).toContainEqual(['client_id', CLIENT])
     expect(scopeLine(manifest, manifestDigest(manifest))).toContain('Reel 读不到')
+  })
+
+  it('selects this week’s still order before the row limit', async () => {
+    const store = new InMemoryLiteStore()
+    const filters: unknown[][] = []
+    const chain = {
+      select: () => chain,
+      eq: (...args: unknown[]) => { filters.push(args); return chain },
+      in: () => chain,
+      order: () => chain,
+      limit: async () => ({ data: [], error: null }),
+    }
+    await loadWeekPackManifest({
+      ports: { store, adminEmails: { has: () => true }, checkFile: async () => 'OK', sendEvent: async () => {} },
+      db: { from: () => chain } as never,
+      clientId: CLIENT,
+      now: FRIDAY_NZ,
+    })
+    expect(filters).toContainEqual(['brief->>engine', 'still'])
+    expect(filters).toContainEqual(['brief->factory_stills->>week_start', '2026-11-09'])
   })
 
   it('does not drop a platform_draft row from the reel query', async () => {
@@ -576,7 +624,7 @@ describe('load', () => {
 
     const manifest = await loadWeekPackManifest({
       ports: litePorts,
-      db: { from: () => ({ select: () => ({ eq: () => ({ in: () => ({ order: () => ({ limit: async () => ({ data: [], error: null }) }) }) }) }) }) } as never,
+      db: { from: () => looseChain([]) } as never,
       clientId: CLIENT,
       now: FRIDAY_NZ,
     })

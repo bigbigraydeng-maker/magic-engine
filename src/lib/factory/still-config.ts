@@ -5,6 +5,12 @@
 
 export const FACTORY_STILL_COST_ESTIMATE_USD = 0.04
 
+/** Identity stamped on an automated still pass. Not a person, and not a publish grant. */
+export const STILL_REVIEWER_ID = 'system:still-review'
+
+/** Reserved before the image check. The ledger stores the real cost when the model returns one. */
+export const STILL_VISUAL_COST_ESTIMATE_USD = 0.01
+
 export type StillAspect = '9:16' | '4:5'
 export type StillRole = 'story' | 'post'
 

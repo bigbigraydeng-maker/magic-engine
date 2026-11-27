@@ -3,9 +3,6 @@
  * The switch defaults off: nothing here runs unless factory_stills.enabled is true.
  */
 
-import { createHash } from 'node:crypto'
-import type { SupabaseClient } from '@supabase/supabase-js'
-
 import { loadRankableClientAssets, type RankableAssetRow } from '@/lib/factory/client-asset-pool'
 import type { ComposeTourPosterResult } from '@/lib/social/image-post-poster'
 import { getActiveBrief } from '@/lib/content/brief-injector'
@@ -15,10 +12,19 @@ import { isoDate, nzCalendar, targetWeek } from '@/lib/social/week-pack/cadence'
 import type { WeekWindow } from '@/lib/social/image-post-week'
 
 import { loadFactoryStills, type FactoryStill } from './still-library'
-import { openStillOrder, recordStillSpend, type StillOrder } from './still-order'
+import {
+  loadHandledStillSlots,
+  loadOpenPassStills,
+  openStillOrder,
+  recordStillSpend,
+  type HandledStillSlot,
+  type OpenPassStill,
+  type StillOrder,
+} from './still-order'
 import { planStillSlots, roomForAnother, type StillSlot } from './still-plan'
 import { FACTORY_STILL_COST_ESTIMATE_USD, readFactoryStillConfig } from './still-config'
 import { composeFactoryStill } from './still-compose'
+import { acceptFactoryStill, noteFailedStill, restampPassedStill, withdrawUnstampedPass, type StillAcceptDeps } from './still-accept'
 
 export interface StillProduceReceipt {
   drafted: number
@@ -28,9 +34,7 @@ export interface StillProduceReceipt {
   note: string
 }
 
-export interface StillProduceDeps {
-  supabase: SupabaseClient
-  now?: () => Date
+export interface StillProduceDeps extends StillAcceptDeps {
   compose?: (input: {
     clientId: string
     date: string
@@ -39,7 +43,6 @@ export interface StillProduceDeps {
     website: string | null
     aspect: StillSlot['aspect']
   }) => Promise<ComposeTourPosterResult>
-  hashUrl?: (url: string) => Promise<string | null>
 }
 
 export async function produceFactoryStills(
@@ -71,15 +74,100 @@ async function fillSlots(
   cap: number,
   deps: StillProduceDeps,
 ): Promise<StillProduceReceipt> {
-  const have = await loadFactoryStills(deps.supabase, clientId)
-  if (have === 'unreadable') return fail('factory_stills_unreadable', '已有静图读不到，为避免重复没有再生成。')
-  const missing = slots.filter((slot) => !have.some((still) => sameSlot(still, slot)))
-  if (missing.length === 0) {
+  const state = await loadSlotState(deps.supabase, clientId, week.weekStart)
+  if (typeof state === 'string') return fail(state, skipNote(state))
+  const { repairs, fresh } = splitMissing(slots, state)
+  if (repairs.length === 0 && fresh.length === 0) {
     return { drafted: 0, skipped: 'stills_already_made', error: null, spentUsd: 0, note: '这一周的静图成片已经有了。' }
   }
   const order = await openStillOrder(deps.supabase, clientId, week, cap, (deps.now ?? (() => new Date()))())
   if (typeof order === 'string') return fail(order, skipNote(order))
-  return makeMissing(clientId, missing, order, cap, deps)
+  const fixed = await repairPasses(clientId, repairs, order, deps)
+  if (fixed.stopped) return { drafted: fixed.drafted, skipped: fixed.stopped, error: null, spentUsd: 0, note: skipNote(fixed.stopped) }
+  if (fresh.length === 0) return repairReceipt(fixed.drafted)
+  const made = await makeMissing(clientId, fresh, order, cap, deps)
+  return { ...made, drafted: made.drafted + fixed.drafted }
+}
+
+interface PassRepair {
+  slot: StillSlot
+  pass: OpenPassStill
+}
+
+async function loadSlotState(
+  supabase: StillProduceDeps['supabase'],
+  clientId: string,
+  weekStart: string,
+): Promise<{ have: FactoryStill[]; handled: HandledStillSlot[]; open: OpenPassStill[] } | 'factory_stills_unreadable' | 'order_unreadable'> {
+  const have = await loadFactoryStills(supabase, clientId)
+  if (have === 'unreadable') return 'factory_stills_unreadable'
+  const handled = await loadHandledStillSlots(supabase, clientId, weekStart)
+  if (handled === 'unreadable') return 'order_unreadable'
+  const open = await loadOpenPassStills(supabase, clientId, weekStart)
+  if (open === 'unreadable') return 'order_unreadable'
+  return { have, handled, open }
+}
+
+function splitMissing(
+  slots: StillSlot[],
+  state: { have: FactoryStill[]; handled: HandledStillSlot[]; open: OpenPassStill[] },
+): { repairs: PassRepair[]; fresh: StillSlot[] } {
+  const missing = slots.filter((slot) => !slotTaken(state.have, state.handled, slot))
+  const repairs = missing.flatMap((slot) => {
+    const pass = state.open.find((row) => row.role === slot.role && row.aspect === slot.aspect && row.slotDate === slot.date)
+    return pass ? [{ slot, pass }] : []
+  })
+  const fresh = missing.filter((slot) => !repairs.some((job) => job.slot === slot))
+  return { repairs, fresh }
+}
+
+async function repairPasses(
+  clientId: string,
+  jobs: PassRepair[],
+  order: StillOrder,
+  deps: StillProduceDeps,
+): Promise<{ drafted: number; stopped: string | null }> {
+  let drafted = 0
+  for (const job of jobs) {
+    const result = await repairOne(clientId, job, order, deps)
+    if (result === 'stamped') drafted += 1
+    if (result === 'unrecorded') return { drafted, stopped: 'still_review_unrecorded' }
+  }
+  return { drafted, stopped: null }
+}
+
+async function repairOne(
+  clientId: string,
+  job: PassRepair,
+  order: StillOrder,
+  deps: StillProduceDeps,
+): Promise<'stamped' | 'unusable' | 'unrecorded'> {
+  const tour = await publishedTour(deps.supabase, clientId, job.slot.date, job.pass.tourId)
+  if (!tour) return withdrawUnstampedPass(deps.supabase, order.id, job.slot)
+  const brief = await getActiveBrief(clientId).catch(() => null)
+  const website = typeof brief?.website === 'string' ? brief.website : null
+  return restampPassedStill(clientId, job.slot, order, job.pass.assetId, tour, website, deps)
+}
+
+async function publishedTour(
+  supabase: StillProduceDeps['supabase'],
+  clientId: string,
+  date: string,
+  tourId: string | null,
+): Promise<PublishedTourFact | null> {
+  if (!tourId) return null
+  try {
+    const read = await loadPublishedTourFacts(supabase, clientId, date)
+    if (!read.published) return null
+    return read.tours.find((tour) => tour.id === tourId) ?? null
+  } catch {
+    return null
+  }
+}
+
+function repairReceipt(drafted: number): StillProduceReceipt {
+  if (drafted > 0) return { drafted, skipped: null, error: null, spentUsd: 0, note: `静图标记补上 ${drafted} 张。` }
+  return { drafted: 0, skipped: null, error: null, spentUsd: 0, note: '静图标记补不上，没有当成通过。' }
 }
 
 async function makeMissing(
@@ -103,7 +191,7 @@ async function makeMissing(
   let stopped: string | null = null
   for (const slot of slots) {
     if (!roomForAnother(spent, cap)) { stopped = 'weekly_cap_reached'; break }
-    const made = await makeOne(clientId, slot, tour, asset, website, order, deps)
+    const made = await makeOne(clientId, slot, tour, asset, website, order, cap, deps)
     if (made.spent !== null) spent = made.spent
     if (made.ok) drafted += 1
     if (made.stopped) { stopped = made.stopped; break }
@@ -113,7 +201,7 @@ async function makeMissing(
     skipped: stopped,
     error: null,
     spentUsd: spent,
-    note: stopped ? skipNote(stopped) : `静图成片新生成 ${drafted} 张。`,
+    note: resultNote(drafted, stopped),
   }
 }
 
@@ -124,6 +212,7 @@ async function makeOne(
   asset: RankableAssetRow,
   website: string | null,
   order: StillOrder,
+  cap: number,
   deps: StillProduceDeps,
 ): Promise<{ ok: boolean; spent: number | null; stopped: string | null }> {
   const compose = deps.compose ?? ((input) => composeFactoryStill(deps.supabase, input))
@@ -133,58 +222,32 @@ async function makeOne(
   const spent = await recordStillSpend(deps.supabase, order, billed, `${slot.role}-${slot.date}`)
   if (spent === 'ledger_failed') return { ok: false, spent: null, stopped: 'ledger_failed' }
   order.spentUsd = spent
-  if (unknownBill) return { ok: false, spent, stopped: 'provider_unknown_billing' }
-  if (!result.ok) return { ok: false, spent, stopped: null }
-  const stamped = await stampStill(deps, clientId, result.assetId, slot, order.id, website, tour.name)
-  return { ok: stamped, spent, stopped: stamped ? null : 'still_stamp_failed' }
+  if (unknownBill || !result.ok) {
+    const blocked = billed > 0
+      ? await markChargedMiss(deps, clientId, slot, tour, order, result, unknownBill)
+      : null
+    if (blocked) return { ok: false, spent, stopped: blocked }
+    if (unknownBill) return { ok: false, spent, stopped: 'provider_unknown_billing' }
+    return { ok: false, spent, stopped: null }
+  }
+  return acceptFactoryStill(clientId, slot, tour, website, result.assetId, order, cap, deps)
 }
 
-async function stampStill(
+async function markChargedMiss(
   deps: StillProduceDeps,
   clientId: string,
-  assetId: string,
   slot: StillSlot,
-  workOrderId: string,
-  website: string | null,
-  tourName: string,
-): Promise<boolean> {
-  const { data, error } = await deps.supabase
-    .from('client_assets')
-    .select('storage_url, vision_metadata')
-    .eq('id', assetId)
-    .eq('client_id', clientId)
-    .limit(1)
-  if (error) return false
-  const row = (data ?? [])[0] as { storage_url?: unknown; vision_metadata?: unknown } | undefined
-  const url = typeof row?.storage_url === 'string' ? row.storage_url : ''
-  const hash = await (deps.hashUrl ?? sha256OfHttps)(url)
-  const text = tourName.trim()
-  const prior = record(row?.vision_metadata) ?? {}
-  const { error: updErr } = await deps.supabase.from('client_assets').update({
-    vision_metadata: {
-      ...prior,
-      kind: 'factory_still',
-      factory_still: {
-        work_order_id: workOrderId,
-        aspect: slot.aspect,
-        role: slot.role,
-        slot_date: slot.date,
-        sha256: hash,
-        text_line: text.length >= 1 && text.length <= 200 ? text : null,
-        source_ref: website !== null && website.startsWith('https://') ? website : null,
-      },
-    },
-  }).eq('id', assetId).eq('client_id', clientId)
-  return !updErr
+  tour: PublishedTourFact,
+  order: StillOrder,
+  result: ComposeTourPosterResult,
+  unknownBill: boolean,
+): Promise<string | null> {
+  const assetId = result.ok ? null : (typeof result.receipt.poster_asset_id === 'string' ? result.receipt.poster_asset_id : null)
+  const reason = unknownBill || result.ok ? '改图没有回报价，已按估价记账' : result.reason
+  const noted = await noteFailedStill(deps, clientId, slot, order, assetId, tour, [reason], { redlineHits: [], factVerdict: 'unreadable' }, null)
+  return noted === 'unrecorded' ? 'still_review_unrecorded' : null
 }
 
-function sha256OfHttps(url: string): Promise<string | null> {
-  if (!url.startsWith('https://')) return Promise.resolve(null)
-  return fetch(url).then(async (res) => {
-    if (!res.ok) return null
-    return createHash('sha256').update(Buffer.from(await res.arrayBuffer())).digest('hex')
-  }).catch(() => null)
-}
 function unknownProviderBill(result: ComposeTourPosterResult): boolean {
   if (result.ok || !result.reason.includes('edit_failed_maybe_billed')) return false
   const requestId = result.receipt.provider_request_id
@@ -199,6 +262,11 @@ function sameSlot(still: FactoryStill, slot: StillSlot): boolean {
   return still.role === slot.role && still.aspect === slot.aspect && still.slotDate === slot.date
 }
 
+function slotTaken(have: FactoryStill[], handled: HandledStillSlot[], slot: StillSlot): boolean {
+  if (have.some((still) => sameSlot(still, slot))) return true
+  return handled.some((row) => row.role === slot.role && row.aspect === slot.aspect && row.slotDate === slot.date)
+}
+
 function fail(skipped: string, note: string): StillProduceReceipt {
   return { drafted: 0, skipped, error: null, spentUsd: 0, note }
 }
@@ -209,6 +277,7 @@ function skipNote(code: string): string {
     ledger_failed: '静图花费记不进账，停下了，避免接着花。',
     provider_unknown_billing: '改图没有回报价，已按估价记账并停下，避免接着花。',
     still_stamp_failed: '静图成片没有标上工单血统，停下了。',
+    still_review_unrecorded: '静图审片结果写不进工单，停下了，没有把它当成可用。',
     daily_order_cap: '今天的工单已经到了每天上限，没有再开工单。',
     no_factory_goal: '没有进行中的目标，没有开工单。',
     no_master_brief: '没有在用的简报，没有开工单。',
@@ -220,6 +289,8 @@ function skipNote(code: string): string {
   return notes[code] ?? code
 }
 
-function record(raw: unknown): Record<string, unknown> | null {
-  return typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? raw as Record<string, unknown> : null
+function resultNote(drafted: number, stopped: string | null): string {
+  if (stopped) return skipNote(stopped)
+  if (drafted === 0) return '静图没有通过审片，没有拿去用。'
+  return `静图成片新生成 ${drafted} 张。`
 }

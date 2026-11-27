@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { PublishedTourFact } from '@/lib/tour-catalog/publish-contract'
 import type { RankableAssetRow } from '@/lib/factory/client-asset-pool'
-import type { FactCheckResult, FactCheckInput } from '@/lib/social/weekly-loop/fact-check'
+import { checkFacts, type FactCheckResult, type FactCheckInput } from '@/lib/social/weekly-loop/fact-check'
 import type { ClaimHit } from '@/lib/social/outbound-claims'
 import {
   draftImagePost,
@@ -266,6 +266,46 @@ describe('draftImagePost — composePoster', () => {
     const result = await draftImagePost(makeInput(), deps)
     expect(result).toEqual({ ok: false, reason: 'fact_check_fail' })
     expect(called).toBe(0)
+  })
+})
+
+describe('draftImagePost — still tour is the only tour', () => {
+  const harbour = tour('harbour-walk', { id: 'harbour', name: 'Harbour Walk', destination: 'harbour', highlights: ['bridge'] })
+  const mountain = tour('mountain-loop', { id: 'mountain', name: 'Mountain Loop', destination: 'mountain', highlights: ['ridge'] })
+  const input = makeInput({
+    tours: [harbour, mountain],
+    assets: [asset('still-1', '2027-01-01.jpg')],
+    lockedTourId: 'harbour',
+    ctaBaseUrl: 'https://example.com/tours',
+  })
+
+  it('writes copy and the link for the pictured tour when another tour is also for sale', async () => {
+    const seen: { tour: PublishedTourFact | null } = { tour: null }
+    const result = await draftImagePost(input, makeDeps({
+      generateCopy: async (picked) => {
+        seen.tour = picked
+        return { hook: picked.name, body: `${picked.destination}. ${picked.highlights[0]}`, cta: 'See the itinerary' }
+      },
+      checkFacts,
+    }))
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(seen.tour).toMatchObject({ id: 'harbour', destination: 'harbour', highlights: ['bridge'] })
+    expect(result.draft.cta_url).toBe('https://example.com/tours/harbour-walk')
+    expect(result.tourSlug).toBe('harbour-walk')
+  })
+
+  it('drops the draft when the caption names the other tour', async () => {
+    const result = await draftImagePost(input, makeDeps({
+      generateCopy: async () => ({ hook: 'Mountain Loop', body: 'Come on the Mountain Loop.', cta: 'Go' }),
+      checkFacts,
+    }))
+    expect(result).toEqual({ ok: false, reason: 'image_tour_mismatch' })
+  })
+
+  it('drops the draft when the still tour id is not in the catalog', async () => {
+    const result = await draftImagePost({ ...input, lockedTourId: 'missing' }, makeDeps({ checkFacts }))
+    expect(result).toEqual({ ok: false, reason: 'still_tour_unreadable' })
   })
 })
 

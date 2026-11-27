@@ -481,3 +481,87 @@ describe('checkFacts', () => {
     expect(res.verdict).toBe('fail')
   })
 })
+
+describe('checkFacts — picture tour must match the caption and the link', () => {
+  const harbour = tour({ id: 'harbour', slug: 'harbour-walk', name: 'Harbour Walk', destination: 'harbour', highlights: ['bridge'] })
+  const mountain = tour({ id: 'mountain', slug: 'mountain-loop', name: 'Mountain Loop', destination: 'mountain', highlights: ['ridge'] })
+  const tours = [harbour, mountain]
+  const base = {
+    texts: { overlay: null, firstComment: null, caption: 'Harbour Walk along the water.' },
+    tours,
+    aliasesByTourId: {},
+    catalogVersion: 1,
+    today: '2026-11-04',
+  }
+
+  it('passes when the picture, the caption, and the link are the same tour', () => {
+    const res = checkFacts({ ...base, linkUrl: 'https://example.com/tours/harbour-walk', imageTourId: 'harbour' })
+    expect(res.verdict).toBe('pass')
+    expect(res.targetTourId).toBe('harbour')
+    expect(find(res, 'image_tour_mismatch')).toEqual([])
+  })
+
+  it('fails a mismatched link and does not switch the draft onto the picture tour', () => {
+    const res = checkFacts({ ...base, linkUrl: 'https://example.com/tours/mountain-loop', imageTourId: 'harbour' })
+    expect(res.verdict).toBe('fail')
+    expect(res.targetTourId).toBe('mountain')
+    expect(find(res, 'image_tour_mismatch')[0]?.outcome).toBe('FAIL')
+  })
+
+  it('fails when the caption names a different tour', () => {
+    const res = checkFacts({
+      ...base,
+      texts: { overlay: null, firstComment: null, caption: 'Come on the Mountain Loop.' },
+      linkUrl: 'https://example.com/tours/harbour-walk',
+      imageTourId: 'harbour',
+    })
+    expect(res.verdict).toBe('fail')
+    expect(res.targetTourId).toBe('harbour')
+  })
+
+  it('fails when the picture text names another on-sale tour with the same destination', () => {
+    const bay = tour({ id: 'bay', slug: 'bay-walk', name: 'Bay Walk', destination: 'harbour', displayPriceText: 'NZD $9,999' })
+    const res = checkFacts({
+      ...base,
+      tours: [...tours, bay],
+      texts: { overlay: 'Bay Walk', firstComment: null, caption: 'Harbour Walk along the water.' },
+      linkUrl: 'https://example.com/tours/harbour-walk',
+      imageTourId: 'harbour',
+    })
+    expect(res.verdict).toBe('fail')
+    expect(res.targetTourId).toBe('harbour')
+    expect(find(res, 'image_tour_mismatch')[0]).toMatchObject({ source: 'overlay', outcome: 'FAIL', claim: 'Bay Walk' })
+  })
+
+  it('checks a price and a date on the picture against the recorded tour', () => {
+    const priced = tour({
+      id: 'harbour', slug: 'harbour-walk', name: 'Harbour Walk', destination: 'harbour',
+      displayPriceText: 'NZD $2,450',
+      departures: [{ departOn: '2027-03-25', displayDate: '25 March 2027', status: 'open', priceTextOverride: null }],
+    })
+    const other = tour({
+      id: 'bay', slug: 'bay-walk', name: 'Bay Walk', destination: 'harbour',
+      displayPriceText: 'NZD $9,999',
+      departures: [{ departOn: '2027-08-01', displayDate: '1 August 2027', status: 'open', priceTextOverride: null }],
+    })
+    const shared = { tours: [priced, other], aliasesByTourId: {}, catalogVersion: 1, today: '2026-11-04', linkUrl: 'https://example.com/tours/harbour-walk', imageTourId: 'harbour' }
+    const wrong = checkFacts({
+      ...shared,
+      texts: { overlay: 'NZD $9,999 on 1 August 2027', firstComment: null, caption: 'Harbour Walk along the water.' },
+    })
+    expect(wrong.verdict).toBe('fail')
+    expect(find(wrong, 'money').some((item) => item.outcome === 'FAIL' && item.source === 'overlay')).toBe(true)
+    expect(find(wrong, 'date').some((item) => item.outcome === 'FAIL' && item.source === 'overlay')).toBe(true)
+    const right = checkFacts({
+      ...shared,
+      texts: { overlay: 'Harbour Walk NZD $2,450 departing 25 March 2027', firstComment: null, caption: 'Harbour Walk along the water.' },
+    })
+    expect(right.verdict).toBe('pass')
+  })
+
+  it('fails closed when the picture tour cannot be read', () => {
+    const res = checkFacts({ ...base, linkUrl: 'https://example.com/tours/harbour-walk', imageTourId: '' })
+    expect(res.verdict).toBe('fail')
+    expect(find(res, 'image_tour_mismatch').length).toBe(1)
+  })
+})

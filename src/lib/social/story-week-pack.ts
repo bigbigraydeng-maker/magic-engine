@@ -6,6 +6,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import { loadFactoryStills, storyReady, type FactoryStill } from '@/lib/factory/still-library'
+import { gateReusedStillText, loadStillRedlines } from '@/lib/factory/still-review'
 import { SupabaseLiteStore } from '@/lib/social/story-lite/supabase-store'
 import type { NewLiteItem } from '@/lib/social/story-lite/types'
 import { targetWeek } from '@/lib/social/week-pack/cadence'
@@ -36,21 +37,53 @@ export async function draftStoryWeekPack(
   if (!pageId) return { ...planned, skipped: 'no_story_page', note: '没有可用的主页编号，没有新建周包。' }
   const stills = await loadFactoryStills(supabase, clientId)
   if (stills === 'unreadable') return { ...planned, skipped: 'factory_stills_unreadable', note: '静图成片读不到，没有新建周包。' }
-  const ready = stills.filter(storyReady)
-    .filter((still) => still.slotDate >= week.weekStart && still.slotDate <= week.weekEnd)
-    .sort((a, b) => a.slotDate.localeCompare(b.slotDate))
-    .slice(0, planned.requested ?? 0)
-  if (ready.length === 0) return { ...planned, skipped: 'no_factory_still', note: '没有可用的 9:16 静图成片，没有新建周包。' }
+  const picked = await pickStoryStills(supabase, clientId, stills, week, planned.requested ?? 0)
+  if (!picked.ok) return { ...planned, skipped: picked.skipped, note: picked.note }
   const packId = crypto.randomUUID()
-  const items = ready.map((still) => itemFromStill(still, pageId))
+  const items = picked.stills.map((still) => itemFromStill(still, pageId))
   await new SupabaseLiteStore(supabase).insertPack({ id: packId, client_id: clientId, title, now }, items)
   return {
     ...planned,
     packId,
     drafted: items.length,
-    lines: ready.map((still) => ({ date: still.slotDate, ref: still.id })),
-    note: `Story 草稿 ${items.length} 条，未授权。`,
+    lines: picked.stills.map((still) => ({ date: still.slotDate, ref: still.id })),
+    note: storyNote(items.length, picked.held),
   }
+}
+
+type ReadyStill = FactoryStill & { sha256: string; textLine: string; sourceRef: string }
+
+async function pickStoryStills(
+  supabase: SupabaseClient,
+  clientId: string,
+  stills: FactoryStill[],
+  week: { weekStart: string; weekEnd: string },
+  requested: number,
+): Promise<{ ok: true; stills: ReadyStill[]; held: number } | { ok: false; skipped: string; note: string }> {
+  const ready = stills.filter(storyReady)
+    .filter((still) => still.slotDate >= week.weekStart && still.slotDate <= week.weekEnd)
+    .sort((a, b) => a.slotDate.localeCompare(b.slotDate))
+    .slice(0, requested)
+  if (ready.length === 0) return { ok: false, skipped: 'no_factory_still', note: '没有可用的 9:16 静图成片，没有新建周包。' }
+  const redlines = await loadStillRedlines(supabase, clientId)
+  if (!redlines) return { ok: false, skipped: 'redline_unreadable', note: '当前不能说的话读不到，没有新建周包。' }
+  const kept = ready.filter((still) => gateReusedStillText(still.overlayLines, [still.textLine], redlines.phrases, redlines.topics) === 'ok')
+  if (kept.length === 0) return blockedStories(ready, redlines)
+  return { ok: true, stills: kept, held: ready.length - kept.length }
+}
+
+function blockedStories(
+  ready: ReadyStill[],
+  redlines: { phrases: string[]; topics: string[] },
+): { ok: false; skipped: string; note: string } {
+  const hit = ready.some((still) => gateReusedStillText(still.overlayLines, [still.textLine], redlines.phrases, redlines.topics) === 'brand_redline_hit')
+  if (hit) return { ok: false, skipped: 'brand_redline_hit', note: '画面上的字碰到当前不能说的话，没有新建周包。' }
+  return { ok: false, skipped: 'overlay_unreadable', note: '画面上的字读不到，没有当成通过，没有新建周包。' }
+}
+
+function storyNote(drafted: number, held: number): string {
+  if (held === 0) return `Story 草稿 ${drafted} 条，未授权。`
+  return `Story 草稿 ${drafted} 条，未授权。另有 ${held} 张按当前文字要求没有放进去。`
 }
 
 function itemFromStill(

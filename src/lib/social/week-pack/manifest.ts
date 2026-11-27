@@ -115,6 +115,7 @@ export function buildManifest(input: {
   assembledAt: string
   story: ManifestStory
   reels: { read_state: 'ok' | 'unread'; truncated: boolean; items: ManifestReel[] }
+  stillReviews?: WeekPackManifest['still_reviews']
 }): WeekPackManifest {
   return {
     client_id: input.clientId.toLowerCase(),
@@ -124,5 +125,6 @@ export function buildManifest(input: {
     story: input.story,
     posts: { connected: false, label: '尚未接入' },
     reels: input.reels,
+    still_reviews: input.stillReviews ?? { read_state: 'ok', items: [] },
   }
 }

@@ -78,6 +78,7 @@ const LABEL: Record<FactItem['kind'], string> = {
   tour_not_sellable: '团已不在售',
   ambiguous_tour_name: '团名对不上唯一的团',
   ambiguous_tour_link: '链接对不上唯一的团',
+  image_tour_mismatch: '线路对不上',
   check_error: '核对出错',
 }
 

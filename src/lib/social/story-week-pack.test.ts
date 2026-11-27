@@ -26,6 +26,42 @@ describe('draftStoryWeekPack', () => {
     expect(inserts).toEqual(['story_packs', 'story_items'])
   })
 
+  it('does not use a still that has no review pass', async () => {
+    const inserts: string[] = []
+    const still = readyStill('2026-11-16')
+    delete (still.vision_metadata.factory_still as { review?: unknown }).review
+    const receipt = await draftStoryWeekPack('c1', { social_week: { story_per_week: 1 } }, NOW, fake(inserts, '12345', [still]))
+    expect(receipt).toMatchObject({ drafted: 0, skipped: 'no_factory_still' })
+    expect(inserts).toEqual([])
+  })
+
+  it('does not pack a still when printed picture text hits a later red line', async () => {
+    const inserts: string[] = []
+    const still = readyStill('2026-11-16')
+    still.vision_metadata.poster = { text_lines: ['Quiet sale'] }
+    const receipt = await draftStoryWeekPack('c1', { social_week: { story_per_week: 1 } }, NOW, fake(inserts, '1234567890', [still], ['Quiet sale']))
+    expect(receipt).toMatchObject({ drafted: 0, skipped: 'brand_redline_hit' })
+    expect(receipt.note).toContain('没有新建周包')
+    expect(inserts).toEqual([])
+  })
+
+  it('packs the still when the current red line is not on the picture', async () => {
+    const inserts: string[] = []
+    const receipt = await draftStoryWeekPack('c1', { social_week: { story_per_week: 1 } }, NOW, fake(inserts, '1234567890', [readyStill('2026-11-16')], ['balloon']))
+    expect(receipt.drafted).toBe(1)
+    expect(receipt.skipped).toBeNull()
+    expect(inserts).toEqual(['story_packs', 'story_items'])
+  })
+
+  it('does not pack a still when the printed picture text cannot be read', async () => {
+    const inserts: string[] = []
+    const still = readyStill('2026-11-16')
+    delete (still.vision_metadata as { poster?: unknown }).poster
+    const receipt = await draftStoryWeekPack('c1', { social_week: { story_per_week: 1 } }, NOW, fake(inserts, '1234567890', [still]))
+    expect(receipt).toMatchObject({ drafted: 0, skipped: 'overlay_unreadable' })
+    expect(inserts).toEqual([])
+  })
+
   it('does not insert when the page id is not a number', async () => {
     const inserts: string[] = []
     const receipt = await draftStoryWeekPack('c1', { social_week: { story_per_week: 1 } }, NOW, fake(inserts, 'page', [readyStill('2026-11-16')]))
@@ -40,28 +76,32 @@ function readyStill(date: string) {
     storage_url: `https://cdn.example/${date}.jpg`,
     vision_metadata: {
       kind: 'factory_still',
+      poster: { text_lines: ['Harbour Walk'] },
       factory_still: {
         aspect: '9:16', role: 'story', slot_date: date, sha256: SHA,
         text_line: 'Harbour Walk', source_ref: 'https://example.com/tours', work_order_id: 'wo-1',
+        review: { verdict: 'pass', reviewer: 'system:still-review' },
       },
     },
   }
 }
 
-function fake(inserts: string[], pageId: string, stills: unknown[]) {
+function fake(inserts: string[], pageId: string, stills: unknown[], phrases: string[] = []) {
   const packs: Array<{ id: string; title: string }> = []
   const items: Array<{ item_id: string; slot_at: string; pack_id: string }> = []
   const from = (table: string) => {
     const chain = {
       select: () => chain,
       eq: () => chain,
+      or: () => chain,
       is: () => chain,
       order: () => chain,
       limit: () => Promise.resolve({
-        data: table === 'clients' ? [{ facebook_page_id: pageId }]
+        data: table === 'clients' ? [{ facebook_page_id: pageId, brand_redline_phrases: phrases }]
           : table === 'story_packs' ? packs
           : table === 'client_assets' ? stills
           : table === 'story_items' ? items
+          : table === 'master_briefs' ? [{ excluded_topics: [] }]
           : [],
         error: null,
       }),

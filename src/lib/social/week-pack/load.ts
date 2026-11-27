@@ -6,6 +6,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 
+import { readStillReviews } from '@/lib/factory/still-review'
 import { toPublishedView } from '@/lib/factory/publish/publish-display'
 import { buildReelPostCaption } from '@/lib/social/reel-publishing'
 import { computeItemFingerprint, computePackContentHash } from '@/lib/social/story-lite/fingerprint'
@@ -49,9 +50,10 @@ export async function loadWeekPackManifest(input: {
   now: Date
 }): Promise<WeekPackManifest> {
   const week = targetWeek(input.now)
-  const [story, reels] = await Promise.all([
+  const [story, reels, stillReviews] = await Promise.all([
     loadStory(input.ports, input.clientId, input.now, week.weekStart, week.weekEnd),
     loadReels(input.db, input.clientId, week.weekStart, week.weekEnd),
+    loadStillReviews(input.db, input.clientId, week.weekStart),
   ])
   return buildManifest({
     clientId: input.clientId,
@@ -60,6 +62,7 @@ export async function loadWeekPackManifest(input: {
     assembledAt: input.now.toISOString(),
     story,
     reels,
+    stillReviews,
   })
 }
 
@@ -126,6 +129,37 @@ async function loadReels(
     return parsed ? [parsed] : []
   })
   return { read_state: 'ok', truncated: rows.length > REEL_CAP, items: selectReels(inputs, weekStart, weekEnd) }
+}
+
+async function loadStillReviews(
+  db: SupabaseClient,
+  clientId: string,
+  weekStart: string,
+): Promise<WeekPackManifest['still_reviews']> {
+  const { data, error } = await db
+    .from('content_work_orders')
+    .select('id, status, brief, output')
+    .eq('client_id', clientId)
+    .eq('status', 'closed')
+    .eq('brief->>engine', 'still')
+    .eq('brief->factory_stills->>week_start', weekStart)
+    .order('created_at', { ascending: false })
+    .limit(8)
+  if (error) return { read_state: 'unread', items: [] }
+  const items = (Array.isArray(data) ? data : []).flatMap((row) => stillsForWeek(row, weekStart))
+  return { read_state: 'ok', items: items.slice(0, 12) }
+}
+
+function stillsForWeek(row: unknown, weekStart: string): WeekPackManifest['still_reviews']['items'] {
+  if (!row || typeof row !== 'object') return []
+  const record = row as Record<string, unknown>
+  if (record.status !== 'closed') return []
+  const brief = record.brief
+  if (!brief || typeof brief !== 'object') return []
+  const engine = (brief as { engine?: unknown }).engine
+  const week = (brief as { factory_stills?: { week_start?: unknown } }).factory_stills?.week_start
+  if (engine !== 'still' || week !== weekStart) return []
+  return readStillReviews(record.output)
 }
 
 function toReelInput(row: unknown): ReelInput | null {
