@@ -1,6 +1,6 @@
 /**
  * A still counts as finished only after the copy gate and the image check pass.
- * A miss is not stamped, so the weekly draft cannot use it. The reason stays on the work order.
+ * A miss is not usable. A failed image check is marked on the asset so the same picture is not reviewed again.
  */
 
 import { createHash } from 'node:crypto'
@@ -85,7 +85,11 @@ async function finishVisual(
   const spent = await chargeVisual(deps.supabase, order, visual)
   if (spent === 'ledger_failed') return { ok: false, spent: null, stopped: 'ledger_failed' }
   order.spentUsd = spent
-  if (!visual.pass) return drop(deps, slot, order, assetId, { ...copy, pass: false, reasons: visual.reasons }, null, visual.model)
+  if (!visual.pass) {
+    const marked = await stampFailed(deps, clientId, assetId, loaded.meta, slot, order.id, tour, visual.reasons)
+    if (!marked) return { ok: false, spent, stopped: 'still_stamp_failed' }
+    return drop(deps, slot, order, assetId, { ...copy, pass: false, reasons: visual.reasons }, null, visual.model)
+  }
   const hash = await (deps.hashUrl ?? sha256OfHttps)(loaded.url)
   if (!hash) return drop(deps, slot, order, assetId, failCopy(['文件校验算不出来'], copy.factVerdict), null, visual.model)
   const recorded = await remember(deps, slot, order, assetId, 'pass', ['画面和文字都过了'], copy, visual.model)
@@ -170,6 +174,38 @@ function overlayOf(meta: Record<string, unknown>): string {
   const lines = record(meta.poster)?.text_lines
   if (!Array.isArray(lines)) return ''
   return lines.filter((line): line is string => typeof line === 'string' && line.trim().length > 0).join('\n')
+}
+
+async function stampFailed(
+  deps: StillAcceptDeps,
+  clientId: string,
+  assetId: string,
+  meta: Record<string, unknown>,
+  slot: StillSlot,
+  workOrderId: string,
+  tour: PublishedTourFact,
+  reasons: string[],
+): Promise<boolean> {
+  const tourId = tour.id.trim()
+  const { error } = await deps.supabase.from('client_assets').update({
+    vision_metadata: {
+      ...meta,
+      kind: 'factory_still',
+      factory_still: {
+        work_order_id: workOrderId,
+        aspect: slot.aspect,
+        role: slot.role,
+        slot_date: slot.date,
+        tour_id: tourId.length > 0 ? tourId : null,
+        review: {
+          verdict: 'fail',
+          reviewer: STILL_REVIEWER_ID,
+          reasons: reasons.filter((line) => line.trim().length > 0).slice(0, 4),
+        },
+      },
+    },
+  }).eq('id', assetId).eq('client_id', clientId)
+  return !error
 }
 
 async function stampPassed(

@@ -163,6 +163,34 @@ describe('produceFactoryStills', () => {
     expect(inserts.filter((row) => row.table === 'factory_balance_ledger').map((row) => row.row.amount_usd)).toEqual([-0.038, -0.01])
   })
 
+  it('skips a failed image check on the next run and does not charge again', async () => {
+    const inserts: Array<{ table: string; row: Record<string, unknown> }> = []
+    const db = capSupabase(inserts)
+    const reviewVisual = vi.fn(async () => ({ pass: false, reasons: ['有水印或其他品牌'], costUsd: 0.01, model: 'test-model', billed: true }))
+    const compose = vi.fn(passCompose)
+    const deps = {
+      supabase: db as never,
+      compose,
+      hashUrl: async () => 'ab'.repeat(32),
+      reviewCopy: passCopy,
+      reviewVisual,
+    }
+    const config = { factory_stills: { enabled: true, weekly_cap_usd: 1 }, social_week: { post_per_week: 1 } }
+    const first = await produceFactoryStills('c1', config, WEEK_NOW, deps)
+    expect(first.drafted).toBe(0)
+    expect(reviewVisual).toHaveBeenCalledTimes(1)
+    const charged = inserts.filter((row) => row.table === 'factory_balance_ledger').length
+    expect(charged).toBe(2)
+    const review = (db.assets[0]?.vision_metadata as { factory_still?: { review?: { verdict?: string; reasons?: string[] } } }).factory_still?.review
+    expect(review).toEqual({ verdict: 'fail', reviewer: 'system:still-review', reasons: ['有水印或其他品牌'] })
+    expect(db.assets[0]?.verified_by).toBeNull()
+    const second = await produceFactoryStills('c1', config, WEEK_NOW, deps)
+    expect(second).toMatchObject({ drafted: 0, skipped: 'stills_already_made', spentUsd: 0 })
+    expect(reviewVisual).toHaveBeenCalledTimes(1)
+    expect(compose).toHaveBeenCalledTimes(1)
+    expect(inserts.filter((row) => row.table === 'factory_balance_ledger')).toHaveLength(charged)
+  })
+
   it('does not mark a still usable when the review cannot be saved', async () => {
     const inserts: Array<{ table: string; row: Record<string, unknown> }> = []
     const db = capSupabase(inserts, { failReviewWrite: true })
