@@ -24,14 +24,14 @@
  *
  * 🔴 **Why A auto-merges only for this exact head, and some paths never do.**
  *
- * An A PR arms auto-merge only when Claude Code has signed
- * off on the current head with no unresolved P0/P1, every required check
- * other than this gate is already green, and every review conversation is
- * resolved. A push changes the head and drops both sign-offs. Paths that
- * touch a database schema or migration, a Meta token or credential, or code
- * that creates or changes a Meta campaign, budget, or bid never arm
- * auto-merge: `rayHold: true` disables every level. A missing `rayHold`
- * fails closed for A only.
+ * An A PR arms auto-merge when every required check other than this gate is
+ * already green and every review conversation is resolved. Claude Code and
+ * Codex reviews still run; neither blocks the merge (Ray 2026-11-16). A `p0`
+ * label is a suggestion to look, not a hold. Paths that touch a database
+ * schema or migration, a Meta token or credential, or code that creates or
+ * changes a Meta campaign, budget, or bid never arm auto-merge:
+ * `rayHold: true` disables every level. A missing `rayHold` fails closed
+ * for A only.
  *
  * 🔴 **Why an unrecognised risk is treated as A, not as B.**
  *
@@ -71,91 +71,34 @@ const TIER = {
 }
 
 /**
- * 「这条 PR 是不是 P0」的三态解析。
- *
- * 只有明确的 `false`（或字符串 `'false'`）才算「不是 P0」。`undefined` / `null` /
- * 读不出来的值一律当成 **是** P0 —— 读不到标签不是「这不是 P0」的证据，
- * 失败必须朝严的方向倒。跟 `draft` / `fork` 同一套约定。
- *
- * @param {unknown} value
- * @returns {'yes'|'no'|'unknown'}
- */
-function parseP0(value) {
-  if (value === false || value === 'false') return 'no'
-  if (value === true || value === 'true') return 'yes'
-  // 读不到标签不是「这不是 P0」的证据，所以按 P0 拦住 —— 但要说清是「读不到」，
-  // 不是「标了」。一条谎称「这是 P0」的原因会让人去找一个不存在的标签。
-  return 'unknown'
-}
-
-/**
  * B/C auto-merge.
  *
- * 🔴 **为什么 B/C 不再要任何人签字**（Ray 2026-10-26 拍板「只有 P0 审」）。
- *
- * 旧规则要 Codex 审过当前这次提交。但 Codex 的三个审查工作流在 2026-10-15 被
- * Ray 停用（`disabled_manually`），这一签**永远不会到**—— 于是仓库里每一条 B/C
- * PR 都停在「等 Codex」上，等不到的东西成了默认阻塞。一道永远不会放行的闸不是闸，
- * 是堵。
- *
- * 新规则：B/C 直接开自动合并，**真正的把关交给 GitHub 的必过检查**——
- * `enable` 只是「检查全绿就合」，检查没绿 GitHub 自己不会合。想要人看一眼的那种
- * 改动，在 PR 上打 `p0` 标签：带 `p0` 的必须有 Claude Code 对**当前这次提交**的
- * 签字才开。推了新提交就掉签、自动合并随之关掉。
- *
- * 草稿、fork、`rayHold` 三道在调用方先拦，这里拦不到的东西它们已经拦过。
+ * Codex 不再是输入（2026-10-26：那一签的审查已停，等它会把每条 PR 卡住）。
+ * `p0` 标签和 Claude 签字也不再挡（Ray 2026-11-16）。打开自动合并之后，由
+ * GitHub 等必过检查。草稿、fork、`rayHold` 在调用方先拦。
  *
  * @param {string} risk
- * @param {{p0: 'yes'|'no'|'unknown', claudeSignoff?: {clear?: unknown, reason?: unknown}|null}} input
  * @returns {{pass: boolean, decision: 'enable'|'disable', tier: 'auto'|'signed'|'blocked', reason: string}}
  */
-function decideBcMerge(risk, { p0, claudeSignoff }) {
-  // `!== 'no'` 而不是 `=== 'yes'`：读不到标签不等于「这不是 P0」，失败朝严的方向倒。
-  if (p0 !== 'no') {
-    if (claudeSignoff && claudeSignoff.clear === true) {
-      return {
-        pass: true,
-        decision: MERGE_DECISION.ENABLE_AUTO_MERGE,
-        tier: TIER.AUTO,
-        reason: `${risk} 级 · ${p0 === 'yes' ? '标了 p0' : '读不到 p0 标签，按 P0 处理'}：Claude Code 已签过当前这次提交且没有未解决的 P0/P1，机器检查全绿后自动合并`,
-      }
-    }
-    const detail = reviewDetail(claudeSignoff, 'Claude Code 还没签过当前这次提交')
-    return {
-      pass: false,
-      decision: MERGE_DECISION.DISABLE_AUTO_MERGE,
-      tier: TIER.BLOCKED,
-      reason: `${risk} 级 · ${p0 === 'yes' ? '标了 p0' : '读不到 p0 标签，按 P0 处理'}：${detail}，不开启自动合并`,
-    }
-  }
+function decideBcMerge(risk) {
   return {
     pass: true,
     decision: MERGE_DECISION.ENABLE_AUTO_MERGE,
     tier: TIER.AUTO,
-    reason: `${risk} 级：不是 P0，机器检查全绿后自动合并（要人看一眼就给 PR 打 p0 标签）`,
+    reason: `${risk} 级：机器检查全绿后自动合并（签字和 p0 标签都不挡）`,
   }
 }
 
 /**
- * @param {{clear?: unknown, reason?: unknown}|null|undefined} review
- * @param {string} fallback
- * @returns {string}
- */
-function reviewDetail(review, fallback) {
-  if (review && review.clear === true) return ''
-  if (review && typeof review.reason === 'string' && review.reason !== '') return review.reason
-  return fallback
-}
-
-/**
- * A-level auto-merge. Every flag must be the boolean `true` / `false` we
- * expect; a stringly `"true"` does not arm it. `rayHold` must already have
- * been rejected by the caller when it is `true`.
+ * A-level auto-merge. Checks and conversations must be the boolean `true`.
+ * A stringly `"true"` does not arm it. Sign-off is not an input (Ray
+ * 2026-11-16). `rayHold` must already have been rejected by the caller when
+ * it is `true`; anything other than an explicit `false` still fails closed.
  *
- * @param {{claudeSignoff?: {clear?: unknown, reason?: unknown}|null, requiredChecksGreen?: unknown, conversationsResolved?: unknown, rayHold?: unknown}} input
+ * @param {{requiredChecksGreen?: unknown, conversationsResolved?: unknown, rayHold?: unknown}} input
  * @returns {{pass: boolean, decision: 'enable'|'disable', tier: 'auto'|'signed'|'blocked', reason: string, needsRayMerge: boolean}}
  */
-function decideAMerge({ claudeSignoff, requiredChecksGreen, conversationsResolved, rayHold }) {
+function decideAMerge({ requiredChecksGreen, conversationsResolved, rayHold }) {
   if (rayHold !== false) {
     return {
       pass: false,
@@ -165,24 +108,16 @@ function decideAMerge({ claudeSignoff, requiredChecksGreen, conversationsResolve
       reason: 'A 级：没能确认这批改动是否碰到库表、Meta 凭证或广告花费，不开启自动合并',
     }
   }
-  // 🔴 **A 级的两签改成一签**（Ray 2026-10-26 拍板「只有 P0 审」的配套）。
-  //    原来要 Codex Astra 和 Claude Code 各一签。Codex 的审查工作流 2026-10-15
-  //    被停用，那一签永远不会到 —— 于是 A 级也变成永久阻塞，连「谁都不看一眼」
-  //    都不是，是「谁也合不了」。保留签字这道闸（A 级碰的是安全、鉴权、不可逆
-  //    副作用），但只认那个真的还在审的身份。
-  //    注意 `rayHold`（库表 / Meta 凭证 / 广告花费）仍然一票否决，在调用方先拦。
-  const claudeClear = claudeSignoff?.clear === true
-  if (claudeClear && requiredChecksGreen === true && conversationsResolved === true) {
+  if (requiredChecksGreen === true && conversationsResolved === true) {
     return {
       pass: true,
       decision: MERGE_DECISION.ENABLE_AUTO_MERGE,
       tier: TIER.AUTO,
       needsRayMerge: false,
-      reason: 'A 级：Claude Code 已签过当前这次提交，没有未解决的 P0/P1，必过检查已全绿，审查对话都已解决，自动合并',
+      reason: 'A 级：必过检查已全绿，审查对话都已解决，自动合并（签字不挡）',
     }
   }
   const parts = []
-  if (!claudeClear) parts.push(reviewDetail(claudeSignoff, 'Claude Code 还没签过当前这次提交'))
   if (requiredChecksGreen !== true) parts.push('必过检查还没全绿')
   if (conversationsResolved !== true) parts.push('还有没解决的审查对话')
   return {
@@ -208,12 +143,11 @@ function decideAMerge({ claudeSignoff, requiredChecksGreen, conversationsResolve
  *       here or a caller that forgets to pass `fork` slips it past.
  *   1c. `rayHold: true` never auto-merges, at any level. That flag is the
  *       schema / Meta credential / Meta ad-spend exception.
- *   2. B 和 C 直接开自动合并（Ray 2026-10-26「只有 P0 审」）。把关交给 GitHub 的
- *      必过检查：`enable` 的含义是「检查全绿就合」。要人看一眼的，在 PR 上打
- *      `p0` 标签 —— 带 `p0` 的要 Claude Code 对当前这次提交签字，推新提交就掉签。
- *      子牙 / 魏征 / 狄仁杰的抽查不是输入。
- *   3. A 级要 Claude Code 签过当前这次提交、必过检查全绿、审查对话全解决。
- *      Codex 那一签已去掉：它的审查工作流 2026-10-15 被停用，永远不会到。
+ *   2. B 和 C 直接开自动合并。Codex 不是输入（2026-10-26）。`p0` 标签和 Claude
+ *      签字也不挡（Ray 2026-11-16）。把关交给 GitHub 的必过检查。子牙 / 魏征 /
+ *      狄仁杰的抽查不是输入。
+ *   3. A 级要必过检查全绿、审查对话全解决。不要求 Claude 或 Codex 签字
+ *      （Ray 2026-11-16）。库表 / Meta 凭证 / 广告花费已在 1c 拦住。
  *   4. Anything else is not auto-merged, and says so in the reason.
  *
  * 🔴 **`fork` uses the same fail-closed convention as `draft`.** Only an
@@ -231,10 +165,10 @@ export function decideMerge({
   risk,
   draft,
   fork,
-  p0,
+  p0: _p0,
   signoff: _signoff,
   codexReview: _codexReview,
-  claudeSignoff,
+  claudeSignoff: _claudeSignoff,
   requiredChecksGreen,
   conversationsResolved,
   rayHold,
@@ -275,19 +209,21 @@ export function decideMerge({
     }
   }
 
-  // Rule 2. B and C may reach `enable` after Codex has reviewed this head.
-  // `clear !== true` fails closed. A missing rayHold does not affect them.
-  if (risk === 'B' || risk === 'C') return decideBcMerge(risk, { p0: parseP0(p0), claudeSignoff })
+  // Rule 2. B and C arm auto-merge without a review. A missing rayHold does
+  // not affect them. `p0` and sign-off are ignored on purpose.
+  if (risk === 'B' || risk === 'C') return decideBcMerge(risk)
 
-  // Rule 3. A reaches `enable` only when both head sign-offs, the required
-  // checks, and the review conversations all agree. See `decideAMerge`.
+  // Rule 3. A reaches `enable` when the required checks and the review
+  // conversations agree. See `decideAMerge`.
   if (risk === 'A') {
-    return decideAMerge({ claudeSignoff, requiredChecksGreen, conversationsResolved, rayHold })
+    return decideAMerge({ requiredChecksGreen, conversationsResolved, rayHold })
   }
 
   // Rule 4. An unrecognised level is not a level we can reason about.
   void _signoff
   void _codexReview
+  void _claudeSignoff
+  void _p0
   return {
     pass: false,
     decision: MERGE_DECISION.DISABLE_AUTO_MERGE,
