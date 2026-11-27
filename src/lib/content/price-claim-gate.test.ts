@@ -11,6 +11,7 @@
 
 import { describe, it, expect } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { isPosterSigned } from '@/lib/assets/provenance'
 import {
   judgeOutgoingPost,
   judgePriceClaimWithSource,
@@ -213,6 +214,16 @@ describe('judgeOutgoingPost —— AI 海报新规矩（快速发帖那条路）
   })
   const parentRow = (source: string, archived_at: string | null = null) =>
     ({ id: PARENT, client_id: CLIENT, storage_url: 'https://cdn.example.com/parent.jpg', source, archived_at })
+  const machineReviewedPoster = (hasPrice: boolean) => ({
+    ...posterRow(false),
+    verified_by: null,
+    verified_at: null,
+    vision_metadata: {
+      poster: { ...posterRow(false).vision_metadata.poster, has_price: hasPrice, text_lines: hasPrice ? ['X', 'From $6,999'] : ['X'] },
+      kind: 'factory_still',
+      factory_still: { review: { verdict: 'pass', reviewer: 'system:still-review' } },
+    },
+  })
   const UNPRICED = 'Discover China this spring'
 
   it('未签海报 + 文案无价 → 拦（价格藏在图里也算报价），说明走海报那套', async () => {
@@ -241,6 +252,24 @@ describe('judgeOutgoingPost —— AI 海报新规矩（快速发帖那条路）
       const v = await judgeOutgoingPost(db, { clientId: CLIENT, caption: UNPRICED, imageUrl: IMG })
       expect(v.blocked).toBe(true)
     }
+  })
+
+  it('机审通过、图里有价 → 仍是未签，发出去会被拦住', async () => {
+    const row = machineReviewedPoster(true)
+    expect(isPosterSigned(row)).toBe(false)
+    const v = await judgeOutgoingPost(makeSupabase({ client_assets: [row, parentRow('client_verified')] }), {
+      clientId: CLIENT, caption: 'From $6,999 pp', imageUrl: IMG,
+    })
+    expect(v).toMatchObject({ blocked: true, priceClaimed: true, poster: true, posterSigned: false })
+  })
+
+  it('机审通过、图里和文案都没价 → 仍是未签，发出去会被拦住', async () => {
+    const row = machineReviewedPoster(false)
+    expect(isPosterSigned(row)).toBe(false)
+    const v = await judgeOutgoingPost(makeSupabase({ client_assets: [row, parentRow('client_verified')] }), {
+      clientId: CLIENT, caption: UNPRICED, imageUrl: IMG,
+    })
+    expect(v).toMatchObject({ blocked: true, priceClaimed: false, poster: true, posterSigned: false })
   })
 
   it('凡是海报都要签字：未签、图里也没价、文案也没价 → 照样拦', async () => {

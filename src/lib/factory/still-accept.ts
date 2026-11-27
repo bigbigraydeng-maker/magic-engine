@@ -184,10 +184,8 @@ async function stampPassed(
   hash: string,
 ): Promise<boolean> {
   const text = tourName.trim()
-  const checkedAt = (deps.now ?? (() => new Date()))().toISOString()
+  // Machine review is not a person. Leave verified_by / verified_at alone so the poster sign gate stays unsigned.
   const { error } = await deps.supabase.from('client_assets').update({
-    verified_by: STILL_REVIEWER_ID,
-    verified_at: checkedAt,
     vision_metadata: {
       ...meta,
       kind: 'factory_still',
