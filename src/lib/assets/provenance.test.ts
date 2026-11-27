@@ -8,6 +8,7 @@ import {
   isAssetOwnership,
   normaliseSource,
   canAssetBackRealPrice,
+  isPosterSigned,
   posterHasPrice,
   readPosterLineage,
 } from './provenance'
@@ -152,6 +153,9 @@ describe('canAssetBackRealPrice —— AI 海报新规矩', () => {
     expect(canAssetBackRealPrice(poster(unsigned), 'client_verified')).toBe(false)
     expect(canAssetBackRealPrice({ ...poster(signed), verified_at: 'garbage' }, 'fde_shot')).toBe(false)
     expect(canAssetBackRealPrice({ ...poster(signed), verified_by: '  ' }, 'fde_shot')).toBe(false)
+    const machine = { verified_by: 'system:still-review', verified_at: '2026-11-15T01:00:00.000Z' }
+    expect(isPosterSigned(machine)).toBe(false)
+    expect(canAssetBackRealPrice(poster(machine), 'fde_shot')).toBe(false)
   })
 
   it('原图被降级 / 查不到 → 签过字也背不了', () => {
