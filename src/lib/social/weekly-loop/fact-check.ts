@@ -24,6 +24,7 @@ export type FactItemKind =
   | 'tour_not_sellable'
   | 'ambiguous_tour_name'
   | 'ambiguous_tour_link'
+  | 'image_tour_mismatch'
   | 'check_error'
 
 export interface FactItem {
@@ -41,6 +42,8 @@ export interface FactCheckInput {
   aliasesByTourId: Record<string, string[]>
   catalogVersion: number
   today: string
+  /** Tour the picture was made for. When set, caption and link must name this tour. */
+  imageTourId?: string | null
 }
 
 export interface FactCheckResult {
@@ -586,6 +589,30 @@ function errorResult(input: FactCheckInput, err: unknown): FactCheckResult {
   }
 }
 
+function toursNamedIn(caption: string, tours: PublishedTourFact[]): PublishedTourFact[] {
+  return tours.filter((tour) => {
+    if (containsWholePhrase(caption, tour.name)) return true
+    return isNonEmptyString(tour.title) && containsWholePhrase(caption, tour.title)
+  })
+}
+
+function imageTourItems(input: FactCheckInput, linkTarget: PublishedTourFact | null): FactItem[] {
+  if (input.imageTourId === undefined) return []
+  const imageId = typeof input.imageTourId === 'string' ? input.imageTourId.trim() : ''
+  const imageTour = input.tours.find((tour) => tour.id === imageId)
+  const named = toursNamedIn(input.texts.caption, input.tours)
+  const sameBody = imageTour !== undefined && named.length === 1 && named[0]?.id === imageTour.id
+  const sameLink = imageTour !== undefined && linkTarget?.id === imageTour.id
+  if (sameBody && sameLink) return []
+  return [{
+    kind: 'image_tour_mismatch',
+    claim: input.texts.caption.trim().slice(0, 80) || 'image tour unreadable',
+    source: 'caption',
+    outcome: 'FAIL',
+    expected: imageTour?.name ?? null,
+  }]
+}
+
 // ---------------------------------------------------------------------------
 // Public entry point
 // ---------------------------------------------------------------------------
@@ -610,6 +637,7 @@ export function checkFacts(input: FactCheckInput): FactCheckResult {
     }
 
     items.push(...collectClaimItems(texts, target, input.today))
+    items.push(...imageTourItems(input, target))
 
     return assembleResult(input, target, items)
   } catch (err) {

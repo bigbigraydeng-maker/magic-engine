@@ -481,3 +481,47 @@ describe('checkFacts', () => {
     expect(res.verdict).toBe('fail')
   })
 })
+
+describe('checkFacts — picture tour must match the caption and the link', () => {
+  const harbour = tour({ id: 'harbour', slug: 'harbour-walk', name: 'Harbour Walk', destination: 'harbour', highlights: ['bridge'] })
+  const mountain = tour({ id: 'mountain', slug: 'mountain-loop', name: 'Mountain Loop', destination: 'mountain', highlights: ['ridge'] })
+  const tours = [harbour, mountain]
+  const base = {
+    texts: { overlay: null, firstComment: null, caption: 'Harbour Walk along the water.' },
+    tours,
+    aliasesByTourId: {},
+    catalogVersion: 1,
+    today: '2026-11-04',
+  }
+
+  it('passes when the picture, the caption, and the link are the same tour', () => {
+    const res = checkFacts({ ...base, linkUrl: 'https://example.com/tours/harbour-walk', imageTourId: 'harbour' })
+    expect(res.verdict).toBe('pass')
+    expect(res.targetTourId).toBe('harbour')
+    expect(find(res, 'image_tour_mismatch')).toEqual([])
+  })
+
+  it('fails a mismatched link and does not switch the draft onto the picture tour', () => {
+    const res = checkFacts({ ...base, linkUrl: 'https://example.com/tours/mountain-loop', imageTourId: 'harbour' })
+    expect(res.verdict).toBe('fail')
+    expect(res.targetTourId).toBe('mountain')
+    expect(find(res, 'image_tour_mismatch')[0]?.outcome).toBe('FAIL')
+  })
+
+  it('fails when the caption names a different tour', () => {
+    const res = checkFacts({
+      ...base,
+      texts: { overlay: null, firstComment: null, caption: 'Come on the Mountain Loop.' },
+      linkUrl: 'https://example.com/tours/harbour-walk',
+      imageTourId: 'harbour',
+    })
+    expect(res.verdict).toBe('fail')
+    expect(res.targetTourId).toBe('harbour')
+  })
+
+  it('fails closed when the picture tour cannot be read', () => {
+    const res = checkFacts({ ...base, linkUrl: 'https://example.com/tours/harbour-walk', imageTourId: '' })
+    expect(res.verdict).toBe('fail')
+    expect(find(res, 'image_tour_mismatch').length).toBe(1)
+  })
+})

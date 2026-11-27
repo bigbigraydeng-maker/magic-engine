@@ -16,6 +16,7 @@ export interface FactoryStill {
   textLine: string | null
   sourceRef: string | null
   workOrderId: string | null
+  tourId: string | null
   reviewVerdict: 'pass' | null
 }
 
@@ -42,6 +43,7 @@ export function parseFactoryStill(row: {
     textLine: textLine(meta.text_line),
     sourceRef: typeof meta.source_ref === 'string' && meta.source_ref.startsWith('https://') ? meta.source_ref : null,
     workOrderId: typeof meta.work_order_id === 'string' ? meta.work_order_id : null,
+    tourId: tourIdOf(meta.tour_id),
     reviewVerdict: reviewVerdict(meta.review),
   }
 }
@@ -73,6 +75,12 @@ export async function loadFactoryStills(
 function reviewVerdict(raw: unknown): 'pass' | null {
   const review = record(raw)
   return review?.verdict === 'pass' ? 'pass' : null
+}
+
+function tourIdOf(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const id = raw.trim()
+  return id.length > 0 ? id : null
 }
 
 function textLine(raw: unknown): string | null {

@@ -90,7 +90,7 @@ async function finishVisual(
   if (!hash) return drop(deps, slot, order, assetId, failCopy(['文件校验算不出来'], copy.factVerdict), null, visual.model)
   const recorded = await remember(deps, slot, order, assetId, 'pass', ['画面和文字都过了'], copy, visual.model)
   if (!recorded) return { ok: false, spent, stopped: 'still_review_unrecorded' }
-  const stamped = await stampPassed(deps, clientId, assetId, loaded.meta, slot, order.id, website, tour.name, hash)
+  const stamped = await stampPassed(deps, clientId, assetId, loaded.meta, slot, order.id, website, tour, hash)
   if (!stamped) return { ok: false, spent, stopped: 'still_stamp_failed' }
   return { ok: true, spent, stopped: null }
 }
@@ -180,10 +180,11 @@ async function stampPassed(
   slot: StillSlot,
   workOrderId: string,
   website: string | null,
-  tourName: string,
+  tour: PublishedTourFact,
   hash: string,
 ): Promise<boolean> {
-  const text = tourName.trim()
+  const text = tour.name.trim()
+  const tourId = tour.id.trim()
   // Machine review is not a person. Leave verified_by / verified_at alone so the poster sign gate stays unsigned.
   const { error } = await deps.supabase.from('client_assets').update({
     vision_metadata: {
@@ -197,6 +198,7 @@ async function stampPassed(
         sha256: hash,
         text_line: text.length >= 1 && text.length <= 200 ? text : null,
         source_ref: website !== null && website.startsWith('https://') ? website : null,
+        tour_id: tourId.length > 0 ? tourId : null,
         review: { verdict: 'pass', reviewer: STILL_REVIEWER_ID },
       },
     },

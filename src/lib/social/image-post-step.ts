@@ -231,10 +231,10 @@ async function draftEachDate(
   for (const slotDate of dates) {
     const still = stills.get(slotDate)
     if (!still) continue
-    const result = await draftImagePost(
-      { clientId, date: slotDate, tours, assets: [stillAsset(still)], recentTourSlugs: [...recentSlugs], ctaBaseUrl: 'https://www.ctstours.co.nz/tours' },
-      copyDeps,
-    )
+    const result = await draftLockedStill(clientId, slotDate, tours, still, recentSlugs, copyDeps)
+    if (result === 'still_tour_unreadable') {
+      return finishDraft(planIds.length + 1, planIds, draftedDates, null, 'still_tour_unreadable', requested)
+    }
     if (!result.ok) return finishDraft(planIds.length + 1, planIds, draftedDates, null, result.reason, requested)
     const captionHit = scanRedlineHits([`${result.draft.hook}\n\n${result.draft.body}\n\n${result.draft.cta}`], redlines.phrases, redlines.topics)
     if (captionHit.length > 0) return finishDraft(planIds.length + 1, planIds, draftedDates, null, 'brand_redline_hit', requested)
@@ -251,12 +251,37 @@ async function draftEachDate(
   return finishDraft(dates.length, planIds, draftedDates, null, null, requested)
 }
 
-function stillAsset(still: FactoryStill): RankableAssetRow {
+function draftLockedStill(
+  clientId: string,
+  date: string,
+  tours: PublishedTourFact[],
+  still: FactoryStill,
+  recentSlugs: string[],
+  deps: Parameters<typeof draftImagePost>[1],
+) {
+  const tour = tours.find((item) => item.id === still.tourId)
+  if (!tour) return 'still_tour_unreadable' as const
+  return draftImagePost({
+    clientId,
+    date,
+    tours,
+    assets: [stillAsset(still, tour)],
+    recentTourSlugs: recentSlugs,
+    ctaBaseUrl: 'https://www.ctstours.co.nz/tours',
+    lockedTourId: tour.id,
+  }, deps)
+}
+
+function stillAsset(still: FactoryStill, tour: PublishedTourFact): RankableAssetRow {
   return {
     id: still.id,
     storage_url: still.storageUrl,
     original_filename: `${still.slotDate}.jpg`,
-    vision_metadata: null,
+    vision_metadata: {
+      destination: tour.destination,
+      highlights: tour.highlights,
+      factory_still: { tour_id: tour.id },
+    },
     source: 'ai_generated',
   }
 }

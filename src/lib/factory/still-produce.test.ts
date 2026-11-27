@@ -117,7 +117,8 @@ describe('produceFactoryStills', () => {
     expect(reviewVisual).toHaveBeenCalledTimes(1)
     expect(db.assets[0]?.verified_by).toBeNull()
     expect(db.assets[0]?.verified_at).toBeUndefined()
-    const meta = db.assets[0]?.vision_metadata as { factory_still?: { review?: { verdict?: string; reviewer?: string } } }
+    const meta = db.assets[0]?.vision_metadata as { factory_still?: { tour_id?: string; review?: { verdict?: string; reviewer?: string } } }
+    expect(meta.factory_still?.tour_id).toBe('t1')
     expect(meta.factory_still?.review).toEqual({ verdict: 'pass', reviewer: 'system:still-review' })
     const stills = (db.orders[0]?.output as { stills?: Array<{ verdict?: string }> } | undefined)?.stills
     expect(stills?.[0]?.verdict).toBe('pass')

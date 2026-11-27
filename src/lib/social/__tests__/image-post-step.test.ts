@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   getActiveBrief: vi.fn(),
   runImageEdit: vi.fn(),
   readPosterText: vi.fn(),
+  copiedTour: null as null | { id: string; destination: string; highlights: string[] },
 }))
 
 vi.mock('@/lib/tour-catalog/store-publish', () => ({ loadPublishedTourFacts: mocks.loadPublishedTourFacts }))
@@ -23,7 +24,10 @@ vi.mock('@/lib/social/weekly-loop/fact-check', () => ({
 }))
 vi.mock('@/lib/social/outbound-claims', () => ({ scanOutboundClaims: () => [] }))
 vi.mock('../image-post-generate-copy', () => ({
-  generateImagePostCopy: async () => ({ hook: 'Discover China', body: 'A 14-day journey', cta: 'See the itinerary' }),
+  generateImagePostCopy: async (tour: { id: string; name: string; destination: string; highlights: string[] }) => {
+    mocks.copiedTour = { id: tour.id, destination: tour.destination, highlights: [...tour.highlights] }
+    return { hook: tour.name, body: `${tour.destination} ${tour.highlights.join(' ')}`, cta: 'See the itinerary' }
+  },
 }))
 
 import { runImagePostStep } from '../image-post-step'
@@ -94,6 +98,7 @@ const run = (cfg: unknown, inserted: Inserted[]) =>
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.copiedTour = null
   mocks.loadPublishedTourFacts.mockResolvedValue({ published: true, version: 1, tours: [tour] })
   mocks.loadRankableClientAssets.mockResolvedValue([photo])
   mocks.getActiveCampaigns.mockResolvedValue([{ id: 'camp-1' }])
@@ -140,10 +145,40 @@ describe('runImagePostStep — factory stills only', () => {
     expect(inserted).toEqual([])
   })
 
+  it('uses the still tour for copy and link when another tour is also for sale', async () => {
+    const inserted: Inserted[] = []
+    const other: PublishedTourFact = {
+      ...tour, id: 't2', slug: 'south-lakes', name: 'South Lakes', destination: 'south', highlights: ['lakes'],
+    }
+    const pictured: PublishedTourFact = { ...tour, highlights: ['city wall'] }
+    mocks.loadPublishedTourFacts.mockResolvedValue({ published: true, version: 1, tours: [other, pictured] })
+    const r = await runImagePostStep(CLIENT, '2027-01-01', config(), null, {
+      supabase: fakeSupabase(inserted, [feedStill('2027-01-01', 'still-1')]),
+      callLLM: vi.fn(),
+    })
+    expect(r).toMatchObject({ drafted: 1, error: null })
+    expect(mocks.copiedTour).toEqual({ id: 't1', destination: 'china', highlights: ['city wall'] })
+    const post = planRow(inserted).bundles[0].post as { cta_url?: string }
+    expect(post.cta_url).toBe('https://www.ctstours.co.nz/tours/china-panorama')
+  })
+
+  it('drops the draft when the still has no tour id', async () => {
+    const inserted: Inserted[] = []
+    const still = feedStill('2027-01-01', 'still-1')
+    delete (still.vision_metadata.factory_still as { tour_id?: string }).tour_id
+    const r = await runImagePostStep(CLIENT, '2027-01-01', config(), null, {
+      supabase: fakeSupabase(inserted, [still]),
+      callLLM: vi.fn(),
+    })
+    expect(r).toMatchObject({ drafted: 0, error: 'still_tour_unreadable' })
+    expect(inserted).toEqual([])
+    expect(mocks.copiedTour).toBeNull()
+  })
+
   it('does not write a draft when the caption hits a brand red line', async () => {
     const inserted: Inserted[] = []
     const r = await runImagePostStep(CLIENT, '2027-01-01', config(), null, {
-      supabase: redlineSupabase(inserted, [feedStill('2027-01-01', 'still-1')], ['Discover']),
+      supabase: redlineSupabase(inserted, [feedStill('2027-01-01', 'still-1')], ['China']),
       callLLM: vi.fn(),
     })
     expect(r).toMatchObject({ drafted: 0, error: 'brand_redline_hit' })
@@ -163,6 +198,7 @@ function feedStill(date: string, id: string) {
         aspect: '4:5', role: 'post', slot_date: date,
         sha256: 'ab'.repeat(32), text_line: 'China Panorama',
         source_ref: 'https://example.com/tours', work_order_id: 'wo-1',
+        tour_id: 't1',
         review: { verdict: 'pass', reviewer: 'system:still-review' },
       },
     },
