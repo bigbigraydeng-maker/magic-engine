@@ -12,11 +12,19 @@ import { isoDate, nzCalendar, targetWeek } from '@/lib/social/week-pack/cadence'
 import type { WeekWindow } from '@/lib/social/image-post-week'
 
 import { loadFactoryStills, type FactoryStill } from './still-library'
-import { loadHandledStillSlots, openStillOrder, recordStillSpend, type HandledStillSlot, type StillOrder } from './still-order'
+import {
+  loadHandledStillSlots,
+  loadOpenPassStills,
+  openStillOrder,
+  recordStillSpend,
+  type HandledStillSlot,
+  type OpenPassStill,
+  type StillOrder,
+} from './still-order'
 import { planStillSlots, roomForAnother, type StillSlot } from './still-plan'
 import { FACTORY_STILL_COST_ESTIMATE_USD, readFactoryStillConfig } from './still-config'
 import { composeFactoryStill } from './still-compose'
-import { acceptFactoryStill, noteFailedStill, type StillAcceptDeps } from './still-accept'
+import { acceptFactoryStill, noteFailedStill, restampPassedStill, withdrawUnstampedPass, type StillAcceptDeps } from './still-accept'
 
 export interface StillProduceReceipt {
   drafted: number
@@ -66,17 +74,100 @@ async function fillSlots(
   cap: number,
   deps: StillProduceDeps,
 ): Promise<StillProduceReceipt> {
-  const have = await loadFactoryStills(deps.supabase, clientId)
-  if (have === 'unreadable') return fail('factory_stills_unreadable', '已有静图读不到，为避免重复没有再生成。')
-  const handled = await loadHandledStillSlots(deps.supabase, clientId, week.weekStart)
-  if (handled === 'unreadable') return fail('order_unreadable', '工单读不到，没有生成。')
-  const missing = slots.filter((slot) => !slotTaken(have, handled, slot))
-  if (missing.length === 0) {
+  const state = await loadSlotState(deps.supabase, clientId, week.weekStart)
+  if (typeof state === 'string') return fail(state, skipNote(state))
+  const { repairs, fresh } = splitMissing(slots, state)
+  if (repairs.length === 0 && fresh.length === 0) {
     return { drafted: 0, skipped: 'stills_already_made', error: null, spentUsd: 0, note: '这一周的静图成片已经有了。' }
   }
   const order = await openStillOrder(deps.supabase, clientId, week, cap, (deps.now ?? (() => new Date()))())
   if (typeof order === 'string') return fail(order, skipNote(order))
-  return makeMissing(clientId, missing, order, cap, deps)
+  const fixed = await repairPasses(clientId, repairs, order, deps)
+  if (fixed.stopped) return { drafted: fixed.drafted, skipped: fixed.stopped, error: null, spentUsd: 0, note: skipNote(fixed.stopped) }
+  if (fresh.length === 0) return repairReceipt(fixed.drafted)
+  const made = await makeMissing(clientId, fresh, order, cap, deps)
+  return { ...made, drafted: made.drafted + fixed.drafted }
+}
+
+interface PassRepair {
+  slot: StillSlot
+  pass: OpenPassStill
+}
+
+async function loadSlotState(
+  supabase: StillProduceDeps['supabase'],
+  clientId: string,
+  weekStart: string,
+): Promise<{ have: FactoryStill[]; handled: HandledStillSlot[]; open: OpenPassStill[] } | 'factory_stills_unreadable' | 'order_unreadable'> {
+  const have = await loadFactoryStills(supabase, clientId)
+  if (have === 'unreadable') return 'factory_stills_unreadable'
+  const handled = await loadHandledStillSlots(supabase, clientId, weekStart)
+  if (handled === 'unreadable') return 'order_unreadable'
+  const open = await loadOpenPassStills(supabase, clientId, weekStart)
+  if (open === 'unreadable') return 'order_unreadable'
+  return { have, handled, open }
+}
+
+function splitMissing(
+  slots: StillSlot[],
+  state: { have: FactoryStill[]; handled: HandledStillSlot[]; open: OpenPassStill[] },
+): { repairs: PassRepair[]; fresh: StillSlot[] } {
+  const missing = slots.filter((slot) => !slotTaken(state.have, state.handled, slot))
+  const repairs = missing.flatMap((slot) => {
+    const pass = state.open.find((row) => row.role === slot.role && row.aspect === slot.aspect && row.slotDate === slot.date)
+    return pass ? [{ slot, pass }] : []
+  })
+  const fresh = missing.filter((slot) => !repairs.some((job) => job.slot === slot))
+  return { repairs, fresh }
+}
+
+async function repairPasses(
+  clientId: string,
+  jobs: PassRepair[],
+  order: StillOrder,
+  deps: StillProduceDeps,
+): Promise<{ drafted: number; stopped: string | null }> {
+  let drafted = 0
+  for (const job of jobs) {
+    const result = await repairOne(clientId, job, order, deps)
+    if (result === 'stamped') drafted += 1
+    if (result === 'unrecorded') return { drafted, stopped: 'still_review_unrecorded' }
+  }
+  return { drafted, stopped: null }
+}
+
+async function repairOne(
+  clientId: string,
+  job: PassRepair,
+  order: StillOrder,
+  deps: StillProduceDeps,
+): Promise<'stamped' | 'unusable' | 'unrecorded'> {
+  const tour = await publishedTour(deps.supabase, clientId, job.slot.date, job.pass.tourId)
+  if (!tour) return withdrawUnstampedPass(deps.supabase, order.id, job.slot)
+  const brief = await getActiveBrief(clientId).catch(() => null)
+  const website = typeof brief?.website === 'string' ? brief.website : null
+  return restampPassedStill(clientId, job.slot, order, job.pass.assetId, tour, website, deps)
+}
+
+async function publishedTour(
+  supabase: StillProduceDeps['supabase'],
+  clientId: string,
+  date: string,
+  tourId: string | null,
+): Promise<PublishedTourFact | null> {
+  if (!tourId) return null
+  try {
+    const read = await loadPublishedTourFacts(supabase, clientId, date)
+    if (!read.published) return null
+    return read.tours.find((tour) => tour.id === tourId) ?? null
+  } catch {
+    return null
+  }
+}
+
+function repairReceipt(drafted: number): StillProduceReceipt {
+  if (drafted > 0) return { drafted, skipped: null, error: null, spentUsd: 0, note: `静图标记补上 ${drafted} 张。` }
+  return { drafted: 0, skipped: null, error: null, spentUsd: 0, note: '静图标记补不上，没有当成通过。' }
 }
 
 async function makeMissing(

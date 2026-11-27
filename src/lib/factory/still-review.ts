@@ -36,6 +36,7 @@ export interface StillWorkReview {
   role: 'story' | 'post'
   aspect: '9:16' | '4:5'
   slot_date: string
+  tour_id: string | null
   reviewer: string
   model: string | null
   verdict: 'pass' | 'fail'
@@ -215,6 +216,7 @@ export function buildStillReview(input: {
   role: 'story' | 'post'
   aspect: '9:16' | '4:5'
   slotDate: string
+  tourId: string | null
   verdict: 'pass' | 'fail'
   reasons: string[]
   redlineHits: string[]
@@ -222,11 +224,13 @@ export function buildStillReview(input: {
   model: string | null
   checkedAt: string
 }): StillWorkReview {
+  const tourId = input.tourId?.trim() ?? ''
   return {
     asset_id: input.assetId,
     role: input.role,
     aspect: input.aspect,
     slot_date: input.slotDate,
+    tour_id: tourId.length > 0 ? tourId : null,
     reviewer: STILL_REVIEWER_ID,
     model: input.model,
     verdict: input.verdict,

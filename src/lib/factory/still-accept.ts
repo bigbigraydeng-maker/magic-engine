@@ -2,6 +2,7 @@
  * A still counts as finished only after the copy gate and the image check pass.
  * A miss is not usable. Once this week's budget has been spent, a later failure is marked
  * on the asset when one exists, and on the work order, so the same slot is not billed again.
+ * A pass on the order without the asset mark is not finished: a later run writes the mark only.
  */
 
 import { createHash } from 'node:crypto'
@@ -10,7 +11,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { PublishedTourFact } from '@/lib/tour-catalog/publish-contract'
 import { factCheckToday } from '@/lib/social/weekly-loop/reel-facts'
 
-import { appendStillReview, recordStillSpend, type StillOrder } from './still-order'
+import { appendStillReview, recordStillSpend, replacePassWithFail, type StillOrder } from './still-order'
 import { STILL_REVIEWER_ID, STILL_VISUAL_COST_ESTIMATE_USD } from './still-config'
 import {
   buildStillReview,
@@ -96,7 +97,7 @@ async function finishVisual(
   }
   const hash = await (deps.hashUrl ?? sha256OfHttps)(loaded.url)
   if (!hash) return drop(deps, clientId, slot, order, assetId, tour, failCopy(['文件校验算不出来'], copy.factVerdict), null, visual.model)
-  const recorded = await remember(deps, slot, order, assetId, 'pass', ['画面和文字都过了'], copy, visual.model)
+  const recorded = await remember(deps, slot, order, assetId, 'pass', ['画面和文字都过了'], copy, visual.model, tour.id)
   if (!recorded) {
     await noteFailedStill(deps, clientId, slot, order, assetId, tour, ['审片结果写不进工单'], copy, visual.model)
     return { ok: false, spent, stopped: 'still_review_unrecorded' }
@@ -140,9 +141,54 @@ export async function noteFailedStill(
 ): Promise<'ok' | 'stamp_failed' | 'unrecorded'> {
   const lines = reasons.map(plainReviewReason).filter((line) => line.length > 0).slice(0, 4)
   const stamped = await stampFailed(deps, clientId, assetId, slot, order.id, tour, lines)
-  const recorded = await remember(deps, slot, order, assetId, 'fail', lines, { pass: false, reasons: lines, redlineHits: copy.redlineHits, factVerdict: copy.factVerdict }, model)
+  const recorded = await remember(deps, slot, order, assetId, 'fail', lines, { pass: false, reasons: lines, redlineHits: copy.redlineHits, factVerdict: copy.factVerdict }, model, tour.id)
   if (!recorded) return 'unrecorded'
   return stamped ? 'ok' : 'stamp_failed'
+}
+
+const STAMP_MISSING = '素材标记没有写上'
+
+/** Write the missing pass mark. Does not review the picture again and does not spend the weekly budget. */
+export async function restampPassedStill(
+  clientId: string,
+  slot: StillSlot,
+  order: StillOrder,
+  assetId: string | null,
+  tour: PublishedTourFact,
+  website: string | null,
+  deps: StillAcceptDeps,
+): Promise<'stamped' | 'unusable' | 'unrecorded'> {
+  if (!assetId) return withdrawUnstampedPass(deps.supabase, order.id, slot)
+  const loaded = await loadStillAsset(deps.supabase, clientId, assetId)
+  if (!loaded) return withdrawUnstampedPass(deps.supabase, order.id, slot)
+  const hash = await (deps.hashUrl ?? sha256OfHttps)(loaded.url)
+  if (!hash) return withdrawAndFail(deps, clientId, slot, order, assetId, tour)
+  const stamped = await stampPassed(deps, clientId, assetId, loaded.meta, slot, order.id, website, tour, hash)
+  if (stamped) return 'stamped'
+  return withdrawAndFail(deps, clientId, slot, order, assetId, tour)
+}
+
+export async function withdrawUnstampedPass(
+  supabase: SupabaseClient,
+  orderId: string,
+  slot: StillSlot,
+): Promise<'unusable' | 'unrecorded'> {
+  const ok = await replacePassWithFail(supabase, orderId, slot, [STAMP_MISSING])
+  return ok ? 'unusable' : 'unrecorded'
+}
+
+async function withdrawAndFail(
+  deps: StillAcceptDeps,
+  clientId: string,
+  slot: StillSlot,
+  order: StillOrder,
+  assetId: string,
+  tour: PublishedTourFact,
+): Promise<'unusable' | 'unrecorded'> {
+  const withdrawn = await withdrawUnstampedPass(deps.supabase, order.id, slot)
+  if (withdrawn !== 'unusable') return withdrawn
+  await stampFailed(deps, clientId, assetId, slot, order.id, tour, [STAMP_MISSING])
+  return 'unusable'
 }
 
 async function remember(
@@ -154,6 +200,7 @@ async function remember(
   reasons: string[],
   copy: StillCopyVerdict,
   model: string | null,
+  tourId: string,
 ): Promise<boolean> {
   const now = (deps.now ?? (() => new Date()))()
   return appendStillReview(deps.supabase, order.id, buildStillReview({
@@ -161,6 +208,7 @@ async function remember(
     role: slot.role,
     aspect: slot.aspect,
     slotDate: slot.date,
+    tourId,
     verdict,
     reasons,
     redlineHits: copy.redlineHits,

@@ -45,28 +45,69 @@ export interface HandledStillSlot {
   slotDate: string
 }
 
-/** Slots this week's still order already finished or failed. A miss here is not made again. */
+/**
+ * Slots this week's still order already failed. A pass without an asset stamp stays open
+ * so a later run can write the mark. A miss here is not made again.
+ */
 export async function loadHandledStillSlots(
   supabase: SupabaseClient,
   clientId: string,
   weekStart: string,
 ): Promise<HandledStillSlot[] | 'unreadable'> {
-  const { data, error } = await supabase
-    .from('content_work_orders')
-    .select('output')
-    .eq('client_id', clientId)
-    .eq('brief->factory_stills->>week_start', weekStart)
-    .order('created_at', { ascending: false })
-    .limit(1)
-  if (error) return 'unreadable'
-  const output = record(record((data ?? [])[0])?.output)
-  const stills = Array.isArray(output?.stills) ? output.stills : []
+  const stills = await readWeekStills(supabase, clientId, weekStart)
+  if (stills === 'unreadable') return 'unreadable'
   const handled: HandledStillSlot[] = []
   for (const raw of stills) {
     const slot = handledSlot(raw)
     if (slot) handled.push(slot)
   }
   return handled
+}
+
+export interface OpenPassStill {
+  role: 'story' | 'post'
+  aspect: '9:16' | '4:5'
+  slotDate: string
+  assetId: string | null
+  tourId: string | null
+}
+
+/** Latest pass review for each slot. A later fail closes that slot. */
+export async function loadOpenPassStills(
+  supabase: SupabaseClient,
+  clientId: string,
+  weekStart: string,
+): Promise<OpenPassStill[] | 'unreadable'> {
+  const stills = await readWeekStills(supabase, clientId, weekStart)
+  if (stills === 'unreadable') return 'unreadable'
+  const latest = new Map<string, OpenPassStill | null>()
+  for (const raw of stills) {
+    const slot = openPassOf(raw)
+    if (!slot) continue
+    latest.set(slot.key, slot.pass)
+  }
+  return [...latest.values()].filter((row): row is OpenPassStill => row !== null)
+}
+
+export async function replacePassWithFail(
+  supabase: SupabaseClient,
+  orderId: string,
+  slot: { role: 'story' | 'post'; aspect: '9:16' | '4:5'; date: string },
+  reasons: string[],
+): Promise<boolean> {
+  const { data, error } = await supabase.from('content_work_orders').select('output').eq('id', orderId).limit(1)
+  if (error) return false
+  const row = (data ?? [])[0] as { output?: unknown } | undefined
+  if (!row) return false
+  const output = record(row.output) ?? {}
+  const prior = Array.isArray(output.stills) ? output.stills : []
+  const changed = { value: false }
+  const stills = prior.map((raw) => rewritePass(raw, slot, reasons, changed))
+  if (!changed.value) return false
+  const { error: updErr } = await supabase.from('content_work_orders').update({
+    output: { ...output, stills },
+  }).eq('id', orderId)
+  return !updErr
 }
 
 export async function appendStillReview(
@@ -217,13 +258,62 @@ async function insertStillOrder(
   return id ? { id, spentUsd: 0 } : 'order_unreadable'
 }
 
+async function readWeekStills(
+  supabase: SupabaseClient,
+  clientId: string,
+  weekStart: string,
+): Promise<unknown[] | 'unreadable'> {
+  const { data, error } = await supabase
+    .from('content_work_orders')
+    .select('output')
+    .eq('client_id', clientId)
+    .eq('brief->factory_stills->>week_start', weekStart)
+    .order('created_at', { ascending: false })
+    .limit(1)
+  if (error) return 'unreadable'
+  const output = record(record((data ?? [])[0])?.output)
+  return Array.isArray(output?.stills) ? output.stills : []
+}
+
 function handledSlot(raw: unknown): HandledStillSlot | null {
+  const row = record(raw)
+  if (!row || row.verdict === 'pass') return null
+  if (row.role !== 'story' && row.role !== 'post') return null
+  if (row.aspect !== '9:16' && row.aspect !== '4:5') return null
+  if (typeof row.slot_date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(row.slot_date)) return null
+  return { role: row.role, aspect: row.aspect, slotDate: row.slot_date }
+}
+
+function openPassOf(raw: unknown): { key: string; pass: OpenPassStill | null } | null {
   const row = record(raw)
   if (!row) return null
   if (row.role !== 'story' && row.role !== 'post') return null
   if (row.aspect !== '9:16' && row.aspect !== '4:5') return null
   if (typeof row.slot_date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(row.slot_date)) return null
-  return { role: row.role, aspect: row.aspect, slotDate: row.slot_date }
+  const tourId = typeof row.tour_id === 'string' ? row.tour_id.trim() : ''
+  return {
+    key: `${row.role}:${row.aspect}:${row.slot_date}`,
+    pass: row.verdict === 'pass' ? {
+      role: row.role,
+      aspect: row.aspect,
+      slotDate: row.slot_date,
+      assetId: typeof row.asset_id === 'string' ? row.asset_id : null,
+      tourId: tourId.length > 0 ? tourId : null,
+    } : null,
+  }
+}
+
+function rewritePass(
+  raw: unknown,
+  slot: { role: 'story' | 'post'; aspect: '9:16' | '4:5'; date: string },
+  reasons: string[],
+  changed: { value: boolean },
+): unknown {
+  const item = record(raw)
+  if (!item || item.verdict !== 'pass') return raw
+  if (item.role !== slot.role || item.aspect !== slot.aspect || item.slot_date !== slot.date) return raw
+  changed.value = true
+  return { ...item, verdict: 'fail', reasons: reasons.slice(0, 4) }
 }
 
 function record(raw: unknown): Record<string, unknown> | null {

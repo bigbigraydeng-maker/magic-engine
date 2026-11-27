@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ComposeTourPosterResult } from '@/lib/social/image-post-poster'
 
 import { produceFactoryStills } from './still-produce'
+import { readStillReviews } from './still-review'
 import { planStillSlots, roomForAnother } from './still-plan'
 import { readFactoryStillConfig } from './still-config'
 
@@ -299,11 +300,86 @@ describe('produceFactoryStills', () => {
     await expectNoSecondCharge(inserts, deps, compose)
     expect(reviewVisual).toHaveBeenCalledTimes(1)
   })
+
+  it('writes the missing asset mark on the next run without another review or charge', async () => {
+    const gap = stampGap(1)
+    const first = await produceFactoryStills('c1', ONE_POST, WEEK_NOW, gap.deps)
+    expect(first.skipped).toBe('still_stamp_failed')
+    expect(gap.reviewVisual).toHaveBeenCalledTimes(1)
+    expect(ledgerAmounts(gap.inserts)).toEqual([-0.038, -0.01])
+    expect(JSON.stringify(gap.db.assets[0]?.vision_metadata)).not.toContain('factory_still')
+    expect(readStillReviews(gap.db.orders[0]?.output).map((row) => row.verdict)).toEqual(['pass'])
+    const second = await produceFactoryStills('c1', ONE_POST, WEEK_NOW, gap.deps)
+    expect(second).toMatchObject({ drafted: 1, skipped: null, spentUsd: 0 })
+    expect(gap.reviewVisual).toHaveBeenCalledTimes(1)
+    expect(gap.reviewCopy).toHaveBeenCalledTimes(1)
+    expect(gap.compose).toHaveBeenCalledTimes(1)
+    expect(ledgerAmounts(gap.inserts)).toEqual([-0.038, -0.01])
+    const meta = gap.db.assets[0]?.vision_metadata as { factory_still?: { tour_id?: string; review?: { verdict?: string } } }
+    expect(meta.factory_still?.tour_id).toBe('t1')
+    expect(meta.factory_still?.review).toEqual({ verdict: 'pass', reviewer: 'system:still-review' })
+    expect(gap.db.assets[0]?.verified_by).toBeNull()
+    expect(gap.db.assets[0]?.verified_at).toBeUndefined()
+    const third = await produceFactoryStills('c1', ONE_POST, WEEK_NOW, gap.deps)
+    expect(third).toMatchObject({ drafted: 0, skipped: 'stills_already_made', spentUsd: 0 })
+    expect(gap.reviewVisual).toHaveBeenCalledTimes(1)
+    expect(ledgerAmounts(gap.inserts)).toEqual([-0.038, -0.01])
+  })
+
+  it('marks a passed order unusable when the asset mark still cannot be written', async () => {
+    const gap = stampGap(99)
+    const first = await produceFactoryStills('c1', ONE_POST, WEEK_NOW, gap.deps)
+    expect(first.skipped).toBe('still_stamp_failed')
+    const charged = ledgerAmounts(gap.inserts)
+    const second = await produceFactoryStills('c1', ONE_POST, WEEK_NOW, gap.deps)
+    expect(second).toMatchObject({ drafted: 0, spentUsd: 0 })
+    expect(second.note).toContain('没有当成通过')
+    expect(gap.reviewVisual).toHaveBeenCalledTimes(1)
+    expect(gap.reviewCopy).toHaveBeenCalledTimes(1)
+    expect(gap.compose).toHaveBeenCalledTimes(1)
+    expect(ledgerAmounts(gap.inserts)).toEqual(charged)
+    const reviews = readStillReviews(gap.db.orders[0]?.output)
+    expect(reviews.map((row) => row.verdict)).toEqual(['fail'])
+    expect(reviews[0]?.reasons).toContain('素材标记没有写上')
+    expect(failReview(gap.db).verdict).not.toBe('pass')
+    expect(gap.db.assets[0]?.verified_by).toBeNull()
+    expect(gap.db.assets[0]?.verified_at).toBeUndefined()
+    const third = await produceFactoryStills('c1', ONE_POST, WEEK_NOW, gap.deps)
+    expect(third).toMatchObject({ drafted: 0, skipped: 'stills_already_made', spentUsd: 0 })
+    expect(gap.reviewVisual).toHaveBeenCalledTimes(1)
+    expect(ledgerAmounts(gap.inserts)).toEqual(charged)
+  })
 })
 
 const ONE_POST = { factory_stills: { enabled: true, weekly_cap_usd: 1 }, social_week: { post_per_week: 1 } }
 
 const passCopy = async () => ({ pass: true, reasons: [], redlineHits: [], factVerdict: 'pass' })
+
+function stampGap(failAssetWrites: number) {
+  const inserts: Array<{ table: string; row: Record<string, unknown> }> = []
+  const db = capSupabase(inserts, { failAssetWrites })
+  const reviewVisual = vi.fn(async () => ({ pass: true, reasons: [], costUsd: 0.01, model: 'test-model', billed: true }))
+  const reviewCopy = vi.fn(passCopy)
+  const compose = vi.fn(passCompose)
+  return {
+    inserts,
+    db,
+    reviewVisual,
+    reviewCopy,
+    compose,
+    deps: {
+      supabase: db as never,
+      compose,
+      hashUrl: async () => 'ab'.repeat(32),
+      reviewCopy,
+      reviewVisual,
+    },
+  }
+}
+
+function ledgerAmounts(inserts: Array<{ table: string; row: Record<string, unknown> }>): number[] {
+  return inserts.filter((row) => row.table === 'factory_balance_ledger').map((row) => row.row.amount_usd as number)
+}
 
 function failedCompose(reason: string, costUsd: number) {
   return async (): Promise<ComposeTourPosterResult> => ({
@@ -352,7 +428,7 @@ const passCompose = async (): Promise<ComposeTourPosterResult> => ({
 
 function capSupabase(
   inserts: Array<{ table: string; row: Record<string, unknown> }>,
-  opts: { failReviewWrite?: boolean; failLedgerAfter?: number } = {},
+  opts: { failReviewWrite?: boolean; failLedgerAfter?: number; failAssetWrites?: number } = {},
 ) {
   const orders: Array<Record<string, unknown>> = []
   const assets: Array<Record<string, unknown>> = [{
@@ -361,6 +437,7 @@ function capSupabase(
     verified_by: null,
     vision_metadata: { poster: { recipe_id: 'tour_poster_v1', text_lines: ['Harbour Walk'] } },
   }]
+  let assetWrites = 0
   const from = (table: string) => {
     const chain = {
       select: () => chain,
@@ -386,7 +463,10 @@ function capSupabase(
         }
       },
       update: (patch: Record<string, unknown>) => {
-        const fail = opts.failReviewWrite === true && table === 'content_work_orders' && 'output' in patch
+        const reviewFail = opts.failReviewWrite === true && table === 'content_work_orders' && 'output' in patch
+        const assetFail = table === 'client_assets' && opts.failAssetWrites != null && assetWrites < opts.failAssetWrites
+        if (table === 'client_assets') assetWrites += 1
+        const fail = reviewFail || assetFail
         if (!fail && table === 'content_work_orders' && orders[0]) Object.assign(orders[0], patch)
         if (!fail && table === 'client_assets' && assets[0]) Object.assign(assets[0], patch)
         const eq = () => Object.assign(Promise.resolve({ error: fail ? { message: 'write failed' } : null }), { eq })
