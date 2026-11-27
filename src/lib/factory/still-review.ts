@@ -86,12 +86,15 @@ export function judgeStillCopy(input: {
   topics: string[]
   source: OkFactSource | null
   today: string
+  imageTourId: string | null
 }): StillCopyVerdict {
   const overlay = input.overlay.trim()
   const caption = input.caption.trim()
   if (!overlay || !caption) return copyFail('没有可核对的画面文字或说明', [], 'unreadable')
   const redlineHits = scanRedlineHits([overlay, caption], input.phrases, input.topics)
   if (!input.source) return copyFail('团目录读不到，没有当成通过', redlineHits, 'unreadable')
+  const imageTourId = input.imageTourId?.trim() ?? ''
+  if (!imageTourId) return copyFail('线路读不到，没有当成通过', redlineHits, 'unreadable')
   const fact = checkFacts({
     texts: { overlay, caption, firstComment: null },
     linkUrl: input.linkUrl,
@@ -99,6 +102,7 @@ export function judgeStillCopy(input: {
     aliasesByTourId: input.source.aliasesByTourId,
     catalogVersion: input.source.catalogVersion,
     today: input.today,
+    imageTourId,
   })
   const reasons = [...redlineReasons(redlineHits), ...factProblemLines(fact.items).map(plainReviewReason)]
   if (fact.verdict !== 'pass' && reasons.length === 0) reasons.push('事实核对没有通过')
@@ -135,6 +139,7 @@ export async function reviewStillCopy(input: {
   caption: string
   linkUrl: string | null
   today: string
+  imageTourId: string | null
 }): Promise<StillCopyVerdict> {
   const redlines = await loadStillRedlines(input.supabase, input.clientId)
   if (!redlines) return copyFail('品牌红线读不到，没有当成通过', [], 'unreadable')
@@ -147,6 +152,7 @@ export async function reviewStillCopy(input: {
     topics: redlines.topics,
     source: source.ok ? source : null,
     today: input.today,
+    imageTourId: input.imageTourId,
   })
 }
 
@@ -161,11 +167,31 @@ export function parseStillVisual(raw: string): { pass: boolean; reasons: string[
   return { pass: reasons.length === 0, reasons: reasons.slice(0, 4) }
 }
 
+export function stillVisualPrompt(input: { tourName: string; place: string; overlay: string }): string {
+  const tourName = input.tourName.trim()
+  return [
+    'Check this one marketing still. Do not assume it passes. When unsure, answer false.',
+    `This still is only for this tour: ${tourName || '(none)'}`,
+    `Named place: ${input.place.trim() || '(none)'}`,
+    `Overlay text that must be readable and not cropped: ${input.overlay.trim() || '(none)'}`,
+    'Use only this tour. If the on-image text names a different tour, the still fails.',
+    'Return only JSON with boolean fields text_legible, faces_ok, place_ok, brands_ok.',
+    'text_legible: on-image text is readable and not cut off by the frame.',
+    'faces_ok: there is no person, or no person or face is distorted.',
+    'place_ok: the picture matches this tour and its place. Answer false if the on-image text names a different tour.',
+    'brands_ok: there is no watermark and no other brand or logo.',
+  ].join('\n')
+}
+
 export async function reviewStillImage(input: {
   imageUrl: string
   place: string
   overlay: string
+  tourName: string
 }): Promise<StillVisualVerdict> {
+  if (!input.tourName.trim()) {
+    return { pass: false, reasons: ['线路读不到，没有当成通过'], costUsd: null, model: null, billed: false }
+  }
   const image = await loadReviewImage(input.imageUrl)
   if (typeof image === 'string') {
     return { pass: false, reasons: ['画面读不出来'], costUsd: null, model: null, billed: false }
@@ -249,21 +275,8 @@ function jsonObject(raw: string): Record<string, unknown> | null {
   }
 }
 
-function reviewPrompt(place: string, overlay: string): string {
-  return [
-    'Check this one marketing still. Do not assume it passes. When unsure, answer false.',
-    `Named place: ${place || '(none)'}`,
-    `Overlay text that must be readable and not cropped: ${overlay || '(none)'}`,
-    'Return only JSON with boolean fields text_legible, faces_ok, place_ok, brands_ok.',
-    'text_legible: on-image text is readable and not cut off by the frame.',
-    'faces_ok: there is no person, or no person or face is distorted.',
-    'place_ok: the picture matches the named place.',
-    'brands_ok: there is no watermark and no other brand or logo.',
-  ].join('\n')
-}
-
 async function askReviewModel(
-  input: { place: string; overlay: string },
+  input: { tourName: string; place: string; overlay: string },
   image: { data: string; mediaType: ImageMediaType },
 ): Promise<StillVisualVerdict> {
   const client = reviewClient()
@@ -277,7 +290,7 @@ async function askReviewModel(
         role: 'user',
         content: [
           { type: 'image', source: { type: 'base64', media_type: image.mediaType, data: image.data } },
-          { type: 'text', text: reviewPrompt(input.place, input.overlay) },
+          { type: 'text', text: stillVisualPrompt(input) },
         ],
       }],
     })

@@ -519,6 +519,46 @@ describe('checkFacts — picture tour must match the caption and the link', () =
     expect(res.targetTourId).toBe('harbour')
   })
 
+  it('fails when the picture text names another on-sale tour with the same destination', () => {
+    const bay = tour({ id: 'bay', slug: 'bay-walk', name: 'Bay Walk', destination: 'harbour', displayPriceText: 'NZD $9,999' })
+    const res = checkFacts({
+      ...base,
+      tours: [...tours, bay],
+      texts: { overlay: 'Bay Walk', firstComment: null, caption: 'Harbour Walk along the water.' },
+      linkUrl: 'https://example.com/tours/harbour-walk',
+      imageTourId: 'harbour',
+    })
+    expect(res.verdict).toBe('fail')
+    expect(res.targetTourId).toBe('harbour')
+    expect(find(res, 'image_tour_mismatch')[0]).toMatchObject({ source: 'overlay', outcome: 'FAIL', claim: 'Bay Walk' })
+  })
+
+  it('checks a price and a date on the picture against the recorded tour', () => {
+    const priced = tour({
+      id: 'harbour', slug: 'harbour-walk', name: 'Harbour Walk', destination: 'harbour',
+      displayPriceText: 'NZD $2,450',
+      departures: [{ departOn: '2027-03-25', displayDate: '25 March 2027', status: 'open', priceTextOverride: null }],
+    })
+    const other = tour({
+      id: 'bay', slug: 'bay-walk', name: 'Bay Walk', destination: 'harbour',
+      displayPriceText: 'NZD $9,999',
+      departures: [{ departOn: '2027-08-01', displayDate: '1 August 2027', status: 'open', priceTextOverride: null }],
+    })
+    const shared = { tours: [priced, other], aliasesByTourId: {}, catalogVersion: 1, today: '2026-11-04', linkUrl: 'https://example.com/tours/harbour-walk', imageTourId: 'harbour' }
+    const wrong = checkFacts({
+      ...shared,
+      texts: { overlay: 'NZD $9,999 on 1 August 2027', firstComment: null, caption: 'Harbour Walk along the water.' },
+    })
+    expect(wrong.verdict).toBe('fail')
+    expect(find(wrong, 'money').some((item) => item.outcome === 'FAIL' && item.source === 'overlay')).toBe(true)
+    expect(find(wrong, 'date').some((item) => item.outcome === 'FAIL' && item.source === 'overlay')).toBe(true)
+    const right = checkFacts({
+      ...shared,
+      texts: { overlay: 'Harbour Walk NZD $2,450 departing 25 March 2027', firstComment: null, caption: 'Harbour Walk along the water.' },
+    })
+    expect(right.verdict).toBe('pass')
+  })
+
   it('fails closed when the picture tour cannot be read', () => {
     const res = checkFacts({ ...base, linkUrl: 'https://example.com/tours/harbour-walk', imageTourId: '' })
     expect(res.verdict).toBe('fail')

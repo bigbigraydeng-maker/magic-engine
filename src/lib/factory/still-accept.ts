@@ -62,6 +62,7 @@ export async function acceptFactoryStill(
     caption,
     linkUrl: stillFactLink(website, tour.slug),
     today: factCheckToday(now),
+    imageTourId: tour.id,
   })
   if (!copy.pass) return drop(deps, clientId, slot, order, assetId, tour, copy, null)
   if (order.spentUsd + STILL_VISUAL_COST_ESTIMATE_USD > cap + 1e-9) {
@@ -83,7 +84,7 @@ async function finishVisual(
   copy: StillCopyVerdict,
   deps: StillAcceptDeps,
 ): Promise<{ ok: boolean; spent: number | null; stopped: string | null }> {
-  const visual = await (deps.reviewVisual ?? reviewStillImage)({ imageUrl: loaded.url, place, overlay })
+  const visual = await (deps.reviewVisual ?? reviewStillImage)({ imageUrl: loaded.url, place, overlay, tourName: tour.name.trim() })
   const spent = await chargeVisual(deps.supabase, order, visual)
   if (spent === 'ledger_failed') {
     await noteFailedStill(deps, clientId, slot, order, assetId, tour, visual.reasons.length > 0 ? visual.reasons : ['画面审花费记不进账'], copy, visual.model)
