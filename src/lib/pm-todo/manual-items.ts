@@ -41,6 +41,7 @@ import { pushWeekPlanApprovalItems } from './week-plan-items'
 import { pushEmailReplyItems } from './email-reply-items'
 import { pushLeadFollowupItems } from './lead-followup-items'
 import { pushCatalogueFollowupItems } from './catalogue-followup-items'
+import { pushCatalogueAskItems } from './catalogue-ask-items'
 import { pushTriggeredSendItems } from './triggered-send-items'
 import { pushBindingRequestItems } from './binding-request-items'
 import { pushPageBindingItems } from './page-binding-items'
@@ -567,6 +568,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 发出目录之后挂着「AI 跟进中」却没人跟的客人 —— AI 的后续动作还没做成程序（跟进流程整套重排的第 0 刀）
     (b) => pushCatalogueFollowupItems(supabase, b, ids, now, nameOf).catch((e) =>
       console.warn('[manual-items] 发目录之后没人跟待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 员工留言写了要发目录、目录还没发出去 —— 留言本身不发信，要有人去「交给 AI 跟进」页点一次
+    (b) => pushCatalogueAskItems(supabase, b, ids, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 留言要目录待办生成失败（不阻塞其他待办）:', e),
     ),
     // ME 自己发出的信：结果不明 / 退信 / 投诉 / 回执没回来 / 钥匙出错 / 系统自动停了授权。读失败自己出一条待办。
     (b) => pushTriggeredSendItems(supabase, b, ids, now, nameOf).catch((e) =>

@@ -63,6 +63,29 @@ export async function sendCatalogueAndTakeOver(
   }
 }
 
+/**
+ * Send the catalogue and leave the guest with staff (a staff note asked for it: catalogue-ask.ts). No takeover event.
+ * A guest already in "AI 跟进中" is refused, as above: their catalogue is out.
+ */
+export async function sendCatalogueKeepWithStaff(
+  args: SendCatalogueArgs,
+  deps: { sendCatalogue(a: SendCatalogueArgs): Promise<SendCatalogueResult>; store: Pick<TakeoverStoreDeps, 'loadEvents'> },
+): Promise<CatalogueActionResult> {
+  try {
+    if (takeoverState(await deps.store.loadEvents(args.clientId, args.contactId)).on) {
+      return { status: 409, body: { ok: false, sent: false, reason: 'already_in_takeover', message: '这位客人已经在「AI 跟进中」了，请刷新页面看最新状态。' } }
+    }
+  } catch {
+    return { status: 503, body: { ok: false, sent: false, reason: 'unreadable', message: '暂时读不到这位客人的跟进状态，信没发，请稍后再试。' } }
+  }
+  const sent = await deps.sendCatalogue(args)
+  if (!sent.ok) {
+    if (sent.mayHaveSent) return { status: 409, body: { ok: false, sent: 'unknown', reason: 'send_unknown', message: CATALOGUE_UNKNOWN_MESSAGE } }
+    return { status: sent.status, body: { ok: false, sent: false, reason: sent.reason, message: sent.message } }
+  }
+  return { status: 200, body: { ok: true, sent: true, duplicate: sent.duplicate, versionLabel: sent.versionLabel, since: null } }
+}
+
 export interface TakeoverOffArgs {
   clientId: string
   contactId: string

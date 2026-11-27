@@ -88,6 +88,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   tools_wide_budget_warning: 'decide',
   // 推广计划每日检查：草稿等你批准 / 批准后内容被改 / 到期阶段检查没过 / 对账偏差——都是批准、花钱、改计划，要 PM 拍板
   promo_plan_watch: 'decide',
+  catalogue_ask_check_failed: 'dev', // 「员工留言要目录、还没发」这一栏没算出来：我们这边的欠账
   catalogue_followup_check_failed: 'dev', // 「发目录之后没人跟」这一栏没算出来：我们这边的欠账
   // ME 自己发出的信（triggered-send-items.ts）
   triggered_send_complained: 'decide', // 客人投诉了 ME 自动发的信：要不要改信 / 先停发，由 PM 定
@@ -151,6 +152,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   // ── 3 · 要转给客户那边的 ─────────────────────────────────────────────
   email_reply_due: 'client_side', // 客人来信没回
   lead_followup_due: 'client_side', // 客人填了表超过 24 小时没人回，转给客户的销售
+  catalogue_ask_waiting: 'client_side', // 员工留言要发目录、还没发：转给客户的销售去名单页点一次
   catalogue_followup_clicked: 'client_side', // 看了目录的客人挂着 AI 跟进却没人跟：转给客户的销售打电话
   catalogue_followup_quiet: 'client_side', // 发目录满 7 天没动静：转给客户的销售换个方式联系
   triggered_send_hard_bounced: 'client_side', // ME 自动发的信被退回：转给客户的销售要一个能用的邮箱
