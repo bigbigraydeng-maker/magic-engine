@@ -23,6 +23,7 @@ import { demoteForTakeover, takeoverMarkFor } from './ai-takeover/day-list-filte
 import { toReengageTouchRow } from './ai-takeover/came-back'
 import { senderShapeOf } from './enquiry-screen/sender-shape'
 import { type IntentLevel } from './next-action'
+import { qualifiedSummary, type QualifiedRow, type QualifiedSummary } from './qualified-summary'
 import {
   buildSections,
   type BuildOptions,
@@ -71,6 +72,11 @@ export interface PriorityViewInput {
    * 写明「AI 跟进中」；客人回来了 → 留在原位，标「客人回来了」。不传 = 没有人在接管（旧行为）。
    */
   takeoverSince?: ReadonlyMap<string, string>
+  /**
+   * The client's qualified stage keys (ad strategy config). Passed → the output carries how many qualified guests are
+   * waiting / moved / quiet in THIS set of contacts (qualified-summary.ts). Nobody is moved and no order changes.
+   */
+  qualifiedStageKeys?: ReadonlySet<string>
 }
 
 /**
@@ -155,6 +161,8 @@ function applyTakeover(
 export interface PriorityViewOutput<T> {
   sections: SectionResult<T>[]
   focus: FocusResult
+  /** Null = no qualified stages given, or none of them is in the client's stage list. */
+  qualified: QualifiedSummary | null
 }
 
 /**
@@ -176,6 +184,7 @@ export function buildPriorityView<T>(
   // contactId → row + ranked，方便 buildSections 的 getRow 回读原始行。
   const byId = new Map<string, ContactRowLike>()
   const ranked: RankedContact[] = []
+  const qualifiedRows: QualifiedRow[] = []
   for (const c of input.contacts) {
     byId.set(c.id, c)
     const tps = byContact.get(c.id) ?? []
@@ -192,6 +201,7 @@ export function buildPriorityView<T>(
     const base = demoteNonEnquirySender(c, day ? day.seg : segmentContact(model, input.now))
     const traded = input.tradeIds?.has(c.id) ? demoteTrade(base) : base
     const { seg, aiTakeover, customerCameBack } = applyTakeover(c.id, tps, traded, input)
+    qualifiedRows.push({ stage: c.stage ?? null, segment: seg.segment, handled: day?.handled === true, aiTakeover })
     ranked.push({
       contactId: c.id,
       seg,
@@ -215,5 +225,8 @@ export function buildPriorityView<T>(
       return extractRow(row, r)
     },
   }
-  return buildSections(ranked, opts)
+  const qualified = input.qualifiedStageKeys === undefined
+    ? null
+    : qualifiedSummary(qualifiedRows, input.qualifiedStageKeys, [...input.stageMeta.keys()])
+  return { ...buildSections(ranked, opts), qualified }
 }

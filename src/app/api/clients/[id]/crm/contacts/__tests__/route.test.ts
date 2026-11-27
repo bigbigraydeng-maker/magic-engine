@@ -10,7 +10,7 @@
  * 按调用顺序吐罐头行。不需要真的实现 PostgREST。
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 
 vi.mock('@/lib/auth/client-access', () => ({
@@ -101,6 +101,8 @@ let rpcCalls: Array<Record<string, unknown>> = []
 /** `clients.leads_config` 的假返回（view=priority 用它认「自己人」邮箱域名）。 */
 let clientsLeadsConfig: unknown = null
 let identityRows: Row[] = []
+/** `ad_strategy_configs` 的假返回（合格客人阶段）；默认没设。 */
+let qualifiedConfig: { data: unknown; error: { message: string } | null } = { data: null, error: null }
 
 /**
  * 假 builder。链式方法都返回自己，`then` 让它可 await。
@@ -141,7 +143,11 @@ function fakeDb(table: string) {
       return builder
     },
     maybeSingle: () =>
-      Promise.resolve(table === 'clients' ? { data: { leads_config: clientsLeadsConfig }, error: null } : { data: null, error: null }),
+      Promise.resolve(
+        table === 'clients' ? { data: { leads_config: clientsLeadsConfig }, error: null }
+          : table === 'ad_strategy_configs' ? qualifiedConfig
+            : { data: null, error: null },
+      ),
     then: (resolve: (v: unknown) => unknown) => {
       if (table === 'contacts') {
         // count 查询（head）只回 count；取页查询回行。
@@ -469,6 +475,35 @@ describe('GET contacts — 筛选落到 SQL', () => {
     expect(contactQueries.length).toBeGreaterThan(0)
     for (const q of contactQueries) {
       expect(q.eqs).toEqual(expect.arrayContaining([['client_id', 'client-y']]))
+    }
+  })
+})
+
+describe('GET contacts — view=priority 顶上「已报价的客人」那一行', () => {
+  const QUALIFIED = { data: { qualified_stage_keys: ['quoted', 'gone_stage'] }, error: null }
+  afterEach(() => { qualifiedConfig = { data: null, error: null } })
+
+  it('没筛选时带上数字和可筛的阶段（只留阶段表里有的），按本客户读', async () => {
+    qualifiedConfig = QUALIFIED
+    const { body } = await get('cts', '?view=priority')
+    expect(body.qualified).toMatchObject({ stageKeys: ['quoted'] })
+    const read = recorded.find((r) => r.table === 'ad_strategy_configs')
+    expect(read?.eqs).toContainEqual(['client_id', 'cts'])
+  })
+
+  it('筛了阶段或在搜索：不带这个字段（数字只算得出一部分）', async () => {
+    qualifiedConfig = QUALIFIED
+    expect('qualified' in (await get('cts', '?view=priority&stage=quoted')).body).toBe(false)
+    expect('qualified' in (await get('cts', '?view=priority&q=stan')).body).toBe(false)
+  })
+
+  it('客户没设合格阶段、设的不是数组、或读失败：字段是 null，名单照常出', async () => {
+    for (const cfg of [{ data: null, error: null }, { data: { qualified_stage_keys: 'quoted' }, error: null }, { data: null, error: { message: 'down' } }]) {
+      qualifiedConfig = cfg
+      const { status, body } = await get('cts', '?view=priority')
+      expect(status).toBe(200)
+      expect(body.qualified).toBeNull()
+      expect(Array.isArray(body.sections)).toBe(true)
     }
   })
 })

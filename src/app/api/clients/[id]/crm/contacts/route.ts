@@ -832,6 +832,8 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
     console.warn('[crm/contacts] 读 AI 接管名单失败，按无人接管显示:', err instanceof Error ? err.message : err)
     return new Map<string, string>()
   })
+  // 客户自己定的合格阶段（已报价及以后）。和别的读并行；自己兜住错误，读不到就是空集合。
+  const qualifiedRead = loadQualifiedStageKeys(clientId)
   try {
     ;[contacts, touches, stageRows, briefs, { leadsConfig, country: clientCountry }, allNoteContacts] = await Promise.all([
       selectedContacts,
@@ -922,9 +924,10 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
   )
 
   const takeoverSince = await takeoverRead
+  const qualifiedStageKeys = await qualifiedRead
   const siteReading = await loadSiteReading(supabaseAdmin, clientId, nowPri)
   const customPerContact: Array<Record<CustomColumnKey, string | null>> = []
-  const { sections, focus } = buildPriorityView(
+  const { sections, focus, qualified } = buildPriorityView(
     {
       contacts,
       touchpoints: touches,
@@ -941,6 +944,7 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
       touchedToday: contactsTouchedToday(touches, nowPri, timeZone),
       stageSuppressedTodayIds,
       takeoverSince,
+      qualifiedStageKeys,
     },
     (row, ranked) => {
       const tps = byContact.get(row.id) ?? []
@@ -992,11 +996,30 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
       marketingAction: isMarketingAction(stage.marketing_action) ? stage.marketing_action : 'suppress',
     })),
     sections,
+    // 已报价（客户自己定的合格阶段）的客人今天有几位在等：页面顶上那一行入口用。
+    // 筛了阶段或在搜索时**不带这个字段**（数字只算得出一部分，页面沿用筛之前那一份）；null = 这个客户没有合格阶段，页面不显示。
+    ...(query.stages.length === 0 && query.q === null ? { qualified } : {}),
     recentNotes,
     viewerEmail,
   })
   res.headers.set('Server-Timing', timer.header())
   return res
+}
+
+/**
+ * 客户自己定的「合格客人」阶段（广告策略设置里那一份，CTS = 已报价及以后）。
+ * 读不到或没设 = 空集合：页面不显示「已报价」那一行入口，名单本身一个字不变。
+ */
+async function loadQualifiedStageKeys(clientId: string): Promise<Set<string>> {
+  try {
+    const { data, error } = await supabaseAdmin.from('ad_strategy_configs').select('qualified_stage_keys').eq('client_id', clientId).maybeSingle()
+    if (error) throw new Error(error.message)
+    const raw = (data as { qualified_stage_keys?: unknown } | null)?.qualified_stage_keys
+    return new Set(Array.isArray(raw) ? raw.filter((k): k is string => typeof k === 'string') : [])
+  } catch (err) {
+    console.warn('[crm/contacts] 读合格客人阶段失败，不显示已报价入口:', err instanceof Error ? err.message : err)
+    return new Set()
+  }
 }
 
 /**
