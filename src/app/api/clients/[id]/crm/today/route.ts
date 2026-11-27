@@ -448,6 +448,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     touchesOf: (id) => (byContact.get(id) ?? []).map(toReengageTouchRow),
     dayStartMs: localDayStartMs(now, timeZone),
     now,
+    lastClickAt: (id) => siteReading.get(id)?.lastClickAt,
   })
 
   /**

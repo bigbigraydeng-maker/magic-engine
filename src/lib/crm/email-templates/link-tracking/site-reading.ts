@@ -12,6 +12,11 @@ import type { SiteReading } from '../../segments'
 
 /** How far back a visit still means "reading now". */
 export const SITE_READING_WINDOW_MS = 7 * 86_400_000
+/**
+ * How far back the loader reads clicks for "he opened what we sent" (`SiteReading.lastClickAt`). Covers the longest
+ * industry click window (tourism, 60 days); the staff-list rule applies its own window on top.
+ */
+export const CLICK_LOOKBACK_MS = 60 * 86_400_000
 /** Two brochure visits at least this far apart = the guest came back to it, not one session refreshing the page. */
 export const RETURN_GAP_MS = 8 * 3_600_000
 /** The client site's online brochure page (same address the timeline label uses, click-summary `pageViewLabel`). */
@@ -82,4 +87,30 @@ export function countVisits(times: readonly number[]): number {
     }
   }
   return visits
+}
+
+/**
+ * Adds each guest's latest human click / page view on our mail links (inside CLICK_LOOKBACK_MS) to the reading map as
+ * `lastClickAt`. A guest with only older clicks gets an entry with no tours and no brochure visits, so the
+ * "reading the brochure" group is untouched while the staff list still knows he opened what we sent.
+ */
+export function attachLastClicks(
+  reading: ReadonlyMap<string, SiteReading>,
+  clicks: readonly ClickForReading[],
+  now: Date,
+): Map<string, SiteReading> {
+  const since = now.getTime() - CLICK_LOOKBACK_MS
+  const latest = new Map<string, number>()
+  for (const c of clicks) {
+    const at = Date.parse(c.occurred_at)
+    if (Number.isNaN(at) || at < since || at > now.getTime()) continue
+    latest.set(c.contact_id, Math.max(latest.get(c.contact_id) ?? 0, at))
+  }
+  const out = new Map(reading)
+  for (const [contactId, at] of latest) {
+    const iso = new Date(at).toISOString()
+    const base = out.get(contactId) ?? { tours: [], brochureVisits: 0, lastAt: iso }
+    out.set(contactId, { ...base, lastClickAt: iso })
+  }
+  return out
 }

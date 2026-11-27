@@ -146,7 +146,8 @@ function applyTakeover(
     // 没做当天冻结（dayStartMs 没传）就没有「今天刚交给 AI 的留在原位」这一说。
     dayStartMs: input.dayStartMs ?? Number.POSITIVE_INFINITY,
     now: input.now,
-  })
+    lastClickAt: (id) => input.siteReading?.get(id)?.lastClickAt,
+  }, seg)
   if (mark === null) return { seg: demoteForTakeover(seg), aiTakeover: true, customerCameBack: false }
   return { seg, aiTakeover: true, customerCameBack: mark.cameBack !== null }
 }
