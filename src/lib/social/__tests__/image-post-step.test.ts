@@ -175,6 +175,43 @@ describe('runImagePostStep — factory stills only', () => {
     expect(mocks.copiedTour).toBeNull()
   })
 
+  it('does not write a draft when printed picture text hits a later red line', async () => {
+    const inserted: Inserted[] = []
+    const still = feedStill('2027-01-01', 'still-1')
+    still.vision_metadata.poster = { text_lines: ['Quiet sale', 'China Panorama'] }
+    const r = await runImagePostStep(CLIENT, '2027-01-01', config(), null, {
+      supabase: redlineSupabase(inserted, [still], ['Quiet sale']),
+      callLLM: vi.fn(),
+    })
+    expect(r).toMatchObject({ drafted: 0, error: 'brand_redline_hit' })
+    expect(inserted).toEqual([])
+    expect(mocks.copiedTour).toBeNull()
+    expect(mocks.runImageEdit).not.toHaveBeenCalled()
+  })
+
+  it('still writes the draft when the current red line is not on the picture or the new copy', async () => {
+    const inserted: Inserted[] = []
+    const r = await runImagePostStep(CLIENT, '2027-01-01', config(), null, {
+      supabase: redlineSupabase(inserted, [feedStill('2027-01-01', 'still-1')], ['balloon']),
+      callLLM: vi.fn(),
+    })
+    expect(r).toMatchObject({ drafted: 1, planIds: ['social_plans-new'], error: null })
+    expect(mocks.runImageEdit).not.toHaveBeenCalled()
+  })
+
+  it('does not write a draft when the printed picture text cannot be read', async () => {
+    const inserted: Inserted[] = []
+    const still = feedStill('2027-01-01', 'still-1')
+    delete (still.vision_metadata as { poster?: unknown }).poster
+    const r = await runImagePostStep(CLIENT, '2027-01-01', config(), null, {
+      supabase: fakeSupabase(inserted, [still]),
+      callLLM: vi.fn(),
+    })
+    expect(r).toMatchObject({ drafted: 0, error: 'overlay_unreadable' })
+    expect(inserted).toEqual([])
+    expect(mocks.copiedTour).toBeNull()
+  })
+
   it('does not write a draft when the caption hits a brand red line', async () => {
     const inserted: Inserted[] = []
     const r = await runImagePostStep(CLIENT, '2027-01-01', config(), null, {
@@ -194,6 +231,7 @@ function feedStill(date: string, id: string) {
     storage_url: `https://cdn.example/${id}.jpg`,
     vision_metadata: {
       kind: 'factory_still',
+      poster: { text_lines: ['China Panorama'] },
       factory_still: {
         aspect: '4:5', role: 'post', slot_date: date,
         sha256: 'ab'.repeat(32), text_line: 'China Panorama',

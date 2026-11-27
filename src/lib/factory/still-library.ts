@@ -18,6 +18,8 @@ export interface FactoryStill {
   workOrderId: string | null
   tourId: string | null
   reviewVerdict: 'pass' | null
+  /** Words already printed on the picture. Null means they cannot be read. */
+  overlayLines: string[] | null
 }
 
 const SHA = /^[0-9a-f]{64}$/
@@ -28,7 +30,8 @@ export function parseFactoryStill(row: {
   vision_metadata?: unknown
 }): FactoryStill | null {
   if (typeof row.id !== 'string' || typeof row.storage_url !== 'string' || !row.storage_url.startsWith('https://')) return null
-  const meta = record(record(row.vision_metadata)?.factory_still)
+  const vision = record(row.vision_metadata)
+  const meta = record(vision?.factory_still)
   if (!meta) return null
   if (meta.aspect !== '9:16' && meta.aspect !== '4:5') return null
   if (meta.role !== 'story' && meta.role !== 'post') return null
@@ -45,6 +48,7 @@ export function parseFactoryStill(row: {
     workOrderId: typeof meta.work_order_id === 'string' ? meta.work_order_id : null,
     tourId: tourIdOf(meta.tour_id),
     reviewVerdict: reviewVerdict(meta.review),
+    overlayLines: overlayLinesOf(vision),
   }
 }
 
@@ -81,6 +85,14 @@ function tourIdOf(raw: unknown): string | null {
   if (typeof raw !== 'string') return null
   const id = raw.trim()
   return id.length > 0 ? id : null
+}
+
+function overlayLinesOf(vision: Record<string, unknown> | null): string[] | null {
+  const lines = record(vision?.poster)?.text_lines
+  if (!Array.isArray(lines) || lines.length === 0) return null
+  const text = lines.map((line) => (typeof line === 'string' ? line.trim() : ''))
+  if (text.some((line) => line.length === 0)) return null
+  return text
 }
 
 function textLine(raw: unknown): string | null {

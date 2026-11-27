@@ -111,6 +111,18 @@ export function judgeStillCopy(input: {
   return { pass, reasons: reasons.filter((line) => line.length > 0).slice(0, 4), redlineHits, factVerdict: fact.verdict }
 }
 
+/** Current client wording rules for a still that was already passed. Unreadable picture text is not a pass. */
+export function gateReusedStillText(
+  overlayLines: string[] | null,
+  extra: string[],
+  phrases: string[],
+  topics: string[],
+): 'ok' | 'overlay_unreadable' | 'brand_redline_hit' {
+  if (!overlayLines || overlayLines.length === 0) return 'overlay_unreadable'
+  const hits = scanRedlineHits([...overlayLines, ...extra], phrases, topics)
+  return hits.length > 0 ? 'brand_redline_hit' : 'ok'
+}
+
 export async function loadStillRedlines(
   supabase: SupabaseClient,
   clientId: string,

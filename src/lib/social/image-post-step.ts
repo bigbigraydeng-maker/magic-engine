@@ -6,8 +6,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { loadPublishedTourFacts } from '@/lib/tour-catalog/store-publish'
 import { loadFactoryStills, type FactoryStill } from '@/lib/factory/still-library'
-import { loadStillRedlines } from '@/lib/factory/still-review'
-import { scanRedlineHits } from '@/lib/factory/worker-guard'
+import { gateReusedStillText, loadStillRedlines } from '@/lib/factory/still-review'
 import { getActiveCampaigns } from '@/lib/content/campaign-injector'
 import { readSocialAgentSettings } from '@/lib/social/recipe/tier-defaults'
 import { checkFacts } from '@/lib/social/weekly-loop/fact-check'
@@ -231,13 +230,15 @@ async function draftEachDate(
   for (const slotDate of dates) {
     const still = stills.get(slotDate)
     if (!still) continue
+    const printed = blockReusedText(still, [], redlines)
+    if (printed) return finishDraft(planIds.length + 1, planIds, draftedDates, null, printed, requested)
     const result = await draftLockedStill(clientId, slotDate, tours, still, recentSlugs, copyDeps)
     if (result === 'still_tour_unreadable') {
       return finishDraft(planIds.length + 1, planIds, draftedDates, null, 'still_tour_unreadable', requested)
     }
     if (!result.ok) return finishDraft(planIds.length + 1, planIds, draftedDates, null, result.reason, requested)
-    const captionHit = scanRedlineHits([`${result.draft.hook}\n\n${result.draft.body}\n\n${result.draft.cta}`], redlines.phrases, redlines.topics)
-    if (captionHit.length > 0) return finishDraft(planIds.length + 1, planIds, draftedDates, null, 'brand_redline_hit', requested)
+    const captionHit = blockReusedText(still, [result.draft.hook, result.draft.body, result.draft.cta], redlines)
+    if (captionHit) return finishDraft(planIds.length + 1, planIds, draftedDates, null, captionHit, requested)
     const writeResult = await writeImagePostPlan(
       { clientId, campaignId, date: slotDate, draft: result.draft, tourSlug: result.tourSlug, poster: result.poster },
       { insertPlan: (row) => insertSocialPlan(deps.supabase, row) },
@@ -270,6 +271,15 @@ function draftLockedStill(
     ctaBaseUrl: 'https://www.ctstours.co.nz/tours',
     lockedTourId: tour.id,
   }, deps)
+}
+
+function blockReusedText(
+  still: FactoryStill,
+  extra: string[],
+  redlines: { phrases: string[]; topics: string[] },
+): 'overlay_unreadable' | 'brand_redline_hit' | null {
+  const gate = gateReusedStillText(still.overlayLines, extra, redlines.phrases, redlines.topics)
+  return gate === 'ok' ? null : gate
 }
 
 function stillAsset(still: FactoryStill, tour: PublishedTourFact): RankableAssetRow {
