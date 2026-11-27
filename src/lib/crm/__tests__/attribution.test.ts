@@ -138,14 +138,30 @@ describe('attributionFromMetaLeadRow：Meta lead 导出的一行', () => {
 })
 
 describe('attributionFromUtm：官网表单只到 campaign 级', () => {
-  it('FB / IG 的各种写法都收敛成 meta', () => {
+  it('只有 Meta 来源、没有付费信号 → 自然社媒，不是付费', () => {
     for (const s of ['facebook', 'fb', 'ig', 'instagram', 'meta', 'FaceBook']) {
-      expect(attributionFromUtm({ utm_source: s }).platform).toBe('meta')
+      expect(attributionFromUtm({ utm_source: s }).platform).toBe('organic_social')
     }
   })
 
-  it('Google Ads 收敛成 google', () => {
+  it('付费媒介才把 Meta 来源记成付费', () => {
+    for (const medium of ['paid', 'cpc', 'ppc', 'paid_social', 'ads', 'cpm', 'Paid_Social']) {
+      expect(attributionFromUtm({ utm_source: 'facebook', utm_medium: medium }).platform).toBe('meta')
+    }
+  })
+
+  it('organic / social / organic_social 媒介记成自然社媒', () => {
+    for (const medium of ['organic', 'social', 'organic_social']) {
+      const a = attributionFromUtm({ utm_source: 'ig', utm_medium: medium, utm_content: 'reel-food-01' })
+      expect(a.platform).toBe('organic_social')
+      expect(a.adId).toBeNull()
+      expect(a.creativeRef).toBe('reel-food-01')
+    }
+  })
+
+  it('Google Ads 收敛成 google，不因付费媒介改记成 Meta', () => {
     expect(attributionFromUtm({ utm_source: 'googleads' }).platform).toBe('google')
+    expect(attributionFromUtm({ utm_source: 'google', utm_medium: 'cpc' }).platform).toBe('google')
   })
 
   it('邮件和转介绍按 medium 判', () => {
@@ -157,8 +173,9 @@ describe('attributionFromUtm：官网表单只到 campaign 级', () => {
     expect(attributionFromUtm({}).platform).toBe('web')
   })
 
-  it('utm 只到 campaign —— ad / adset 一律 null，不假装有广告级归因', () => {
+  it('没有付费信号时 campaign 仍记下，但不编广告编号', () => {
     const a = attributionFromUtm({ utm_source: 'facebook', utm_campaign: 'walnut-clearance' })
+    expect(a.platform).toBe('organic_social')
     expect(a.campaignId).toBe('walnut-clearance')
     expect(a.adId).toBeNull()
     expect(a.adsetId).toBeNull()
@@ -169,16 +186,23 @@ describe('attributionFromUtm：官网表单只到 campaign 级', () => {
     expect(attributionFromUtm({ utm_content: 'reel-food-01' }).creativeRef).toBe('reel-food-01')
   })
 
-  it('Meta 来源 + utm_content 纯数字 → 当 ad id（{{ad.id}}），不当素材指纹', () => {
-    const a = attributionFromUtm({ utm_source: 'facebook', utm_content: '52558384510073' })
-    expect(a.adId).toBe('52558384510073')
+  it('Meta 来源 + utm_content 纯数字 → 当 ad id（{{ad.id}}），并记成付费', () => {
+    const a = attributionFromUtm({ utm_source: 'facebook', utm_content: '123456789012' })
+    expect(a.platform).toBe('meta')
+    expect(a.adId).toBe('123456789012')
     expect(a.creativeRef).toBeNull()
   })
 
   it('非 Meta 来源的数字 utm_content 不冒充 ad id', () => {
-    const a = attributionFromUtm({ utm_source: 'google', utm_content: '52558384510073' })
+    const a = attributionFromUtm({ utm_source: 'google', utm_content: '123456789012' })
+    expect(a.platform).toBe('google')
     expect(a.adId).toBeNull()
-    expect(a.creativeRef).toBe('52558384510073')
+    expect(a.creativeRef).toBe('123456789012')
+  })
+
+  it('facebook 来源配邮件或转介绍媒介，不算付费也不算自然社媒', () => {
+    expect(attributionFromUtm({ utm_source: 'facebook', utm_medium: 'email' }).platform).toBe('email')
+    expect(attributionFromUtm({ utm_source: 'facebook', utm_medium: 'referral' }).platform).toBe('referral')
   })
 })
 
