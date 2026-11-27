@@ -98,6 +98,7 @@ export async function recheckBreakerPause(
     load?: typeof loadBreakerFacts
     capture?: typeof captureIsFresh
   } = {},
+  adsetId: string | null = null,
 ): Promise<string | null> {
   const plan = await (ports.plan ?? singleApprovedPlanReason)(sb, clientId)
   if (plan) return plan
@@ -107,8 +108,17 @@ export async function recheckBreakerPause(
   const capture = await (ports.capture ?? captureIsFresh)(sb, clientId, accountId, now, maxAge)
   if (capture === 'unread') return SNAPSHOT_UNREAD
   if (capture === 'stale') return STALE_SNAPSHOT
-  const still = judgeBreaker(facts).pauses.some((pause) => pause.campaignId === campaignId)
+  const still = pauseStillHolds(judgeBreaker(facts).pauses, campaignId, adsetId)
   return still ? null : RULE_CLEARED
+}
+
+function pauseStillHolds(
+  pauses: readonly { campaignId: string; adsetId: string | null; unit?: 'campaign' | 'adset' }[],
+  campaignId: string,
+  adsetId: string | null,
+): boolean {
+  if (adsetId) return pauses.some((pause) => pause.unit === 'adset' && pause.adsetId === adsetId)
+  return pauses.some((pause) => pause.unit !== 'adset' && pause.campaignId === campaignId)
 }
 
 export async function recheckScaleFallback(
