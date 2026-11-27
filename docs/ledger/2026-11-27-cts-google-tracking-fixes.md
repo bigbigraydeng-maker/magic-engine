@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-11-27
 done_on: 2026-11-27
-done_ref: doc:docs/ledger/2026-11-27-cts-google-tracking-fixes.md
+done_ref: pr:3959
 source: session:ca3e0d15
 verify_by: 2026-12-04
 verify_how: 进 GA4 核关键事件只剩询盘事件一个（另一个无数据的购买事件不计）、事件数据保留 14 个月、币种纽币、Search Console 关联在；进 Search Console 核站点地图只剩一条且读取成功；看官网仓库改动单 321 是否已合并上线，已上线则核旧云南网址跳到可打开的云南团页、两篇文章的结构化数据能解析、GA4 出现过点电话事件。全对算成；官网改动单仍未合并或任一项不对算不成，报 PM
