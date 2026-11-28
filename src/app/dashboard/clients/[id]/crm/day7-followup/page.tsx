@@ -34,6 +34,7 @@ export default function Day7FollowUpPage({ params }: { params: { id: string } })
   }, [])
   return (
     <LetterBoard
+      surface="day7_page"
       clientId={clientId}
       listUrl={`/api/clients/${clientId}/crm/ai-pickup/day7`}
       toBoard={toBoard}

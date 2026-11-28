@@ -4,7 +4,8 @@
  * 在 CRM 里给一个**还没有邮件往来**的客人发第一封邮件（真人点发送才会调）。
  * 设计稿：docs/specs/2026-10-21-crm-send-first-email-design-v0.md
  *
- * Body: { subject, body, requestId, expectedRecipient, template? }
+ * Body: { subject, body, requestId, expectedRecipient, template?, aiLetterId? }
+ *   aiLetterId         稿子是 AI 起草的才带（起草接口给的）。发信之前先把这次发送记到那份 AI 稿子上，记不上就不发。
  *   requestId          前端每个「写邮件」框生成一次的 UUID；双击 / 重试用同一个，服务端据此不重复发
  *   expectedRecipient  抽屉上显示的收件地址；和服务端最终取的不一致就拒发
  *   template           用模板写的信才带：{ key, version, catalogVersion, picks, inputs, callBasis }（见 email-templates/request.ts）
@@ -19,6 +20,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { parseTemplateRequest } from '@/lib/crm/email-templates/request'
 import { sendTemplateEmail } from '@/lib/crm/email-templates/send-template-email'
+import { LINK_REFUSAL, linkAiLetterForSend, parseAiLetterId } from '@/lib/crm/email-compose/ai-letter-record'
+import { supabaseAdmin } from '@/lib/supabase'
 
 interface RouteParams {
   params: { id: string; cid: string }
@@ -45,6 +48,24 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
   const parsed = parseTemplateRequest(payload.template)
   if (!parsed.ok) {
     return NextResponse.json({ error: parsed.error, reason: 'invalid_input' }, { status: 400 })
+  }
+
+  const ai = parseAiLetterId(payload.aiLetterId)
+  if (!ai.ok) return NextResponse.json({ error: '请求格式错误', reason: 'invalid_input' }, { status: 400 })
+  if (ai.id !== null) {
+    if (typeof payload.requestId !== 'string' || !parseAiLetterId(payload.requestId).ok || typeof payload.subject !== 'string' || typeof payload.body !== 'string') {
+      return NextResponse.json({ error: '请求格式错误', reason: 'invalid_input' }, { status: 400 })
+    }
+    // Before the send: an AI letter must never reach a guest without its mark (PM 2026-11-28).
+    const linked = await linkAiLetterForSend(supabaseAdmin, {
+      clientId: params.id, contactId: params.cid, aiLetterId: ai.id, requestId: payload.requestId,
+      actorEmail: sentByEmail, subject: payload.subject, body: payload.body, now: new Date(),
+    })
+    if (!linked.ok) {
+      const refusal = LINK_REFUSAL[linked.reason]
+      // `final`: editing the letter cannot help — this draft belongs to another guest or was already sent; draft again.
+      return NextResponse.json({ error: refusal.message, reason: `ai_letter_${linked.reason}`, final: linked.reason !== 'write_failed' }, { status: refusal.status })
+    }
   }
 
   const result = await sendTemplateEmail({

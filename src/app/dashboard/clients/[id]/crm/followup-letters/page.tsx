@@ -56,6 +56,7 @@ export default function FollowUpLettersPage({ params }: { params: { id: string }
   const sendUrl = useCallback(() => `/api/clients/${clientId}/crm/followup-letters/release`, [clientId])
   return (
     <LetterBoard
+      surface="letters_page"
       clientId={clientId}
       listUrl={`/api/clients/${clientId}/crm/followup-letters`}
       toBoard={toBoard}

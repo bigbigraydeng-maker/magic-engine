@@ -43,6 +43,8 @@ interface DraftResponse {
   error?: string
   read?: ReadLine[]
   checks?: CheckLine[]
+  /** The record of this AI draft (crm_ai_letters); sent back with the letter so it keeps its "AI 起草" mark. */
+  aiLetterId?: string
 }
 
 const CHECK_ICON: Record<CheckLine['status'], string> = { pass: '✓', warn: '⚠', fail: '✗' }
@@ -80,6 +82,8 @@ export function ComposeEmail({
   const [drafted, setDrafted] = useState(false)
   const [draftKind, setDraftKind] = useState<DraftKind>('first')
   const [review, setReview] = useState<{ read: ReadLine[]; checks: CheckLine[] } | null>(null)
+  // Set when the text in the box came from the AI; the send carries it so the letter stays marked as AI-drafted.
+  const [aiLetterId, setAiLetterId] = useState<string | null>(null)
   const requestId = useRef(newRequestId())
 
   const load = useCallback(async () => {
@@ -120,7 +124,7 @@ export function ComposeEmail({
       const url = `/api/clients/${clientId}/crm/contacts/${contactId}/email/compose/draft`
       const res =
         kind === 'follow_up'
-          ? await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind }) })
+          ? await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, surface: 'drawer' }) })
           : await fetch(url, { method: 'POST' })
       const json = (await res.json().catch(() => ({}))) as DraftResponse
       if (!res.ok || !json.subject || !json.body) {
@@ -130,6 +134,7 @@ export function ComposeEmail({
       setSubject(json.subject)
       setBody(json.body)
       setReview(kind === 'follow_up' && json.read && json.checks ? { read: json.read, checks: json.checks } : null)
+      setAiLetterId(json.aiLetterId ?? null)
       setDrafted(true)
       setDone(false)
     } catch {
@@ -147,7 +152,7 @@ export function ComposeEmail({
       const res = await fetch(`/api/clients/${clientId}/crm/contacts/${contactId}/email/compose`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subject, body, requestId: requestId.current, expectedRecipient: compose.recipient }),
+        body: JSON.stringify({ subject, body, requestId: requestId.current, expectedRecipient: compose.recipient, ...(aiLetterId ? { aiLetterId } : {}) }),
       })
       const json = (await res.json().catch(() => ({}))) as { error?: string }
       if (!res.ok) {
@@ -160,6 +165,7 @@ export function ComposeEmail({
       setDone(true)
       setDrafted(false)
       setReview(null)
+      setAiLetterId(null)
       onSent()
       void load()
     } catch {

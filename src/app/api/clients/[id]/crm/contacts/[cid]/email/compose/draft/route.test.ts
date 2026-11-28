@@ -8,11 +8,17 @@ vi.mock('@/lib/microsoft/mail-send-new-prod', () => ({ createMailNewDeps: vi.fn(
 vi.mock('@/lib/microsoft/mail-send-new', () => ({ previewCompose: vi.fn() }))
 vi.mock('@/lib/crm/email-compose/ai-draft', () => ({ generateFirstEmailDraft: vi.fn(), claimDraftSlot: vi.fn(() => true) }))
 vi.mock('@/lib/crm/email-compose/follow-up-draft', () => ({ generateFollowUpDraft: vi.fn() }))
+vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { marker: 'db' } }))
+vi.mock('@/lib/crm/email-compose/ai-letter-record', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/crm/email-compose/ai-letter-record')>('@/lib/crm/email-compose/ai-letter-record')
+  return { ...actual, recordAiDraft: vi.fn(async () => 'ai-1') }
+})
 
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { previewCompose } from '@/lib/microsoft/mail-send-new'
 import { claimDraftSlot, generateFirstEmailDraft } from '@/lib/crm/email-compose/ai-draft'
 import { generateFollowUpDraft } from '@/lib/crm/email-compose/follow-up-draft'
+import { recordAiDraft } from '@/lib/crm/email-compose/ai-letter-record'
 import { POST } from './route'
 
 const call = () => POST(new NextRequest('http://x/api', { method: 'POST' }), { params: { id: 'client-a', cid: 'contact-1' } })
@@ -28,7 +34,8 @@ describe('POST email/compose/draft', () => {
     ;(generateFirstEmailDraft as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: true, draft: { subject: 'S', body: 'B' } })
     const res = await call()
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ subject: 'S', body: 'B' })
+    expect(await res.json()).toEqual({ subject: 'S', body: 'B', aiLetterId: 'ai-1' })
+    expect(recordAiDraft).toHaveBeenCalledWith({ marker: 'db' }, { clientId: 'client-a', contactId: 'contact-1', surface: 'drawer', kind: 'first', subject: 'S', body: 'B', checks: [], actorEmail: 's@c.nz' })
     expect(generateFirstEmailDraft).toHaveBeenCalledWith('client-a', 'contact-1')
     expect(requirePaidClientAccess).toHaveBeenCalledWith('client-a')
     expect(previewCompose).toHaveBeenCalledWith({ clientId: 'client-a', contactId: 'contact-1' }, { marker: 'deps' })
@@ -78,9 +85,32 @@ describe('POST email/compose/draft', () => {
     ;(generateFollowUpDraft as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: true, draft })
     const res = await callWith(JSON.stringify({ kind: 'follow_up' }))
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ ...draft, kind: 'follow_up' })
+    expect(await res.json()).toEqual({ ...draft, kind: 'follow_up', aiLetterId: 'ai-1' })
     expect(generateFollowUpDraft).toHaveBeenCalledWith('client-a', 'contact-1')
     expect(generateFirstEmailDraft).not.toHaveBeenCalled()
+  })
+
+  it('the page says where it is: recorded with the draft; an unknown place is refused before the AI runs', async () => {
+    ;(previewCompose as ReturnType<typeof vi.fn>).mockResolvedValueOnce(can)
+    ;(generateFollowUpDraft as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: true, draft: { subject: 'S', body: 'B', read: [], checks: [] } })
+    expect((await callWith(JSON.stringify({ kind: 'follow_up', surface: 'day7_page' }))).status).toBe(200)
+    expect((recordAiDraft as ReturnType<typeof vi.fn>).mock.calls[0][1]).toMatchObject({ surface: 'day7_page', kind: 'follow_up' })
+    const bad = await callWith(JSON.stringify({ kind: 'follow_up', surface: 'somewhere' }))
+    expect(bad.status).toBe(400)
+    expect(generateFollowUpDraft).toHaveBeenCalledTimes(1)
+  })
+
+  it('the AI wrote it but the mark cannot be recorded → 503 and no draft is handed out (an AI letter never goes unmarked)', async () => {
+    ;(previewCompose as ReturnType<typeof vi.fn>).mockResolvedValueOnce(can)
+    ;(generateFirstEmailDraft as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: true, draft: { subject: 'S', body: 'B' } })
+    ;(recordAiDraft as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('db down'))
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const res = await call()
+    expect(res.status).toBe(503)
+    const json = await res.json()
+    expect(json.reason).toBe('not_recorded')
+    expect(json.subject).toBeUndefined()
+    expect(json.body).toBeUndefined()
   })
 
   it('follow_up: not configured / do-not-contact → 409; AI failure → 502', async () => {

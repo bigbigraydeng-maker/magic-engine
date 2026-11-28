@@ -7,12 +7,17 @@ vi.mock('@/lib/crm/followup-progress/letter-list-prod', () => ({ createLetterLis
 vi.mock('@/lib/crm/followup-progress/letter-list', () => ({ checkLetterRelease: vi.fn() }))
 vi.mock('@/lib/crm/email-compose/follow-up-draft', () => ({ checkFollowUpLetter: vi.fn() }))
 vi.mock('@/lib/crm/email-templates/send-template-email', () => ({ sendTemplateEmail: vi.fn() }))
+vi.mock('@/lib/crm/email-compose/ai-letter-record', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/crm/email-compose/ai-letter-record')>('@/lib/crm/email-compose/ai-letter-record')
+  return { ...actual, linkAiLetterForSend: vi.fn(async () => ({ ok: true, edited: false })) }
+})
 
 import { NextRequest } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { checkLetterRelease } from '@/lib/crm/followup-progress/letter-list'
 import { checkFollowUpLetter } from '@/lib/crm/email-compose/follow-up-draft'
 import { sendTemplateEmail } from '@/lib/crm/email-templates/send-template-email'
+import { linkAiLetterForSend } from '@/lib/crm/email-compose/ai-letter-record'
 import { POST } from './route'
 
 const access = requirePaidClientAccess as ReturnType<typeof vi.fn>
@@ -38,6 +43,24 @@ beforeEach(() => {
 })
 
 describe('POST followup-letters/release', () => {
+  it('an AI letter: tied to this send after the checks pass and before it is sent; a failed tie sends nothing', async () => {
+    const AI = 'c1d2e3f4-0000-4000-8000-000000000009'
+    const link = linkAiLetterForSend as ReturnType<typeof vi.fn>
+    expect((await post({ ...good, aiLetterId: AI })).status).toBe(200)
+    expect(link.mock.calls[0][1]).toMatchObject({ clientId: CLIENT, contactId: GUEST, aiLetterId: AI, requestId: REQ, actorEmail: 'staff@example.com', subject: 'Hello', body: 'Kia ora' })
+    expect(link.mock.invocationCallOrder[0]).toBeLessThan(send.mock.invocationCallOrder[0])
+    send.mockClear()
+    link.mockResolvedValueOnce({ ok: false, reason: 'write_failed' })
+    const res = await post({ ...good, aiLetterId: AI })
+    expect(res.status).toBe(409)
+    expect(send).not.toHaveBeenCalled()
+    still.mockResolvedValueOnce({ ok: false, reason: 'staff_today', message: 'no' })
+    link.mockClear()
+    await post({ ...good, aiLetterId: AI })
+    expect(link).not.toHaveBeenCalled()
+    expect((await post({ ...good, aiLetterId: 'nope' })).status).toBe(400)
+  })
+
   it('no access → the access answer, nothing checked, nothing sent', async () => {
     access.mockResolvedValue({ ok: false, status: 403, error: 'no' })
     const res = await post(good)
