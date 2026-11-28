@@ -539,7 +539,7 @@ export function CampaignDailyAutoPublishPanel({
         </p>
       ) : live ? (
         <p className="mb-2 rounded-lg border border-[#C2453A]/40 bg-[#C2453A]/[.08] px-3 py-2 text-[13px] font-medium leading-relaxed text-[#C2453A]">
-          真发模式：授权后，每天最多发 1 条。系统每小时检查一次，当天的帖子会在新西兰时间每天早上 8 点公开到客户的 Facebook 主页。发出后系统不会替你撤回，只能手动撤回。
+          真发模式：授权后，每天最多自动发 1 条图文（视频和 Story 不在这里管，也不算进这 1 条）。系统每小时检查一次，当天的帖子会在新西兰时间每天早上 8 点公开到客户的 Facebook 主页。发出后系统不会替你撤回，只能手动撤回。
         </p>
       ) : (
         <p className="mb-2 rounded-lg border border-[#C2453A]/40 bg-[#C2453A]/[.08] px-3 py-2 text-[13px] font-medium leading-relaxed text-[#C2453A]">
