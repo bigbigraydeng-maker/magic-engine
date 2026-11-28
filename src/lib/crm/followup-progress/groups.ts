@@ -130,7 +130,7 @@ export function groupMeta(cfg: GroupConfig = DEFAULT_GROUP_CONFIG): Record<Follo
     never_contacted: { label: '填过表，记录里没人打过电话或发过信', howTo: '久没人打的可以交给 AI 发第一封信：到「交给 AI」页放行。那一页按自己的规则再筛一遍，能放行的人数比这里少。', owner: 'ai', page: 'ai-pickup', needsEmailFeature: true },
     no_enquiry: { label: '没填过表，也没记录有人联系', howTo: '多半是来信或私信进来的，员工看一眼是不是真客人。', owner: 'staff', page: 'all', needsEmailFeature: false },
     qualified: { label: '意向高的客人，还没成交', howTo: '员工自己跟，AI 不接。久没联系的先打。', owner: 'staff', page: 'all', needsEmailFeature: false },
-    warm: { label: `打过电话或发过信，近 ${cfg.warmDays} 天还在看我们的邮件`, howTo: '最适合一人一封的跟进信，写好后进放行页，人点了才发。', owner: 'ai', page: null, needsEmailFeature: false },
+    warm: { label: `打过电话或发过信，近 ${cfg.warmDays} 天还在看我们的邮件`, howTo: '最适合一人一封的跟进信：到「跟进信」页让 AI 写一批草稿，人看过勾上才发。最近有员工联系过的，AI 不插手。', owner: 'ai', page: 'followup-letters', needsEmailFeature: true },
     cold: { label: `打过电话或发过信，近 ${cfg.warmDays} 天没动静`, howTo: '不单独花力气，只收定期群发。', owner: 'none', page: null, needsEmailFeature: false },
     later: { label: '说了以后再考虑，或员工设了稍后提醒', howTo: '现在不打扰，到客人说的时间再联系。', owner: 'none', page: null, needsEmailFeature: false },
     ai: { label: 'AI 跟进中', howTo: 'AI 已发出第一封信，之后按节奏再跟一封；客人一回话就转回员工。', owner: 'ai', page: 'day7-followup', needsEmailFeature: true },

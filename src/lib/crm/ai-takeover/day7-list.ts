@@ -9,9 +9,9 @@
  * (魏征 P1-2). Every read throws on error: this list decides who is written to, so a half read is no list at all.
  */
 
-import { createHash } from 'node:crypto'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchAll } from '@/lib/supabase-paginate'
+import { uuidFromSeed } from '@/lib/crm/stable-uuid'
 import type { ComposePreview } from '@/lib/microsoft/mail-send-new'
 import { day7Status, type Day7Status } from './day7'
 import { loadClientInputs, stopDecisionFor, stopLineContext } from './stop-line-run'
@@ -47,13 +47,9 @@ export interface Day7ListDeps {
 
 const PARALLEL_CHECKS = 8
 
-/** A stable UUID (version 5 layout) for one guest's day-7 letter in one round of follow-up. */
+/** A stable UUID for one guest's day-7 letter in one round of follow-up. */
 export function day7RequestId(contactId: string, since: string): string {
-  const h = createHash('sha1').update(`day7-followup:${contactId}:${Date.parse(since)}`).digest()
-  h[6] = (h[6] & 0x0f) | 0x50
-  h[8] = (h[8] & 0x3f) | 0x80
-  const x = h.subarray(0, 16).toString('hex')
-  return `${x.slice(0, 8)}-${x.slice(8, 12)}-${x.slice(12, 16)}-${x.slice(16, 20)}-${x.slice(20, 32)}`
+  return uuidFromSeed(`day7-followup:${contactId}:${Date.parse(since)}`)
 }
 
 function emptyCounts(): Record<Day7Status, number> {

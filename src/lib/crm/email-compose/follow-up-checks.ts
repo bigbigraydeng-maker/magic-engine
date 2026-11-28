@@ -13,6 +13,7 @@ import { extractAmounts } from '@/lib/crm/email-templates/amounts'
 import type { EmailSettings, PublishedToursProviderSettings } from '@/lib/crm/email-templates/types'
 import type { PublishedTourFact } from '@/lib/tour-catalog/publish-contract'
 import type { FollowUpWriterConfig } from './follow-up-config'
+import { namesTour, shortTourName } from './tour-name'
 
 /** 一条检查结果。fail = 发之前必须改；warn = 看一眼；pass = 过了。 */
 export interface CheckLine {
@@ -36,6 +37,18 @@ export interface FollowUpCheckInput {
   providerSettings: PublishedToursProviderSettings | null
   previousSubjects: readonly string[]
   previousExcerpts: readonly string[]
+  /**
+   * Did anyone on our side actually talk with this guest (a call that reached them, or a staff note saying so)?
+   * false = every call went unanswered or to voicemail. Not given = the caller did not work it out, and the
+   * conversation check is skipped.
+   */
+  spokeWithGuest?: boolean
+  /**
+   * Given when the text checked is a whole letter (a draft a person may have edited), not the AI's middle paragraphs:
+   * the URLs the system itself builds for this client (site link, tour pages of tours on sale). These are not
+   * "a URL the AI wrote"; any other URL in the text still is a problem.
+   */
+  systemUrls?: readonly string[]
 }
 
 const MONTHS = 'January|February|March|April|May|June|July|August|September|October|November|December'
@@ -82,6 +95,11 @@ function factsFor(i: FollowUpCheckInput): RenderFacts | null {
   }
 }
 
+/** A URL as it is compared: without the punctuation a sentence puts after it. */
+function bareUrl(u: string): string {
+  return u.replace(/[).,;:!?'"’”>\]]+$/, '')
+}
+
 function gateChecks(i: FollowUpCheckInput, facts: RenderFacts | null): CheckLine[] {
   const gate = evaluateContentGates({
     subject: i.subject,
@@ -95,8 +113,10 @@ function gateChecks(i: FollowUpCheckInput, facts: RenderFacts | null): CheckLine
   const phrase = all.filter(({ v }) => PHRASE_CODES.has(v.code))
   const links = all.filter(({ v }) => LINK_CODES.has(v.code))
   const residue = all.filter(({ v }) => !LINK_CODES.has(v.code) && !PHRASE_CODES.has(v.code) && v.code !== 'amount_not_in_catalog')
-  const aiUrls = i.aiBody.match(/https?:\/\/\S+|www\.\S+/gi) ?? []
-  const linkProblems = [...links.map(({ v }) => `${v.code}：${v.url ?? v.detail}`), ...aiUrls.map((u) => `AI 自己写了网址：${u}`)]
+  const known = new Set((i.systemUrls ?? []).map(bareUrl))
+  const aiUrls = (i.aiBody.match(/https?:\/\/\S+|www\.\S+/gi) ?? []).filter((u) => !known.has(bareUrl(u)))
+  const foreign = i.systemUrls === undefined ? 'AI 自己写了网址' : '有不是系统按团目录拼出来的网址'
+  const linkProblems = [...links.map(({ v }) => `${v.code}：${v.url ?? v.detail}`), ...aiUrls.map((u) => `${foreign}：${u}`)]
   return [
     {
       id: 'guardrails',
@@ -175,6 +195,64 @@ function lengthCheck(i: FollowUpCheckInput): CheckLine {
   }
 }
 
+/**
+ * The letter must not offer a tour that is off sale. The link checks only see links; this one reads the words:
+ * a tour of the client's catalogue, named in the letter by its short name (two words or more, any capitalisation),
+ * that is inactive or sold out. Found 2026-11-28: a draft offered a tour that had been taken off sale.
+ * Not caught, on purpose: an off-sale tour whose short name is one everyday word, and one that shares its short
+ * name with a tour still on sale (the words cannot say which is meant).
+ */
+function offSaleTourCheck(i: FollowUpCheckInput): CheckLine {
+  const text = `${i.subject}\n${i.aiBody}`
+  const onSale = new Set(i.tours.filter((t) => t.isActive && !t.soldOut).map((t) => shortTourName(t.name).toLowerCase()))
+  const hits = new Set<string>()
+  for (const t of i.tours) {
+    if (t.isActive && !t.soldOut) continue
+    const name = shortTourName(t.name)
+    if (onSale.has(name.toLowerCase())) continue
+    if (namesTour(text, name, false)) hits.add(name)
+  }
+  return {
+    id: 'off_sale_tour',
+    status: hits.size > 0 ? 'fail' : 'pass',
+    label: '信里提到的团都在售',
+    detail: hits.size > 0 ? `提到了已下架或售完的团：${Array.from(hits).join('、')}。删掉或换成在售的团再发` : '没提到下架的团',
+  }
+}
+
+/**
+ * Phrases that tell the guest we talked with them. Only talk: "you mentioned" is left out (a guest mentions things
+ * in a form or an email too), and so are invitations ("happy to chat on the phone", "give us a call").
+ */
+const CONVERSATION_CLAIM_RE = new RegExp(
+  '\\b(' + [
+    '(when|since|as) we (last |first )?(spoke|talked|chatted)',
+    'as (we )?discussed',
+    '(per|following|after|further to|following up on|since) our (phone |recent |last )?(call|conversation|chat|discussion)',
+    'our (phone |recent |last )?(call|conversation|discussion) (on|in|last|this|earlier|yesterday|today)',
+    '(spoke|talked|chatted) (with|to) you',
+    '(speaking|talking|chatting) (with|to) you (on|last|this|earlier|yesterday|the other)',
+    '(enjoyed|pleasure|great|lovely|nice|good|wonderful) (to (speak|talk|chat)|speaking|talking|chatting) (with|to) you',
+    'thanks? (you )?for (taking (my|our) call|the (call|chat)|your time on the (phone|call))',
+    'you (told|said to) (us|me) (on|over|during) the (phone|call)',
+  ].join('|') + ')\\b',
+  'i',
+)
+
+/**
+ * The letter must not say "when we spoke" to a guest nobody reached. This is the mistake that took three review
+ * rounds to clear from the hand-written reconnect letters of 2026-11-28 (16 of 58): a voicemail or a call of a
+ * few seconds is on record as a call, and the letter turned it into a conversation.
+ */
+function conversationClaimCheck(i: FollowUpCheckInput): CheckLine[] {
+  if (i.spokeWithGuest === undefined) return []
+  const hit = `${i.subject}\n${i.aiBody}`.match(CONVERSATION_CLAIM_RE)
+  const label = '没通上话就不说「我们通话时」'
+  if (!hit) return [{ id: 'conversation_claim', status: 'pass', label, detail: i.spokeWithGuest ? '记录里通过话，信里没提也没问题' : '记录里没有通上话的电话，信里也没说通过话' }]
+  if (i.spokeWithGuest) return [{ id: 'conversation_claim', status: 'pass', label, detail: `信里提到通话（"${clip(hit[0], 40)}"），记录里确实通过话` }]
+  return [{ id: 'conversation_claim', status: 'fail', label, detail: `信里写了 "${clip(hit[0], 40)}"，但记录里没有一通电话真的和客人通上话（没打过，或都没接通）。改掉这句再发` }]
+}
+
 function repeatCheck(i: FollowUpCheckInput): CheckLine {
   const sameSubject = i.previousSubjects.some((s) => s.trim().toLowerCase() === i.subject.trim().toLowerCase())
   const mine = ngrams(i.aiBody)
@@ -199,7 +277,7 @@ function repeatCheck(i: FollowUpCheckInput): CheckLine {
 
 function spellingCheck(i: FollowUpCheckInput): CheckLine {
   const cjk = /[㐀-鿿]/.test(i.subject + i.aiBody)
-  const us = (i.aiBody.match(/\b(catalog|catalogs|traveling|traveler|color|center|favorite)\b/gi) ?? []).map((w) => w.toLowerCase())
+  const us = (`${i.subject}\n${i.aiBody}`.match(/\b(catalog|catalogs|traveling|traveler|color|center|favorite|inquiry|inquiries)\b/gi) ?? []).map((w) => w.toLowerCase())
   return {
     id: 'spelling',
     status: cjk ? 'fail' : us.length > 0 ? 'warn' : 'pass',
@@ -217,6 +295,8 @@ export function runFollowUpChecks(i: FollowUpCheckInput): CheckLine[] {
     starCheck(i),
     lengthCheck(i),
     repeatCheck(i),
+    ...conversationClaimCheck(i),
+    offSaleTourCheck(i),
     spellingCheck(i),
     {
       id: 'framing',

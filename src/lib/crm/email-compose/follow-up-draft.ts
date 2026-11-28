@@ -38,6 +38,8 @@ import {
 } from './ai-draft'
 import { readFollowUpWriterConfig, type FollowUpWriterConfig } from './follow-up-config'
 import { runFollowUpChecks, type CheckLine } from './follow-up-checks'
+import { namesTour, shortTourName } from './tour-name'
+import { callReach, isSystemCall as isPhoneSystemCall, noteSaysReached, type PhoneTouch } from '@/lib/crm/ai-takeover/call-reach'
 
 export { runFollowUpChecks, type CheckLine } from './follow-up-checks'
 
@@ -99,6 +101,7 @@ const SIGN_OFF_RE = /^(warm regards|kind regards|best regards|regards|best wishe
 const GREETING_RE = /^(hi|hello|hey|dear|kia ora|good (morning|afternoon|evening))\b[^\n]{0,60}\n+/i
 const FOLLOW_UP_JSON_SCHEMA: Record<string, unknown> = { ...EMAIL_DRAFT_JSON_SCHEMA }
 
+export const NO_CONVERSATION_NOTE = '\n\nIMPORTANT: there is no phone conversation with this customer on record (no call was made, or none was answered). Do not say or imply that we spoke, talked or chatted with them, or that anything was discussed in a call. You may refer to what the customer wrote to us or filled in a form.'
 export const LINK_LEAD_MANY = 'In case it helps, here are the links:'
 export const LINK_LEAD_ONE = 'You can browse everything on our website:'
 
@@ -122,12 +125,7 @@ function countTerm(text: string, term: string): number {
   return matches ? matches.length : 0
 }
 
-/** "China Discovery — Best of China" → "Best of China"（信里、链接名都用短名）。 */
-export function shortTourName(name: string): string {
-  const parts = name.split(/\s[—–-]\s/)
-  const last = parts[parts.length - 1] ?? name
-  return last.trim() === '' ? name.trim() : last.trim()
-}
+export { namesTour, shortTourName } from './tour-name'
 
 export function nextDeparture(tour: PublishedTourFact, today: string): PublishedTourFactDeparture | null {
   const upcoming = tour.departures.filter((d) => d.departOn >= today).sort((a, b) => a.departOn.localeCompare(b.departOn))
@@ -390,7 +388,9 @@ export function buildLinks(a: {
       if (!tour.isActive || tour.soldOut) continue
       const label = shortTourName(tour.name)
       if (label.length < 4 || seen.has(label.toLowerCase())) continue
-      if (countTerm(a.aiText, label) === 0) continue
+      // Two tours on sale with the same short name (one per destination): the words cannot say which one is meant.
+      if (a.tours.filter((t) => t.isActive && !t.soldOut && shortTourName(t.name).toLowerCase() === label.toLowerCase()).length > 1) continue
+      if (!namesTour(a.aiText, label)) continue
       seen.add(label.toLowerCase())
       out.push({ label, url: buildTourUrl(a.providerSettings, tour, null) })
       extra += 1
@@ -579,11 +579,26 @@ function picksFor(ctx: WriterContext, tours: readonly PublishedTourFact[], canLi
   })
 }
 
+/**
+ * The tours the letter may name: the ones on sale today, by short name. Older facts and older mails of ours still
+ * mention tours that have since been taken off sale; without this line the model offers them again.
+ * When we know which tours this guest cares about, only tours of those destinations are listed: a guest asking
+ * about one country is not handed the tour names of another.
+ */
+export function onSaleNote(tours: readonly PublishedTourFact[], picks: readonly ResolvedPick[] = []): string {
+  const wanted = new Set(picks.map((p) => p.tour.destination))
+  const pool = tours.filter((t) => t.isActive && !t.soldOut && (wanted.size === 0 || wanted.has(t.destination)))
+  const names = Array.from(new Set(pool.map((t) => shortTourName(t.name))))
+  if (names.length === 0) return ''
+  return `\n\nTOURS ON SALE TODAY (the only tours you may name; any other tour mentioned above is no longer offered, do not name it): ${names.join('; ')}.`
+}
+
 async function askForDraft(
   ctx: WriterContext,
   picks: readonly ResolvedPick[],
   subjects: readonly string[],
   deps: FollowUpDeps,
+  tours: readonly PublishedTourFact[],
 ): Promise<{ subject: string; body: string } | null> {
   const known = renderFollowUpContext({ contactName: ctx.person.display_name, touches: ctx.touches, messages: ctx.messages, calls: ctx.calls, business: ctx.identity.name })
   try {
@@ -597,7 +612,8 @@ async function askForDraft(
           previousSubjects: subjects,
           config: ctx.config,
         }),
-        user: `Known situation:\n${known}`,
+        // The model sees call records as "we spoke"; when no call reached the guest it is told so in plain words.
+        user: `Known situation:\n${known}${spokeOnRecord(ctx) ? '' : NO_CONVERSATION_NOTE}${onSaleNote(tours, picks)}`,
         schema: EmailDraftSchema,
         jsonSchema: { name: 'follow_up_email_draft', schema: FOLLOW_UP_JSON_SCHEMA },
         totalBudgetMs: 25_000,
@@ -614,6 +630,43 @@ async function askForDraft(
   }
 }
 
+/**
+ * Did a person on our side actually talk with this guest? A phone-system call counts when the guest was reached
+ * (`callReach`); a staff call note counts when it says so and is not the record of a failed call (`noteSaysReached`).
+ * Same judgement the AI pickup uses to decide who was "rung and not reached".
+ */
+export function spokeWithGuest(touches: readonly FollowUpTouch[]): boolean {
+  const phone: PhoneTouch[] = touches.filter((t) => t.channel === 'phone').map((t) => ({ source: t.source, occurredAt: t.occurred_at, metadata: t.metadata }))
+  return phone.some((t) => (isPhoneSystemCall(t.source) ? callReach(t.metadata) === 'reached' : noteSaysReached(t, phone)))
+}
+
+/**
+ * The touch list the writer reads is capped to the most recent ones; a guest with many mail records can have an
+ * older answered call pushed out of it. The call notes come from the phone system itself and are not capped that
+ * way: a call with points the guest made is a conversation too.
+ */
+function spokeOnRecord(ctx: Pick<WriterContext, 'touches' | 'calls'>): boolean {
+  return spokeWithGuest(ctx.touches) || ctx.calls.some((c) => c.facts.some((f) => f.speaker === 'customer'))
+}
+
+/** The checks for one letter text, from everything the writer knows about the guest. One place for drafting and re-checking. */
+function checksForLetter(ctx: WriterContext, catalogue: { tours: PublishedTourFact[] }, picks: readonly ResolvedPick[], text: { subject: string; aiBody: string; letter: string; strippedFraming: boolean; systemUrls?: readonly string[] }): CheckLine[] {
+  return runFollowUpChecks({
+    ...text,
+    config: ctx.config,
+    settings: ctx.settings,
+    picks,
+    tours: catalogue.tours,
+    providerSettings: ctx.settings.providers.publishedTours ?? null,
+    spokeWithGuest: spokeOnRecord(ctx),
+    previousSubjects: previousSubjects(ctx.touches),
+    previousExcerpts: ctx.touches
+      .filter((t) => isOurEmail(t) && t.source === 'microsoft_mail' && (t.raw ?? '').trim() !== '')
+      .slice(0, MAX_EXCERPTS)
+      .map((t) => clip(t.raw, EXCERPT_LIMIT)),
+  })
+}
+
 export async function generateFollowUpDraft(clientId: string, contactId: string, deps: FollowUpDeps = {}): Promise<FollowUpResult> {
   const ctx = await loadWriterContext(clientId, contactId, deps.now ? deps.now() : new Date())
   if ('ok' in ctx) return ctx
@@ -621,28 +674,13 @@ export async function generateFollowUpDraft(clientId: string, contactId: string,
   const providerSettings = ctx.settings.providers.publishedTours ?? null
   const picks = picksFor(ctx, catalogue.tours, providerSettings !== null)
   const subjects = previousSubjects(ctx.touches)
-  const draft = await askForDraft(ctx, picks, subjects, deps)
+  const draft = await askForDraft(ctx, picks, subjects, deps, catalogue.tours)
   if (!draft) return fail('no_ai', 'AI 暂时写不出来，请自己写或稍后再试。')
 
   const framing = stripFraming(draft.body)
   const links = buildLinks({ picks, tours: catalogue.tours, providerSettings, config: ctx.config, aiText: framing.body })
   const letter = composeFollowUpLetter({ firstName: resolveFirstName(ctx.person.display_name), config: ctx.config, aiBody: framing.body, links })
-  const checks: CheckLine[] = runFollowUpChecks({
-    subject: draft.subject,
-    aiBody: framing.body,
-    letter,
-    strippedFraming: framing.stripped,
-    config: ctx.config,
-    settings: ctx.settings,
-    picks,
-    tours: catalogue.tours,
-    providerSettings,
-    previousSubjects: subjects,
-    previousExcerpts: ctx.touches
-      .filter((t) => isOurEmail(t) && t.source === 'microsoft_mail' && (t.raw ?? '').trim() !== '')
-      .slice(0, MAX_EXCERPTS)
-      .map((t) => clip(t.raw, EXCERPT_LIMIT)),
-  })
+  const checks = checksForLetter(ctx, catalogue, picks, { subject: draft.subject, aiBody: framing.body, letter, strippedFraming: framing.stripped })
   const read = summariseReading({
     touches: ctx.touches,
     calls: ctx.calls,
@@ -652,4 +690,62 @@ export async function generateFollowUpDraft(clientId: string, contactId: string,
     hasTourLinks: providerSettings !== null,
   })
   return { ok: true, draft: { subject: draft.subject, body: letter, read, checks } }
+}
+
+/**
+ * Every URL the system itself may put in a letter for this client: the site link, and the page of each tour on sale
+ * (with or without one of its departures). A letter being re-checked carries these; they are not "a URL the AI wrote".
+ */
+function systemUrlsFor(ctx: WriterContext, tours: readonly PublishedTourFact[]): string[] {
+  const urls = new Set<string>()
+  if (ctx.config.siteLink) urls.add(ctx.config.siteLink.url)
+  const provider = ctx.settings.providers.publishedTours ?? null
+  if (provider !== null) {
+    for (const tour of tours) {
+      if (!tour.isActive || tour.soldOut) continue
+      urls.add(buildTourUrl(provider, tour, null))
+      for (const dep of tour.departures) urls.add(buildTourUrl(provider, tour, dep))
+    }
+  }
+  return Array.from(urls)
+}
+
+/**
+ * A whole letter minus what the system itself puts around the writing: the greeting line built from the client's
+ * config and the guest's first name, the sign-off from the config, and the link lines the system builds.
+ * Only exact matches are removed: a greeting or sign-off a person rewrote stays in and is checked like any text.
+ */
+export function withoutSystemFraming(letter: string, a: { firstName: string | null; config: FollowUpWriterConfig; systemUrls: readonly string[] }): string {
+  const framed = composeFollowUpLetter({ firstName: a.firstName, config: a.config, aiBody: '\u0000', links: [] })
+  const [greeting = '', signature = ''] = framed.split('\u0000').map((part) => part.trim())
+  let text = letter.replace(/\r\n/g, '\n').trim()
+  if (greeting !== '' && text.startsWith(greeting)) text = text.slice(greeting.length).trim()
+  if (signature !== '' && text.endsWith(signature)) text = text.slice(0, text.length - signature.length).trim()
+  const urls = new Set(a.systemUrls)
+  const lines = text.split('\n').filter((line) => {
+    const t = line.trim()
+    if (t === LINK_LEAD_MANY || t === LINK_LEAD_ONE) return false
+    const url = t.match(/(https?:\/\/\S+)$/)?.[1]
+    return !(url !== undefined && urls.has(url) && /^[^:]{1,80}:\s+https?:\/\/\S+$/.test(t))
+  })
+  return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
+export type LetterCheckResult = { ok: true; checks: CheckLine[] } | { ok: false; reason: FollowUpFailure; message: string }
+
+/**
+ * The same checks, run again on the text a person is about to send (the AI's draft, or the draft after their edits).
+ * No model is called. The whole letter is checked as it stands: greeting, body, links and sign-off together.
+ */
+export async function checkFollowUpLetter(clientId: string, contactId: string, text: { subject: string; body: string }, deps: Pick<FollowUpDeps, 'now'> = {}): Promise<LetterCheckResult> {
+  const ctx = await loadWriterContext(clientId, contactId, deps.now ? deps.now() : new Date())
+  if ('ok' in ctx) return ctx.ok ? { ok: false, reason: 'facts_unreadable', message: UNREADABLE } : { ok: false, reason: ctx.reason, message: ctx.message }
+  const catalogue = await loadCatalogue(clientId, ctx.today)
+  if (!catalogue.readable) return { ok: false, reason: 'facts_unreadable', message: '暂时读不到团目录，没法检查这封信。稍后再试。' }
+  const picks = picksFor(ctx, catalogue.tours, (ctx.settings.providers.publishedTours ?? null) !== null)
+  const systemUrls = systemUrlsFor(ctx, catalogue.tours)
+  // The body checks (spelling, length, "we spoke", off-sale tours…) read what was written, not what the system put
+  // around it: a guest's name in the greeting may be in any script, and the sign-off is the client's own.
+  const aiBody = withoutSystemFraming(text.body, { firstName: resolveFirstName(ctx.person.display_name), config: ctx.config, systemUrls })
+  return { ok: true, checks: checksForLetter(ctx, catalogue, picks, { subject: text.subject, aiBody, letter: text.body, strippedFraming: false, systemUrls }) }
 }

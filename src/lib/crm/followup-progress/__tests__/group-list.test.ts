@@ -8,7 +8,7 @@ function detail(entries: Array<[string, GroupVerdict, { e?: string; g?: string; 
   const dates: FollowupProgressDetail['dates'] = new Map()
   for (const [id, v, d] of entries) {
     verdicts.set(id, v)
-    dates.set(id, { lastEnquiryAt: d.e ?? null, lastGuestMessageAt: d.g ?? null, lastStaffAt: d.s ?? null })
+    dates.set(id, { lastEnquiryAt: d.e ?? null, lastGuestMessageAt: d.g ?? null, lastStaffAt: d.s ?? null, lastEngagedAt: null, bulkLast7Days: 0 })
   }
   return { clientId: 'c', at: '2026-11-28T00:00:00Z', counts: emptyCounts(), week: { guestsContactedByStaff: 0, guestsWhoReplied: 0, newEnquiries: 0, movedToQualified: 0, newBookings: 0, takenByAi: 0 }, verdicts, dates }
 }
