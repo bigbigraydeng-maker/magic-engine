@@ -1,12 +1,16 @@
 ---
 id: 2026-11-28-crm-ai-letter-tracking
 title: AI 起草的客人信一封一行记下来（原稿、终稿、改没改、谁放行），记不上就不给稿子、不发信。PM 11-28 原话「ai 写的信一定要有标记，做跟踪和学习，分析」
-status: decided
+status: done
 owner: agent
 decided_on: 2026-11-28
 source: session:96dc6edf
 verify_by: 2026-12-03
 verify_how: 12-03（周四）查线上库：①crm_ai_letters 表存在，开着行级保护、只有服务器能读写。②表里有 11-30 之后的行，surface 有客人抽屉或跟进信页的；凡是 request_id 不为空的行，在 crm_email_send_receipts 里都能按 request_id 找到发信回执。③反查：11-30 之后跟进信页、第 7 天跟进信页发出的信（回执里 actor 为员工、没有模板的），每封都能在 crm_ai_letters 里按 request_id 找到。算成：三条都对。没人用过 AI 起草（表是空的）不算失败，写「还没用过」。不成时第一步：看起草接口有没有返回 503 not_recorded。
+done_on: 2026-11-28
+done_ref: pr:3992
+last_checked: 2026-11-28
+check_note: 11-28 22:55（新西兰时间）上线。建表在合并之前做（PM 回「建表」），只有服务器能读写、匿名和登录用户都不能读。合并由 PM 回「你合」授权 agent 代合。上线后当场试：给一位客人在抽屉里让 AI 起草跟进信（没发），表里多了一行（surface=drawer、12 项检查、request_id 为空）
 ---
 起因：PM 要求 AI 写的信能被追踪、学习、分析。之前 AI 起草只返回文字，发出去后和员工自己写的信分不出来。
 这一刀只做「记下来」：新表 crm_ai_letters；起草接口写完就记，记不上不给稿子；两条发送路在发信前把这次发送绑到 AI 稿子上，记不上不发。三个页面都带上标记。
