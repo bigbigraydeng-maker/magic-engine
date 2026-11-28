@@ -7,12 +7,15 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { fetchAll } from '@/lib/supabase-paginate'
+import { fetchAll, fetchAllParallel } from '@/lib/supabase-paginate'
 import { isDoNotContact, type DncTouch } from '@/lib/crm/dnc'
 import { isHumanFollowup } from '@/lib/crm/lead-followup-due'
 import { isMarketingAction, type MarketingAction } from '@/lib/crm/pipeline'
 import { engagementFromMetadata } from '@/lib/crm/segments'
-import { ENQUIRY_FORM_CHANNELS } from '@/lib/crm/enquiry-daily-digest'
+import { ENQUIRY_FORM_CHANNELS, isMeTestContact } from '@/lib/crm/enquiry-daily-digest'
+import { isAutomatedTouch } from '@/lib/crm/automated-touch'
+import { contactKindOf, isSystemAccountName, readDomainRules, type DomainRules } from '@/lib/crm/contact-kind'
+import { isAutoReply } from '@/lib/microsoft/auto-reply'
 import { countGroups, groupOf, type GroupConfig, type GroupCounts, type GroupVerdict, type GuestFacts, DEFAULT_GROUP_CONFIG } from './groups'
 
 const DAY_MS = 86_400_000
@@ -23,12 +26,16 @@ const GUEST_MESSAGE_CHANNELS: ReadonlySet<string> = new Set(['email', 'whatsapp'
 
 interface ContactRow {
   id: string
+  display_name: string | null
   do_not_contact: boolean | null
   stage: string | null
   ai_takeover_since: string | null
+  snooze_until: string | null
   primary_email: string | null
   primary_phone: string | null
 }
+
+interface IdentityRow { contact_id: string; kind: string; value: string }
 
 export interface TouchRow {
   contact_id: string | null
@@ -36,6 +43,7 @@ export interface TouchRow {
   direction: string | null
   source: string | null
   occurred_at: string
+  summary: string | null
   metadata: Record<string, unknown> | null
 }
 
@@ -73,11 +81,18 @@ function later(a: string | null, b: string): string {
   return a === null || Date.parse(b) > Date.parse(a) ? b : a
 }
 
+/** The mail's subject: the sync keeps it in metadata, older rows only in the summary. */
+function subjectOf(t: TouchRow): string | null {
+  const s = t.metadata?.subject
+  return typeof s === 'string' ? s : t.summary
+}
+
+/** The guest's own words. Not a machine: an out-of-office or a bounce after a bulk send is nobody speaking. */
 function isGuestMessage(t: TouchRow): boolean {
   if (t.direction !== 'inbound' || !GUEST_MESSAGE_CHANNELS.has(t.channel)) return false
-  if (engagementFromMetadata(t.metadata) !== null) return false
+  if (isAutomatedTouch(t.source, t.metadata)) return false
   // A call the guest made and nobody answered still counts: the guest reached out and is waiting for us.
-  return t.source !== 'mailchimp'
+  return !(t.channel === 'email' && isAutoReply(subjectOf(t)))
 }
 
 function isEnquiry(t: TouchRow): boolean {
@@ -108,31 +123,43 @@ export function touchFacts(touches: readonly TouchRow[]): Acc {
 }
 
 async function readBook(sb: SupabaseClient, clientId: string) {
-  const [contacts, touches, stages, bookings, cfg] = await Promise.all([
+  const [contacts, touches, stages, bookings, identities, cfg, client] = await Promise.all([
     fetchAll<ContactRow>((from, to) =>
-      sb.from('contacts').select('id, do_not_contact, stage, ai_takeover_since, primary_email, primary_phone')
+      sb.from('contacts').select('id, display_name, do_not_contact, stage, ai_takeover_since, snooze_until, primary_email, primary_phone')
         .eq('client_id', clientId).order('id', { ascending: true }).range(from, to)),
-    fetchAll<TouchRow>((from, to) =>
-      sb.from('contact_touchpoints').select('contact_id, channel, direction, source, occurred_at, metadata')
-        .eq('client_id', clientId).order('id', { ascending: true }).range(from, to)),
+    // Many pages for a busy client: read them at once. `id` is the tie-break that keeps page edges stable and
+    // proves the read is complete (same pattern as the "今天先联系" list).
+    fetchAllParallel<TouchRow & { id: string }>(
+      (from, to, withCount) =>
+        sb.from('contact_touchpoints').select('id, contact_id, channel, direction, source, occurred_at, summary, metadata', withCount ? { count: 'exact' } : undefined)
+          .eq('client_id', clientId).order('occurred_at', { ascending: false }).order('id', { ascending: false }).range(from, to),
+      (row) => row.id,
+    ),
     fetchAll<StageRow>((from, to) =>
       sb.from('client_pipeline_stages').select('stage_key, marketing_action, is_terminal')
         .eq('client_id', clientId).order('stage_key', { ascending: true }).range(from, to)),
     fetchAll<{ contact_id: string; created_at: string }>((from, to) =>
       sb.from('crm_bookings').select('contact_id, created_at')
         .eq('client_id', clientId).eq('status', 'active').order('id', { ascending: true }).range(from, to)),
+    // Every address and number a guest has, not just the first one kept on the contact row.
+    fetchAll<IdentityRow>((from, to) =>
+      sb.from('contact_identities').select('contact_id, kind, value')
+        .eq('client_id', clientId).in('kind', ['email', 'phone']).order('id', { ascending: true }).range(from, to)),
     sb.from('ad_strategy_configs').select('qualified_stage_keys').eq('client_id', clientId).maybeSingle(),
+    sb.from('clients').select('leads_config').eq('id', clientId).maybeSingle(),
   ])
   if (cfg.error) throw new Error(cfg.error.message)
+  if (client.error) throw new Error(client.error.message)
+  const rules = readDomainRules((client.data as { leads_config?: unknown } | null)?.leads_config)
   const keys = (cfg.data as { qualified_stage_keys?: unknown } | null)?.qualified_stage_keys
   const qualified = new Set(Array.isArray(keys) ? keys.filter((k): k is string => typeof k === 'string') : [])
-  return { contacts, touches, stages, bookings, qualified }
+  return { contacts, touches, stages, bookings, identities, qualified, rules }
 }
 
 async function readWeekEvents(sb: SupabaseClient, clientId: string, sinceIso: string) {
   const [stageEvents, takeovers] = await Promise.all([
-    fetchAll<{ contact_id: string; to_stage: string | null }>((from, to) =>
-      sb.from('contact_stage_events').select('contact_id, to_stage')
+    fetchAll<{ contact_id: string; from_stage: string | null; to_stage: string | null }>((from, to) =>
+      sb.from('contact_stage_events').select('contact_id, from_stage, to_stage')
         .eq('client_id', clientId).gte('created_at', sinceIso).order('id', { ascending: true }).range(from, to)),
     fetchAll<{ contact_id: string }>((from, to) =>
       sb.from('contact_automation_events').select('contact_id')
@@ -149,9 +176,12 @@ interface BookIndex {
   stageOf: Map<string, { action: MarketingAction | null; terminal: boolean }>
   booked: Set<string>
   touchesOf: Map<string, TouchRow[]>
+  emailsOf: Map<string, string[]>
+  hasPhone: Set<string>
+  rules: DomainRules
 }
 
-function bookIndex(book: { stages: StageRow[]; bookings: Array<{ contact_id: string }>; touches: TouchRow[] }): BookIndex {
+function bookIndex(book: { stages: StageRow[]; bookings: Array<{ contact_id: string }>; touches: TouchRow[]; identities: IdentityRow[]; rules: DomainRules }): BookIndex {
   const stageOf: BookIndex['stageOf'] = new Map()
   for (const s of book.stages) stageOf.set(s.stage_key, { action: isMarketingAction(s.marketing_action) ? s.marketing_action : null, terminal: s.is_terminal === true })
   const touchesOf = new Map<string, TouchRow[]>()
@@ -161,21 +191,33 @@ function bookIndex(book: { stages: StageRow[]; bookings: Array<{ contact_id: str
     if (list) list.push(t)
     else touchesOf.set(t.contact_id, [t])
   }
-  return { stageOf, booked: new Set(book.bookings.map((b) => b.contact_id)), touchesOf }
+  const emailsOf = new Map<string, string[]>()
+  const hasPhone = new Set<string>()
+  for (const i of book.identities) {
+    if (i.kind === 'phone') hasPhone.add(i.contact_id)
+    else emailsOf.set(i.contact_id, [...(emailsOf.get(i.contact_id) ?? []), i.value])
+  }
+  return { stageOf, booked: new Set(book.bookings.map((b) => b.contact_id)), touchesOf, emailsOf, hasPhone, rules: book.rules }
 }
 
-function guestFacts(c: ContactRow, a: Acc, index: BookIndex, qualified: ReadonlySet<string>): GuestFacts {
+function guestFacts(c: ContactRow, a: Acc, index: BookIndex, qualified: ReadonlySet<string>, now: Date): GuestFacts {
   const st = c.stage === null ? undefined : index.stageOf.get(c.stage)
+  const emails = [...(index.emailsOf.get(c.id) ?? [])]
+  if (nonEmpty(c.primary_email) && !emails.includes(c.primary_email as string)) emails.push(c.primary_email as string)
+  const snooze = c.snooze_until === null ? NaN : Date.parse(c.snooze_until)
   return {
     doNotContact: isDoNotContact(c.do_not_contact === true, a.dnc),
+    // Same judgement as the "今天先联系" list: by email domain, by system-account name, by the test-lead name.
+    notGuest: contactKindOf(emails, index.rules) !== 'retail' || isSystemAccountName(c.display_name) || isMeTestContact(c.display_name),
     hasActiveBooking: index.booked.has(c.id),
     stage: c.stage,
     stageAction: st?.action ?? null,
     stageTerminal: st?.terminal ?? false,
     qualified: c.stage !== null && qualified.has(c.stage),
-    aiTakeover: c.ai_takeover_since !== null,
-    hasEmail: nonEmpty(c.primary_email),
-    hasPhone: nonEmpty(c.primary_phone),
+    aiTakeoverSince: c.ai_takeover_since,
+    snoozed: Number.isFinite(snooze) && snooze > now.getTime(),
+    hasEmail: emails.length > 0,
+    hasPhone: nonEmpty(c.primary_phone) || index.hasPhone.has(c.id),
     lastStaffAt: a.staff,
     lastGuestMessageAt: a.guest,
     lastEnquiryAt: a.enquiry,
@@ -201,13 +243,14 @@ export async function loadFollowupProgress(
   const enquiryWeek = new Set<string>()
   for (const c of book.contacts) {
     const a = touchFacts(index.touchesOf.get(c.id) ?? [])
-    verdicts.set(c.id, groupOf(guestFacts(c, a, index, book.qualified), now, cfg))
+    verdicts.set(c.id, groupOf(guestFacts(c, a, index, book.qualified, now), now, cfg))
     if (a.staff !== null && Date.parse(a.staff) >= sinceMs) staffWeek.add(c.id)
     if (a.guest !== null && Date.parse(a.guest) >= sinceMs) repliedWeek.add(c.id)
     if (a.enquiry !== null && Date.parse(a.enquiry) >= sinceMs) enquiryWeek.add(c.id)
   }
 
-  const movedToQualified = new Set(weekEvents.stageEvents.filter((e) => e.to_stage !== null && book.qualified.has(e.to_stage)).map((e) => e.contact_id))
+  // Into a qualified stage from outside them: a move between two qualified stages is not a new qualified guest.
+  const movedToQualified = new Set(weekEvents.stageEvents.filter((e) => e.to_stage !== null && book.qualified.has(e.to_stage) && !(e.from_stage !== null && book.qualified.has(e.from_stage))).map((e) => e.contact_id))
   return {
     clientId,
     at: now.toISOString(),

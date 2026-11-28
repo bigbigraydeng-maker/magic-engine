@@ -10,6 +10,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { FOLLOWUP_GROUPS, type FollowupGroup, type GroupCounts } from './groups'
 
 export const FOLLOWUP_PROGRESS_JOB_NAME = 'crm-followup-progress-daily'
+/** When the snapshot is taken, in words, for the page. Pinned to the job's cron by the same test. */
+export const SNAPSHOT_TIME_LABEL = '每天早上 6:30'
 
 export interface DayPoint {
   /** When that day's snapshot was taken. */

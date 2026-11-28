@@ -2,10 +2,10 @@
  * 跟进进度页的画面：只收数字，不取数。分组规则和文案在 `lib/crm/followup-progress/groups.ts`。
  */
 
-import Link from 'next/link'
 import { WEEK_DAYS, type FollowupProgress } from '@/lib/crm/followup-progress/load'
-import { delta, pointDaysAgo, type DayPoint } from '@/lib/crm/followup-progress/history'
-import { FOLLOWUP_GROUPS, GROUP_META, OUT_OF_SCOPE, OUT_OF_SCOPE_LABEL, type FollowupGroup } from '@/lib/crm/followup-progress/groups'
+import { delta, pointDaysAgo, SNAPSHOT_TIME_LABEL, type DayPoint } from '@/lib/crm/followup-progress/history'
+import { FOLLOWUP_GROUPS, groupMeta, OUT_OF_SCOPE, OUT_OF_SCOPE_LABEL, type FollowupGroup } from '@/lib/crm/followup-progress/groups'
+import { GroupLink } from './GroupLink'
 
 const OWNER_LABEL = { staff: '员工', ai: 'AI（人点了才发）', none: '暂不处理' } as const
 
@@ -16,7 +16,7 @@ function Change({ value }: { value: number | null }): JSX.Element {
 }
 
 function GroupRow({ clientId, group, progress, day, week }: { clientId: string; group: FollowupGroup; progress: FollowupProgress; day: DayPoint | null; week: DayPoint | null }): JSX.Element {
-  const meta = GROUP_META[group]
+  const meta = groupMeta()[group]
   return (
     <tr className="border-t border-me-charcoal/10 align-top">
       <td className="max-w-[230px] py-3 pr-4 sm:max-w-none">
@@ -28,7 +28,7 @@ function GroupRow({ clientId, group, progress, day, week }: { clientId: string; 
       <td className="py-3 pr-4 text-sm"><Change value={delta(progress.counts, week, group)} /></td>
       <td className="py-3 pr-4 text-sm text-me-charcoal/80">{OWNER_LABEL[meta.owner]}</td>
       <td className="py-3 text-sm">
-        {meta.page ? <Link className="underline" href={`/dashboard/clients/${clientId}/crm/${meta.page}`}>去处理</Link> : <span className="text-me-charcoal/40">—</span>}
+        {meta.page ? <GroupLink clientId={clientId} page={meta.page} needsEmailFeature={meta.needsEmailFeature} /> : <span className="text-me-charcoal/60">—</span>}
       </td>
     </tr>
   )
@@ -37,11 +37,11 @@ function GroupRow({ clientId, group, progress, day, week }: { clientId: string; 
 function WeekCards({ progress }: { progress: FollowupProgress }): JSX.Element {
   const items: Array<[string, number]> = [
     ['新填表的客人', progress.week.newEnquiries],
-    ['员工联系过的客人', progress.week.guestsContactedByStaff],
+    ['员工打过电话或发过信的客人', progress.week.guestsContactedByStaff],
     ['来信或来电的客人', progress.week.guestsWhoReplied],
     ['交给 AI 的客人', progress.week.takenByAi],
-    ['变成已报价及以后', progress.week.movedToQualified],
-    ['新订团', progress.week.newBookings],
+    ['变成高意向客人', progress.week.movedToQualified],
+    ['新订单', progress.week.newBookings],
   ]
   return (
     <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -63,7 +63,7 @@ export function ProgressView({ clientId, progress, history, now }: { clientId: s
     <>
       <h1 className="text-lg font-semibold text-me-charcoal">跟进进度</h1>
       <p className="mb-5 mt-1 text-sm text-me-charcoal/70">
-        还没成交、可以联系的客人一共 <strong className="tabular-nums">{progress.counts.inScope}</strong> 位，分成下面几组。数字是打开这一页时现算的；「比昨天」「比上周」来自每天早上 6:30 自动记下的数。
+        还没成交、可以联系的客人一共 <strong className="tabular-nums">{progress.counts.inScope}</strong> 位，分成下面几组。数字是打开这一页时现算的；「比昨天」「比上周」来自{SNAPSHOT_TIME_LABEL}自动记下的数{history.length === 0 ? '，现在还没有记过（第一次记数之后才有对比；近期没有新咨询的客户不记）' : ''}。
       </p>
 
       <h2 className="mb-2 text-sm font-semibold text-me-charcoal">最近 {WEEK_DAYS} 天发生了什么</h2>
@@ -95,7 +95,9 @@ export function ProgressView({ clientId, progress, history, now }: { clientId: s
 
       <p className="mt-6 text-[12.5px] leading-relaxed text-me-charcoal/60">
         这一页和「今天先联系」的名单不是一回事：那边排的是今天先打谁，这里看的是全部客人的大盘，所以两边人数不会一样。
-        「有人联系过」只认系统里记下的电话、邮件和 WhatsApp；Facebook 私信的回复分不出是真人还是自动回复，不算；员工用自己手机打、没记进系统的也看不到。
+        「打过电话或发过信」只认系统里记下的电话、邮件和 WhatsApp，打了没接通的也算打过；员工用自己手机打、没记进系统的看不到。
+        Facebook 私信两头都不算：回复分不出是真人还是自动回复，客人发来的私信在系统里是整段对话一条记录，看不出谁最后说话。
+        「比昨天」「比上周」比的是那天早上记下的数，不是整整 24 小时前。
       </p>
     </>
   )

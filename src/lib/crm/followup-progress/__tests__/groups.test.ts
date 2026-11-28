@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { countGroups, DEFAULT_GROUP_CONFIG, FOLLOWUP_GROUPS, GROUP_META, groupOf, type GuestFacts } from '../groups'
+import { countGroups, DEFAULT_GROUP_CONFIG, FOLLOWUP_GROUPS, groupMeta, groupOf, type GuestFacts } from '../groups'
 
 const NOW = new Date('2026-11-28T00:00:00Z')
 
@@ -15,7 +15,9 @@ function facts(over: Partial<GuestFacts> = {}): GuestFacts {
     stageAction: 'nurture',
     stageTerminal: false,
     qualified: false,
-    aiTakeover: false,
+    notGuest: false,
+    aiTakeoverSince: null,
+    snoozed: false,
     hasEmail: true,
     hasPhone: true,
     lastStaffAt: null,
@@ -28,7 +30,7 @@ function facts(over: Partial<GuestFacts> = {}): GuestFacts {
 
 describe('groupOf', () => {
   it('do-not-contact wins over everything', () => {
-    const f = facts({ doNotContact: true, hasActiveBooking: true, aiTakeover: true })
+    const f = facts({ doNotContact: true, hasActiveBooking: true, aiTakeoverSince: daysAgo(3) })
     expect(groupOf(f, NOW)).toEqual({ inScope: false, why: 'do_not_contact' })
   })
 
@@ -36,8 +38,31 @@ describe('groupOf', () => {
     expect(groupOf(facts({ hasActiveBooking: true }), NOW)).toEqual({ inScope: false, why: 'booked' })
   })
 
+  it('a guest nobody has moved yet (no stage) is an open new lead, not "cannot judge"', () => {
+    expect(groupOf(facts({ stage: null, stageAction: null, lastEnquiryAt: daysAgo(2) }), NOW)).toEqual({ inScope: true, group: 'new_lead' })
+    expect(groupOf(facts({ stage: '', stageAction: null, lastEnquiryAt: daysAgo(40) }), NOW)).toEqual({ inScope: true, group: 'never_contacted' })
+  })
+
+  it('not a guest (staff, trade, system account, test lead) is out of scope, after do-not-contact only', () => {
+    expect(groupOf(facts({ notGuest: true, hasActiveBooking: true, lastGuestMessageAt: daysAgo(1) }), NOW)).toEqual({ inScope: false, why: 'not_guest' })
+  })
+
+  it('with the AI: stays "ai" until the guest speaks after the takeover and nobody answers', () => {
+    expect(groupOf(facts({ aiTakeoverSince: daysAgo(5), lastGuestMessageAt: daysAgo(9), lastStaffAt: null }), NOW)).toEqual({ inScope: true, group: 'ai' })
+    expect(groupOf(facts({ aiTakeoverSince: daysAgo(5), lastGuestMessageAt: daysAgo(1), lastStaffAt: daysAgo(8) }), NOW)).toEqual({ inScope: true, group: 'awaiting_reply' })
+    expect(groupOf(facts({ aiTakeoverSince: daysAgo(5), lastGuestMessageAt: daysAgo(2), lastStaffAt: daysAgo(1) }), NOW)).toEqual({ inScope: true, group: 'ai' })
+  })
+
+  it('snoozed by staff is "later", but a guest who wrote since still waits for a reply', () => {
+    expect(groupOf(facts({ snoozed: true, lastEnquiryAt: daysAgo(2) }), NOW)).toEqual({ inScope: true, group: 'later' })
+    expect(groupOf(facts({ snoozed: true, lastGuestMessageAt: daysAgo(1) }), NOW)).toEqual({ inScope: true, group: 'awaiting_reply' })
+  })
+
+  it('never contacted and never filled a form is its own group, not "filled a form"', () => {
+    expect(groupOf(facts({}), NOW)).toEqual({ inScope: true, group: 'no_enquiry' })
+  })
+
   it('unknown stage is out of scope', () => {
-    expect(groupOf(facts({ stage: null }), NOW)).toEqual({ inScope: false, why: 'unknown_stage' })
     expect(groupOf(facts({ stage: 'x', stageAction: null }), NOW)).toEqual({ inScope: false, why: 'unknown_stage' })
   })
 
@@ -49,7 +74,7 @@ describe('groupOf', () => {
   })
 
   it('ai takeover wins over qualified', () => {
-    expect(groupOf(facts({ aiTakeover: true, qualified: true }), NOW)).toEqual({ inScope: true, group: 'ai' })
+    expect(groupOf(facts({ aiTakeoverSince: daysAgo(3), qualified: true }), NOW)).toEqual({ inScope: true, group: 'ai' })
   })
 
   it('qualified stays with staff even when the guest wrote last', () => {
@@ -132,7 +157,7 @@ describe('countGroups', () => {
 describe('GROUP_META', () => {
   it('has a labelled entry for every follow-up group', () => {
     for (const group of FOLLOWUP_GROUPS) {
-      const meta = GROUP_META[group]
+      const meta = groupMeta()[group]
       expect(meta.label.length).toBeGreaterThan(0)
       expect(meta.howTo.length).toBeGreaterThan(0)
     }

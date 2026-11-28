@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { touchFacts, type TouchRow } from '../load'
-import { delta, pointDaysAgo, pointFromSummary, FOLLOWUP_PROGRESS_JOB_NAME, type DayPoint } from '../history'
+import { delta, pointDaysAgo, pointFromSummary, FOLLOWUP_PROGRESS_JOB_NAME, SNAPSHOT_TIME_LABEL, type DayPoint } from '../history'
 import { emptyCounts } from '../groups'
-import { FOLLOWUP_PROGRESS_JOB } from '@/lib/inngest/functions/crm-followup-progress-daily'
+import { FOLLOWUP_PROGRESS_CRON, FOLLOWUP_PROGRESS_JOB } from '@/lib/inngest/functions/crm-followup-progress-daily'
 
 function touch(over: Partial<TouchRow>): TouchRow {
-  return { contact_id: 'c1', channel: 'email', direction: 'outbound', source: 'microsoft_mail', occurred_at: '2026-11-20T00:00:00Z', metadata: null, ...over }
+  return { contact_id: 'c1', channel: 'email', direction: 'outbound', source: 'microsoft_mail', occurred_at: '2026-11-20T00:00:00Z', summary: null, metadata: null, ...over }
 }
 
 describe('touchFacts', () => {
@@ -33,6 +33,16 @@ describe('touchFacts', () => {
     ])
     expect(a.guest).toBe('2026-11-22T00:00:00Z')
     expect(a.engaged).toBe('2026-11-26T00:00:00Z')
+  })
+
+  it('an out-of-office or a machine-marked inbound mail is nobody speaking', () => {
+    const a = touchFacts([
+      touch({ direction: 'inbound', metadata: { subject: 'Automatic reply: Black Friday' } }),
+      touch({ direction: 'inbound', summary: 'Re: Automatic reply: away' }),
+      touch({ direction: 'inbound', metadata: { automated: true } }),
+      touch({ direction: 'inbound', source: 'me_unsubscribe' }),
+    ])
+    expect(a.guest).toBeNull()
   })
 
   it('a call the guest made and we missed is the guest speaking and not a staff contact', () => {
@@ -65,6 +75,8 @@ describe('history', () => {
 
   it('the page and the job agree on the job name', () => {
     expect(FOLLOWUP_PROGRESS_JOB_NAME).toBe(FOLLOWUP_PROGRESS_JOB)
+    expect(FOLLOWUP_PROGRESS_CRON).toBe('30 6 * * *')
+    expect(SNAPSHOT_TIME_LABEL).toContain('6:30')
   })
 
   it('reads this client only, and only a good snapshot', () => {

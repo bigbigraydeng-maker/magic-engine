@@ -71,12 +71,18 @@ function errText(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback
 }
 
-/** One client's snapshot. Never throws: a failed read is a receipt with the reason. */
-async function snapshotClient(deps: FollowupProgressDeps, client: DigestClient, now: Date): Promise<FollowupClientReceipt> {
+/**
+ * One client's snapshot. The read throws inside its own step so Inngest retries that step; only after the retries
+ * are spent does the run reach the catch and record the client as failed, without losing the other clients.
+ */
+async function snapshotClient(step: FollowupProgressStep, deps: FollowupProgressDeps, client: DigestClient, now: Date): Promise<FollowupClientReceipt> {
   const base = { client_id: client.id, client_name: client.name, no_publish: true as const, created_at: now.toISOString() }
   try {
-    const p = await deps.loadProgress(deps.supabase, client.id, now)
-    return { ...base, ok: true, counts: p.counts, week: p.week }
+    const numbers = await step.run(`snapshot-${client.id}`, async () => {
+      const p = await deps.loadProgress(deps.supabase, client.id, now)
+      return { counts: p.counts, week: p.week }
+    })
+    return { ...base, ok: true, ...numbers }
   } catch (err) {
     return { ...base, ok: false, reason: errText(err, '取数时出现未知错误') }
   }
@@ -107,7 +113,7 @@ export async function runFollowupProgressDaily(
   }
 
   const results: FollowupClientReceipt[] = []
-  for (const client of clients) results.push(await step.run(`snapshot-${client.id}`, () => snapshotClient(deps, client, now)))
+  for (const client of clients) results.push(await snapshotClient(step, deps, client, now))
 
   const receipt: FollowupProgressReceipt = {
     job: FOLLOWUP_PROGRESS_JOB,
