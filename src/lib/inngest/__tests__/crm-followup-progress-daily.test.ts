@@ -52,7 +52,7 @@ function detail(clientId: string, cold: number): FollowupProgressDetail {
   counts.total = cold
   counts.inScope = cold
   counts.groups.cold = cold
-  return { clientId, at: NOW.toISOString(), counts, week: WEEK, verdicts: new Map([['guest-1', { inScope: true, group: 'cold' }]]) }
+  return { clientId, at: NOW.toISOString(), counts, week: WEEK, verdicts: new Map([['guest-1', { inScope: true, group: 'cold' }]]), dates: new Map() }
 }
 
 function deps(over: Partial<FollowupProgressDeps> = {}): FollowupProgressDeps {

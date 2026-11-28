@@ -55,7 +55,7 @@ describe('groupOf', () => {
 
   it('snoozed by staff is "later", but a guest who wrote since still waits for a reply', () => {
     expect(groupOf(facts({ snoozed: true, lastEnquiryAt: daysAgo(2) }), NOW)).toEqual({ inScope: true, group: 'later' })
-    expect(groupOf(facts({ snoozed: true, lastGuestMessageAt: daysAgo(1) }), NOW)).toEqual({ inScope: true, group: 'awaiting_reply' })
+    expect(groupOf(facts({ snoozed: true, lastGuestMessageAt: daysAgo(1), lastEnquiryAt: daysAgo(30) }), NOW)).toEqual({ inScope: true, group: 'awaiting_reply' })
   })
 
   it('never contacted and never filled a form is its own group, not "filled a form"', () => {
@@ -88,7 +88,12 @@ describe('groupOf', () => {
 
   it('guest wrote after staff (or with no staff) is awaiting_reply', () => {
     expect(groupOf(facts({ lastGuestMessageAt: daysAgo(2), lastStaffAt: daysAgo(5) }), NOW)).toEqual({ inScope: true, group: 'awaiting_reply' })
-    expect(groupOf(facts({ lastGuestMessageAt: daysAgo(2) }), NOW)).toEqual({ inScope: true, group: 'awaiting_reply' })
+    expect(groupOf(facts({ lastGuestMessageAt: daysAgo(2), lastEnquiryAt: daysAgo(9) }), NOW)).toEqual({ inScope: true, group: 'awaiting_reply' })
+  })
+
+  it('wrote out of the blue (no form, never contacted) is kept apart from guests waiting for a reply', () => {
+    expect(groupOf(facts({ lastGuestMessageAt: daysAgo(2) }), NOW)).toEqual({ inScope: true, group: 'unknown_sender' })
+    expect(groupOf(facts({ lastGuestMessageAt: daysAgo(2), lastStaffAt: daysAgo(5) }), NOW)).toEqual({ inScope: true, group: 'awaiting_reply' })
   })
 
   it('staff replied after the guest and no engagement is cold', () => {

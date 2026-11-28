@@ -13,7 +13,7 @@
 import { stageSuppressesWorklist, type MarketingAction } from '@/lib/crm/pipeline'
 
 export const FOLLOWUP_GROUPS = [
-  'awaiting_reply', 'new_lead', 'never_contacted', 'no_enquiry', 'qualified', 'warm', 'cold', 'later', 'ai', 'no_contact_details',
+  'awaiting_reply', 'unknown_sender', 'new_lead', 'never_contacted', 'no_enquiry', 'qualified', 'warm', 'cold', 'later', 'ai', 'no_contact_details',
 ] as const
 export type FollowupGroup = (typeof FOLLOWUP_GROUPS)[number]
 
@@ -88,9 +88,11 @@ export function groupOf(f: GuestFacts, now: Date, cfg: GroupConfig = DEFAULT_GRO
   if (f.aiTakeoverSince !== null) return { inScope: true, group: waiting && (ai === null || (guest as number) > ai) ? 'awaiting_reply' : 'ai' }
   if (f.qualified) return { inScope: true, group: 'qualified' }
   if (!f.hasEmail && !f.hasPhone) return { inScope: true, group: 'no_contact_details' }
-  if (waiting) return { inScope: true, group: 'awaiting_reply' }
-  if (f.snoozed) return { inScope: true, group: 'later' }
   const enquiry = ms(f.lastEnquiryAt)
+  // Wrote to us out of the blue: no form, and we never contacted them. Could be a guest emailing directly, more
+  // often a supplier or a sales pitch. Kept apart so the "waiting for a reply" list stays a list of guests.
+  if (waiting) return { inScope: true, group: enquiry === null && staff === null ? 'unknown_sender' : 'awaiting_reply' }
+  if (f.snoozed) return { inScope: true, group: 'later' }
   if (within(enquiry, now, cfg.newLeadDays) && (staff === null || (enquiry as number) > staff)) return { inScope: true, group: 'new_lead' }
   if (f.stageAction === 'defer') return { inScope: true, group: 'later' }
   if (staff === null) return { inScope: true, group: enquiry === null ? 'no_enquiry' : 'never_contacted' }
@@ -118,7 +120,8 @@ export interface GroupMeta {
  */
 export function groupMeta(cfg: GroupConfig = DEFAULT_GROUP_CONFIG): Record<FollowupGroup, GroupMeta> {
   return {
-    awaiting_reply: { label: '客人来过信或来过电，之后没记录有人回', howTo: '员工今天回。先看邮箱里是不是已经回过，系统里可能没记上。', owner: 'staff', page: 'all', needsEmailFeature: false },
+    awaiting_reply: { label: '填过表或联系过的客人来信来电，之后没记录有人回', howTo: '员工今天回。先看邮箱里是不是已经回过，系统里可能没记上。', owner: 'staff', page: 'all', needsEmailFeature: false },
+    unknown_sender: { label: '只来过信或来过电，没填过表，我们也没联系过', howTo: '多半是供应商或推销，也可能是直接来信咨询的客人。员工扫一眼：是客人就回，不是就标成「非咨询」。', owner: 'staff', page: 'all', needsEmailFeature: false },
     new_lead: { label: `近 ${cfg.newLeadDays} 天填了表，之后还没人联系`, howTo: '员工今天打电话，最新填表的先打。', owner: 'staff', page: 'all', needsEmailFeature: false },
     never_contacted: { label: '填过表，记录里没人打过电话或发过信', howTo: '久没人打的可以交给 AI 发第一封信：到「交给 AI」页放行。那一页按自己的规则再筛一遍，能放行的人数比这里少。', owner: 'ai', page: 'ai-pickup', needsEmailFeature: true },
     no_enquiry: { label: '没填过表，也没记录有人联系', howTo: '多半是来信或私信进来的，员工看一眼是不是真客人。', owner: 'staff', page: 'all', needsEmailFeature: false },
@@ -133,7 +136,7 @@ export function groupMeta(cfg: GroupConfig = DEFAULT_GROUP_CONFIG): Record<Follo
 
 export const OUT_OF_SCOPE_LABEL: Record<OutOfScope, string> = {
   do_not_contact: '别再联系',
-  not_guest: '不是客人（自己人、同行、系统账号、测试）',
+  not_guest: '不是客人（自己人、同行、系统账号、测试、推销和群发来信）',
   booked: '已有订单',
   closed_stage: '阶段已结束（成交、售后或不再跟进）',
   unknown_stage: '阶段不在阶段表里（没法判断）',
@@ -149,7 +152,7 @@ export interface GroupCounts {
 export function emptyCounts(): GroupCounts {
   return {
     total: 0, inScope: 0,
-    groups: { awaiting_reply: 0, new_lead: 0, never_contacted: 0, no_enquiry: 0, qualified: 0, warm: 0, cold: 0, later: 0, ai: 0, no_contact_details: 0 },
+    groups: { awaiting_reply: 0, unknown_sender: 0, new_lead: 0, never_contacted: 0, no_enquiry: 0, qualified: 0, warm: 0, cold: 0, later: 0, ai: 0, no_contact_details: 0 },
     out: { do_not_contact: 0, not_guest: 0, booked: 0, closed_stage: 0, unknown_stage: 0 },
   }
 }

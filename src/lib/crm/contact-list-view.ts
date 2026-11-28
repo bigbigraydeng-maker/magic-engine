@@ -134,7 +134,7 @@ function demoteNonEnquirySender(row: ContactRowLike, seg: SegmentResult): Segmen
  */
 const UNTOUCHED_STAGE_KEYS: ReadonlySet<string> = new Set(['', 'new', 'new_lead', 'lead', 'unqualified'])
 
-function hasHumanProgressed(stage: string | null): boolean {
+export function hasHumanProgressed(stage: string | null): boolean {
   return !UNTOUCHED_STAGE_KEYS.has((stage ?? '').trim().toLowerCase())
 }
 
