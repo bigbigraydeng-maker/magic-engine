@@ -12,10 +12,10 @@ function detail(newLeads: number): FollowupProgressDetail {
   const dates: FollowupProgressDetail['dates'] = new Map()
   for (let i = 0; i < newLeads; i++) {
     verdicts.set(`n${i}`, { inScope: true, group: 'new_lead' })
-    dates.set(`n${i}`, { lastEnquiryAt: new Date(NOW.getTime() - (i + 1) * 3_600_000).toISOString(), lastGuestMessageAt: null })
+    dates.set(`n${i}`, { lastEnquiryAt: new Date(NOW.getTime() - (i + 1) * 3_600_000).toISOString(), lastGuestMessageAt: null, lastStaffAt: null })
   }
   verdicts.set('w1', { inScope: true, group: 'awaiting_reply' })
-  dates.set('w1', { lastEnquiryAt: null, lastGuestMessageAt: '2026-11-26T00:00:00Z' })
+  dates.set('w1', { lastEnquiryAt: null, lastGuestMessageAt: '2026-11-26T00:00:00Z', lastStaffAt: null })
   verdicts.set('c1', { inScope: true, group: 'cold' })
   verdicts.set('x1', { inScope: false, why: 'booked' })
   counts.total = newLeads + 3
@@ -115,7 +115,7 @@ describe('the weekly report', () => {
     const d = detail(0)
     d.verdicts.set('w2', { inScope: true, group: 'awaiting_reply' })
     // 27 Nov 11:30 UTC is already 28 Nov in Auckland.
-    d.dates.set('w2', { lastEnquiryAt: '2026-11-01T00:00:00Z', lastGuestMessageAt: '2026-11-27T11:30:00Z' })
+    d.dates.set('w2', { lastEnquiryAt: '2026-11-01T00:00:00Z', lastGuestMessageAt: '2026-11-27T11:30:00Z', lastStaffAt: null })
     const r = buildWeeklyReport({ clientName: 'A', day: 'd', detail: d, history: [], names: names(d), aiReady: null, now: NOW })
     expect(r.awaitingReply.shown.map((g) => g.contactId)).toEqual(['w2', 'w1'])
     expect(buildWeeklyBody(r, TZ)).toContain('last heard 28 Nov')
