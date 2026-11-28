@@ -61,7 +61,7 @@ function detail(): FollowupProgressDetail {
     clientId: CTS, at: NOW.toISOString(), counts,
     week: { guestsContactedByStaff: 3, guestsWhoReplied: 2, newEnquiries: 5, movedToQualified: 1, newBookings: 0, takenByAi: 0 },
     verdicts: new Map([['g1', { inScope: true, group: 'new_lead' }], ['g2', { inScope: true, group: 'new_lead' }], ['g3', { inScope: true, group: 'awaiting_reply' }]]),
-    dates: new Map([['g1', { lastEnquiryAt: '2026-11-27T00:00:00Z', lastGuestMessageAt: null, lastStaffAt: null }], ['g2', { lastEnquiryAt: '2026-11-28T00:00:00Z', lastGuestMessageAt: null, lastStaffAt: null }], ['g3', { lastEnquiryAt: null, lastGuestMessageAt: '2026-11-26T00:00:00Z', lastStaffAt: null }]]),
+    dates: new Map([['g1', { lastEnquiryAt: '2026-11-27T00:00:00Z', lastGuestMessageAt: null, lastStaffAt: null, lastEngagedAt: null, bulkLast7Days: 0 }], ['g2', { lastEnquiryAt: '2026-11-28T00:00:00Z', lastGuestMessageAt: null, lastStaffAt: null, lastEngagedAt: null, bulkLast7Days: 0 }], ['g3', { lastEnquiryAt: null, lastGuestMessageAt: '2026-11-26T00:00:00Z', lastStaffAt: null, lastEngagedAt: null, bulkLast7Days: 0 }]]),
   }
 }
 

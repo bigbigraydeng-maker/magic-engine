@@ -33,6 +33,9 @@ import {
   generateFollowUpDraft,
   pickFeaturedTours,
   runFollowUpChecks,
+  spokeWithGuest,
+  namesTour,
+  onSaleNote,
   shortTourName,
   stripFraming,
   type CheckLine,
@@ -134,6 +137,98 @@ describe('stripFraming', () => {
     const r = stripFraming('Hi Nerita,\n\nBody text here.\n\nWarm regards,\nBaker')
     expect(r).toEqual({ body: 'Body text here.', stripped: true })
     expect(stripFraming('Body only.').stripped).toBe(false)
+  })
+})
+
+describe('tour names in the letter (found in the 2026-11-28 trial drafts)', () => {
+  const highlights = tour({ id: 't9', slug: 'highlights', name: 'Japan Discovery — Highlights', departures: [] })
+  const golden = tour({ id: 't8', slug: 'golden-china', name: 'China Discovery — Golden China', isActive: false, departures: [] })
+
+  it('a one-word tour name is an everyday word: "highlights like the Great Wall" does not name the tour', () => {
+    expect(namesTour('It promises highlights like the Great Wall.', 'Highlights')).toBe(false)
+    expect(namesTour('Our Highlights tour is popular.', 'Highlights')).toBe(false)
+    expect(namesTour('Our China Panorama visits Dali.', 'China Panorama')).toBe(true)
+    expect(namesTour('a wide china panorama of options', 'China Panorama')).toBe(false)
+  })
+
+  it('no link to another destination\'s tour is added because of an everyday word', () => {
+    const links = buildLinks({ picks: [{ tour: best, departure: best.departures[0] }], tours: [best, highlights], providerSettings, config: cfg, aiText: 'It promises highlights like the Great Wall.' })
+    expect(links.map((l) => l.label)).not.toContain('Highlights')
+  })
+
+  it('a letter that offers a tour taken off sale fails the check, naming the tour', () => {
+    const c = checksFor('We have wonderful options, including the Golden China tour.', { tours: [best, golden] }).find((x) => x.id === 'off_sale_tour')
+    expect(c?.status).toBe('fail')
+    expect(c?.detail).toContain('Golden China')
+  })
+
+  it('tours on sale, and ordinary words, pass', () => {
+    expect(statusOf(checksFor('Our Best of China tour leaves in March.', { tours: [best, golden] }), 'off_sale_tour')).toBe('pass')
+    expect(statusOf(checksFor('A golden opportunity to see China.', { tours: [best, golden] }), 'off_sale_tour')).toBe('pass')
+  })
+
+  it('the writer is told which tours are on sale today, by short name, without the ones taken off sale', () => {
+    const note = onSaleNote([best, panorama, golden])
+    expect(note).toContain('Best of China; China Panorama')
+    expect(note).not.toContain('Golden China')
+    expect(onSaleNote([golden])).toBe('')
+  })
+
+  it('"inquiry" is flagged as American spelling', () => {
+    expect(statusOf(checksFor('Thank you for your inquiry.'), 'spelling')).toBe('warn')
+  })
+})
+
+describe('the conversation check (exam questions from the 2026-11-28 reconnect letters)', () => {
+  const line = (aiBody: string, spoke: boolean | undefined) => checksFor(aiBody, { spokeWithGuest: spoke }).find((c) => c.id === 'conversation_claim')
+
+  it('"when we spoke" to a guest nobody reached is a fail, quoting the phrase', () => {
+    const c = line('When we spoke in October, we said we would send you the details.', false)
+    expect(c?.status).toBe('fail')
+    expect(c?.detail).toContain('When we spoke')
+  })
+
+  it('catches the other ways of saying we talked', () => {
+    for (const body of ['As discussed, here are the dates.', 'Following our call last week.', 'It was lovely chatting with you.', 'You mentioned you wanted March.', 'Our team spoke with you about China.', 'Thanks for your time on the phone.']) {
+      expect(line(body, false)?.status, body).toBe('fail')
+    }
+  })
+
+  it('the same words are fine when a call really reached the guest', () => {
+    expect(line('When we spoke in October, you were looking at March.', true)?.status).toBe('pass')
+  })
+
+  it('a neutral opening passes whether or not we talked', () => {
+    expect(line('Thank you for your enquiry. Here are the 2027 dates.', false)?.status).toBe('pass')
+    expect(line('Thank you for your enquiry. Here are the 2027 dates.', true)?.status).toBe('pass')
+  })
+
+  it('a caller that did not work out whether we talked gets no such line (nothing claimed either way)', () => {
+    expect(line('When we spoke in October.', undefined)).toBeUndefined()
+  })
+})
+
+describe('spokeWithGuest', () => {
+  const call = (metadata: Record<string, unknown>, minutes = 0, source = 'twilio') => ({ channel: 'phone', source, direction: 'outbound', occurred_at: new Date(Date.UTC(2026, 10, 10, 0, minutes)).toISOString(), summary: null, raw: null, metadata })
+
+  it('a voicemail or an unanswered call is not a conversation', () => {
+    expect(spokeWithGuest([call({ outcome: 'spoke', customer_spoke: 'no' }), call({ outcome: 'no_answer' }, 5)])).toBe(false)
+  })
+
+  it('a call where the guest spoke is', () => {
+    expect(spokeWithGuest([call({ outcome: 'spoke', customer_spoke: 'yes' })])).toBe(true)
+  })
+
+  it('a staff note written right after a failed call describes that call, not a talk', () => {
+    expect(spokeWithGuest([call({ customer_spoke: 'no' }), call({}, 3, 'me_manual')])).toBe(false)
+  })
+
+  it('a staff note on its own (rang from another phone) counts as talked', () => {
+    expect(spokeWithGuest([call({ outcome: 'spoke' }, 0, 'me_manual')])).toBe(true)
+  })
+
+  it('no phone record at all is not a conversation', () => {
+    expect(spokeWithGuest([{ channel: 'email', source: 'microsoft_mail', direction: 'outbound', occurred_at: '2026-11-10T00:00:00Z', summary: null, raw: null, metadata: null }])).toBe(false)
   })
 })
 

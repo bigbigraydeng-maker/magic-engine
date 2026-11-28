@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { looksLikeNonEnquiry, touchFacts, type TouchRow } from '../load'
+import { bulkSince, looksLikeNonEnquiry, touchFacts, type TouchRow } from '../load'
 import { delta, pointDaysAgo, pointFromSummary, FOLLOWUP_PROGRESS_JOB_NAME, SNAPSHOT_TIME_LABEL, type DayPoint } from '../history'
 import { emptyCounts } from '../groups'
 import { FOLLOWUP_PROGRESS_CRON, FOLLOWUP_PROGRESS_JOB } from '@/lib/inngest/functions/crm-followup-progress-daily'
@@ -125,5 +125,24 @@ describe('history', () => {
     expect(pointDaysAgo(h, now, 30)).toBeNull()
     expect(delta(counts(9), pointDaysAgo(h, now, 1), 'cold')).toBe(-3)
     expect(delta(counts(9), null, 'cold')).toBeNull()
+  })
+})
+
+describe('bulkSince — bulk and machine mails that the weekly limit must also count', () => {
+  const since = Date.parse('2026-11-21T00:00:00Z')
+  const open = (campaign: string, at: string, clicked = false) => touch({ source: 'mailchimp', direction: 'inbound', occurred_at: at, metadata: { email_opened: true, email_clicked: clicked, email_campaign_id: campaign } })
+
+  it('a bulk send is counted from the guest\'s open or click of it: one per campaign, however many traces', () => {
+    expect(bulkSince([open('bf1', '2026-11-22T00:00:00Z'), open('bf1', '2026-11-22T00:00:00Z', true), open('bf2', '2026-11-25T00:00:00Z'), open('bf3', '2026-11-26T19:00:00Z')], since)).toBe(3)
+  })
+
+  it('counts our own machine-sent rows too, and never a staff mail or a campaign from before the window', () => {
+    expect(bulkSince([
+      touch({ source: 'me_send', occurred_at: '2026-11-23T00:00:00Z' }),
+      touch({ source: 'microsoft_mail', metadata: { automated: true }, occurred_at: '2026-11-26T00:00:00Z' }),
+      touch({ source: 'microsoft_mail', occurred_at: '2026-11-26T00:00:00Z' }),
+      open('old', '2026-11-10T00:00:00Z'),
+      touch({ channel: 'phone', source: 'twilio', occurred_at: '2026-11-26T00:00:00Z' }),
+    ], since)).toBe(2)
   })
 })

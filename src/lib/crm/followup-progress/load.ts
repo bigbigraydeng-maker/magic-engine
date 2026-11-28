@@ -77,8 +77,12 @@ export interface FollowupProgress {
 /** Contact id → the verdict, for callers that need names per group later. */
 export interface FollowupProgressDetail extends FollowupProgress {
   verdicts: Map<string, GroupVerdict>
-  /** Contact id → when the guest last filled a form / last spoke / was last called or written to, for callers that list a group. */
-  dates: Map<string, { lastEnquiryAt: string | null; lastGuestMessageAt: string | null; lastStaffAt: string | null }>
+  /**
+   * Contact id → when the guest last filled a form / last spoke / was last called or written to / last opened or
+   * clicked a mail of ours, and how many bulk or machine mails we sent them in the last 7 days. For callers that
+   * list a group.
+   */
+  dates: Map<string, { lastEnquiryAt: string | null; lastGuestMessageAt: string | null; lastStaffAt: string | null; lastEngagedAt: string | null; bulkLast7Days: number }>
 }
 
 function later(a: string | null, b: string): string {
@@ -179,6 +183,25 @@ function nonEmpty(v: string | null): boolean {
   return v !== null && v.trim() !== ''
 }
 
+/**
+ * Bulk and machine mails this guest got from us since a moment: the ones the per-guest weekly limit must also count.
+ *
+ * A bulk send is not recorded per recipient. What is recorded is the guest opening or clicking it, stamped with the
+ * campaign and the campaign's send time. So a campaign counts when there is any trace of it in the window: our own
+ * send row, or the guest's open or click. A guest who never opened a campaign is undercounted; a guest who opened
+ * (the only kind the letter list writes to) is counted right.
+ */
+export function bulkSince(touches: readonly TouchRow[], sinceMs: number): number {
+  const seen = new Set<string>()
+  touches.forEach((t, i) => {
+    if (t.channel !== 'email' || !(Date.parse(t.occurred_at) >= sinceMs)) return
+    const campaign = typeof t.metadata?.email_campaign_id === 'string' && t.metadata.email_campaign_id !== '' ? t.metadata.email_campaign_id : null
+    if (campaign !== null) return void seen.add(`campaign:${campaign}`)
+    if (t.direction === 'outbound' && isAutomatedTouch(t.source, t.metadata)) seen.add(`row:${i}`)
+  })
+  return seen.size
+}
+
 interface BookIndex {
   stageOf: Map<string, { action: MarketingAction | null; terminal: boolean }>
   booked: Set<string>
@@ -262,10 +285,11 @@ export async function loadFollowupProgress(
   const repliedWeek = new Set<string>()
   const enquiryWeek = new Set<string>()
   for (const c of book.contacts) {
-    const a = touchFacts(index.touchesOf.get(c.id) ?? [])
+    const touches = index.touchesOf.get(c.id) ?? []
+    const a = touchFacts(touches)
     const verdict = groupOf(guestFacts(c, a, index, book.qualified, now), now, cfg)
     verdicts.set(c.id, verdict)
-    dates.set(c.id, { lastEnquiryAt: a.enquiry, lastGuestMessageAt: a.guest, lastStaffAt: a.staff })
+    dates.set(c.id, { lastEnquiryAt: a.enquiry, lastGuestMessageAt: a.guest, lastStaffAt: a.staff, lastEngagedAt: a.engaged, bulkLast7Days: bulkSince(touches, sinceMs) })
     // The week's numbers count guests: people in the follow-up work or already booked. Staff, trade partners,
     // sales pitches and closed contacts are not "guests who wrote".
     if (!verdict.inScope && verdict.why !== 'booked') continue

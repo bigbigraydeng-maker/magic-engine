@@ -38,6 +38,7 @@ import {
 } from './ai-draft'
 import { readFollowUpWriterConfig, type FollowUpWriterConfig } from './follow-up-config'
 import { runFollowUpChecks, type CheckLine } from './follow-up-checks'
+import { callReach, isSystemCall as isPhoneSystemCall, noteSaysReached, type PhoneTouch } from '@/lib/crm/ai-takeover/call-reach'
 
 export { runFollowUpChecks, type CheckLine } from './follow-up-checks'
 
@@ -99,6 +100,7 @@ const SIGN_OFF_RE = /^(warm regards|kind regards|best regards|regards|best wishe
 const GREETING_RE = /^(hi|hello|hey|dear|kia ora|good (morning|afternoon|evening))\b[^\n]{0,60}\n+/i
 const FOLLOW_UP_JSON_SCHEMA: Record<string, unknown> = { ...EMAIL_DRAFT_JSON_SCHEMA }
 
+export const NO_CONVERSATION_NOTE = '\n\nIMPORTANT: none of our calls reached this customer (no answer or voicemail only). Do not say or imply that we spoke, talked, chatted or discussed anything with them.'
 export const LINK_LEAD_MANY = 'In case it helps, here are the links:'
 export const LINK_LEAD_ONE = 'You can browse everything on our website:'
 
@@ -120,6 +122,18 @@ function countTerm(text: string, term: string): number {
   if (needle === '') return 0
   const matches = text.toLowerCase().match(new RegExp(`(?<![a-z0-9])${escapeRegex(needle)}(?![a-z0-9])`, 'g'))
   return matches ? matches.length : 0
+}
+
+/**
+ * Does the text name this tour? A short name of one ordinary word ("Highlights", "Explorer", "Panorama") is also an
+ * everyday word: "highlights like the Great Wall" is not the tour called Highlights. So a one-word name never
+ * counts, and a longer name must appear with its own capital letters. Found 2026-11-28: a China follow-up letter
+ * got a link to a Japan tour named "Highlights" this way.
+ */
+export function namesTour(text: string, shortName: string): boolean {
+  const name = shortName.trim()
+  if (name.split(/\s+/).length < 2) return false
+  return new RegExp(`(?<![A-Za-z0-9])${escapeRegex(name)}(?![A-Za-z0-9])`).test(text)
 }
 
 /** "China Discovery — Best of China" → "Best of China"（信里、链接名都用短名）。 */
@@ -390,7 +404,7 @@ export function buildLinks(a: {
       if (!tour.isActive || tour.soldOut) continue
       const label = shortTourName(tour.name)
       if (label.length < 4 || seen.has(label.toLowerCase())) continue
-      if (countTerm(a.aiText, label) === 0) continue
+      if (!namesTour(a.aiText, label)) continue
       seen.add(label.toLowerCase())
       out.push({ label, url: buildTourUrl(a.providerSettings, tour, null) })
       extra += 1
@@ -579,11 +593,22 @@ function picksFor(ctx: WriterContext, tours: readonly PublishedTourFact[], canLi
   })
 }
 
+/**
+ * The tours the letter may name: the ones on sale today, by short name. Older facts and older mails of ours still
+ * mention tours that have since been taken off sale; without this line the model offers them again.
+ */
+export function onSaleNote(tours: readonly PublishedTourFact[]): string {
+  const names = Array.from(new Set(tours.filter((t) => t.isActive && !t.soldOut).map((t) => shortTourName(t.name))))
+  if (names.length === 0) return ''
+  return `\n\nTOURS ON SALE TODAY (the only tours you may name; any other tour mentioned above is no longer offered, do not name it): ${names.join('; ')}.`
+}
+
 async function askForDraft(
   ctx: WriterContext,
   picks: readonly ResolvedPick[],
   subjects: readonly string[],
   deps: FollowUpDeps,
+  tours: readonly PublishedTourFact[],
 ): Promise<{ subject: string; body: string } | null> {
   const known = renderFollowUpContext({ contactName: ctx.person.display_name, touches: ctx.touches, messages: ctx.messages, calls: ctx.calls, business: ctx.identity.name })
   try {
@@ -597,7 +622,8 @@ async function askForDraft(
           previousSubjects: subjects,
           config: ctx.config,
         }),
-        user: `Known situation:\n${known}`,
+        // The model sees call records as "we spoke"; when no call reached the guest it is told so in plain words.
+        user: `Known situation:\n${known}${spokeWithGuest(ctx.touches) ? '' : NO_CONVERSATION_NOTE}${onSaleNote(tours)}`,
         schema: EmailDraftSchema,
         jsonSchema: { name: 'follow_up_email_draft', schema: FOLLOW_UP_JSON_SCHEMA },
         totalBudgetMs: 25_000,
@@ -614,6 +640,16 @@ async function askForDraft(
   }
 }
 
+/**
+ * Did a person on our side actually talk with this guest? A phone-system call counts when the guest was reached
+ * (`callReach`); a staff call note counts when it says so and is not the record of a failed call (`noteSaysReached`).
+ * Same judgement the AI pickup uses to decide who was "rung and not reached".
+ */
+export function spokeWithGuest(touches: readonly FollowUpTouch[]): boolean {
+  const phone: PhoneTouch[] = touches.filter((t) => t.channel === 'phone').map((t) => ({ source: t.source, occurredAt: t.occurred_at, metadata: t.metadata }))
+  return phone.some((t) => (isPhoneSystemCall(t.source) ? callReach(t.metadata) === 'reached' : noteSaysReached(t, phone)))
+}
+
 export async function generateFollowUpDraft(clientId: string, contactId: string, deps: FollowUpDeps = {}): Promise<FollowUpResult> {
   const ctx = await loadWriterContext(clientId, contactId, deps.now ? deps.now() : new Date())
   if ('ok' in ctx) return ctx
@@ -621,7 +657,7 @@ export async function generateFollowUpDraft(clientId: string, contactId: string,
   const providerSettings = ctx.settings.providers.publishedTours ?? null
   const picks = picksFor(ctx, catalogue.tours, providerSettings !== null)
   const subjects = previousSubjects(ctx.touches)
-  const draft = await askForDraft(ctx, picks, subjects, deps)
+  const draft = await askForDraft(ctx, picks, subjects, deps, catalogue.tours)
   if (!draft) return fail('no_ai', 'AI 暂时写不出来，请自己写或稍后再试。')
 
   const framing = stripFraming(draft.body)
@@ -637,6 +673,7 @@ export async function generateFollowUpDraft(clientId: string, contactId: string,
     picks,
     tours: catalogue.tours,
     providerSettings,
+    spokeWithGuest: spokeWithGuest(ctx.touches),
     previousSubjects: subjects,
     previousExcerpts: ctx.touches
       .filter((t) => isOurEmail(t) && t.source === 'microsoft_mail' && (t.raw ?? '').trim() !== '')

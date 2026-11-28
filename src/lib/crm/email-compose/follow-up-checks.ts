@@ -36,6 +36,12 @@ export interface FollowUpCheckInput {
   providerSettings: PublishedToursProviderSettings | null
   previousSubjects: readonly string[]
   previousExcerpts: readonly string[]
+  /**
+   * Did anyone on our side actually talk with this guest (a call that reached them, or a staff note saying so)?
+   * false = every call went unanswered or to voicemail. Not given = the caller did not work it out, and the
+   * conversation check is skipped.
+   */
+  spokeWithGuest?: boolean
 }
 
 const MONTHS = 'January|February|March|April|May|June|July|August|September|October|November|December'
@@ -175,6 +181,57 @@ function lengthCheck(i: FollowUpCheckInput): CheckLine {
   }
 }
 
+function escapeRe(v: string): string {
+  return v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/** "China Discovery — Best of China" → "Best of China": the name a letter would use. */
+function shortName(name: string): string {
+  const parts = name.split(/\s[—–-]\s/)
+  return (parts[parts.length - 1] ?? name).trim() || name.trim()
+}
+
+/**
+ * The letter must not offer a tour that is off sale. The link checks only see links; this one reads the words:
+ * a tour of the client's catalogue, named in the letter by its short name (two words or more, with its capitals),
+ * that is inactive or sold out. Found 2026-11-28: a draft offered a tour that had been taken off sale.
+ */
+function offSaleTourCheck(i: FollowUpCheckInput): CheckLine {
+  const text = `${i.subject}\n${i.aiBody}`
+  const onSale = new Set(i.tours.filter((t) => t.isActive && !t.soldOut).map((t) => shortName(t.name).toLowerCase()))
+  const hits = new Set<string>()
+  for (const t of i.tours) {
+    if (t.isActive && !t.soldOut) continue
+    const name = shortName(t.name)
+    // The same short name can belong to a tour that is on sale (another tier): then the words are fine.
+    if (name.split(/\s+/).length < 2 || onSale.has(name.toLowerCase())) continue
+    if (new RegExp(`(?<![A-Za-z0-9])${escapeRe(name)}(?![A-Za-z0-9])`).test(text)) hits.add(name)
+  }
+  return {
+    id: 'off_sale_tour',
+    status: hits.size > 0 ? 'fail' : 'pass',
+    label: '信里提到的团都在售',
+    detail: hits.size > 0 ? `提到了已下架或售完的团：${Array.from(hits).join('、')}。删掉或换成在售的团再发` : '没提到下架的团',
+  }
+}
+
+/** Phrases that tell the guest we talked. Written broadly on purpose: a false alarm costs a glance, a miss costs our word. */
+const CONVERSATION_CLAIM_RE = /\b(when we (spoke|talked|chatted)|as (we )?discussed|(our|your) (call|phone call|conversation|chat)|(spoke|talked|chatted) (with|to) you|(on|over) the phone|you (mentioned|told us|said)|great (speaking|talking|chatting)|(lovely|nice|good) (to (speak|talk|chat)|speaking|talking|chatting))\b/i
+
+/**
+ * The letter must not say "when we spoke" to a guest nobody reached. This is the mistake that took three review
+ * rounds to clear from the hand-written reconnect letters of 2026-11-28 (16 of 58): a voicemail or a call of a
+ * few seconds is on record as a call, and the letter turned it into a conversation.
+ */
+function conversationClaimCheck(i: FollowUpCheckInput): CheckLine[] {
+  if (i.spokeWithGuest === undefined) return []
+  const hit = `${i.subject}\n${i.aiBody}`.match(CONVERSATION_CLAIM_RE)
+  const label = '没通上话就不说「我们通话时」'
+  if (!hit) return [{ id: 'conversation_claim', status: 'pass', label, detail: i.spokeWithGuest ? '记录里通过话，信里没提也没问题' : '记录里没通上话，信里也没说通过话' }]
+  if (i.spokeWithGuest) return [{ id: 'conversation_claim', status: 'pass', label, detail: `信里提到通话（"${clip(hit[0], 40)}"），记录里确实通过话` }]
+  return [{ id: 'conversation_claim', status: 'fail', label, detail: `信里写了 "${clip(hit[0], 40)}"，但记录里没有一通电话真的接通（都是没接或语音信箱）。改掉这句再发` }]
+}
+
 function repeatCheck(i: FollowUpCheckInput): CheckLine {
   const sameSubject = i.previousSubjects.some((s) => s.trim().toLowerCase() === i.subject.trim().toLowerCase())
   const mine = ngrams(i.aiBody)
@@ -199,7 +256,7 @@ function repeatCheck(i: FollowUpCheckInput): CheckLine {
 
 function spellingCheck(i: FollowUpCheckInput): CheckLine {
   const cjk = /[㐀-鿿]/.test(i.subject + i.aiBody)
-  const us = (i.aiBody.match(/\b(catalog|catalogs|traveling|traveler|color|center|favorite)\b/gi) ?? []).map((w) => w.toLowerCase())
+  const us = (`${i.subject}\n${i.aiBody}`.match(/\b(catalog|catalogs|traveling|traveler|color|center|favorite|inquiry|inquiries)\b/gi) ?? []).map((w) => w.toLowerCase())
   return {
     id: 'spelling',
     status: cjk ? 'fail' : us.length > 0 ? 'warn' : 'pass',
@@ -217,6 +274,8 @@ export function runFollowUpChecks(i: FollowUpCheckInput): CheckLine[] {
     starCheck(i),
     lengthCheck(i),
     repeatCheck(i),
+    ...conversationClaimCheck(i),
+    offSaleTourCheck(i),
     spellingCheck(i),
     {
       id: 'framing',
