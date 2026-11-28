@@ -33,6 +33,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { industryFeatureFlags } from '@/lib/clients/industry-features'
 import { afterCrmListReady } from '@/lib/crm/list-ready'
+import { AiPickupWaitingBanner } from './AiPickupWaitingBanner'
 import { NewMessagesBanner } from './NewMessagesBanner'
 
 export function CrmTabs({ clientId }: { clientId: string; active?: 'all' | 'decisions' | 'payments' | 'sales' }) {
@@ -66,6 +67,8 @@ export function CrmTabs({ clientId }: { clientId: string; active?: 'all' | 'deci
     <>
       {/* 新消息提醒：页面不会自己刷新，隔 30 秒问一次有没有客人发来新消息（读失败什么都不做）。 */}
       <NewMessagesBanner clientId={clientId} />
+      {/* 有客人在「交给 AI 跟进」页等放行：放行要员工自己点，这里是员工唯一会看到的提醒（读失败什么都不做）。 */}
+      <AiPickupWaitingBanner clientId={clientId} />
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm font-semibold text-me-charcoal/60">
         <span>更多入口：</span>
         {/*

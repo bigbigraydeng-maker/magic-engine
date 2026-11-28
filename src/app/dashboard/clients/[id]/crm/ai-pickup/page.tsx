@@ -5,6 +5,7 @@
  * 每位客人走现有「发送 2027 目录」那条路（所有发信检查照跑），发出确认之后才挂「AI 跟进中」；没点之前客人一直留在员工名单上。
  * 员工留言要发目录的客人排在最前（当天就出现）：发出后仍留在员工名单上，不挂「AI 跟进中」（lib/crm/ai-takeover/catalogue-ask.ts）。
  * 规则：lib/crm/ai-takeover/pickup.ts；名单：lib/crm/ai-takeover/pickup-list.ts。
+ * 名单按「员工留言要目录 / 打了没接通 / 询价 7 天没人打」分组，每组可以全选、全不选（PM 2026-11-28：放行由客户员工自己点，要让他们一眼看懂每组是什么）。
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 
@@ -28,6 +29,12 @@ interface ListReply { catalogue: { versionLabel: string; validUntil: string } | 
 type Result = { kind: 'sending' } | { kind: 'sent'; kept: boolean } | { kind: 'refused' | 'unknown' | 'half'; message: string }
 
 const RULE_LABEL: Record<Row['rule'], string> = { not_reached: '打了没接通', never_called: '询价 7 天没人打', catalogue_asked: '员工留言要目录' }
+const RULE_ORDER: ReadonlyArray<Row['rule']> = ['catalogue_asked', 'not_reached', 'never_called']
+const RULE_HINT: Record<Row['rule'], string> = {
+  catalogue_asked: '员工在留言里写了要发目录。默认不勾：看一眼留言，确实要发再勾。只发目录，客人仍留在员工名单上。',
+  not_reached: '打过电话没接通。发出目录后交给 AI 跟进，客人回信、回电会自动回到员工名单。',
+  never_called: '询价满 7 天还没人打过电话。发出目录后交给 AI 跟进，客人回信、回电会自动回到员工名单。',
+}
 const UNKNOWN = '这封有没有发出去还不确定，先别重发，一分钟后看客人的往来记录。'
 
 function day(iso: string | null): string {
@@ -114,6 +121,28 @@ function Group({ title, rows, clientId }: { title: string; rows: Row[]; clientId
   )
 }
 
+function ReadyGroup({ clientId, rule, rows, ticked, results, busy, onToggle, onSetAll }: {
+  clientId: string; rule: Row['rule']; rows: Row[]; ticked: Set<string>; results: Record<string, Result>; busy: boolean
+  onToggle: (id: string) => void; onSetAll: (ids: string[], on: boolean) => void
+}) {
+  if (rows.length === 0) return null
+  const open = rows.filter((r) => results[r.contactId]?.kind !== 'sent')
+  const chosen = open.filter((r) => ticked.has(r.contactId)).length
+  return (
+    <section className="mt-4 rounded-lg border border-me-charcoal/10 bg-white px-4 py-2" data-testid={`ready-group-${rule}`}>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-me-charcoal/10 py-2">
+        <h2 className="text-sm font-semibold text-me-charcoal">{RULE_LABEL[rule]} · {rows.length} 位<span className="ml-2 font-normal text-me-charcoal/60">已勾 {chosen} 位</span></h2>
+        <div className="flex gap-3 text-[12.5px]">
+          <button type="button" disabled={busy || open.length === 0} onClick={() => onSetAll(open.map((r) => r.contactId), true)} className="text-me-charcoal underline disabled:opacity-40">全选这一组</button>
+          <button type="button" disabled={busy || chosen === 0} onClick={() => onSetAll(open.map((r) => r.contactId), false)} className="text-me-charcoal/70 underline disabled:opacity-40">全不选</button>
+        </div>
+      </div>
+      <p className="pt-2 text-[12.5px] text-me-charcoal/60">{RULE_HINT[rule]}</p>
+      <ul>{rows.map((r) => <RowCard key={r.contactId} clientId={clientId} row={r} checked={ticked.has(r.contactId)} onToggle={() => onToggle(r.contactId)} result={results[r.contactId]} />)}</ul>
+    </section>
+  )
+}
+
 export default function CrmAiPickupPage({ params }: { params: { id: string } }) {
   const clientId = params.id
   const { data, error, reload } = useList(clientId)
@@ -131,6 +160,7 @@ export default function CrmAiPickupPage({ params }: { params: { id: string } }) 
   const chosen = ready.filter((r) => ticked.has(r.contactId) && results[r.contactId]?.kind !== 'sent')
 
   const toggle = (id: string) => setTicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
+  const setAll = (ids: string[], on: boolean) => setTicked((s) => { const n = new Set(s); for (const id of ids) { if (on) n.add(id); else n.delete(id) } return n })
 
   const sendAll = async () => {
     setConfirming(false)
@@ -163,12 +193,12 @@ export default function CrmAiPickupPage({ params }: { params: { id: string } }) 
       {data && data.catalogue === null && <p className="text-sm text-me-charcoal/70">这个客户还没配目录，现在发不了。</p>}
       {data && data.catalogue !== null && (
         <>
-          <p className="mb-3 text-[12.5px] text-me-charcoal/60">目录 {data.catalogue.versionLabel}（有效期到 {data.catalogue.validUntil}）· 今天最多 {data.dailyMax} 位，等得最久的先发</p>
-          <div className="rounded-lg border border-me-charcoal/10 bg-white px-4 py-1">
-            {ready.length === 0 ? <p className="py-3 text-sm text-me-charcoal/60">今天没有要交给 AI 的客人。</p> : (
-              <ul>{ready.map((r) => <RowCard key={r.contactId} clientId={clientId} row={r} checked={ticked.has(r.contactId)} onToggle={() => toggle(r.contactId)} result={results[r.contactId]} />)}</ul>
-            )}
-          </div>
+          <p className="mb-3 text-[12.5px] text-me-charcoal/60">目录 {data.catalogue.versionLabel}（有效期到 {data.catalogue.validUntil}）· 今天最多 {data.dailyMax} 位，等得最久的先发 · 按下面三组分好了，可以一组一组放行</p>
+          {ready.length === 0 ? (
+            <div className="rounded-lg border border-me-charcoal/10 bg-white px-4 py-1"><p className="py-3 text-sm text-me-charcoal/60">今天没有要交给 AI 的客人。</p></div>
+          ) : RULE_ORDER.map((rule) => (
+            <ReadyGroup key={rule} clientId={clientId} rule={rule} rows={ready.filter((r) => r.rule === rule)} ticked={ticked} results={results} busy={busy} onToggle={toggle} onSetAll={setAll} />
+          ))}
           {ready.length > 0 && (
             <div className="mt-4 flex flex-wrap items-center gap-3">
               {!confirming ? (

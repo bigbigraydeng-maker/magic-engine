@@ -12,7 +12,10 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { askAll } from '@/lib/crm/ai-takeover/catalogue-ask'
 import { DEFAULT_PICKUP_CONFIG } from '@/lib/crm/ai-takeover/pickup'
+import { guestsWithCatalogue } from '@/lib/crm/catalogue-line/prod'
+import { CATALOGUE_ONCE_DAYS } from '@/lib/crm/catalogue-line/send-catalogue'
 import { decideAll, latestEnquiries, loadInputs, PickupNotConfiguredError } from '@/lib/crm/ai-takeover/pickup-run'
 import { loadEmailSettings } from '@/lib/crm/email-templates/settings-store'
 import { APP_BASE } from './binding-request-items'
@@ -24,11 +27,14 @@ export type AiPickupWaitingItemKind =
   /** 这一栏今天没算出来 —— 我们这边要查（开发的活） */
   | 'ai_pickup_waiting_check_failed'
 
-/** 最近这么多天里有人放行过，就不提醒 —— 有人在点，不用催。 */
-export const QUIET_DAYS = 2
+/**
+ * 最近这么多天里有人放行过，就不提醒 —— 有人在点，不用催。
+ * PM 2026-11-28：放行由客户的员工自己点（员工页顶上有提醒条 AiPickupWaitingBanner），这条待办只做兜底，所以从 2 天放宽到 5 天。
+ */
+export const QUIET_DAYS = 5
 
 export interface AiPickupWaiting {
-  /** 符合 AI 接手规则、在等放行的客人数 */
+  /** 放行页上在等的客人数：规则接手的 + 员工留言要目录的，去掉已经有目录的 */
   waiting: number
   /** 距上一次放行过了几天；null = 从来没有人放行过 */
   daysSinceRelease: number | null
@@ -50,11 +56,11 @@ export function buildAiPickupWaitingItems(clientId: string, clientName: string, 
     client_id: clientId,
     client_name: clientName,
     what:
-      `${clientName} 有 ${w.waiting} 位客人符合「交给 AI」的规则（询价 7 天没人打，或打了没接通），在等人点放行。` +
+      `${clientName} 有 ${w.waiting} 位客人在「交给 AI 跟进」页等人点放行（询价 7 天没人打、打了没接通，或员工留言要目录）。` +
       since +
       '不放行，这些客人既不在员工的名单最前面，也收不到目录',
     how:
-      '请转给客户的销售：点链接打开「交给 AI 跟进」，看一眼名单，点一次整批发送。' +
+      '请转给客户的销售：点链接打开「交给 AI 跟进」，名单按组分好了，每组看一眼、勾上、点发送。员工自己的名单页顶上也有同样的提醒条。' +
       '页面每天只放一批，发不了的会写原因；多的第二天接着放。',
     href: pickupHref(clientId),
   }]
@@ -88,7 +94,19 @@ export const defaultAiPickupWaitingDeps: AiPickupWaitingDeps = {
       if (err instanceof PickupNotConfiguredError) return null
       throw err
     }
-    const waiting = decideAll(inputs, leads, now, DEFAULT_PICKUP_CONFIG).length
+    // Same two lists as the release page (pickup-list.ts): the guests the rules take, plus the guests whose staff note
+    // asks for the catalogue and whom the rules do not already take.
+    const picks = decideAll(inputs, leads, now, DEFAULT_PICKUP_CONFIG)
+    const taken = new Set(decideAll(inputs, leads, now, { ...DEFAULT_PICKUP_CONFIG, afterLastCallMinutes: 0 }).map((p) => p.contactId))
+    const asks = askAll(inputs, leads, now).filter((a) => !taken.has(a.contactId))
+    // The release page never offers a guest who already has the catalogue (the send refuses a second copy): leave
+    // them out here too, or the number could never come down however many times staff release.
+    const ids = [...picks.map((p) => p.contactId), ...asks.map((a) => a.contactId)]
+    const has = ids.length === 0 ? new Set<string>() : await guestsWithCatalogue(supabase, {
+      clientId, templateKey: catalogue.templateKey, contactIds: ids,
+      sinceIso: new Date(now.getTime() - CATALOGUE_ONCE_DAYS * 86_400_000).toISOString(),
+    })
+    const waiting = ids.filter((id) => !has.has(id)).length
     const { data, error } = await supabase
       .from('contact_automation_events')
       .select('created_at')
@@ -98,7 +116,23 @@ export const defaultAiPickupWaitingDeps: AiPickupWaitingDeps = {
       .limit(1)
     if (error) throw new Error(error.message)
     const last = (data ?? [])[0] as { created_at?: string } | undefined
-    return { waiting, daysSinceRelease: daysSince(last?.created_at, now) }
+    // Releasing a "staff note asks for the catalogue" guest sends the catalogue without the AI mark: a catalogue
+    // actually sent counts as somebody releasing, too.
+    const sent = await supabase
+      .from('crm_email_send_receipts')
+      .select('created_at')
+      .eq('client_id', clientId)
+      .eq('template_key', catalogue.templateKey)
+      .eq('outcome', 'sent')
+      .order('created_at', { ascending: false })
+      .limit(1)
+    if (sent.error) throw new Error(sent.error.message)
+    const lastSent = (sent.data ?? [])[0] as { created_at?: string } | undefined
+    const latest = [last?.created_at, lastSent?.created_at]
+      .filter((v): v is string => typeof v === 'string' && !Number.isNaN(Date.parse(v)))
+      .sort((x, y) => Date.parse(x) - Date.parse(y))
+      .pop()
+    return { waiting, daysSinceRelease: daysSince(latest, now) }
   },
 }
 
