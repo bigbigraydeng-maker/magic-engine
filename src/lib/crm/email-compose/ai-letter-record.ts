@@ -72,10 +72,50 @@ export interface AiLetterLink {
 
 export type LinkResult = { ok: true; edited: boolean } | { ok: false; reason: 'not_found' | 'other_send' | 'write_failed' }
 
+/** A send attempt that went out, or whose outcome is not known yet, counts as used. */
+async function requestWasSent(db: SupabaseClient, clientId: string, requestId: string): Promise<boolean | null> {
+  const { data, error } = await db
+    .from('crm_email_send_receipts')
+    .select('id')
+    .eq('client_id', clientId)
+    .eq('request_id', requestId)
+    .in('outcome', ['sent', 'unknown'])
+    .limit(1)
+  if (error) return null
+  return (data ?? []).length > 0
+}
+
+/**
+ * Another AI letter already holds this request id (staff redrafted after a refused send, and the page kept the same
+ * request id). If that send never went, the older letter lets go of the id; if it went, or might have, refuse.
+ */
+async function freeRequestId(db: SupabaseClient, l: AiLetterLink): Promise<LinkResult | null> {
+  const other = await db
+    .from('crm_ai_letters')
+    .select('id')
+    .eq('client_id', l.clientId)
+    .eq('request_id', l.requestId)
+    .neq('id', l.aiLetterId)
+    .maybeSingle()
+  if (other.error) return { ok: false, reason: 'write_failed' }
+  if (other.data === null) return null
+  const sent = await requestWasSent(db, l.clientId, l.requestId)
+  if (sent === null) return { ok: false, reason: 'write_failed' }
+  if (sent) return { ok: false, reason: 'other_send' }
+  const cleared = await db
+    .from('crm_ai_letters')
+    .update({ request_id: null, released_by: null, released_at: null, final_subject: null, final_body: null, edited: null })
+    .eq('id', (other.data as { id: string }).id)
+    .eq('client_id', l.clientId)
+    .eq('request_id', l.requestId)
+  return cleared.error ? { ok: false, reason: 'write_failed' } : null
+}
+
 /**
  * Ties one send to its AI letter, before the send. The letter must belong to this client and this guest.
  * A letter already tied to a different send is refused: one AI letter, one send (a retry of the same send keeps its
- * request id and passes).
+ * request id and passes). The update only lands while the letter is still free or tied to this same send, so two
+ * sends racing for one letter cannot both pass.
  */
 export async function linkAiLetterForSend(db: SupabaseClient, l: AiLetterLink): Promise<LinkResult> {
   const read = await db
@@ -90,6 +130,8 @@ export async function linkAiLetterForSend(db: SupabaseClient, l: AiLetterLink): 
   if (row === null) return { ok: false, reason: 'not_found' }
   if (row.request_id !== null && row.request_id !== l.requestId) return { ok: false, reason: 'other_send' }
   const edited = row.ai_subject !== l.subject || row.ai_body !== l.body
+  const freed = await freeRequestId(db, l)
+  if (freed !== null) return freed
   const write = await db
     .from('crm_ai_letters')
     .update({
@@ -99,14 +141,16 @@ export async function linkAiLetterForSend(db: SupabaseClient, l: AiLetterLink): 
     .eq('id', l.aiLetterId)
     .eq('client_id', l.clientId)
     .eq('contact_id', l.contactId)
+    .or(`request_id.is.null,request_id.eq.${l.requestId}`)
     .select('id')
   if (write.error || (write.data ?? []).length !== 1) return { ok: false, reason: 'write_failed' }
   return { ok: true, edited }
 }
 
 /** What staff read when the link refuses the send. Nothing has been sent in any of these cases. */
-export const LINK_REFUSAL: Record<Exclude<LinkResult, { ok: true }>['reason'], { status: 409 | 503; message: string }> = {
+// All 409: in every case nothing was sent, and the pages read 502/503 as "outcome unknown, do not resend".
+export const LINK_REFUSAL: Record<Exclude<LinkResult, { ok: true }>['reason'], { status: 409; message: string }> = {
   not_found: { status: 409, message: '这封信对不上 AI 起草的记录（可能是别的客人的稿子），没有发。请重新让 AI 起草。' },
   other_send: { status: 409, message: '这份 AI 稿子已经发过一次了，没有再发。要再写一封，请重新让 AI 起草。' },
-  write_failed: { status: 503, message: '「AI 起草」的标记没记上，这封没有发。稍后再点一次发送。' },
+  write_failed: { status: 409, message: '「AI 起草」的标记没记上，这封没有发。稍后再点一次发送。' },
 }

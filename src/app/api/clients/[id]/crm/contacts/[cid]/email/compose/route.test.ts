@@ -52,22 +52,28 @@ describe('POST email/compose', () => {
     const order: string[] = []
     ;(linkAiLetterForSend as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => { order.push('link'); return { ok: true, edited: true } })
     ;(sendMailNew as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => { order.push('send'); return { ok: true, messageId: 'm1', conversationId: 'c1' } })
-    const res = await post({ subject: 'S', body: 'B2', requestId: 'r', expectedRecipient: 'a@b.com', aiLetterId: '0b9c2a51-1d2e-4c4b-9a1e-5f2f0d3c4b5a' })
+    const res = await post({ subject: 'S', body: 'B2', requestId: 'e1f2a3b4-0000-4000-8000-000000000001', expectedRecipient: 'a@b.com', aiLetterId: '0b9c2a51-1d2e-4c4b-9a1e-5f2f0d3c4b5a' })
     expect(res.status).toBe(200)
     expect(order).toEqual(['link', 'send'])
     expect((linkAiLetterForSend as ReturnType<typeof vi.fn>).mock.calls[0][1]).toMatchObject({
-      clientId: 'client-a', contactId: 'contact-1', aiLetterId: '0b9c2a51-1d2e-4c4b-9a1e-5f2f0d3c4b5a', requestId: 'r', actorEmail: 'sales@client.co.nz', subject: 'S', body: 'B2',
+      clientId: 'client-a', contactId: 'contact-1', aiLetterId: '0b9c2a51-1d2e-4c4b-9a1e-5f2f0d3c4b5a', requestId: 'e1f2a3b4-0000-4000-8000-000000000001', actorEmail: 'sales@client.co.nz', subject: 'S', body: 'B2',
     })
   })
 
   it('the AI mark cannot be written, or the letter is not this guest\'s → refused, nothing is sent', async () => {
-    for (const [reason, status] of [['write_failed', 503], ['not_found', 409], ['other_send', 409]] as const) {
+    for (const [reason, status] of [['write_failed', 409], ['not_found', 409], ['other_send', 409]] as const) {
       ;(linkAiLetterForSend as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: false, reason })
-      const res = await post({ subject: 'S', body: 'B', requestId: 'r', expectedRecipient: 'a@b.com', aiLetterId: '0b9c2a51-1d2e-4c4b-9a1e-5f2f0d3c4b5a' })
+      const res = await post({ subject: 'S', body: 'B', requestId: 'e1f2a3b4-0000-4000-8000-000000000001', expectedRecipient: 'a@b.com', aiLetterId: '0b9c2a51-1d2e-4c4b-9a1e-5f2f0d3c4b5a' })
       expect(res.status).toBe(status)
       expect((await res.json()).reason).toBe(`ai_letter_${reason}`)
     }
     expect(sendMailNew).not.toHaveBeenCalled()
+  })
+
+  it('an AI letter with a request id that is not an id → 400 before anything is written', async () => {
+    const res = await post({ subject: 'S', body: 'B', requestId: 'r', expectedRecipient: 'a@b.com', aiLetterId: '0b9c2a51-1d2e-4c4b-9a1e-5f2f0d3c4b5a' })
+    expect(res.status).toBe(400)
+    expect(linkAiLetterForSend).not.toHaveBeenCalled()
   })
 
   it('an aiLetterId that is not an id → 400, never treated as "not AI"', async () => {

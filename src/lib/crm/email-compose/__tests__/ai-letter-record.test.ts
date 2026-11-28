@@ -5,36 +5,47 @@ import { LINK_REFUSAL, linkAiLetterForSend, parseAiLetterId, parseSurface, recor
 
 type Row = Record<string, unknown>
 
-/** A tiny in-memory stand-in for the one table, enough for insert / select-eq-maybeSingle / update-eq-select. */
-function fakeDb(rows: Row[], opts: { failInsert?: boolean; failUpdate?: boolean } = {}) {
+/** A tiny in-memory stand-in: insert / select-eq-neq-in-or-limit-maybeSingle / update, on two tables. */
+function fakeDb(rows: Row[], opts: { failInsert?: boolean; failUpdate?: boolean; receipts?: Row[] } = {}) {
   const writes: Array<{ op: string; values: Row }> = []
+  const tables: Record<string, Row[]> = { crm_ai_letters: rows, crm_email_send_receipts: opts.receipts ?? [] }
   const db = {
     from(table: string) {
-      if (table !== 'crm_ai_letters') throw new Error(`unexpected table ${table}`)
-      const filters: Array<[string, unknown]> = []
-      const match = (r: Row) => filters.every(([k, v]) => r[k] === v)
+      const data = tables[table]
+      if (!data) throw new Error(`unexpected table ${table}`)
+      const tests: Array<(r: Row) => boolean> = []
+      const match = (r: Row) => tests.every((t) => t(r))
       let pending: { op: 'insert' | 'update'; values: Row } | null = null
       const q = {
         insert(values: Row) { pending = { op: 'insert', values }; return q },
         update(values: Row) { pending = { op: 'update', values }; return q },
         select() { return q },
-        eq(k: string, v: unknown) { filters.push([k, v]); return q },
+        limit() { return q },
+        eq(k: string, v: unknown) { tests.push((r) => r[k] === v); return q },
+        neq(k: string, v: unknown) { tests.push((r) => r[k] !== v); return q },
+        in(k: string, vs: unknown[]) { tests.push((r) => vs.includes(r[k])); return q },
+        or(expr: string) {
+          // only the form used: request_id.is.null,request_id.eq.<id>
+          const id = expr.split('request_id.eq.')[1]
+          tests.push((r) => r.request_id === null || r.request_id === undefined || r.request_id === id)
+          return q
+        },
         async single() {
           if (opts.failInsert) return { data: null, error: { message: 'boom' } }
-          const row = { id: `id-${rows.length + 1}`, request_id: null, ...pending!.values }
-          rows.push(row); writes.push({ op: 'insert', values: pending!.values })
+          const row = { id: `id-${data.length + 1}`, request_id: null, ...pending!.values }
+          data.push(row); writes.push({ op: 'insert', values: pending!.values })
           return { data: { id: row.id }, error: null }
         },
-        async maybeSingle() { return { data: rows.find(match) ?? null, error: null } },
+        async maybeSingle() { const hit = data.find(match); return { data: hit ? { ...hit } : null, error: null } },
         then(resolve: (v: unknown) => void) {
           if (pending?.op === 'update') {
             if (opts.failUpdate) return resolve({ data: null, error: { message: 'boom' } })
-            const hit = rows.filter(match)
+            const hit = data.filter(match)
             for (const r of hit) Object.assign(r, pending.values)
             writes.push({ op: 'update', values: pending.values })
             return resolve({ data: hit.map((r) => ({ id: r.id })), error: null })
           }
-          return resolve({ data: rows.filter(match), error: null })
+          return resolve({ data: data.filter(match), error: null })
         },
       }
       return q
@@ -101,6 +112,43 @@ describe('linkAiLetterForSend', () => {
   })
   it('the write fails → refused, so the send does not run', async () => {
     expect(await linkAiLetterForSend(fakeDb([{ ...base }], { failUpdate: true }).db, link())).toEqual({ ok: false, reason: 'write_failed' })
-    expect(LINK_REFUSAL.write_failed.status).toBe(503)
+    // 409, not 503: the pages read 503 as "outcome unknown, do not resend", but nothing was sent.
+    expect(LINK_REFUSAL.write_failed.status).toBe(409)
+  })
+
+  it('redrafted after a refused send, same request id: the older unsent letter lets go of it and the new one is tied', async () => {
+    const f = fakeDb([{ ...base, id: 'OLD', request_id: 'r1', final_body: 'old' }, { ...base }], { receipts: [{ client_id: 'c1', request_id: 'r1', outcome: 'blocked' }] })
+    expect(await linkAiLetterForSend(f.db, link())).toEqual({ ok: true, edited: false })
+    expect(f.rows.find((r) => r.id === 'OLD')).toMatchObject({ request_id: null, final_body: null, released_by: null })
+    expect(f.rows.find((r) => r.id === 'L1')).toMatchObject({ request_id: 'r1' })
+  })
+
+  it('same request id held by another letter whose send went out (or may have) → refused, nothing changed', async () => {
+    for (const outcome of ['sent', 'unknown']) {
+      const f = fakeDb([{ ...base, id: 'OLD', request_id: 'r1' }, { ...base }], { receipts: [{ client_id: 'c1', request_id: 'r1', outcome }] })
+      expect(await linkAiLetterForSend(f.db, link())).toEqual({ ok: false, reason: 'other_send' })
+      expect(f.rows.find((r) => r.id === 'OLD')?.request_id).toBe('r1')
+      expect(f.rows.find((r) => r.id === 'L1')?.request_id).toBeNull()
+    }
+  })
+
+  it('two sends racing for one letter: the update only lands while the letter is free or tied to this send', async () => {
+    const f = fakeDb([{ ...base }])
+    // the first send ties the letter between this send's read and its write
+    const raced = f.db
+    const realFrom = raced.from.bind(raced)
+    let reads = 0
+    ;(raced as unknown as { from: typeof realFrom }).from = ((t: string) => {
+      const q = realFrom(t)
+      const realMaybe = (q as unknown as { maybeSingle: () => Promise<unknown> }).maybeSingle
+      ;(q as unknown as { maybeSingle: () => Promise<unknown> }).maybeSingle = async () => {
+        const out = await realMaybe()
+        if (t === 'crm_ai_letters' && reads++ === 0) f.rows[0].request_id = 'r-other'
+        return out
+      }
+      return q
+    }) as typeof realFrom
+    expect(await linkAiLetterForSend(raced, link())).toEqual({ ok: false, reason: 'write_failed' })
+    expect(f.rows[0].request_id).toBe('r-other')
   })
 })

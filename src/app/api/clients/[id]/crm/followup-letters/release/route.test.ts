@@ -52,7 +52,7 @@ describe('POST followup-letters/release', () => {
     send.mockClear()
     link.mockResolvedValueOnce({ ok: false, reason: 'write_failed' })
     const res = await post({ ...good, aiLetterId: AI })
-    expect(res.status).toBe(503)
+    expect(res.status).toBe(409)
     expect(send).not.toHaveBeenCalled()
     still.mockResolvedValueOnce({ ok: false, reason: 'staff_today', message: 'no' })
     link.mockClear()

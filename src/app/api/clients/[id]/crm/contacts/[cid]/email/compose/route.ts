@@ -53,7 +53,7 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
   const ai = parseAiLetterId(payload.aiLetterId)
   if (!ai.ok) return NextResponse.json({ error: '请求格式错误', reason: 'invalid_input' }, { status: 400 })
   if (ai.id !== null) {
-    if (typeof payload.requestId !== 'string' || typeof payload.subject !== 'string' || typeof payload.body !== 'string') {
+    if (typeof payload.requestId !== 'string' || !parseAiLetterId(payload.requestId).ok || typeof payload.subject !== 'string' || typeof payload.body !== 'string') {
       return NextResponse.json({ error: '请求格式错误', reason: 'invalid_input' }, { status: 400 })
     }
     // Before the send: an AI letter must never reach a guest without its mark (PM 2026-11-28).

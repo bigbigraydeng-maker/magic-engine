@@ -39,7 +39,7 @@ create index crm_ai_letters_contact_idx on public.crm_ai_letters (contact_id);
 create unique index crm_ai_letters_request_idx on public.crm_ai_letters (client_id, request_id) where request_id is not null;
 
 comment on table public.crm_ai_letters is
-  'AI 起草的客人信，一封一行：原稿、检查、谁起草；发送前补 request_id、终稿、是否改过、谁放行。发送结果和客人后续按 request_id 去回执与往来里查。设计稿 2026-11-28。';
+  'AI 起草的客人信，一封一行：原稿、检查、谁起草；发送前补 request_id、终稿、是否改过、谁放行。released_at 有值不等于发出去了（发送前就写、发送可能被拦）：发没发成一律按 request_id 去 crm_email_send_receipts 查。设计稿 2026-11-28。';
 
 alter table public.crm_ai_letters enable row level security;
 
