@@ -24,6 +24,7 @@ export type FactItemKind =
   | 'tour_not_sellable'
   | 'ambiguous_tour_name'
   | 'ambiguous_tour_link'
+  | 'banned_phrase'
   | 'check_error'
 
 export interface FactItem {
@@ -41,6 +42,8 @@ export interface FactCheckInput {
   aliasesByTourId: Record<string, string[]>
   catalogVersion: number
   today: string
+  /** The client's own banned phrases (brand red lines). Any hit in any text fails the check. */
+  bannedPhrases?: readonly string[]
 }
 
 export interface FactCheckResult {
@@ -547,6 +550,33 @@ function notSellableItem(target: PublishedTourFact): FactItem | null {
 }
 
 // ---------------------------------------------------------------------------
+// Client banned phrases (brand red lines)
+// ---------------------------------------------------------------------------
+
+/** Lowercase, hyphens and underscores count as spaces, whitespace collapsed: "small group" also matches "small-group". */
+function normalizeForBanned(s: string): string {
+  return s.toLowerCase().replace(/[-\u2010-\u2015_]+/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
+function collectBannedPhraseItems(texts: SourcedText[], banned: readonly string[] | undefined): FactItem[] {
+  if (!banned || banned.length === 0) return []
+  const items: FactItem[] = []
+  const seen = new Set<string>()
+  for (const { source, text } of texts) {
+    const surface = normalizeForBanned(text)
+    for (const phrase of banned) {
+      const needle = normalizeForBanned(phrase)
+      if (needle.length === 0 || !surface.includes(needle)) continue
+      const key = `${source}\u0000${needle}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      items.push({ kind: 'banned_phrase', claim: phrase.trim(), source, outcome: 'FAIL', expected: null })
+    }
+  }
+  return items
+}
+
+// ---------------------------------------------------------------------------
 // Step 6: verdict
 // ---------------------------------------------------------------------------
 
@@ -610,6 +640,7 @@ export function checkFacts(input: FactCheckInput): FactCheckResult {
     }
 
     items.push(...collectClaimItems(texts, target, input.today))
+    items.push(...collectBannedPhraseItems(texts, input.bannedPhrases))
 
     return assembleResult(input, target, items)
   } catch (err) {

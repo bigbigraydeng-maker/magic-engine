@@ -50,6 +50,7 @@ const SOURCE_REASON_ZH: Record<string, string> = {
   catalog_empty: '团目录里没有团',
   presence_read_failed: '查不到团目录是否发布过',
   snapshot_read_failed: '读不到团目录的历史版本',
+  redline_read_failed: '读不到这个客户的禁用词',
   load_failed: '读取出错',
 }
 

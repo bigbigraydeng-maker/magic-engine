@@ -46,7 +46,10 @@ interface FakeQueryResult {
   error: unknown
 }
 
-function makeFakeDb(result: FakeQueryResult): {
+function makeFakeDb(
+  result: FakeQueryResult,
+  redlines: { client?: FakeQueryResult; brief?: FakeQueryResult } = {},
+): {
   db: SupabaseClient
   from: ReturnType<typeof vi.fn>
 } {
@@ -57,7 +60,15 @@ function makeFakeDb(result: FakeQueryResult): {
     order: () => chain,
     limit: () => Promise.resolve(result),
   }
-  from.mockReturnValue(chain)
+  const single = (r: FakeQueryResult) => {
+    const c = { select: () => c, eq: () => c, maybeSingle: () => Promise.resolve(r) }
+    return c
+  }
+  const clientResult = redlines.client ?? { data: { brand_redline_phrases: [] }, error: null }
+  const briefResult = redlines.brief ?? { data: null, error: null }
+  from.mockImplementation((table: string) =>
+    table === 'clients' ? single(clientResult) : table === 'master_briefs' ? single(briefResult) : chain,
+  )
   return { db: asDb({ from }), from }
 }
 
@@ -280,5 +291,52 @@ describe('loadSocialFactSource', () => {
     if (result.ok) {
       expect(result.aliasesByTourId).toEqual({})
     }
+  })
+})
+
+describe('loadSocialFactSource banned phrases', () => {
+  const published = () =>
+    loadMock.mockResolvedValue({ published: true, version: 7, tours: [tour('t1', 'Brand Line — Valley Rim')] })
+  const history = { data: [{ version: 7, snapshot: { tours: [{ id: 't1', name: 'Brand Line — Valley Rim' }] } }], error: null }
+
+  it('reads the client red-line phrases plus the active brief avoid words and excluded topics, without duplicates', async () => {
+    published()
+    const { db } = makeFakeDb(history, {
+      client: { data: { brand_redline_phrases: ['small group', ' max 16 '] }, error: null },
+      brief: { data: { avoid_words: ['small group', 'early bird'], excluded_topics: ['visa free'] }, error: null },
+    })
+
+    const result = await loadSocialFactSource(db, 'client-1', '2024-01-01')
+
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.bannedPhrases).toEqual(['small group', 'max 16', 'early bird', 'visa free'])
+  })
+
+  it('a client with no lists gets an empty list, not a failure', async () => {
+    published()
+    const { db } = makeFakeDb(history)
+
+    const result = await loadSocialFactSource(db, 'client-1', '2024-01-01')
+
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.bannedPhrases).toEqual([])
+  })
+
+  it('fails closed when the client row cannot be read', async () => {
+    published()
+    const { db } = makeFakeDb(history, { client: { data: null, error: { message: 'down' } } })
+
+    const result = await loadSocialFactSource(db, 'client-1', '2024-01-01')
+
+    expect(result).toEqual({ ok: false, reason: 'redline_read_failed' })
+  })
+
+  it('fails closed when the brief cannot be read', async () => {
+    published()
+    const { db } = makeFakeDb(history, { brief: { data: null, error: { message: 'down' } } })
+
+    const result = await loadSocialFactSource(db, 'client-1', '2024-01-01')
+
+    expect(result).toEqual({ ok: false, reason: 'redline_read_failed' })
   })
 })
