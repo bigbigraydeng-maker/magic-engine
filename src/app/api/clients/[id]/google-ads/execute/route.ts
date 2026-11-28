@@ -35,6 +35,7 @@ import {
   addCampaignNegativeKeyword,
 } from '@/lib/google-ads/client'
 import { checkBudgetWithinSafeRange, microsToDisplay } from '@/lib/google-ads/guardrails'
+import { clientOwnsGoogleAdsAccount } from '@/lib/google-ads/creds-loader'
 import { ADS_ACTION_TYPE } from '@/lib/flywheel/vocabulary'
 import { resolveAndLogAdsExpectedMetric } from '@/lib/flywheel/ads-expected-metric'
 
@@ -113,8 +114,14 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     )
   }
 
-  // TODO P18.D: Validate google_ads_customer_id against clients.google_ads_customer_id column
-  // to prevent IDOR — currently trusts caller-supplied value (acceptable at P18.B skeleton stage).
+  // Tenant boundary: one shared manager credential serves every client, so the
+  // caller-supplied id must be the account registered for THIS client.
+  if (!(await clientOwnsGoogleAdsAccount(supabaseAdmin, clientId, google_ads_customer_id))) {
+    return NextResponse.json(
+      { error: 'google_ads_customer_id is not the Google Ads account registered for this client' },
+      { status: 403 },
+    )
+  }
 
   // ── Credentials ───────────────────────────────────────────────────────────
   const creds = loadGoogleAdsCreds(google_ads_customer_id)
@@ -190,6 +197,17 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
             'This campaign has no campaign-level budget (likely using ad group budgets). ' +
             'Adjust budget directly in Google Ads Manager.',
         },
+        { status: 422 },
+      )
+    }
+
+    // The ±20% guard below reads THIS campaign's budget. Without this check the
+    // caller could pass any other budget's resource name: the guard would
+    // approve against campaign A's amount while the write changed budget B.
+    // Fails closed when the campaign's own budget reference is unknown.
+    if (campaign.campaignBudget.resourceName !== budgetResourceName) {
+      return NextResponse.json(
+        { error: 'params.budget_resource_name is not the budget used by this campaign' },
         { status: 422 },
       )
     }

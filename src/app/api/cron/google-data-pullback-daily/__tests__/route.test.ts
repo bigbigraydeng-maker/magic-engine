@@ -44,7 +44,7 @@ vi.mock('@/lib/meta/client', () => ({
 }))
 
 vi.mock('@/lib/google-ads/client', () => ({
-  fetchAccountInsights: vi.fn().mockResolvedValue(null),
+  fetchAccountInsightsResult: vi.fn().mockResolvedValue({ ok: false, status: null, reason: 'unset in test' }),
   loadGoogleAdsCreds:   vi.fn().mockReturnValue(null),
 }))
 
@@ -76,13 +76,13 @@ vi.mock('@/lib/meta/token-selection', async (importOriginal) => {
 import { supabaseAdmin } from '@/lib/supabase'
 import { fetchGa4Snapshot } from '@/lib/ga4/client'
 import { fetchGscSnapshot } from '@/lib/gsc/client'
-import { fetchAccountInsights, loadGoogleAdsCreds } from '@/lib/google-ads/client'
+import { fetchAccountInsightsResult, loadGoogleAdsCreds } from '@/lib/google-ads/client'
 import { GET } from '../route'
 
 const mockFrom              = vi.mocked(supabaseAdmin.from)
 const mockFetchGa4          = vi.mocked(fetchGa4Snapshot)
 const mockFetchGsc          = vi.mocked(fetchGscSnapshot)
-const mockFetchGoogleAds    = vi.mocked(fetchAccountInsights)
+const mockFetchGoogleAds    = vi.mocked(fetchAccountInsightsResult)
 const mockLoadGoogleAdsCreds = vi.mocked(loadGoogleAdsCreds)
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -465,7 +465,7 @@ describe('GET /api/cron/google-data-pullback-daily', () => {
       customerId:     CUSTOMER_ID,
     })
 
-    mockFetchGoogleAds.mockResolvedValue({
+    mockFetchGoogleAds.mockResolvedValue({ ok: true, insights: {
       period_start: '2026-05-17',
       period_end:   '2026-06-16',
       spend:        420.50,
@@ -475,7 +475,7 @@ describe('GET /api/cron/google-data-pullback-daily', () => {
       cpc:          0.124,
       conversions:  45,
       cpa:          9.34,
-    })
+    } })
 
     const res = await GET(makeRequest({ authorization: 'Bearer test-secret' }))
     expect(res.status).toBe(200)
@@ -512,7 +512,7 @@ describe('GET /api/cron/google-data-pullback-daily', () => {
     expect(mockLoadGoogleAdsCreds).toHaveBeenCalledWith(CUSTOMER_ID)
   })
 
-  it('marks Google Ads sync failed when env vars are missing (loadGoogleAdsCreds → null)', async () => {
+  it('records Google Ads as skipped, not failed, when env vars are missing (loadGoogleAdsCreds → null)', async () => {
     const GA_CLIENT  = 'client-uuid-ga-no-env'
     const CUSTOMER_ID = '1111111111'
 
@@ -535,16 +535,21 @@ describe('GET /api/cron/google-data-pullback-daily', () => {
     expect(res.status).toBe(200)
     const body = await res.json()
 
+    // A service-level setup gap is the same for every client and every day;
+    // counting it as a failed client would email "failed" daily and bury real
+    // failures. It is still recorded, with the reason.
     expect(body.google_ads_synced).toBe(0)
-    expect(body.failed).toBe(1)
+    expect(body.google_ads_unconfigured).toBe(1)
+    expect(body.failed).toBe(0)
     expect(body.results[0].google_ads).toMatchObject({
-      success: false,
+      success: true,
+      skipped: 'credentials_missing',
       error:   expect.stringMatching(/GOOGLE_ADS_\*.*env vars missing/i),
     })
     expect(mockFetchGoogleAds).not.toHaveBeenCalled()
   })
 
-  it('marks Google Ads sync failed when fetchAccountInsights returns null (token unapproved / bad customer_id)', async () => {
+  it('marks Google Ads sync failed, with the provider reason, when the API call fails (token unapproved / bad customer_id)', async () => {
     const GA_CLIENT  = 'client-uuid-ga-null-insights'
     const CUSTOMER_ID = '2222222222'
 
@@ -565,7 +570,7 @@ describe('GET /api/cron/google-data-pullback-daily', () => {
       developerToken: 'dt', clientId: 'cid', clientSecret: 'cs',
       refreshToken: 'rt', customerId: CUSTOMER_ID,
     })
-    mockFetchGoogleAds.mockResolvedValue(null)
+    mockFetchGoogleAds.mockResolvedValue({ ok: false, status: 401, reason: 'UNAUTHENTICATED' })
 
     const res = await GET(makeRequest({ authorization: 'Bearer test-secret' }))
     expect(res.status).toBe(200)
@@ -575,7 +580,7 @@ describe('GET /api/cron/google-data-pullback-daily', () => {
     expect(body.failed).toBe(1)
     expect(body.results[0].google_ads).toMatchObject({
       success: false,
-      error:   expect.stringMatching(/fetchAccountInsights returned null/),
+      error:   'Google Ads API 401: UNAUTHENTICATED',
     })
   })
 

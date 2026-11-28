@@ -52,12 +52,15 @@ export type MetricPuller =
  * to the entry that authorised it.
  */
 export const ADS_METRIC_PULLERS: Readonly<Record<AdsMetricKey, readonly MetricPuller[]>> = {
-  // ── Delivery metrics: both ad platforms report these unconditionally ──────
-  [ADS_METRIC_KEY.SPEND]:       ['meta_ads', 'google_ads_pullback'],
-  [ADS_METRIC_KEY.IMPRESSIONS]: ['meta_ads', 'google_ads_pullback'],
-  [ADS_METRIC_KEY.CLICKS]:      ['meta_ads', 'google_ads_pullback'],
-  [ADS_METRIC_KEY.CPC]:         ['meta_ads', 'google_ads_pullback'],
-  [ADS_METRIC_KEY.CTR]:         ['meta_ads', 'google_ads_pullback'],
+  // ── Delivery metrics (Meta) ───────────────────────────────────────────────
+  // `ads.account.*` is Meta-only. Google Ads writes `ads.google.*` below: no
+  // reader of this namespace filters `source`, so two platforms sharing a key
+  // would be blended silently.
+  [ADS_METRIC_KEY.SPEND]:       ['meta_ads'],
+  [ADS_METRIC_KEY.IMPRESSIONS]: ['meta_ads'],
+  [ADS_METRIC_KEY.CLICKS]:      ['meta_ads'],
+  [ADS_METRIC_KEY.CPC]:         ['meta_ads'],
+  [ADS_METRIC_KEY.CTR]:         ['meta_ads'],
 
   // ── Outcome metrics: only ever written when the objective produces them ──
   // Registered = a puller will write a row WHEN the data exists. It does not
@@ -65,8 +68,8 @@ export const ADS_METRIC_PULLERS: Readonly<Record<AdsMetricKey, readonly MetricPu
   // row, which is exactly why resolveAdsExpectedMetric must not pick ROAS
   // for it.
   [ADS_METRIC_KEY.ROAS]:                  ['meta_ads'],
-  [ADS_METRIC_KEY.CONVERSIONS]:           ['meta_ads', 'google_ads_pullback'],
-  [ADS_METRIC_KEY.CPA]:                   ['meta_ads_pullback', 'google_ads_pullback'],
+  [ADS_METRIC_KEY.CONVERSIONS]:           ['meta_ads'],
+  [ADS_METRIC_KEY.CPA]:                   ['meta_ads_pullback'],
   [ADS_METRIC_KEY.COST_PER_LEAD]:         ['meta_ads_pullback'],
   [ADS_METRIC_KEY.COST_PER_CONVERSATION]: ['meta_ads_pullback'],
 
@@ -74,6 +77,15 @@ export const ADS_METRIC_PULLERS: Readonly<Record<AdsMetricKey, readonly MetricPu
   [ADS_METRIC_KEY.GA4_PAID_SESSIONS]:    ['ga4_paid_search_pullback'],
   [ADS_METRIC_KEY.GA4_PAID_USERS]:       ['ga4_paid_search_pullback'],
   [ADS_METRIC_KEY.GA4_PAID_CONVERSIONS]: ['ga4_paid_search_pullback'],
+
+  // ── Google Ads account metrics (own namespace, see vocabulary.ts) ─────────
+  [ADS_METRIC_KEY.GOOGLE_SPEND]:       ['google_ads_pullback'],
+  [ADS_METRIC_KEY.GOOGLE_IMPRESSIONS]: ['google_ads_pullback'],
+  [ADS_METRIC_KEY.GOOGLE_CLICKS]:      ['google_ads_pullback'],
+  [ADS_METRIC_KEY.GOOGLE_CPC]:         ['google_ads_pullback'],
+  [ADS_METRIC_KEY.GOOGLE_CTR]:         ['google_ads_pullback'],
+  [ADS_METRIC_KEY.GOOGLE_CONVERSIONS]: ['google_ads_pullback'],
+  [ADS_METRIC_KEY.GOOGLE_CPA]:         ['google_ads_pullback'],
 }
 
 const ADS_METRIC_KEYS = new Set<string>(Object.values(ADS_METRIC_KEY))

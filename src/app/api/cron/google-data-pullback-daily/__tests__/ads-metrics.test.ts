@@ -39,7 +39,7 @@ vi.mock('@/lib/meta/client', () => ({
 }))
 
 vi.mock('@/lib/google-ads/client', () => ({
-  fetchAccountInsights: vi.fn().mockResolvedValue(null),
+  fetchAccountInsightsResult: vi.fn().mockResolvedValue({ ok: false, status: null, reason: 'unset in test' }),
   loadGoogleAdsCreds:   vi.fn().mockReturnValue(null),
 }))
 
@@ -90,7 +90,7 @@ vi.mock('@/lib/meta/token-selection', async (importOriginal) => {
 import { supabaseAdmin } from '@/lib/supabase'
 import { getAdAccountInsights } from '@/lib/meta/client'
 import { fetchGa4Snapshot, fetchGa4PaidSearchMetrics } from '@/lib/ga4/client'
-import { fetchAccountInsights, loadGoogleAdsCreds } from '@/lib/google-ads/client'
+import { fetchAccountInsightsResult, loadGoogleAdsCreds } from '@/lib/google-ads/client'
 import { ADS_METRIC_KEY } from '@/lib/flywheel/vocabulary'
 import { GET } from '../route'
 
@@ -98,7 +98,7 @@ const mockFrom            = vi.mocked(supabaseAdmin.from)
 const mockMetaInsights    = vi.mocked(getAdAccountInsights)
 const mockGa4Snapshot     = vi.mocked(fetchGa4Snapshot)
 const mockGa4Paid         = vi.mocked(fetchGa4PaidSearchMetrics)
-const mockGoogleInsights  = vi.mocked(fetchAccountInsights)
+const mockGoogleInsights  = vi.mocked(fetchAccountInsightsResult)
 const mockGoogleCreds     = vi.mocked(loadGoogleAdsCreds)
 
 // ── Harness ───────────────────────────────────────────────────────────────────
@@ -116,6 +116,8 @@ function setupSupabase(opts: {
   meta?:      Array<{ id: string; name: string; domain: string | null; meta_ad_account_id: string }>
   connectors?: Array<{ client_id: string; anchor: 'gsc' | 'ga4'; config: Record<string, unknown> }>
   googleAds?: Array<{ client_id: string; account_id: string }>
+  /** Rows for the `clients.google_ads_customer_id` lookup (client settings). */
+  googleAdsClientColumn?: Array<{ id: string; google_ads_customer_id: string | null }>
 }) {
   const inserted: MetricRow[][] = []
 
@@ -145,9 +147,16 @@ function setupSupabase(opts: {
           eq:     vi.fn().mockResolvedValue({ data: opts.connectors ?? [], error: null }),
         } as never
       case 'clients':
+        // Two lookups hit this table: Meta ad accounts and Google Ads ids.
         return {
-          select: vi.fn().mockReturnThis(),
-          not:    vi.fn().mockResolvedValue({ data: opts.meta ?? [], error: null }),
+          select: vi.fn().mockImplementation((columns: string) => ({
+            not: vi.fn().mockResolvedValue({
+              data: columns.includes('google_ads_customer_id')
+                ? (opts.googleAdsClientColumn ?? [])
+                : (opts.meta ?? []),
+              error: null,
+            }),
+          })),
         } as never
       case 'platform_oauth_connections':
         return {
@@ -204,6 +213,10 @@ const MESSENGER_INSIGHTS = {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // The external-pull allowlist defaults to a single tenant when unset, which
+  // filters every fixture client here and turns each run into "nothing to
+  // sync". Same stub as route.test.ts.
+  vi.stubEnv('EXTERNAL_DATA_PULL_CLIENT_IDS', '*')
   process.env.CRON_SECRET = 'test-secret'
   process.env.META_SYSTEM_USER_TOKEN = 'meta-token'
   mockMetaPullMetrics.mockResolvedValue([])
@@ -311,25 +324,169 @@ describe('regression — existing ads metric pulls are untouched', () => {
       developerToken: 'dt', clientId: 'cid', clientSecret: 'cs',
       refreshToken: 'rt', customerId: '777',
     })
-    mockGoogleInsights.mockResolvedValue({
+    mockGoogleInsights.mockResolvedValue({ ok: true, insights: {
       period_start: '2026-07-02', period_end: '2026-08-01',
       spend: 420.5, impressions: 120000, clicks: 3400,
       ctr: 0.028, cpc: 0.124, conversions: 45, cpa: 9.34,
-    })
+    } })
 
     const body = await (await run()).json()
     expect(body.google_ads_synced).toBe(1)
     expect(body.results[0].google_ads).toMatchObject({ success: true, metrics_written: 7 })
 
     expect(keysFrom(inserted, 'google_ads_pullback').sort()).toEqual([
-      ADS_METRIC_KEY.CLICKS,
-      ADS_METRIC_KEY.CONVERSIONS,
-      ADS_METRIC_KEY.CPA,
-      ADS_METRIC_KEY.CPC,
-      ADS_METRIC_KEY.CTR,
-      ADS_METRIC_KEY.IMPRESSIONS,
-      ADS_METRIC_KEY.SPEND,
+      ADS_METRIC_KEY.GOOGLE_CLICKS,
+      ADS_METRIC_KEY.GOOGLE_CONVERSIONS,
+      ADS_METRIC_KEY.GOOGLE_CPA,
+      ADS_METRIC_KEY.GOOGLE_CPC,
+      ADS_METRIC_KEY.GOOGLE_CTR,
+      ADS_METRIC_KEY.GOOGLE_IMPRESSIONS,
+      ADS_METRIC_KEY.GOOGLE_SPEND,
     ].sort())
+  })
+
+  it('syncs a client whose Google Ads id is only set in client settings', async () => {
+    // The settings page writes clients.google_ads_customer_id; nothing writes a
+    // platform_oauth_connections google_ads row. Before this lookup existed the
+    // daily job found no Google Ads client at all, for any customer.
+    const { inserted } = setupSupabase({
+      googleAdsClientColumn: [{ id: 'client-col', google_ads_customer_id: '123-456-7890' }],
+    })
+    mockGoogleCreds.mockReturnValue({
+      developerToken: 'dt', clientId: 'cid', clientSecret: 'cs',
+      refreshToken: 'rt', customerId: '1234567890',
+    })
+    mockGoogleInsights.mockResolvedValue({ ok: true, insights: {
+      period_start: '2026-07-02', period_end: '2026-08-01',
+      spend: 420.5, impressions: 120000, clicks: 3400,
+      ctr: 0.028, cpc: 0.124, conversions: 45, cpa: 9.34,
+    } })
+
+    const body = await (await run()).json()
+    expect(body.google_ads_synced).toBe(1)
+    expect(mockGoogleCreds).toHaveBeenCalledWith('1234567890')
+
+    // Each value lands under its own key, and none under Meta's namespace.
+    const googleRows = inserted.flat().filter(row => row.source === 'google_ads_pullback')
+    expect(Object.fromEntries(googleRows.map(row => [row.metric_key, row.metric_value]))).toEqual({
+      [ADS_METRIC_KEY.GOOGLE_SPEND]:       420.5,
+      [ADS_METRIC_KEY.GOOGLE_IMPRESSIONS]: 120000,
+      [ADS_METRIC_KEY.GOOGLE_CLICKS]:      3400,
+      [ADS_METRIC_KEY.GOOGLE_CONVERSIONS]: 45,
+      [ADS_METRIC_KEY.GOOGLE_CTR]:         0.028,
+      [ADS_METRIC_KEY.GOOGLE_CPC]:         0.124,
+      [ADS_METRIC_KEY.GOOGLE_CPA]:         9.34,
+    })
+    expect(inserted.flat().some(row => row.metric_key.startsWith('ads.account.'))).toBe(false)
+  })
+
+  it('writes no ratio row when its denominator is zero', async () => {
+    // "No conversions yet" must not become a cost-per-conversion of 0, which a
+    // lower-is-better metric would read as the best result possible.
+    const { inserted } = setupSupabase({
+      googleAdsClientColumn: [{ id: 'client-col', google_ads_customer_id: '1234567890' }],
+    })
+    mockGoogleCreds.mockReturnValue({
+      developerToken: 'dt', clientId: 'cid', clientSecret: 'cs',
+      refreshToken: 'rt', customerId: '1234567890',
+    })
+    mockGoogleInsights.mockResolvedValue({ ok: true, insights: {
+      period_start: '2026-07-02', period_end: '2026-08-01',
+      spend: 50, impressions: 4000, clicks: 20,
+      ctr: 0.005, cpc: 2.5, conversions: 0, cpa: 0,
+    } })
+
+    const body = await (await run()).json()
+    expect(body.results[0].google_ads).toMatchObject({ success: true, metrics_written: 6 })
+    const keys = keysFrom(inserted, 'google_ads_pullback')
+    expect(keys).not.toContain(ADS_METRIC_KEY.GOOGLE_CPA)
+    expect(keys).toContain(ADS_METRIC_KEY.GOOGLE_CONVERSIONS)
+  })
+
+  it('replaces rows from an earlier run the same local day instead of adding to them', async () => {
+    // Day buckets sum count/currency rows, so a second row for the same local
+    // day would show the 30-day total doubled. The clear must be a rolling
+    // window (not "today in UTC") and must cover only this client's Google rows.
+    const { metricsChain } = setupSupabase({
+      googleAdsClientColumn: [{ id: 'client-col', google_ads_customer_id: '1234567890' }],
+    })
+    mockGoogleCreds.mockReturnValue({
+      developerToken: 'dt', clientId: 'cid', clientSecret: 'cs',
+      refreshToken: 'rt', customerId: '1234567890',
+    })
+    mockGoogleInsights.mockResolvedValue({ ok: true, insights: {
+      period_start: '2026-07-02', period_end: '2026-08-01',
+      spend: 50, impressions: 4000, clicks: 20,
+      ctr: 0.005, cpc: 2.5, conversions: 1, cpa: 50,
+    } })
+
+    const before = Date.now()
+    await run()
+
+    expect(metricsChain.delete).toHaveBeenCalledTimes(1)
+    expect(metricsChain.eq).toHaveBeenCalledWith('client_id', 'client-col')
+    expect(metricsChain.eq).toHaveBeenCalledWith('source', 'google_ads_pullback')
+    const [column, since] = metricsChain.gte.mock.calls[0] as [string, string]
+    expect(column).toBe('measured_at')
+    const windowHours = (before - new Date(since).getTime()) / 3_600_000
+    expect(windowHours).toBeGreaterThan(12)   // reaches back past a UTC-midnight boundary
+    expect(windowHours).toBeLessThan(24)      // but keeps yesterday's scheduled row
+    expect(metricsChain.lte).not.toHaveBeenCalled()
+  })
+
+  it('does not insert when clearing earlier rows fails', async () => {
+    const { metricsChain, inserted } = setupSupabase({
+      googleAdsClientColumn: [{ id: 'client-col', google_ads_customer_id: '1234567890' }],
+    })
+    metricsChain.gte.mockResolvedValueOnce({ error: { message: 'delete timed out' } })
+    mockGoogleCreds.mockReturnValue({
+      developerToken: 'dt', clientId: 'cid', clientSecret: 'cs',
+      refreshToken: 'rt', customerId: '1234567890',
+    })
+    mockGoogleInsights.mockResolvedValue({ ok: true, insights: {
+      period_start: '2026-07-02', period_end: '2026-08-01',
+      spend: 50, impressions: 4000, clicks: 20,
+      ctr: 0.005, cpc: 2.5, conversions: 1, cpa: 50,
+    } })
+
+    const body = await (await run()).json()
+    expect(body.results[0].google_ads).toMatchObject({
+      success: false, error: expect.stringMatching(/could not clear earlier Google Ads rows: delete timed out/),
+    })
+    expect(keysFrom(inserted, 'google_ads_pullback')).toEqual([])
+  })
+
+  it('records missing credentials as a skip with a reason, not as a failed client', async () => {
+    setupSupabase({
+      googleAdsClientColumn: [{ id: 'client-col', google_ads_customer_id: '1234567890' }],
+    })
+    mockGoogleCreds.mockReturnValue(null)
+
+    const body = await (await run()).json()
+    expect(body.failed).toBe(0)
+    expect(body.google_ads_synced).toBe(0)
+    expect(body.google_ads_unconfigured).toBe(1)
+    expect(body.results[0].google_ads).toMatchObject({
+      success: true, skipped: 'credentials_missing', error: expect.stringMatching(/GOOGLE_ADS_\*/),
+    })
+    expect(mockGoogleInsights).not.toHaveBeenCalled()
+  })
+
+  it('keeps the provider error text when the Google Ads API rejects the call', async () => {
+    setupSupabase({
+      googleAdsClientColumn: [{ id: 'client-col', google_ads_customer_id: '1234567890' }],
+    })
+    mockGoogleCreds.mockReturnValue({
+      developerToken: 'dt', clientId: 'cid', clientSecret: 'cs',
+      refreshToken: 'rt', customerId: '1234567890',
+    })
+    mockGoogleInsights.mockResolvedValue({ ok: false, status: 403, reason: 'DEVELOPER_TOKEN_NOT_APPROVED' })
+
+    const body = await (await run()).json()
+    expect(body.failed).toBe(1)
+    expect(body.results[0].google_ads).toMatchObject({
+      success: false, error: 'Google Ads API 403: DEVELOPER_TOKEN_NOT_APPROVED',
+    })
   })
 
   it('still writes the three GA4 paid-search metrics', async () => {

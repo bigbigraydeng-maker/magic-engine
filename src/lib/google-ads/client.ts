@@ -19,6 +19,17 @@
 const GOOGLE_ADS_API_BASE = 'https://googleads.googleapis.com/v25'
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
 
+/**
+ * Upper bound for one Google request. Without it a stalled connection waits on
+ * the runtime default (minutes), and the daily cron runs the Google pull before
+ * the Meta safety steps for the same client.
+ */
+const GOOGLE_ADS_REQUEST_TIMEOUT_MS = 20_000
+
+function failureText(err: unknown): string {
+  return (err instanceof Error ? err.message : String(err)).replace(/\s+/g, ' ').trim().slice(0, 200)
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface GoogleAdsCampaign {
@@ -29,6 +40,8 @@ export interface GoogleAdsCampaign {
   campaignBudget?: {
     amountMicros: string   // budget in micro-units
     deliveryMethod: string
+    /** e.g. "customers/123/campaignBudgets/456" — the budget this campaign actually uses. */
+    resourceName?: string
   }
 }
 
@@ -74,6 +87,7 @@ interface GoogleAdsError {
 export async function getAccessToken(creds: Omit<GoogleAdsCreds, 'customerId' | 'managerCustomerId'>): Promise<string> {
   const res = await fetch(GOOGLE_TOKEN_URL, {
     method: 'POST',
+    signal: AbortSignal.timeout(GOOGLE_ADS_REQUEST_TIMEOUT_MS),
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       client_id:     creds.clientId,
@@ -190,7 +204,8 @@ export async function getCampaign(
       campaign.status,
       campaign.bidding_strategy_type,
       campaign_budget.amount_micros,
-      campaign_budget.delivery_method
+      campaign_budget.delivery_method,
+      campaign_budget.resource_name
     FROM campaign
     WHERE campaign.id = ${campaignId}
     LIMIT 1
@@ -217,7 +232,7 @@ export async function getCampaign(
   const json = await res.json() as {
     results?: Array<{
       campaign?: { id?: string; name?: string; status?: string; biddingStrategyType?: string }
-      campaignBudget?: { amountMicros?: string; deliveryMethod?: string }
+      campaignBudget?: { amountMicros?: string; deliveryMethod?: string; resourceName?: string }
     }>
   }
 
@@ -233,6 +248,7 @@ export async function getCampaign(
       ? {
           amountMicros:   row.campaignBudget.amountMicros ?? '0',
           deliveryMethod: row.campaignBudget.deliveryMethod ?? 'STANDARD',
+          resourceName:   row.campaignBudget.resourceName,
         }
       : undefined,
   }
@@ -394,25 +410,50 @@ export interface GoogleAdsAccountInsights {
   cpa: number
 }
 
+/** Outcome of an account-insights pull, with the failure reason kept. */
+export type GoogleAdsAccountInsightsResult =
+  | { ok: true; insights: GoogleAdsAccountInsights }
+  /** `status` is the HTTP status, or null when no response was received. */
+  | { ok: false; status: number | null; reason: string }
+
 /**
- * Fetch aggregate account-level metrics for the trailing `lookbackDays`-day
- * window from Google Ads. Returns null on API failure so the cron can skip
- * the client without blowing up the whole run.
- *
- * Aggregation is done client-side because Google Ads GAQL only emits one row
- * per `segments.date`; we sum the daily rows into a single window total.
+ * Same pull as fetchAccountInsightsResult, flattened to null on any failure.
+ * Kept for callers that only need "did it work". The daily cron uses the
+ * Result form so the provider's own error text reaches the run log.
  */
 export async function fetchAccountInsights(
   creds: GoogleAdsCreds,
   lookbackDays = 30,
 ): Promise<GoogleAdsAccountInsights | null> {
+  const result = await fetchAccountInsightsResult(creds, lookbackDays)
+  return result.ok ? result.insights : null
+}
+
+/**
+ * Fetch aggregate account-level metrics for the trailing `lookbackDays`-day
+ * window from Google Ads. Never throws: a failure comes back as
+ * `{ ok: false, status, reason }` so the cron can skip the client without
+ * blowing up the whole run AND still record why.
+ *
+ * Aggregation is done client-side because Google Ads GAQL only emits one row
+ * per `segments.date`; we sum the daily rows into a single window total.
+ */
+export async function fetchAccountInsightsResult(
+  creds: GoogleAdsCreds,
+  lookbackDays = 30,
+): Promise<GoogleAdsAccountInsightsResult> {
   const today = new Date()
   const since = new Date(today)
   since.setUTCDate(today.getUTCDate() - lookbackDays)
   const period_start = since.toISOString().slice(0, 10)
   const period_end = today.toISOString().slice(0, 10)
 
-  const accessToken = await getAccessToken(creds)
+  let accessToken: string
+  try {
+    accessToken = await getAccessToken(creds)
+  } catch (err) {
+    return { ok: false, status: null, reason: `token refresh failed: ${failureText(err)}` }
+  }
   const url = `${GOOGLE_ADS_API_BASE}/customers/${creds.customerId}/googleAds:search`
 
   const query = `
@@ -430,18 +471,19 @@ export async function fetchAccountInsights(
   try {
     res = await fetch(url, {
       method: 'POST',
+      signal: AbortSignal.timeout(GOOGLE_ADS_REQUEST_TIMEOUT_MS),
       headers: buildHeaders(creds, accessToken),
       body: JSON.stringify({ query }),
     })
   } catch (err) {
     console.error('[google-ads/client] fetchAccountInsights fetch error:', err)
-    return null
+    return { ok: false, status: null, reason: `request failed: ${failureText(err)}` }
   }
 
   if (!res.ok) {
     const body = await res.text().catch(() => '')
     console.error(`[google-ads/client] fetchAccountInsights HTTP ${res.status}:`, body.slice(0, 300))
-    return null
+    return { ok: false, status: res.status, reason: body.replace(/\s+/g, ' ').trim().slice(0, 200) || 'empty error body' }
   }
 
   const json = (await res.json()) as {
@@ -474,15 +516,18 @@ export async function fetchAccountInsights(
   const cpa = conversions > 0 ? spend / conversions : 0
 
   return {
-    period_start,
-    period_end,
-    spend,
-    impressions,
-    clicks,
-    ctr,
-    cpc,
-    conversions,
-    cpa,
+    ok: true,
+    insights: {
+      period_start,
+      period_end,
+      spend,
+      impressions,
+      clicks,
+      ctr,
+      cpc,
+      conversions,
+      cpa,
+    },
   }
 }
 

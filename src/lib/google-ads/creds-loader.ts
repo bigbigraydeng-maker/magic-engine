@@ -110,3 +110,83 @@ export async function loadGoogleAdsCredsForClient(
   if (!customer_id) return null
   return loadGoogleAdsCreds(customer_id)
 }
+
+/**
+ * Digits-only Google Ads customer id, or null when the value is not one.
+ * Accepts the "123-456-7890" display form.
+ */
+export function normaliseGoogleAdsCustomerId(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const digits = raw.replace(/[-\s]/g, '')
+  return /^\d{1,15}$/.test(digits) ? digits : null
+}
+
+/**
+ * Tenant check for every Google Ads call made on behalf of a client.
+ *
+ * All clients share ONE manager-account credential and are told apart only by
+ * customer id, so a caller-supplied id is the whole isolation boundary: without
+ * this check any signed-in client user could read or change another client's
+ * campaigns by passing that client's id.
+ *
+ * Only `clients.google_ads_customer_id` counts as proof, and only when this
+ * client is the SOLE holder of the id. That column is written by internal staff
+ * alone (see the google-ads-customer-id route). The OAuth row and the legacy
+ * flywheel_actions payload that resolveCustomerId() falls back to can originate
+ * from caller input, so they are deliberately not accepted here.
+ * Fails closed: lookup error, no registration, or an id held by more than one
+ * client → false.
+ */
+export async function clientOwnsGoogleAdsAccount(
+  supabase: SupabaseClient,
+  clientId: string,
+  customerId: unknown,
+): Promise<boolean> {
+  const wanted = normaliseGoogleAdsCustomerId(customerId)
+  if (!wanted) return false
+  try {
+    const { data, error } = await supabase
+      .from('clients')
+      .select('id')
+      .eq('google_ads_customer_id', wanted)
+    if (error || !Array.isArray(data)) return false
+    const holders = (data as Array<{ id?: string }>).map(row => row.id)
+    return holders.length === 1 && holders[0] === clientId
+  } catch (err) {
+    console.error('[google-ads/creds-loader] ownership lookup failed (denying):', err)
+    return false
+  }
+}
+
+/**
+ * One Google Ads account per client for the daily cron. `clients.google_ads_customer_id`
+ * wins over a `platform_oauth_connections` row, matching resolveCustomerId() above.
+ * Values that are not a customer id are dropped rather than sent to the API, and
+ * so is any id claimed by more than one client: pulling it would store one
+ * client's figures under another's name, and there is no way to tell here which
+ * claim is the true one.
+ */
+export function mergeGoogleAdsAccounts(
+  clientColumnRows: ReadonlyArray<{ id?: string; google_ads_customer_id?: string | null }>,
+  oauthRows: ReadonlyArray<{ client_id: string; account_id: string }>,
+): Array<{ client_id: string; account_id: string }> {
+  const byClient = new Map<string, string>()
+  for (const row of oauthRows) {
+    const account = normaliseGoogleAdsCustomerId(row.account_id)
+    if (row.client_id && account) byClient.set(row.client_id, account)
+  }
+  for (const row of clientColumnRows) {
+    const account = normaliseGoogleAdsCustomerId(row.google_ads_customer_id)
+    if (row.id && account) byClient.set(row.id, account)
+  }
+  const claims = new Map<string, number>()
+  for (const account of byClient.values()) claims.set(account, (claims.get(account) ?? 0) + 1)
+  const sharedCount = Array.from(claims.values()).filter(count => count > 1).length
+  if (sharedCount > 0) {
+    console.error(
+      `[google-ads/creds-loader] ${sharedCount} Google Ads customer id(s) are registered to more than one client — skipped`,
+    )
+  }
+  return Array.from(byClient, ([client_id, account_id]) => ({ client_id, account_id }))
+    .filter(entry => claims.get(entry.account_id) === 1)
+}

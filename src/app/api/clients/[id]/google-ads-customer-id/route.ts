@@ -20,6 +20,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { requireGlobalAdmin } from '@/lib/auth/require-admin'
 import { resolveCustomerId } from '@/lib/google-ads/creds-loader'
 
 interface PatchBody {
@@ -63,9 +64,23 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id: clientId } = await params
-  const access = await requireDashboardClientAccess(clientId)
-  if (!access.ok) {
-    return NextResponse.json({ error: access.error }, { status: access.status })
+  // Internal staff only — same rule as meta-ad-account (AD-SEC-3). This number
+  // is the tenant boundary for every Google Ads call (one shared manager
+  // credential, clients told apart by id alone): the daily pull and the
+  // campaigns/execute routes act on whatever account is stored here, so anyone
+  // able to change it can point a workspace at another client's account.
+  // requireGlobalAdmin rejects client users AND scoped/demo admins, who are
+  // admins of one client only.
+  const admin = await requireGlobalAdmin()
+  if (!admin.ok) {
+    return NextResponse.json(
+      {
+        error: admin.status === 401
+          ? admin.error
+          : '只有 Magic Lab 团队可以修改 Google Ads 客户编号。需要更换请联系我们。',
+      },
+      { status: admin.status },
+    )
   }
 
   let body: PatchBody
@@ -84,6 +99,34 @@ export async function PATCH(
       { status: 400 },
     )
   }
+
+  // One account, one client. A second registration would make the ownership
+  // check ambiguous (it then denies both) and the daily pull skip both.
+  if (next !== null) {
+    const { data: holders, error: holdersErr } = await supabaseAdmin
+      .from('clients')
+      .select('id')
+      .eq('google_ads_customer_id', next)
+      .neq('id', clientId)
+    if (holdersErr) {
+      return NextResponse.json(
+        { error: `Could not check whether this account is already registered: ${holdersErr.message}` },
+        { status: 500 },
+      )
+    }
+    if ((holders ?? []).length > 0) {
+      return NextResponse.json(
+        { error: '这个 Google Ads 客户编号已经登记在另一个客户名下，不能重复登记。' },
+        { status: 409 },
+      )
+    }
+  }
+
+  // No audit table for this field yet; this line is the record of who moved the
+  // boundary. Logs the actor and the client, not the account number.
+  console.info(
+    `[google-ads-customer-id] ${(admin.user.email ?? 'unknown').toLowerCase()} ${next === null ? 'cleared' : 'set'} the Google Ads account for client ${clientId}`,
+  )
 
   const { error: updateErr } = await supabaseAdmin
     .from('clients')

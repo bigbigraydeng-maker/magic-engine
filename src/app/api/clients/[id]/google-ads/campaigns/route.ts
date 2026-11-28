@@ -11,6 +11,7 @@
  * Responses:
  *   200 { campaigns: GoogleAdsCampaign[] }
  *   400 missing google_ads_customer_id
+ *   403 google_ads_customer_id is not this client's registered account
  *   424 Google Ads credentials not configured
  *   502 Google Ads API error
  */
@@ -18,6 +19,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { loadGoogleAdsCreds, listCampaigns } from '@/lib/google-ads/client'
+import { clientOwnsGoogleAdsAccount } from '@/lib/google-ads/creds-loader'
+import { supabaseAdmin } from '@/lib/supabase'
 
 interface RouteParams {
   params: { id: string }
@@ -39,6 +42,15 @@ export async function GET(req: NextRequest, { params }: RouteParams): Promise<Ne
     return NextResponse.json(
       { error: 'google_ads_customer_id must be a numeric string (1–15 digits)' },
       { status: 400 },
+    )
+  }
+
+  // Tenant boundary: one shared manager credential serves every client, so the
+  // caller-supplied id must be the account registered for THIS client.
+  if (!(await clientOwnsGoogleAdsAccount(supabaseAdmin, clientId, customerId))) {
+    return NextResponse.json(
+      { error: 'google_ads_customer_id is not the Google Ads account registered for this client' },
+      { status: 403 },
     )
   }
 
