@@ -7,6 +7,8 @@ decided_on: 2026-11-28
 source: session:96dc6edf
 verify_by: 2026-12-08
 verify_how: ①合并上线后到 Inngest 后台对 /api/inngest 重新 Sync，确认 cloud-crm-followup-weekly-report 已注册。②合并后的第一个周一上午（12-01 之前合并就查 12-01，否则查 12-08）：hello@magicengine.cloud 收件箱里有一封主题含「follow-up report」的信，发信时间在当天 8 点左右。③查 cron_run_logs 里 job_name = crm-followup-weekly-report 最新一行：status 是 completed，summary.results[0] 的 sent 为 true、recipients 只有 hello@magicengine.cloud、有 provider_message_id。算成：三条都对，且信里「vs a week ago」一列在第一步上线满 7 天后不再全是 no record yet。不成时第一步：看 Inngest 后台该函数有没有运行记录；没有就是没 Sync，有但没发出就看回执里的 reason。
+last_checked: 2026-11-28
+check_note: 11-28 晚更正日期：第一个周一是 11-30，不是判据里写的 12-01；下一个周一是 12-07，不是 12-08。「vs a week ago」一列要到 12-07 那封才有数字。收件人以卡 2026-11-28-crm-weekly-report-cts-paused 为准（只有 hello@）
 ---
 PM 11-28 回「继续做第二步，每周报告」。收件人写死在函数文件的名单里，目前只有 CTS → hello@magicengine.cloud（PM 原话「先只发 hello@」）；发给 CTS 团队要 PM 另外点头并改这份名单。刹车：FOLLOWUP_WEEKLY_REPORT_PAUSED=true 时只取数记回执、不发信。
 报告内容：最近 7 天六个数；「先打电话」新线索名单和「今天回」等回复名单各最多 15 位（只有名字和后台链接，名字里夹着的邮箱电话会掐掉，写明总数）；符合「交给 AI」规则的人数；各组人数和比一周前的变化。

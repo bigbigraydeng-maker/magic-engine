@@ -9,10 +9,11 @@
  * 1. Recipients come only from the literal table `WEEKLY_REPORT_RECIPIENTS` in this file (client id → mailboxes).
  *    Not an environment variable, not a default address: the report names guests, so a wrong address is a leak,
  *    and adding one must go through code review. A client not on the table is read and receipted, never mailed.
- *    CTS → hello@magicengine.cloud: PM 2026-11-28 "先只发 hello@".
- *    CTS → info@ctstours.co.nz: PM 2026-11-28, after reading the trial edition, in his own words
- *    "给 CTS 的 info 邮箱也发，标记清楚这是 Beta 功能". The Beta mark is in the subject and at the top of the body
- *    (`weekly-report.ts`); taking it off is the PM's call.
+ *    CTS → hello@magicengine.cloud only: PM 2026-11-28 "先只发 hello@".
+ *    The client's own mailbox (info@…) was on this table for a few hours on 2026-11-28 ("给 CTS 的 info 邮箱也发，
+ *    标记清楚这是 Beta 功能") and was taken off the same evening, before any edition reached it, on the PM's word
+ *    "你先不要发给 cts 了". Putting it back is the PM's call, made in his own words, and a change to this table.
+ *    The Beta mark in the subject and at the top of the body (`weekly-report.ts`) stays.
  * 2. Brake: `FOLLOWUP_WEEKLY_REPORT_PAUSED=true` reads and receipts, sends nothing.
  *
  * ## Why Inngest
@@ -50,7 +51,7 @@ const CTS_CLIENT_ID = 'c0000000-0000-0000-0000-000000000000'
 
 /** The authorisation table. Literal on purpose — see gate 1 in the file header. */
 export const WEEKLY_REPORT_RECIPIENTS: Readonly<Record<string, readonly string[]>> = Object.freeze({
-  [CTS_CLIENT_ID]: Object.freeze(['hello@magicengine.cloud', 'info@ctstours.co.nz']),
+  [CTS_CLIENT_ID]: Object.freeze(['hello@magicengine.cloud']),
 })
 
 export const PAUSED_REASON = '已暂停（FOLLOWUP_WEEKLY_REPORT_PAUSED=true）'
