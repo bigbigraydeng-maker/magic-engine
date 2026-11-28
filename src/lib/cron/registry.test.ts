@@ -7,6 +7,7 @@ import { expectedIntervalHours } from './schedule'
 import { FLYWHEEL_SEO_WEEKLY_CRON, FLYWHEEL_SEO_WEEKLY_JOB } from '../flywheel/seo-weekly'
 import { COMPETITOR_WATCH_CRON, COMPETITOR_WATCH_JOB } from '../competitors/watch'
 import { AI_VISIBILITY_WEEKLY_CRON, AI_VISIBILITY_WEEKLY_JOB } from '../ai-tracker/weekly-fanout'
+import { CLIENT_WEEKLY_REPORT_CRON, CLIENT_WEEKLY_REPORT_JOB } from '../client-weekly-report/fanout'
 import { GSC_PAGE_DAILY_CRON, GSC_PAGE_DAILY_JOB, GSC_PAGE_DAILY_PULL_JOB } from '../gsc/page-daily-plan'
 import {
   GSC_QUERY_PAGE_DAILY_CRON,
@@ -427,6 +428,16 @@ describe('每个写运行记录的地方，都必须有人认领', () => {
       entry!.schedule,
       '清单里的周期跟 src/lib/ai-tracker/weekly-fanout.ts 的 AI_VISIBILITY_WEEKLY_CRON 不一致',
     ).toBe(AI_VISIBILITY_WEEKLY_CRON)
+  })
+
+  it('🔴 客户每周浏览总结那条的周期不许手抄 —— 清单必须等于代码里唯一那份定义', () => {
+    const entry = CRON_REGISTRY.find((e) => e.jobName === CLIENT_WEEKLY_REPORT_JOB)
+    expect(entry, `清单里找不到 ${CLIENT_WEEKLY_REPORT_JOB}`).toBeDefined()
+    expect(entry!.scheduler).toBe('inngest')
+    expect(
+      entry!.schedule,
+      '清单里的周期跟 src/lib/client-weekly-report/fanout.ts 的 CLIENT_WEEKLY_REPORT_CRON 不一致',
+    ).toBe(CLIENT_WEEKLY_REPORT_CRON)
   })
 
   it('🔴 GSC per-page daily: the schedule is not hand-copied and the output table is the receipts table', () => {
