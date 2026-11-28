@@ -97,12 +97,12 @@ describe('writeSidebarCollapsed', () => {
 describe('buildCrmNavItems', () => {
   it('returns items in the expected order', () => {
     const keys = buildCrmNavItems(CLIENT).map((item) => item.key)
-    expect(keys).toEqual(['today', 'all', 'aipickup', 'payments', 'sales', 'calendar', 'templates', 'sendstats', 'autosend', 'settings'])
+    expect(keys).toEqual(['today', 'all', 'aipickup', 'progress', 'payments', 'sales', 'calendar', 'templates', 'sendstats', 'autosend', 'settings'])
   })
 
   it('uses the exact Chinese labels', () => {
     const labels = buildCrmNavItems(CLIENT).map((item) => item.label)
-    expect(labels).toEqual(['今天先联系', '全部客人', '交给 AI', '付款总览', '销售进度', '到期日历', '邮件模板', '发信统计', '自动发信', '设置'])
+    expect(labels).toEqual(['今天先联系', '全部客人', '交给 AI', '跟进进度', '付款总览', '销售进度', '到期日历', '邮件模板', '发信统计', '自动发信', '设置'])
   })
 
   it('has no placeholder item: every item is a real link', () => {
@@ -118,7 +118,13 @@ describe('buildCrmNavItems', () => {
   it('templates, autosend and settings are right-aligned, the rest left-aligned', () => {
     const items = buildCrmNavItems(CLIENT)
     expect(items.filter((i) => i.align === 'right').map((i) => i.key)).toEqual(['templates', 'sendstats', 'autosend', 'settings'])
-    expect(items.filter((i) => i.align === 'left')).toHaveLength(6)
+    expect(items.filter((i) => i.align === 'left')).toHaveLength(7)
+  })
+
+  it('has the follow-up progress page, open to everyone who can open the CRM (numbers only)', () => {
+    const item = buildCrmNavItems(CLIENT).find((i) => i.key === 'progress')
+    expect(item).toMatchObject({ label: '跟进进度', href: `/dashboard/clients/${CLIENT}/crm/followup-progress`, gate: 'none', align: 'left' })
+    expect(activeCrmNavKey(`/dashboard/clients/${CLIENT}/crm/followup-progress`, '', CLIENT)).toBe('progress')
   })
 
   it('the AI pickup page has its own nav item, behind the template gate, and lights up on its own path', () => {

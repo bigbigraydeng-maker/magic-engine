@@ -16,6 +16,7 @@ export type CrmNavKey =
   | 'today'
   | 'all'
   | 'aipickup'
+  | 'progress'
   | 'payments'
   | 'sales'
   | 'calendar'
@@ -78,6 +79,7 @@ export function buildCrmNavItems(clientId: string): CrmNavItem[] {
     { key: 'today', label: '今天先联系', href: `${base}/crm/all?view=smart`, title: '系统排好的：今天先联系谁', gate: 'none', align: 'left' },
     { key: 'all', label: '全部客人', href: `${base}/crm/all?view=all`, title: '翻看、搜索这个客户的所有客人', gate: 'none', align: 'left' },
     { key: 'aipickup', label: '交给 AI', href: `${base}/crm/ai-pickup`, title: '打了没接通、询价 7 天没人打的客人：看一眼，点一次整批发 2027 目录交给 AI 跟进', gate: 'templates', align: 'left' },
+    { key: 'progress', label: '跟进进度', href: `${base}/crm/followup-progress`, title: '所有还没成交的客人分成几组：每组多少人、谁来处理、这一周动了多少（只读，只有数字）', gate: 'none', align: 'left' },
     { key: 'payments', label: '付款总览', href: `${base}/crm/payments`, title: '按出发日期看每个团收了多少定金尾款、谁还没收齐、哪些已过期', gate: 'bookings', align: 'left' },
     { key: 'sales', label: '销售进度', href: `${base}/sales-progress`, title: '每个团卖了多少、还差多少人成行', gate: 'bookings', align: 'left' },
     { key: 'calendar', label: '到期日历', href: `${base}/crm/calendar`, title: '定金尾款到期日历', gate: 'bookings', align: 'left' },
@@ -111,6 +113,7 @@ export function activeCrmNavKey(
   }
 
   if (pathname === `${base}/crm/ai-pickup`) return 'aipickup'
+  if (pathname === `${base}/crm/followup-progress`) return 'progress'
   if (pathname === `${base}/crm/calendar`) return 'calendar'
   if (pathname === `${base}/crm/payments`) return 'payments'
   if (pathname === `${base}/crm/templates`) return 'templates'

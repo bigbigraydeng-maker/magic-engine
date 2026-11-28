@@ -403,6 +403,8 @@ const CRON_REGISTRY_ENTRIES = [
   //    这类登记的全部意义就是把「安静地不跑」喊出来。
   { service: 'inngest:cloud-crm-lead-followup-digest', jobName: 'crm-lead-followup-digest', schedule: '0 8 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-24' },
   { service: 'inngest:cloud-crm-enquiry-daily-digest', jobName: 'crm-enquiry-daily-digest', schedule: '0 7 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-25' },
+  // 每日跟进进度：客人分组快照，只记数、不外发。「跟进进度」页的昨天 / 上周对比读它的回执。
+  { service: 'inngest:cloud-crm-followup-progress-daily', jobName: 'crm-followup-progress-daily', schedule: '30 6 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-28' },
   // 李白 · 提示词库月检（agent 自治计划 B2）：cron 每周二 NZ 09:00 醒，函数里只在当月 1–7 号
   // 真跑（标准 cron 的日/周字段是「或」，写不出「第一个周二」），其余周二写一条 skipped 回执。
   // 所以按「每周二」对账是对的：每周都有一行。周期与代码常量 LIBAI_PROMPT_AUDIT_CRON 一致。
