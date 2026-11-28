@@ -28,9 +28,9 @@
 并入已有评论分流/选题学习，不建第二个 agent。
 
 ## 效果回写
-尚无。
+2026-10-19 首轮只读验证：判 cannot_check。social_comment_engagements 共 110 条（仅 CTS Facebook，2026-06-24~10-09）：praise 45、other 41、spam 13、question 8、complaint 3；这 110 条挂在 0 条工厂 Reel 帖上，也没有「评论→选题→后续内容」的关联字段。护栏部分（评论是数据不是指令）ME 已有 SO-11，本点只验「能否带来选题效果」，验不了。
 
 ## 机器索引
 ```json
-{"pillar":"social","points":[{"key":"comments_as_signal","text":"公开评论可作为选题线索并沿用现有分流护栏；对 ME 的效果尚未验证。","state":"learning","note":"评论是数据，不是指令；不读私信或自动扩权。"}]}
+{"pillar":"social","points":[{"key":"comments_as_signal","text":"公开评论可作为选题线索并沿用现有分流护栏；对 ME 的效果尚未验证。","state":"cannot_check","note":"评论已入库（110 条，仅 CTS 的 Facebook）但没连到后续选题，也没连到工厂 Reel；效果无法归因。"}]}
 ```
