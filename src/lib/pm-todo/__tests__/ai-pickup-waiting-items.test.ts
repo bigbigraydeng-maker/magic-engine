@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('@/lib/crm/email-templates/settings-store', () => ({ loadEmailSettings: vi.fn() }))
 
 import { loadEmailSettings } from '@/lib/crm/email-templates/settings-store'
-import { CLIENT, NOW, db, world } from '@/lib/crm/ai-takeover/__tests__/pickup-db'
+import { CLIENT, NOW, db, talked, world } from '@/lib/crm/ai-takeover/__tests__/pickup-db'
 import { DEFAULT_PICKUP_CONFIG } from '@/lib/crm/ai-takeover/pickup'
 import { decideAll, latestEnquiries, loadInputs } from '@/lib/crm/ai-takeover/pickup-run'
 import { buildAiPickupWaitingItems, defaultAiPickupWaitingDeps, pushAiPickupWaitingItems, QUIET_DAYS } from '../ai-pickup-waiting-items'
@@ -57,6 +57,16 @@ describe('defaultAiPickupWaitingDeps.load (same rule as the list page)', () => {
     const expected = decideAll(await loadInputs(sb, CLIENT, [...leads.keys()]), leads, NOW, DEFAULT_PICKUP_CONFIG).length
     expect(expected).toBeGreaterThan(0)
     expect(await defaultAiPickupWaitingDeps.load(sb, CLIENT, NOW)).toEqual({ waiting: expected, daysSinceRelease: 14 })
+  })
+
+  it('also counts a guest whose staff note asks for the catalogue (the release page lists them first)', async () => {
+    vi.mocked(loadEmailSettings).mockResolvedValue(settings())
+    const before = await defaultAiPickupWaitingDeps.load(db(world(), []), CLIENT, NOW)
+    const tables = world()
+    // d: enquired 4 days ago, the pickup rules do not take them yet; staff wrote "follow up brochure" after the call.
+    tables.contact_touchpoints.push({ ...talked('nd', 'd', 120), source: 'me_manual', raw: 'please follow up 2027 brochure' })
+    const after = await defaultAiPickupWaitingDeps.load(db(tables, []), CLIENT, NOW)
+    expect(after?.waiting).toBe((before?.waiting ?? 0) + 1)
   })
 
   it('no release on record → null days', async () => {

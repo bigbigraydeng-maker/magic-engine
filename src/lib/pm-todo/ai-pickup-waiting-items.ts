@@ -12,6 +12,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { askAll } from '@/lib/crm/ai-takeover/catalogue-ask'
 import { DEFAULT_PICKUP_CONFIG } from '@/lib/crm/ai-takeover/pickup'
 import { decideAll, latestEnquiries, loadInputs, PickupNotConfiguredError } from '@/lib/crm/ai-takeover/pickup-run'
 import { loadEmailSettings } from '@/lib/crm/email-templates/settings-store'
@@ -24,8 +25,11 @@ export type AiPickupWaitingItemKind =
   /** 这一栏今天没算出来 —— 我们这边要查（开发的活） */
   | 'ai_pickup_waiting_check_failed'
 
-/** 最近这么多天里有人放行过，就不提醒 —— 有人在点，不用催。 */
-export const QUIET_DAYS = 2
+/**
+ * 最近这么多天里有人放行过，就不提醒 —— 有人在点，不用催。
+ * PM 2026-11-28：放行由客户的员工自己点（员工页顶上有提醒条 AiPickupWaitingBanner），这条待办只做兜底，所以从 2 天放宽到 5 天。
+ */
+export const QUIET_DAYS = 5
 
 export interface AiPickupWaiting {
   /** 符合 AI 接手规则、在等放行的客人数 */
@@ -50,11 +54,11 @@ export function buildAiPickupWaitingItems(clientId: string, clientName: string, 
     client_id: clientId,
     client_name: clientName,
     what:
-      `${clientName} 有 ${w.waiting} 位客人符合「交给 AI」的规则（询价 7 天没人打，或打了没接通），在等人点放行。` +
+      `${clientName} 有 ${w.waiting} 位客人在「交给 AI 跟进」页等人点放行（询价 7 天没人打、打了没接通，或员工留言要目录）。` +
       since +
       '不放行，这些客人既不在员工的名单最前面，也收不到目录',
     how:
-      '请转给客户的销售：点链接打开「交给 AI 跟进」，看一眼名单，点一次整批发送。' +
+      '请转给客户的销售：点链接打开「交给 AI 跟进」，名单按组分好了，每组看一眼、勾上、点发送。员工自己的名单页顶上也有同样的提醒条。' +
       '页面每天只放一批，发不了的会写原因；多的第二天接着放。',
     href: pickupHref(clientId),
   }]
@@ -88,7 +92,12 @@ export const defaultAiPickupWaitingDeps: AiPickupWaitingDeps = {
       if (err instanceof PickupNotConfiguredError) return null
       throw err
     }
-    const waiting = decideAll(inputs, leads, now, DEFAULT_PICKUP_CONFIG).length
+    // Same two lists as the release page (pickup-list.ts): the guests the rules take, plus the guests whose staff note
+    // asks for the catalogue and whom the rules do not already take.
+    const picks = decideAll(inputs, leads, now, DEFAULT_PICKUP_CONFIG)
+    const taken = new Set(decideAll(inputs, leads, now, { ...DEFAULT_PICKUP_CONFIG, afterLastCallMinutes: 0 }).map((p) => p.contactId))
+    const asks = askAll(inputs, leads, now).filter((a) => !taken.has(a.contactId))
+    const waiting = picks.length + asks.length
     const { data, error } = await supabase
       .from('contact_automation_events')
       .select('created_at')
