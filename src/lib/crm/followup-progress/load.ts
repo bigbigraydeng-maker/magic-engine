@@ -79,7 +79,7 @@ export interface FollowupProgressDetail extends FollowupProgress {
   verdicts: Map<string, GroupVerdict>
   /**
    * Contact id → when the guest last filled a form / last spoke / was last called or written to / last opened or
-   * clicked a mail of ours, and how many bulk or machine mails we sent them in the last 7 days. For callers that
+   * clicked a mail of ours, and how many bulk mails without a send row of ours they got in the last 7 days. For callers that
    * list a group.
    */
   dates: Map<string, { lastEnquiryAt: string | null; lastGuestMessageAt: string | null; lastStaffAt: string | null; lastEngagedAt: string | null; bulkLast7Days: number }>
@@ -133,29 +133,34 @@ export function touchFacts(touches: readonly TouchRow[]): Acc {
   return a
 }
 
-async function readBook(sb: SupabaseClient, clientId: string) {
+/** `only` = read one guest's rows instead of the whole book (the release re-check: same judgement, small read). */
+async function readBook(sb: SupabaseClient, clientId: string, only: string | null = null) {
   const [contacts, touches, stages, bookings, identities, cfg, client] = await Promise.all([
-    fetchAll<ContactRow>((from, to) =>
-      sb.from('contacts').select('id, display_name, do_not_contact, stage, ai_takeover_since, snooze_until, primary_email, primary_phone')
-        .eq('client_id', clientId).order('id', { ascending: true }).range(from, to)),
+    fetchAll<ContactRow>((from, to) => {
+      const q = sb.from('contacts').select('id, display_name, do_not_contact, stage, ai_takeover_since, snooze_until, primary_email, primary_phone').eq('client_id', clientId)
+      return (only === null ? q : q.eq('id', only)).order('id', { ascending: true }).range(from, to)
+    }),
     // Many pages for a busy client: read them at once. `id` is the tie-break that keeps page edges stable and
     // proves the read is complete (same pattern as the "今天先联系" list).
     fetchAllParallel<TouchRow & { id: string }>(
-      (from, to, withCount) =>
-        sb.from('contact_touchpoints').select('id, contact_id, channel, direction, source, occurred_at, summary, metadata', withCount ? { count: 'exact' } : undefined)
-          .eq('client_id', clientId).order('occurred_at', { ascending: false }).order('id', { ascending: false }).range(from, to),
+      (from, to, withCount) => {
+        const q = sb.from('contact_touchpoints').select('id, contact_id, channel, direction, source, occurred_at, summary, metadata', withCount ? { count: 'exact' } : undefined).eq('client_id', clientId)
+        return (only === null ? q : q.eq('contact_id', only)).order('occurred_at', { ascending: false }).order('id', { ascending: false }).range(from, to)
+      },
       (row) => row.id,
     ),
     fetchAll<StageRow>((from, to) =>
       sb.from('client_pipeline_stages').select('stage_key, marketing_action, is_terminal')
         .eq('client_id', clientId).order('stage_key', { ascending: true }).range(from, to)),
-    fetchAll<{ contact_id: string; created_at: string }>((from, to) =>
-      sb.from('crm_bookings').select('contact_id, created_at')
-        .eq('client_id', clientId).eq('status', 'active').order('id', { ascending: true }).range(from, to)),
+    fetchAll<{ contact_id: string; created_at: string }>((from, to) => {
+      const q = sb.from('crm_bookings').select('contact_id, created_at').eq('client_id', clientId).eq('status', 'active')
+      return (only === null ? q : q.eq('contact_id', only)).order('id', { ascending: true }).range(from, to)
+    }),
     // Every address and number a guest has, not just the first one kept on the contact row.
-    fetchAll<IdentityRow>((from, to) =>
-      sb.from('contact_identities').select('contact_id, kind, value')
-        .eq('client_id', clientId).in('kind', ['email', 'phone']).order('id', { ascending: true }).range(from, to)),
+    fetchAll<IdentityRow>((from, to) => {
+      const q = sb.from('contact_identities').select('contact_id, kind, value').eq('client_id', clientId).in('kind', ['email', 'phone'])
+      return (only === null ? q : q.eq('contact_id', only)).order('id', { ascending: true }).range(from, to)
+    }),
     sb.from('ad_strategy_configs').select('qualified_stage_keys').eq('client_id', clientId).maybeSingle(),
     sb.from('clients').select('leads_config').eq('id', clientId).maybeSingle(),
   ])
@@ -184,22 +189,27 @@ function nonEmpty(v: string | null): boolean {
 }
 
 /**
- * Bulk and machine mails this guest got from us since a moment: the ones the per-guest weekly limit must also count.
+ * Bulk mails this guest got from us since a moment that have NO send row of ours: the ones the mailbox's own weekly
+ * count (every outbound email row, bulk rows included) cannot see, and the per-guest weekly limit must still count.
  *
- * A bulk send is not recorded per recipient. What is recorded is the guest opening or clicking it, stamped with the
- * campaign and the campaign's send time. So a campaign counts when there is any trace of it in the window: our own
- * send row, or the guest's open or click. A guest who never opened a campaign is undercounted; a guest who opened
- * (the only kind the letter list writes to) is counted right.
+ * A bulk send is recorded per recipient only for some campaigns. For the rest, what is recorded is the guest opening
+ * or clicking it, stamped with the campaign id and (in practice) the campaign's send time; when the mail service
+ * gives a later "last action" time, an older campaign opened this week is counted as this week's — the safe side.
+ * A guest who never opened a campaign is undercounted here; the send gate's own count is the backstop.
  */
-export function bulkSince(touches: readonly TouchRow[], sinceMs: number): number {
-  const seen = new Set<string>()
-  touches.forEach((t, i) => {
-    if (t.channel !== 'email' || !(Date.parse(t.occurred_at) >= sinceMs)) return
+export function unrecordedBulkSince(touches: readonly TouchRow[], sinceMs: number): number {
+  const sent = new Set<string>()
+  const traced = new Set<string>()
+  for (const t of touches) {
+    if (t.channel !== 'email' || !(Date.parse(t.occurred_at) >= sinceMs)) continue
     const campaign = typeof t.metadata?.email_campaign_id === 'string' && t.metadata.email_campaign_id !== '' ? t.metadata.email_campaign_id : null
-    if (campaign !== null) return void seen.add(`campaign:${campaign}`)
-    if (t.direction === 'outbound' && isAutomatedTouch(t.source, t.metadata)) seen.add(`row:${i}`)
-  })
-  return seen.size
+    if (campaign === null) continue
+    if (t.direction === 'outbound') sent.add(campaign)
+    else traced.add(campaign)
+  }
+  let n = 0
+  for (const c of traced) if (!sent.has(c)) n += 1
+  return n
 }
 
 interface BookIndex {
@@ -273,10 +283,15 @@ export async function loadFollowupProgress(
   clientId: string,
   now: Date = new Date(),
   cfg: GroupConfig = DEFAULT_GROUP_CONFIG,
+  /** Read one guest only: the verdict and dates are the same as in the whole book; the counts and the week are that guest's alone. */
+  onlyContactId: string | null = null,
 ): Promise<FollowupProgressDetail> {
   const sinceMs = now.getTime() - WEEK_DAYS * DAY_MS
   const sinceIso = new Date(sinceMs).toISOString()
-  const [book, weekEvents] = await Promise.all([readBook(sb, clientId), readWeekEvents(sb, clientId, sinceIso)])
+  const [book, weekEvents] = await Promise.all([
+    readBook(sb, clientId, onlyContactId),
+    onlyContactId === null ? readWeekEvents(sb, clientId, sinceIso) : Promise.resolve({ stageEvents: [], takeovers: [] }),
+  ])
 
   const index = bookIndex(book)
   const verdicts = new Map<string, GroupVerdict>()
@@ -289,7 +304,7 @@ export async function loadFollowupProgress(
     const a = touchFacts(touches)
     const verdict = groupOf(guestFacts(c, a, index, book.qualified, now), now, cfg)
     verdicts.set(c.id, verdict)
-    dates.set(c.id, { lastEnquiryAt: a.enquiry, lastGuestMessageAt: a.guest, lastStaffAt: a.staff, lastEngagedAt: a.engaged, bulkLast7Days: bulkSince(touches, sinceMs) })
+    dates.set(c.id, { lastEnquiryAt: a.enquiry, lastGuestMessageAt: a.guest, lastStaffAt: a.staff, lastEngagedAt: a.engaged, bulkLast7Days: unrecordedBulkSince(touches, sinceMs) })
     // The week's numbers count guests: people in the follow-up work or already booked. Staff, trade partners,
     // sales pitches and closed contacts are not "guests who wrote".
     if (!verdict.inScope && verdict.why !== 'booked') continue

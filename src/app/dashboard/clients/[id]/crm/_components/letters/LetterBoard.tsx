@@ -12,11 +12,12 @@ import Link from 'next/link'
 export interface LetterBoardRow { contactId: string; name: string; note: string; status: 'ready' | 'cannot_send'; recipient: string | null; sentLast7Days: number | null; message: string | null; requestId: string }
 interface CheckLine { id: string; status: 'pass' | 'warn' | 'fail'; label: string; detail: string }
 interface ReadLine { kind: string; text: string }
-interface Draft { subject: string; body: string; checks: CheckLine[]; read: ReadLine[]; edited: boolean }
+/** `stale` = the person changed the text after the checks ran: the checks no longer describe this text. */
+interface Draft { subject: string; body: string; checks: CheckLine[]; read: ReadLine[]; edited: boolean; stale: boolean; rechecking?: boolean; recheckError?: string }
 type CardState =
   | { kind: 'empty' } | { kind: 'drafting' } | { kind: 'draft_failed'; message: string }
   | { kind: 'drafted'; draft: Draft; ticked: boolean }
-  | { kind: 'sending'; draft: Draft } | { kind: 'sent' }
+  | { kind: 'sending'; draft: Draft } | { kind: 'sent'; duplicate: boolean }
   | { kind: 'send_failed'; draft: Draft; message: string; unknown: boolean }
 
 const CHECK_ICON: Record<CheckLine['status'], string> = { pass: '✓', warn: '⚠', fail: '✗' }
@@ -30,23 +31,43 @@ async function requestDraft(clientId: string, contactId: string): Promise<{ ok: 
     })
     const json = (await res.json().catch(() => ({}))) as Partial<Draft> & { error?: string }
     if (!res.ok || !json.subject || !json.body) return { ok: false, message: json.error ?? 'AI 起草失败，稍后再试。' }
-    return { ok: true, draft: { subject: json.subject, body: json.body, checks: json.checks ?? [], read: json.read ?? [], edited: false } }
+    return { ok: true, draft: { subject: json.subject, body: json.body, checks: json.checks ?? [], read: json.read ?? [], edited: false, stale: false } }
   } catch {
     return { ok: false, message: '网络出错，AI 没能起草。' }
   }
 }
 
-async function sendOne(clientId: string, row: LetterBoardRow, draft: Draft): Promise<{ ok: true } | { ok: false; message: string; unknown: boolean }> {
+/** A letter may be ticked only when its checks describe the text as it stands and none of them failed. */
+function canTick(d: Draft): boolean {
+  return !d.stale && !d.rechecking && !d.checks.some((c) => c.status === 'fail')
+}
+
+async function requestChecks(clientId: string, contactId: string, d: Draft): Promise<{ ok: true; checks: CheckLine[] } | { ok: false; message: string }> {
   try {
-    const res = await fetch(`/api/clients/${clientId}/crm/contacts/${row.contactId}/email/compose`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ subject: draft.subject, body: draft.body, requestId: row.requestId, expectedRecipient: row.recipient }),
+    const res = await fetch(`/api/clients/${clientId}/crm/contacts/${contactId}/email/compose/check`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subject: d.subject, body: d.body }),
     })
-    if (res.ok) return { ok: true }
-    const json = (await res.json().catch(() => ({}))) as { error?: string; reason?: string }
+    const json = (await res.json().catch(() => ({}))) as { checks?: CheckLine[]; error?: string }
+    if (!res.ok || !json.checks) return { ok: false, message: json.error ?? '暂时没法检查，稍后再试。' }
+    return { ok: true, checks: json.checks }
+  } catch {
+    return { ok: false, message: '网络出错，没检查成。' }
+  }
+}
+
+type SendOutcome = { ok: true; duplicate: boolean } | { ok: false; message: string; unknown: boolean; checks?: CheckLine[] }
+
+async function sendOne(url: string, row: LetterBoardRow, draft: Draft): Promise<SendOutcome> {
+  try {
+    const res = await fetch(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contactId: row.contactId, subject: draft.subject, body: draft.body, requestId: row.requestId, expectedRecipient: row.recipient }),
+    })
+    const json = (await res.json().catch(() => ({}))) as { error?: string; reason?: string; duplicate?: boolean; checks?: CheckLine[] }
+    if (res.ok) return { ok: true, duplicate: json.duplicate === true }
     // 502 / 503 or "the same letter is still being sent": the outcome is not known — never invite a resend.
     const unknown = res.status === 502 || res.status === 503 || json.reason === 'duplicate_unfinished' || json.reason === 'send_unknown'
-    return { ok: false, message: json.error ?? '发送失败，稍后再试。', unknown }
+    return { ok: false, message: json.error ?? '发送失败，稍后再试。', unknown, ...(json.checks ? { checks: json.checks } : {}) }
   } catch {
     return { ok: false, message: '网络出错，这封有没有发出去还不确定。先别重发，看客人的往来记录。', unknown: true }
   }
@@ -61,9 +82,11 @@ export interface LetterBoardProps {
   intro: string
   back: { href: string; label: string }
   draftAllLabel: string
+  /** Where a ticked letter is posted. Default: the compose route of that guest. */
+  sendUrl?: (contactId: string) => string
 }
 
-export function LetterBoard({ clientId, listUrl, toBoard, title, intro, back, draftAllLabel }: LetterBoardProps) {
+export function LetterBoard({ clientId, listUrl, toBoard, title, intro, back, draftAllLabel, sendUrl }: LetterBoardProps) {
   const [rows, setRows] = useState<LetterBoardRow[] | null>(null)
   const [summary, setSummary] = useState<{ headline: string; other: string } | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -116,19 +139,36 @@ export function LetterBoard({ clientId, listUrl, toBoard, title, intro, back, dr
       const c = latest(r.contactId)
       if (c.kind !== 'drafted' || !c.ticked) continue
       set(r.contactId, { kind: 'sending', draft: c.draft })
-      const out = await sendOne(clientId, r, c.draft)
-      set(r.contactId, out.ok ? { kind: 'sent' } : { kind: 'send_failed', draft: c.draft, message: out.message, unknown: out.unknown })
+      // Ticked earlier, edited or failed since: never send a text whose checks do not stand.
+      if (!canTick(c.draft)) { set(r.contactId, { ...c, ticked: false }); continue }
+      const url = sendUrl ? sendUrl(r.contactId) : `/api/clients/${clientId}/crm/contacts/${r.contactId}/email/compose`
+      const out = await sendOne(url, r, c.draft)
+      // A refusal that comes with fresh checks (the text was checked again at release) shows those checks.
+      const failedDraft = out.ok || !out.checks ? c.draft : { ...c.draft, checks: out.checks, stale: false }
+      set(r.contactId, out.ok ? { kind: 'sent', duplicate: out.duplicate } : { kind: 'send_failed', draft: failedDraft, message: out.message, unknown: out.unknown })
     }
     setBusy(false)
   }
 
   const edit = (id: string, patch: Partial<Draft>) => {
     const c = latest(id)
-    if (!busy && c.kind === 'drafted') set(id, { ...c, draft: { ...c.draft, ...patch, edited: true } })
+    // An edit unticks the letter and marks its checks stale: they were run on the text before the edit.
+    if (!busy && c.kind === 'drafted') set(id, { ...c, ticked: false, draft: { ...c.draft, ...patch, edited: true, stale: true, recheckError: undefined } })
   }
   const toggle = (id: string) => {
     const c = latest(id)
-    if (!busy && c.kind === 'drafted') set(id, { ...c, ticked: !c.ticked })
+    if (!busy && c.kind === 'drafted' && (c.ticked || canTick(c.draft))) set(id, { ...c, ticked: !c.ticked })
+  }
+  const recheck = async (id: string) => {
+    const c = latest(id)
+    if (busy || c.kind !== 'drafted' || c.draft.rechecking) return
+    set(id, { ...c, draft: { ...c.draft, rechecking: true, recheckError: undefined } })
+    const out = await requestChecks(clientId, id, c.draft)
+    const now = latest(id)
+    // The person kept typing while the check ran: the answer is for an older text, so the letter stays stale.
+    if (now.kind !== 'drafted') return
+    const same = now.draft.subject === c.draft.subject && now.draft.body === c.draft.body
+    set(id, { ...now, draft: out.ok && same ? { ...now.draft, checks: out.checks, stale: false, rechecking: false } : { ...now.draft, rechecking: false, recheckError: out.ok ? undefined : out.message } })
   }
   // A refused letter (not an unknown outcome) can be fixed and ticked again; the request id stays the same.
   const retry = (id: string) => {
@@ -154,7 +194,7 @@ export function LetterBoard({ clientId, listUrl, toBoard, title, intro, back, dr
             </div>
           )}
           <ul className="mt-4 space-y-3">
-            {rows.map((r) => <Card key={r.contactId} row={r} state={card(r.contactId)} clientId={clientId} locked={busy} onEdit={edit} onToggle={toggle} onRetry={retry} />)}
+            {rows.map((r) => <Card key={r.contactId} row={r} state={card(r.contactId)} clientId={clientId} locked={busy} onEdit={edit} onToggle={toggle} onRetry={retry} onRecheck={recheck} />)}
           </ul>
         </>
       )}
@@ -162,9 +202,9 @@ export function LetterBoard({ clientId, listUrl, toBoard, title, intro, back, dr
   )
 }
 
-interface CardProps { row: LetterBoardRow; state: CardState; clientId: string; locked: boolean; onEdit: (id: string, p: Partial<Draft>) => void; onToggle: (id: string) => void; onRetry: (id: string) => void }
+interface CardProps { row: LetterBoardRow; state: CardState; clientId: string; locked: boolean; onEdit: (id: string, p: Partial<Draft>) => void; onToggle: (id: string) => void; onRetry: (id: string) => void; onRecheck: (id: string) => void }
 
-function Card({ row, state, clientId, locked, onEdit, onToggle, onRetry }: CardProps) {
+function Card({ row, state, clientId, locked, onEdit, onToggle, onRetry, onRecheck }: CardProps) {
   const editable = state.kind === 'drafted' && !locked
   const draft = state.kind === 'drafted' || state.kind === 'sending' || state.kind === 'send_failed' ? state.draft : null
   return (
@@ -177,7 +217,7 @@ function Card({ row, state, clientId, locked, onEdit, onToggle, onRetry }: CardP
       {row.status === 'ready' && <p className="mt-1 text-xs text-me-charcoal/60">发给 {row.recipient}（近 7 天已收 {row.sentLast7Days ?? 0} 封）</p>}
       {state.kind === 'drafting' && <p className="mt-2 text-sm text-me-charcoal/60">AI 正在写…</p>}
       {state.kind === 'draft_failed' && <p className="mt-2 text-sm text-red-700">{state.message}</p>}
-      {state.kind === 'sent' && <p className="mt-2 text-sm font-bold text-green-700">已发出。</p>}
+      {state.kind === 'sent' && <p className="mt-2 text-sm font-bold text-green-700">{state.duplicate ? '这封之前已经发出过（可能是同事刚放行的），没有再发第二遍。' : '已发出。'}</p>}
       {state.kind === 'send_failed' && (
         <p className={`mt-2 text-sm ${state.unknown ? 'text-amber-700' : 'text-red-700'}`}>
           {state.message}{state.unknown ? ' 先别重发：看客人的往来记录，明天这一页会按实际情况更新。' : ''}
@@ -188,7 +228,14 @@ function Card({ row, state, clientId, locked, onEdit, onToggle, onRetry }: CardP
         <div className="mt-2 space-y-2">
           <input aria-label="主题" disabled={!editable} value={draft.subject} onChange={(e) => onEdit(row.contactId, { subject: e.target.value })} className="w-full rounded border border-me-charcoal/20 px-2 py-1 text-sm" />
           <textarea aria-label="正文" disabled={!editable} value={draft.body} onChange={(e) => onEdit(row.contactId, { body: e.target.value })} rows={8} className="w-full rounded border border-me-charcoal/20 px-2 py-1 text-sm" />
-          {draft.edited && <p className="text-xs text-amber-700">⚠ 你改过正文，下面的检查还是 AI 原稿的结果；价格、日期、产品名请自己再核一遍。</p>}
+          {draft.stale && (
+            <p className="text-xs text-amber-700">
+              ⚠ 你改过这封信，下面的检查是改之前的。
+              {state.kind === 'drafted' && <button type="button" disabled={locked || draft.rechecking} onClick={() => onRecheck(row.contactId)} className="ml-1 underline disabled:opacity-40">{draft.rechecking ? '正在检查…' : '重新检查'}</button>}
+              {' '}检查过了才能勾。
+            </p>
+          )}
+          {draft.recheckError && <p className="text-xs text-red-700">{draft.recheckError}</p>}
           <ul className="text-xs">
             {draft.checks.map((c) => <li key={c.id} className={CHECK_TONE[c.status]}>{CHECK_ICON[c.status]} {c.label}{c.detail ? `：${c.detail}` : ''}</li>)}
           </ul>
@@ -196,9 +243,12 @@ function Card({ row, state, clientId, locked, onEdit, onToggle, onRetry }: CardP
             <details className="text-xs text-me-charcoal/60"><summary>AI 读了什么</summary><ul>{draft.read.map((l, i) => <li key={i}>· {l.text}</li>)}</ul></details>
           )}
           {state.kind === 'drafted' && (
-            <label className="flex items-center gap-2 text-sm font-bold text-me-charcoal">
-              <input type="checkbox" disabled={locked} checked={state.ticked} onChange={() => onToggle(row.contactId)} /> 这封可以发
-            </label>
+            <>
+              <label className={`flex items-center gap-2 text-sm font-bold ${canTick(draft) ? 'text-me-charcoal' : 'text-me-charcoal/60'}`}>
+                <input type="checkbox" disabled={locked || !canTick(draft)} checked={state.ticked} onChange={() => onToggle(row.contactId)} /> 这封可以发
+              </label>
+              {!draft.stale && draft.checks.some((c) => c.status === 'fail') && <p className="text-xs text-red-700">有检查没过（✗），改好并重新检查后才能勾。</p>}
+            </>
           )}
         </div>
       )}

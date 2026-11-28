@@ -31,6 +31,8 @@ import {
   buildLinks,
   composeFollowUpLetter,
   generateFollowUpDraft,
+  checkFollowUpLetter,
+  NO_CONVERSATION_NOTE,
   pickFeaturedTours,
   runFollowUpChecks,
   spokeWithGuest,
@@ -141,7 +143,7 @@ describe('stripFraming', () => {
 })
 
 describe('tour names in the letter (found in the 2026-11-28 trial drafts)', () => {
-  const highlights = tour({ id: 't9', slug: 'highlights', name: 'Japan Discovery — Highlights', departures: [] })
+  const highlights = tour({ id: 't9', slug: 'highlights', destination: 'japan', name: 'Japan Discovery — Highlights', departures: [] })
   const golden = tour({ id: 't8', slug: 'golden-china', name: 'China Discovery — Golden China', isActive: false, departures: [] })
 
   it('a one-word tour name is an everyday word: "highlights like the Great Wall" does not name the tour', () => {
@@ -174,6 +176,27 @@ describe('tour names in the letter (found in the 2026-11-28 trial drafts)', () =
     expect(onSaleNote([golden])).toBe('')
   })
 
+  it('a guest asking about one destination is not handed the tour names of another', () => {
+    const note = onSaleNote([best, highlights], [{ tour: best, departure: best.departures[0] }])
+    expect(note).toContain('Best of China')
+    expect(note).not.toContain('Highlights')
+    // Nothing known about what the guest wants: every tour on sale may be named.
+    expect(onSaleNote([best, highlights])).toContain('Highlights')
+  })
+
+  it('two tours on sale with the same short name: the words cannot say which, so no extra link is added', () => {
+    const classicChina = tour({ id: 'tc', slug: 'classic-china', name: 'China Discovery — Classic Tour', departures: [] })
+    const classicJapan = tour({ id: 'tj', slug: 'classic-japan', destination: 'japan', name: 'Japan Discovery — Classic Tour', departures: [] })
+    const links = buildLinks({ picks: [], tours: [classicChina, classicJapan], providerSettings, config: cfg, aiText: 'Our Classic Tour is popular.' })
+    expect(links.map((l) => l.label)).not.toContain('Classic Tour')
+  })
+
+  it('an off-sale tour is caught whatever the capitals or the kind of apostrophe', () => {
+    const xian = tour({ id: 'tx', slug: 'xian-stay', name: "China Stopover — Xi'an Stay", isActive: false, departures: [] })
+    expect(statusOf(checksFor('we also have the golden china tour', { tours: [best, golden] }), 'off_sale_tour')).toBe('fail')
+    expect(statusOf(checksFor('Try our Xi’an Stay.', { tours: [best, xian] }), 'off_sale_tour')).toBe('fail')
+  })
+
   it('"inquiry" is flagged as American spelling', () => {
     expect(statusOf(checksFor('Thank you for your inquiry.'), 'spelling')).toBe('warn')
   })
@@ -189,8 +212,21 @@ describe('the conversation check (exam questions from the 2026-11-28 reconnect l
   })
 
   it('catches the other ways of saying we talked', () => {
-    for (const body of ['As discussed, here are the dates.', 'Following our call last week.', 'It was lovely chatting with you.', 'You mentioned you wanted March.', 'Our team spoke with you about China.', 'Thanks for your time on the phone.']) {
+    for (const body of [
+      'As discussed, here are the dates.', 'Following our call last week.', 'It was lovely chatting with you.', 'Our team spoke with you about China.',
+      'Thanks for your time on the phone.', 'Since we last spoke, prices have changed.', 'As we talked about, March suits.', 'I enjoyed speaking with you.',
+      'It was a pleasure talking with you.', 'Thanks for taking my call.', 'Thanks for the chat.', 'Per our discussion, here are the options.', 'After our conversation I looked into it.',
+    ]) {
       expect(line(body, false)?.status, body).toBe('fail')
+    }
+  })
+
+  it('does not block a good letter: invitations to talk, and what the guest wrote, are not a claim that we talked', () => {
+    for (const body of [
+      'We can discuss this on the phone if you prefer.', 'Happy to chat on the phone anytime.', 'Is there a good time to have a chat over the phone?', 'You mentioned in your form that March suits you.',
+      'It is your call, no pressure.', 'Our chat line is open on weekdays.', 'Feel free to give us a call on 0800 000 000.', 'If you have any questions, I am happy to talk them through.',
+    ]) {
+      expect(line(body, false)?.status, body).toBe('pass')
     }
   })
 
@@ -304,6 +340,71 @@ describe('generateFollowUpDraft', () => {
     expect(system).toContain('next departure 11 March 2027')
     const user = (askJson.mock.calls[0][0] as { user: string }).user
     expect(user).toContain('INTERNAL: wants Yunnan')
+  })
+
+  it('tells the writer there was no phone conversation, lists the tours on sale, and carries the conversation check', async () => {
+    const r = await generateFollowUpDraft('c1', 'p1', { now: () => new Date('2026-11-10T00:00:00Z') })
+    if (!r.ok) throw new Error(r.message)
+    const user = (askJson.mock.calls[0][0] as { user: string }).user
+    // The only phone record is a staff note with no outcome saying the guest was reached... it counts as talked.
+    expect(user).not.toContain(NO_CONVERSATION_NOTE.trim())
+    expect(user).toContain('TOURS ON SALE TODAY')
+    expect(r.draft.checks.some((c) => c.id === 'conversation_claim')).toBe(true)
+    expect(r.draft.checks.some((c) => c.id === 'off_sale_tour')).toBe(true)
+  })
+
+  it('no call reached the guest: the writer is told so, and a draft that claims a talk fails its check', async () => {
+    tables.contact_touchpoints = (tables.contact_touchpoints as Array<Record<string, unknown>>).filter((t) => t.channel !== 'phone')
+    ;(tables.contact_touchpoints as Array<Record<string, unknown>>).push({ channel: 'phone', source: 'twilio', direction: 'outbound', occurred_at: '2026-11-03T00:00:00Z', summary: null, raw: null, metadata: { outcome: 'spoke', customer_spoke: 'no' } })
+    askJson.mockResolvedValue({ data: { subject: 'Best of China', body: 'When we spoke last week, you asked about March.\n\nJust reply to this email.' } })
+    const r = await generateFollowUpDraft('c1', 'p1', { now: () => new Date('2026-11-10T00:00:00Z') })
+    if (!r.ok) throw new Error(r.message)
+    expect((askJson.mock.calls[0][0] as { user: string }).user).toContain(NO_CONVERSATION_NOTE.trim())
+    expect(r.draft.checks.find((c) => c.id === 'conversation_claim')?.status).toBe('fail')
+  })
+
+  describe('checkFollowUpLetter — the same checks on the text a person is about to send', () => {
+    const noCall = () => { tables.contact_touchpoints = (tables.contact_touchpoints as Array<Record<string, unknown>>).filter((t) => t.channel !== 'phone') }
+
+    it('calls no model and returns the checks for the edited text', async () => {
+      noCall()
+      const r = await checkFollowUpLetter('c1', 'p1', { subject: 'Best of China', body: 'Kia ora Nerita,\n\nWhen we spoke, you asked about March.\n\nWarm regards,\nAlex' }, { now: () => new Date('2026-11-10T00:00:00Z') })
+      if (!r.ok) throw new Error(r.message)
+      expect(askJson).not.toHaveBeenCalled()
+      expect(r.checks.find((c) => c.id === 'conversation_claim')?.status).toBe('fail')
+    })
+
+    it('the links the system itself put in the letter are not "a URL the AI wrote"; a URL from anywhere else still fails', async () => {
+      noCall()
+      const drafted = await generateFollowUpDraft('c1', 'p1', { now: () => new Date('2026-11-10T00:00:00Z') })
+      if (!drafted.ok) throw new Error(drafted.message)
+      expect(drafted.draft.body).toContain('https://www.example.com/tours/china')
+      const same = await checkFollowUpLetter('c1', 'p1', { subject: drafted.draft.subject, body: drafted.draft.body }, { now: () => new Date('2026-11-10T00:00:00Z') })
+      if (!same.ok) throw new Error(same.message)
+      // The untouched draft passes the same checks at release as it did when drafted.
+      expect(same.checks.filter((c) => c.status === 'fail')).toEqual([])
+      const added = await checkFollowUpLetter('c1', 'p1', { subject: drafted.draft.subject, body: `${drafted.draft.body}\n\nSee also https://www.example.com/somewhere-else.` }, { now: () => new Date('2026-11-10T00:00:00Z') })
+      if (!added.ok) throw new Error(added.message)
+      const links = added.checks.find((c) => c.id === 'links')
+      expect(links?.status).toBe('fail')
+      expect(links?.detail).toContain('somewhere-else')
+      expect(links?.detail).not.toContain('AI 自己写了')
+    })
+
+    it('the same letter without the claim passes that check', async () => {
+      noCall()
+      const r = await checkFollowUpLetter('c1', 'p1', { subject: 'Best of China', body: 'Kia ora Nerita,\n\nThank you for your enquiry.\n\nWarm regards,\nAlex' }, { now: () => new Date('2026-11-10T00:00:00Z') })
+      if (!r.ok) throw new Error(r.message)
+      expect(r.checks.find((c) => c.id === 'conversation_claim')?.status).toBe('pass')
+    })
+
+    it('a guest marked do-not-contact, or a catalogue that cannot be read, is refused: no checks means no send', async () => {
+      tables.contacts = { display_name: 'X', do_not_contact: true }
+      expect(await checkFollowUpLetter('c1', 'p1', { subject: 's', body: 'b' })).toMatchObject({ ok: false, reason: 'do_not_contact' })
+      tables.contacts = { display_name: 'Nerita Smith', do_not_contact: false }
+      loadPublishedTourFacts.mockRejectedValueOnce(new Error('down'))
+      expect(await checkFollowUpLetter('c1', 'p1', { subject: 's', body: 'b' })).toMatchObject({ ok: false, reason: 'facts_unreadable' })
+    })
   })
 
   it('do-not-contact → refused before any AI call', async () => {
