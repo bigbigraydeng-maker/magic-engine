@@ -23,7 +23,7 @@ function install(rows: LetterBoardRow[]) {
     const body = typeof init?.body === 'string' ? (JSON.parse(init.body) as Record<string, unknown>) : null
     calls.push({ url, method: init?.method ?? 'GET', body })
     if (url === '/list') return new Response(JSON.stringify({ rows }), { status: 200 })
-    if (url.endsWith('/email/compose/draft')) return new Response(JSON.stringify({ subject: 'Subject', body: 'Body text', checks: draftChecks, read: [{ kind: 'customer', text: '填过表' }] }), { status: 200 })
+    if (url.endsWith('/email/compose/draft')) return new Response(JSON.stringify({ subject: 'Subject', body: 'Body text', checks: draftChecks, read: [{ kind: 'customer', text: '填过表' }], aiLetterId: 'ai-letter-1' }), { status: 200 })
     if (url.endsWith('/email/compose/check')) return new Response(JSON.stringify({ checks: recheckChecks }), { status: 200 })
     if (url.endsWith('/email/compose') || url === '/release') return new Response(JSON.stringify(sendBody), { status: sendStatus })
     return new Response('{}', { status: 404 })
@@ -32,7 +32,7 @@ function install(rows: LetterBoardRow[]) {
 
 function board(sendUrl?: () => string) {
   return render(
-    <LetterBoard clientId="c1" listUrl="/list" toBoard={(json) => { const j = json as { rows?: LetterBoardRow[] }; return j.rows ? { rows: j.rows, headline: `今天 ${j.rows.length} 位`, other: '其他说明' } : null }}
+    <LetterBoard surface="letters_page" clientId="c1" listUrl="/list" toBoard={(json) => { const j = json as { rows?: LetterBoardRow[] }; return j.rows ? { rows: j.rows, headline: `今天 ${j.rows.length} 位`, other: '其他说明' } : null }}
       title="信" intro="说明" back={{ href: '/back', label: '回去' }} draftAllLabel="写这一批" sendUrl={sendUrl} />,
   )
 }
@@ -67,7 +67,7 @@ describe('LetterBoard', () => {
     board()
     await drafted()
     expect(drafts().map((c) => c.url)).toEqual(['/api/clients/c1/crm/contacts/a/email/compose/draft'])
-    expect(drafts()[0].body).toEqual({ kind: 'follow_up' })
+    expect(drafts()[0].body).toEqual({ kind: 'follow_up', surface: 'letters_page' })
     expect(tick().checked).toBe(false)
     expect(release().disabled).toBe(true)
   })
@@ -123,7 +123,7 @@ describe('LetterBoard', () => {
     await screen.findByText('已发出。')
     expect(sends()).toHaveLength(1)
     expect(sends()[0].url).toBe('/api/clients/c1/crm/contacts/a/email/compose')
-    expect(sends()[0].body).toEqual({ contactId: 'a', subject: 'Subject', body: 'Body text', requestId: 'req-a', expectedRecipient: 'a@example.com' })
+    expect(sends()[0].body).toEqual({ contactId: 'a', subject: 'Subject', body: 'Body text', requestId: 'req-a', expectedRecipient: 'a@example.com', aiLetterId: 'ai-letter-1' })
   })
 
   it('a page with its own release route posts there, and shows that route\'s refusal with its fresh checks', async () => {

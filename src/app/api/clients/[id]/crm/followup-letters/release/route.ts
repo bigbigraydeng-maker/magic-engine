@@ -1,7 +1,8 @@
 /**
  * POST /api/clients/[id]/crm/followup-letters/release — a person releases one letter from the "跟进信" page.
  *
- * Body: { contactId, subject, body, requestId, expectedRecipient }
+ * Body: { contactId, subject, body, requestId, expectedRecipient, aiLetterId? }
+ *   aiLetterId  the AI draft this letter came from; tied to this send before it runs, and no send if that fails.
  *
  * The list the person ticked from was a snapshot. Before anything is sent, three things are done again, now:
  *   1. the guest is judged again (`checkLetterRelease`): still in the group, still the AI's to write, nothing human
@@ -25,6 +26,7 @@ import { checkFollowUpLetter } from '@/lib/crm/email-compose/follow-up-draft'
 import { sendTemplateEmail } from '@/lib/crm/email-templates/send-template-email'
 import { checkLetterRelease } from '@/lib/crm/followup-progress/letter-list'
 import { createLetterListDeps } from '@/lib/crm/followup-progress/letter-list-prod'
+import { LINK_REFUSAL, linkAiLetterForSend, parseAiLetterId } from '@/lib/crm/email-compose/ai-letter-record'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120
@@ -46,7 +48,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const requestId = text(payload?.requestId)
   const subject = text(payload?.subject)
   const body = text(payload?.body)
-  if (!contactId || !requestId || !subject || !body || !UUID_RE.test(contactId) || !UUID_RE.test(requestId)) {
+  const ai = parseAiLetterId(payload?.aiLetterId)
+  if (!contactId || !requestId || !subject || !body || !UUID_RE.test(contactId) || !UUID_RE.test(requestId) || !ai.ok) {
     return NextResponse.json({ error: '请求格式不对。', reason: 'invalid_input' }, { status: 400 })
   }
 
@@ -65,6 +68,15 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     // Nothing has been sent yet at this point: the person may fix and release again.
     console.error('[crm/followup-letters/release] 放行前复核失败:', err instanceof Error ? err.message : err)
     return NextResponse.json({ error: '放行前的复核没跑成，这封没有发。稍后再试。', reason: 'recheck_failed' }, { status: 409 })
+  }
+
+  if (ai.id !== null) {
+    // Before the send: an AI letter must never reach a guest without its mark (PM 2026-11-28).
+    const linked = await linkAiLetterForSend(supabaseAdmin, { clientId: params.id, contactId, aiLetterId: ai.id, requestId, actorEmail, subject, body, now: new Date() })
+    if (!linked.ok) {
+      const refusal = LINK_REFUSAL[linked.reason]
+      return NextResponse.json({ error: refusal.message, reason: `ai_letter_${linked.reason}`, final: linked.reason !== 'write_failed' }, { status: refusal.status })
+    }
   }
 
   const result = await sendTemplateEmail({

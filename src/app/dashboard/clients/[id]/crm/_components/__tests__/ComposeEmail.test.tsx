@@ -173,6 +173,28 @@ describe('ComposeEmail', () => {
     expect(screen.getByTestId('compose-check-prices')).toHaveTextContent('✗')
     expect(screen.getByText(/我们发过 2026-09-15/)).toBeInTheDocument()
     const [, init] = f.mock.calls[1] as [string, { body: string }]
-    expect(JSON.parse(init.body)).toEqual({ kind: 'follow_up' })
+    expect(JSON.parse(init.body)).toEqual({ kind: 'follow_up', surface: 'drawer' })
+  })
+  it('an AI draft carries its record id into the send, so the letter stays marked as AI-drafted; a self-written letter does not', async () => {
+    const f = stub([
+      { ok: true, body: { conversationId: null, compose: can } },
+      { ok: true, body: { subject: 'AI subject', body: 'AI body', aiLetterId: 'ai-77' } },
+      { ok: true, body: { ok: true, messageId: 'm1' } },
+      { ok: true, body: { conversationId: null, compose: can } },
+      { ok: true, body: { ok: true, messageId: 'm2' } },
+      { ok: true, body: { conversationId: null, compose: can } },
+    ])
+    draw()
+    fireEvent.click(await screen.findByTestId('compose-ai-follow-up'))
+    await waitFor(() => expect(screen.getByLabelText('邮件主题')).toHaveValue('AI subject'))
+    fireEvent.click(screen.getByRole('button', { name: '发送' }))
+    await waitFor(() => expect(f.mock.calls.length).toBeGreaterThanOrEqual(3))
+    expect(JSON.parse((f.mock.calls[2][1] as { body: string }).body)).toMatchObject({ subject: 'AI subject', aiLetterId: 'ai-77' })
+    await waitFor(() => expect(screen.getByLabelText('邮件主题')).toHaveValue(''))
+    fireEvent.change(screen.getByLabelText('邮件主题'), { target: { value: 'Mine' } })
+    fireEvent.change(screen.getByLabelText('邮件正文'), { target: { value: 'Written by me' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送' }))
+    await waitFor(() => expect(f.mock.calls.length).toBeGreaterThanOrEqual(5))
+    expect(JSON.parse((f.mock.calls[4][1] as { body: string }).body).aiLetterId).toBeUndefined()
   })
 })

@@ -11,12 +11,18 @@ vi.mock('@/lib/microsoft/mail-send-new', async () => {
   return { sendMailNew: vi.fn(), SendStartedError: actual.SendStartedError }
 })
 vi.mock('@/lib/crm/email-templates/send-record-prod', () => ({ recordSendAttemptProd: vi.fn(async () => undefined) }))
+vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { marker: 'db' } }))
+vi.mock('@/lib/crm/email-compose/ai-letter-record', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/crm/email-compose/ai-letter-record')>('@/lib/crm/email-compose/ai-letter-record')
+  return { ...actual, linkAiLetterForSend: vi.fn(async () => ({ ok: true, edited: false })) }
+})
 
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { SendStartedError, sendMailNew } from '@/lib/microsoft/mail-send-new'
 import { emptyMeta } from '@/lib/crm/email-templates/send-gates'
 import { createMailNewDeps } from '@/lib/microsoft/mail-send-new-prod'
 import { recordSendAttemptProd } from '@/lib/crm/email-templates/send-record-prod'
+import { linkAiLetterForSend } from '@/lib/crm/email-compose/ai-letter-record'
 import { POST } from './route'
 
 const post = (body: unknown, raw?: string) =>
@@ -34,6 +40,40 @@ describe('POST email/compose', () => {
       { clientId: 'client-a', contactId: 'contact-1', subject: 'S', body: 'B', sentByEmail: 'sales@client.co.nz', requestId: 'r', expectedRecipient: 'a@b.com' },
       { marker: 'deps' },
     )
+  })
+
+  it('no aiLetterId → nothing is linked (a letter staff wrote themselves)', async () => {
+    ;(sendMailNew as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: true, messageId: 'm1', conversationId: 'c1' })
+    await post({ subject: 'S', body: 'B', requestId: 'r', expectedRecipient: 'a@b.com' })
+    expect(linkAiLetterForSend).not.toHaveBeenCalled()
+  })
+
+  it('an AI letter is tied to this send BEFORE it is sent, with the final text and the sender', async () => {
+    const order: string[] = []
+    ;(linkAiLetterForSend as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => { order.push('link'); return { ok: true, edited: true } })
+    ;(sendMailNew as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => { order.push('send'); return { ok: true, messageId: 'm1', conversationId: 'c1' } })
+    const res = await post({ subject: 'S', body: 'B2', requestId: 'r', expectedRecipient: 'a@b.com', aiLetterId: '0b9c2a51-1d2e-4c4b-9a1e-5f2f0d3c4b5a' })
+    expect(res.status).toBe(200)
+    expect(order).toEqual(['link', 'send'])
+    expect((linkAiLetterForSend as ReturnType<typeof vi.fn>).mock.calls[0][1]).toMatchObject({
+      clientId: 'client-a', contactId: 'contact-1', aiLetterId: '0b9c2a51-1d2e-4c4b-9a1e-5f2f0d3c4b5a', requestId: 'r', actorEmail: 'sales@client.co.nz', subject: 'S', body: 'B2',
+    })
+  })
+
+  it('the AI mark cannot be written, or the letter is not this guest\'s → refused, nothing is sent', async () => {
+    for (const [reason, status] of [['write_failed', 503], ['not_found', 409], ['other_send', 409]] as const) {
+      ;(linkAiLetterForSend as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: false, reason })
+      const res = await post({ subject: 'S', body: 'B', requestId: 'r', expectedRecipient: 'a@b.com', aiLetterId: '0b9c2a51-1d2e-4c4b-9a1e-5f2f0d3c4b5a' })
+      expect(res.status).toBe(status)
+      expect((await res.json()).reason).toBe(`ai_letter_${reason}`)
+    }
+    expect(sendMailNew).not.toHaveBeenCalled()
+  })
+
+  it('an aiLetterId that is not an id → 400, never treated as "not AI"', async () => {
+    const res = await post({ subject: 'S', body: 'B', requestId: 'r', expectedRecipient: 'a@b.com', aiLetterId: 'xyz' })
+    expect(res.status).toBe(400)
+    expect(sendMailNew).not.toHaveBeenCalled()
   })
 
   it('maps a failure to its status + reason + message', async () => {

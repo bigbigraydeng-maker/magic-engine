@@ -13,7 +13,7 @@ export interface LetterBoardRow { contactId: string; name: string; note: string;
 interface CheckLine { id: string; status: 'pass' | 'warn' | 'fail'; label: string; detail: string }
 interface ReadLine { kind: string; text: string }
 /** `stale` = the person changed the text after the checks ran: the checks no longer describe this text. */
-interface Draft { subject: string; body: string; checks: CheckLine[]; read: ReadLine[]; edited: boolean; stale: boolean; rechecking?: boolean; recheckError?: string }
+interface Draft { subject: string; body: string; checks: CheckLine[]; read: ReadLine[]; edited: boolean; stale: boolean; rechecking?: boolean; recheckError?: string; aiLetterId?: string }
 type CardState =
   | { kind: 'empty' } | { kind: 'drafting' } | { kind: 'draft_failed'; message: string }
   | { kind: 'drafted'; draft: Draft; ticked: boolean }
@@ -24,14 +24,14 @@ const CHECK_ICON: Record<CheckLine['status'], string> = { pass: '✓', warn: '�
 const CHECK_TONE: Record<CheckLine['status'], string> = { pass: 'text-green-700', warn: 'text-amber-700', fail: 'text-red-700' }
 
 
-async function requestDraft(clientId: string, contactId: string): Promise<{ ok: true; draft: Draft } | { ok: false; message: string }> {
+async function requestDraft(clientId: string, contactId: string, surface: LetterBoardSurface): Promise<{ ok: true; draft: Draft } | { ok: false; message: string }> {
   try {
     const res = await fetch(`/api/clients/${clientId}/crm/contacts/${contactId}/email/compose/draft`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'follow_up' }),
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'follow_up', surface }),
     })
     const json = (await res.json().catch(() => ({}))) as Partial<Draft> & { error?: string }
     if (!res.ok || !json.subject || !json.body) return { ok: false, message: json.error ?? 'AI 起草失败，稍后再试。' }
-    return { ok: true, draft: { subject: json.subject, body: json.body, checks: json.checks ?? [], read: json.read ?? [], edited: false, stale: false } }
+    return { ok: true, draft: { subject: json.subject, body: json.body, checks: json.checks ?? [], read: json.read ?? [], edited: false, stale: false, ...(json.aiLetterId ? { aiLetterId: json.aiLetterId } : {}) } }
   } catch {
     return { ok: false, message: '网络出错，AI 没能起草。' }
   }
@@ -62,7 +62,7 @@ async function sendOne(url: string, row: LetterBoardRow, draft: Draft): Promise<
   try {
     const res = await fetch(url, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contactId: row.contactId, subject: draft.subject, body: draft.body, requestId: row.requestId, expectedRecipient: row.recipient }),
+      body: JSON.stringify({ contactId: row.contactId, subject: draft.subject, body: draft.body, requestId: row.requestId, expectedRecipient: row.recipient, ...(draft.aiLetterId ? { aiLetterId: draft.aiLetterId } : {}) }),
     })
     const json = (await res.json().catch(() => ({}))) as { error?: string; reason?: string; duplicate?: boolean; final?: boolean; checks?: CheckLine[] }
     if (res.ok) return { ok: true, duplicate: json.duplicate === true }
@@ -74,7 +74,11 @@ async function sendOne(url: string, row: LetterBoardRow, draft: Draft): Promise<
   }
 }
 
+/** Which page the board is on: recorded with every AI draft (crm_ai_letters.surface). */
+export type LetterBoardSurface = 'letters_page' | 'day7_page'
+
 export interface LetterBoardProps {
+  surface: LetterBoardSurface
   clientId: string
   /** GET that returns the list as JSON; `toBoard` turns it into rows and the two summary lines. */
   listUrl: string
@@ -87,7 +91,7 @@ export interface LetterBoardProps {
   sendUrl?: (contactId: string) => string
 }
 
-export function LetterBoard({ clientId, listUrl, toBoard, title, intro, back, draftAllLabel, sendUrl }: LetterBoardProps) {
+export function LetterBoard({ surface, clientId, listUrl, toBoard, title, intro, back, draftAllLabel, sendUrl }: LetterBoardProps) {
   const [rows, setRows] = useState<LetterBoardRow[] | null>(null)
   const [summary, setSummary] = useState<{ headline: string; other: string } | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -123,7 +127,7 @@ export function LetterBoard({ clientId, listUrl, toBoard, title, intro, back, dr
     setBusy(true)
     for (const r of rows.filter((x) => x.status === 'ready' && ['empty', 'draft_failed'].includes(latest(x.contactId).kind))) {
       set(r.contactId, { kind: 'drafting' })
-      const out = await requestDraft(clientId, r.contactId)
+      const out = await requestDraft(clientId, r.contactId, surface)
       // Never ticked for staff: each letter is read and ticked by a person (PM 11-09, review P1).
       set(r.contactId, out.ok ? { kind: 'drafted', draft: out.draft, ticked: false } : { kind: 'draft_failed', message: out.message })
     }
