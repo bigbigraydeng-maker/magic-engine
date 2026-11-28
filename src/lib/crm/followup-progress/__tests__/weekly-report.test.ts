@@ -101,7 +101,7 @@ describe('the weekly report', () => {
     expect(reportName('Mary 021 555 1234')).toBe('Mary')
     expect(reportName('Sue +6421987654')).not.toMatch(/\d{4}/)
     expect(reportName('Bob <bob@x.com> 0275551234')).not.toMatch(/@|\d{4}/)
-    expect(reportName(null)).toBe('No name left')
+    expect(reportName(null)).toBe('No name given')
     expect(reportName('Jane Doe')).toBe('Jane Doe')
     const d = detail(1)
     const n = names(d)
@@ -121,8 +121,29 @@ describe('the weekly report', () => {
     expect(buildWeeklyBody(r, TZ)).toContain('last heard 28 Nov')
   })
 
+  it('is marked Beta in the subject and at the top of the body, before any guest name', () => {
+    const r = report(2)
+    expect(buildWeeklySubject(r).startsWith('[Beta] ')).toBe(true)
+    const html = buildWeeklyBody(r, TZ)
+    expect(html).toContain('<b>Beta.</b>')
+    expect(html.indexOf('<b>Beta.</b>')).toBeLessThan(html.indexOf('Guest n0'))
+    expect(html).toContain('hello@magicengine.cloud')
+    // An edition with nobody to call is still marked.
+    const empty = report(0)
+    expect(buildWeeklySubject(empty).startsWith('[Beta] ')).toBe(true)
+    expect(buildWeeklyBody(empty, TZ)).toContain('<b>Beta.</b>')
+  })
+
+  it('says "on record", never that staff did not call, and says this list differs from the daily list', () => {
+    const html = buildWeeklyBody(report(2), TZ)
+    expect(html).not.toMatch(/nobody has (called|answered|emailed)/i)
+    expect(html).not.toMatch(/never (called|contacted|emailed)/i)
+    expect(html).toContain('no call or email on record')
+    expect(html).toContain('can differ from the "今天先联系" page')
+  })
+
   it('the subject carries the two numbers staff act on', () => {
-    expect(buildWeeklySubject(report(1))).toBe('Acme <Tours> · follow-up report Mon 30 Nov: 1 new lead to call, 1 waiting for a reply')
+    expect(buildWeeklySubject(report(1))).toBe('[Beta] Acme <Tours> · follow-up report Mon 30 Nov: 1 new lead to call, 1 waiting for a reply')
   })
 
   it('every group has English wording, and every group row is in the body', () => {

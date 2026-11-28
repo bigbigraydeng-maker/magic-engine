@@ -20,10 +20,10 @@ export const LIST_MAX = 15
 /** English wording per group, for the report only. The CRM page keeps its own (Chinese) wording in `groups.ts`. */
 export const GROUP_LABEL_EN: Record<FollowupGroup, string> = {
   awaiting_reply: 'Guest wrote or rang, no reply on record',
-  unknown_sender: 'Emailed out of the blue (no form, never contacted)',
-  new_lead: `New form in the last ${DEFAULT_GROUP_CONFIG.newLeadDays} days, not contacted yet`,
-  never_contacted: 'Filled a form earlier, never called or emailed',
-  no_enquiry: 'No form on record, never contacted',
+  unknown_sender: 'Emailed out of the blue (no form, no contact on record)',
+  new_lead: `New form in the last ${DEFAULT_GROUP_CONFIG.newLeadDays} days, no call or email on record yet`,
+  never_contacted: 'Filled a form earlier, no call or email on record',
+  no_enquiry: 'No form and no contact on record',
   qualified: 'High intent, not booked yet',
   warm: 'Called or emailed before, still opening our emails',
   cold: `Called or emailed before, quiet for ${DEFAULT_GROUP_CONFIG.warmDays} days`,
@@ -50,7 +50,7 @@ export interface WeeklyReport {
   changes: Record<FollowupGroup, number | null>
   newLeads: { total: number; shown: ReportGuest[] }
   awaitingReply: { total: number; shown: ReportGuest[] }
-  /** Guests the AI pickup page could release today; null = the client does not use it or it could not be read. */
+  /** Guests matching the AI pickup rules today; null = it could not be read, and the report then says nothing. */
   aiReady: number | null
 }
 
@@ -60,7 +60,7 @@ function ms(iso: string | null): number {
   return Number.isFinite(n) ? n : 0
 }
 
-const NO_NAME = 'No name left'
+const NO_NAME = 'No name given'
 
 /**
  * How the report names a guest. A name field can hold an address or a number ("Mary 021 555 1234"): both are cut
@@ -120,7 +120,7 @@ function plural(n: number, one: string, many: string): string {
 }
 
 export function buildWeeklySubject(r: WeeklyReport): string {
-  return `${r.clientName} · follow-up report ${r.day}: ${plural(r.newLeads.total, 'new lead', 'new leads')} to call, ${r.awaitingReply.total} waiting for a reply`
+  return `[Beta] ${r.clientName} · follow-up report ${r.day}: ${plural(r.newLeads.total, 'new lead', 'new leads')} to call, ${r.awaitingReply.total} waiting for a reply`
 }
 
 function changeText(n: number | null): string {
@@ -151,7 +151,7 @@ function renderList(title: string, hint: string, list: { total: number; shown: R
 function renderWeek(w: WeekActivity): string {
   const cells: Array<[string, number]> = [
     ['New enquiries', w.newEnquiries],
-    ['Guests staff called or emailed', w.guestsContactedByStaff],
+    ['Guests with a staff call or email on record', w.guestsContactedByStaff],
     ['Guests who wrote or rang', w.guestsWhoReplied],
     ['Moved to high intent', w.movedToQualified],
     ['New bookings', w.newBookings],
@@ -170,23 +170,30 @@ function renderAi(r: WeeklyReport): string {
   if (r.aiReady === null) return ''
   const link = `<a href="${esc(crmUrl(r.clientId, 'ai-pickup'))}" style="color:#2563eb">Open the "交给 AI" page</a>`
   if (r.aiReady === 0) return `<p style="font-size:14px;margin:18px 0 0"><b>AI follow-up:</b> nobody matches the AI pickup rules today.</p>`
-  return `<p style="font-size:14px;margin:18px 0 0"><b>AI follow-up:</b> ${plural(r.aiReady, 'guest matches', 'guests match')} the AI pickup rules (not rung within 7 days, or rung and not reached). Someone has to release them: the page offers a limited batch each day and holds back anyone it cannot email. ${link}. Handed over in the last 7 days: ${r.week.takenByAi}.</p>`
+  return `<p style="font-size:14px;margin:18px 0 0"><b>AI follow-up:</b> ${plural(r.aiReady, 'guest matches', 'guests match')} the AI pickup rules (enquired 7 or more days ago with no call on record, or rung and not reached). They wait on the "交给 AI" page until a person releases them; the page offers a limited batch each day and holds back anyone it cannot email. ${link}. Handed over in the last 7 days: ${r.week.takenByAi}.</p>`
 }
 
 function renderUnknown(r: WeeklyReport): string {
   const n = r.counts.groups.unknown_sender
   if (n === 0) return ''
-  return `<p style="font-size:14px;margin:18px 0 0"><b>Also:</b> ${plural(n, 'sender', 'senders')} emailed without ever filling a form, and nobody has answered. Some are guests writing directly, others are suppliers or sales pitches. They are not listed here; a quick look in the CRM sorts them (mark the ones that are not guests as "非咨询").</p>`
+  return `<p style="font-size:14px;margin:18px 0 0"><b>Also:</b> ${plural(n, 'sender', 'senders')} emailed without ever filling a form, and there is no reply on record. Some are guests writing directly, others are suppliers or sales pitches. They are not listed here: they are in the CRM under "全部客人", and each one needs a person to open the record and decide.</p>`
 }
+
+/**
+ * Shown at the top of every edition while the report is in Beta (PM 2026-11-28: "标记清楚这是 Beta 功能").
+ * It says what Beta means for the reader: the numbers are only as complete as the CRM records, and who to tell.
+ */
+export const BETA_NOTICE = `<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;padding:10px 12px;margin:0 0 16px;font-size:13px;color:#78350f"><b>Beta.</b> This weekly report is a new feature from Magic Engine and is still being tuned. The names and numbers come from what is recorded in the CRM, so a call from a personal phone or a reply sent outside the CRM can be missing: please check before acting on a name. If something looks wrong or is missing, tell Magic Engine at hello@magicengine.cloud.</div>`
 
 export function buildWeeklyBody(r: WeeklyReport, timeZone: string): string {
   return `
     <div style="font-family:sans-serif;max-width:640px;margin:0 auto;padding:24px;color:#0f172a">
+      ${BETA_NOTICE}
       <p style="font-size:17px;font-weight:600;margin:0 0 4px">${esc(r.clientName)} — weekly follow-up report, ${esc(r.day)}</p>
-      <p style="font-size:14px;color:#334155;margin:0 0 14px">${r.counts.inScope} open guests in the follow-up work. <a href="${esc(crmUrl(r.clientId, 'followup-progress'))}" style="color:#2563eb">See the live numbers</a>.</p>
+      <p style="font-size:14px;color:#334155;margin:0 0 14px">${r.counts.inScope} guests still being followed up. <a href="${esc(crmUrl(r.clientId, 'followup-progress'))}" style="color:#2563eb">See the live numbers</a>.</p>
       <p style="font-size:15px;font-weight:600;margin:0 0 6px">The last 7 days</p>
       ${renderWeek(r.week)}
-      ${renderList('Call first: new leads', `Filled a form in the last ${DEFAULT_GROUP_CONFIG.newLeadDays} days and nobody has called or emailed since. Newest first.`, r.newLeads, r.clientId, timeZone, 'form on')}
+      ${renderList('Call first: new leads', `Filled a form in the last ${DEFAULT_GROUP_CONFIG.newLeadDays} days, with no call or email on record since. Newest first. This list has its own rules and can differ from the "今天先联系" page; the guest's CRM record is the final word.`, r.newLeads, r.clientId, timeZone, 'form on')}
       ${renderList('Reply today: guests waiting for an answer', 'Wrote or rang, and there is no reply on record. Most recent first. Check the mailbox first: a reply sent from outside the CRM may not be recorded.', r.awaitingReply, r.clientId, timeZone, 'last heard')}
       ${renderUnknown(r)}
       ${renderAi(r)}
@@ -195,7 +202,7 @@ export function buildWeeklyBody(r: WeeklyReport, timeZone: string): string {
       <p style="margin-top:20px;font-size:11px;color:#94a3b8">
         "Called or emailed" counts calls, emails and WhatsApp recorded in the system (a call nobody answered still counts as called). Calls made from a personal phone and Facebook Messenger chats are not counted.
         Contact details are left out on purpose — open the CRM link to see them.
-        Sent automatically every Monday morning by Magic Engine.
+        Sent automatically every Monday morning by Magic Engine (Beta).
       </p>
     </div>`
 }
