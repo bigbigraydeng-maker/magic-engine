@@ -89,8 +89,9 @@ beforeEach(() => {
 })
 
 describe('the recipient gate', () => {
-  it('the report goes to exactly the two mailboxes the PM named, for one client', () => {
-    expect(WEEKLY_REPORT_RECIPIENTS).toEqual({ [CTS]: ['hello@magicengine.cloud', 'info@ctstours.co.nz'] })
+  it('the report goes to the Magic Engine mailbox only: no client mailbox is on the table', () => {
+    expect(WEEKLY_REPORT_RECIPIENTS).toEqual({ [CTS]: ['hello@magicengine.cloud'] })
+    expect(JSON.stringify(WEEKLY_REPORT_RECIPIENTS)).not.toContain('ctstours')
     expect(Object.isFrozen(WEEKLY_REPORT_RECIPIENTS)).toBe(true)
     expect(Object.isFrozen(WEEKLY_REPORT_RECIPIENTS[CTS])).toBe(true)
   })
@@ -125,9 +126,9 @@ describe('the run', () => {
     expect(ids).toEqual(['log-start', `read-${CTS}`, `send-${CTS}`, 'log-finish'])
     expect(send).toHaveBeenCalledTimes(1)
     const call = send.mock.calls[0][0]
-    expect(call.recipients).toEqual(['hello@magicengine.cloud', 'info@ctstours.co.nz'])
+    expect(call.recipients).toEqual(['hello@magicengine.cloud'])
     expect(call.idempotencyKey).toBe(`${WEEKLY_REPORT_JOB}:${CTS}:week-of-2026-11-30`)
-    expect(receipt.results[0]).toMatchObject({ client_id: CTS, client_name: 'CTS Tours', in_scope: 3, new_leads: 2, awaiting_reply: 1, ai_ready: 216, sent: true, no_publish: false, provider_message_id: 'msg-1', recipients: ['hello@magicengine.cloud', 'info@ctstours.co.nz'] })
+    expect(receipt.results[0]).toMatchObject({ client_id: CTS, client_name: 'CTS Tours', in_scope: 3, new_leads: 2, awaiting_reply: 1, ai_ready: 216, sent: true, no_publish: false, provider_message_id: 'msg-1', recipients: ['hello@magicengine.cloud'] })
     expect(JSON.stringify(receipt)).not.toContain('Secret Guest')
     expect(finish).toHaveBeenCalledWith(expect.objectContaining({ processed: 1, completed: 1, failed: 0 }))
   })
