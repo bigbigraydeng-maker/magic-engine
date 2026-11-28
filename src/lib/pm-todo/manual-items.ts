@@ -42,6 +42,7 @@ import { pushEmailReplyItems } from './email-reply-items'
 import { pushLeadFollowupItems } from './lead-followup-items'
 import { pushCatalogueFollowupItems } from './catalogue-followup-items'
 import { pushCatalogueAskItems } from './catalogue-ask-items'
+import { pushAiPickupWaitingItems } from './ai-pickup-waiting-items'
 import { pushTriggeredSendItems } from './triggered-send-items'
 import { pushBindingRequestItems } from './binding-request-items'
 import { pushPageBindingItems } from './page-binding-items'
@@ -572,6 +573,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 员工留言写了要发目录、目录还没发出去 —— 留言本身不发信，要有人去「交给 AI 跟进」页点一次
     (b) => pushCatalogueAskItems(supabase, b, ids, now, nameOf).catch((e) =>
       console.warn('[manual-items] 留言要目录待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 有客人符合「交给 AI」的规则在等放行、最近几天没人点 —— 放行要有人点，没人点时得有东西喊
+    (b) => pushAiPickupWaitingItems(supabase, b, ids, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 等放行待办生成失败（不阻塞其他待办）:', e),
     ),
     // ME 自己发出的信：结果不明 / 退信 / 投诉 / 回执没回来 / 钥匙出错 / 系统自动停了授权。读失败自己出一条待办。
     (b) => pushTriggeredSendItems(supabase, b, ids, now, nameOf).catch((e) =>
