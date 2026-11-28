@@ -73,6 +73,10 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   ads_tune_content_ticket: 'review', // 调方没有可加的新图，请内容侧出一条，不改广告
   ads_health_patrol_alert: 'decide', // 广告体检亮了警报或给了处方
   ads_trend_check_alert: 'decide', // 日趋势 Check 命中（素材疲劳 / 成本走强）
+  // 当天花费已过线却没成效 / 单次成本偏高的提前预警：系统不自动改预算、不暂停，改不改在投的广告
+  // 由人定；同 ads_trend_check_alert 一档。（2026-11-28 补：这条漏了 → laneOf() 拿到 undefined，
+  // 预警不进五类任何一栏、也不进开发欠账和周报，从邮件和页面上整条消失）
+  ads_predictive_early_warning_alert: 'decide',
   ad_readback_blocker: 'decide', // 正在花钱的广告组撞上已知坑，要改设置
   outcome_rows_orphaned: 'decide', // 旧效果数据删还是留（删了撤不回）
   maliang_render_failed: 'decide', // 成片不过关：返工（花钱）还是放弃

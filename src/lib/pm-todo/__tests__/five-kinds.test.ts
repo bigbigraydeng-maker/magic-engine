@@ -4,6 +4,8 @@
  */
 
 import { writeFileSync } from 'node:fs'
+import path from 'node:path'
+import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import {
   buildTodoEmail,
@@ -36,7 +38,57 @@ const item = (over: Partial<ManualItem> = {}): ManualItem => ({
   ...over,
 })
 
+/**
+ * 让编译器把 `ManualItemKind` 这个联合类型的每个成员念出来。
+ *
+ * 车道表靠 `Record<ManualItemKind, TodoLane>` 保证穷举，但那只在类型检查时生效；
+ * 构建跳过类型检查，漏一条照样上线（2026-11-28 ads_predictive_early_warning_alert）。
+ * 这里在测试里再查一遍。只解析类型、不做全量检查，约 1 秒。
+ */
+function allManualItemKinds(): string[] {
+  const file = path.resolve(process.cwd(), 'src/lib/pm-todo/manual-item-types.ts')
+  const program = ts.createProgram([file], {
+    noEmit: true,
+    skipLibCheck: true,
+    strict: true,
+    module: ts.ModuleKind.ESNext,
+    moduleResolution: ts.ModuleResolutionKind.Bundler,
+    baseUrl: process.cwd(),
+    paths: { '@/*': ['./src/*'] },
+    types: [],
+  })
+  const checker = program.getTypeChecker()
+  const source = program.getSourceFile(file)
+  const moduleSymbol = source ? checker.getSymbolAtLocation(source) : undefined
+  const symbol = moduleSymbol
+    ? checker.getExportsOfModule(moduleSymbol).find((s) => s.name === 'ManualItemKind')
+    : undefined
+  if (!symbol) throw new Error('manual-item-types.ts 里找不到 ManualItemKind')
+  const type = checker.getDeclaredTypeOfSymbol(symbol)
+  return (type.isUnion() ? type.types : [type]).map((member) => {
+    // 念不出字面量（某个子类型没解析出来）就直接报错，不许当成「没有这种待办」放过去
+    if (!member.isStringLiteral()) throw new Error(`ManualItemKind 有成员不是字符串字面量：${checker.typeToString(member)}`)
+    return member.value
+  })
+}
+
 describe('车道表', () => {
+  it('🔴 每一种待办都在车道表里有一行：漏了的那种会从邮件和页面上整条消失', () => {
+    const kinds = allManualItemKinds()
+    expect(kinds.length).toBeGreaterThan(150) // 念出来的太少 = 解析坏了，不是「都分好了」
+    expect(kinds.filter((kind) => !Object.prototype.hasOwnProperty.call(LANE_OF_KIND, kind))).toEqual([])
+    // 反过来：表里也不许留着已经不存在的种类
+    expect(Object.keys(LANE_OF_KIND).filter((kind) => !kinds.includes(kind))).toEqual([])
+  }, 30_000)
+
+  it('🔴 广告提前预警进「要你拍板」一栏，PM 当天看得见', () => {
+    const warning = item({ kind: 'ads_predictive_early_warning_alert', what: '「CTS Tours NZ」广告预警：系列 1 今日单次成本偏高' })
+    expect(laneOf(warning)).toBe('decide')
+    const view = buildTodoView({ ...EMPTY, manualItems: [warning] })
+    expect(view.totalItems).toBe(1)
+    expect(view.sections.map((s) => s.pm_kind)).toEqual(['decide'])
+  })
+
   it('每一种待办都分到了七条车道之一', () => {
     const valid = new Set<TodoLane>([...PM_KIND_ORDER, 'dev', 'weekly'])
     for (const lane of Object.values(LANE_OF_KIND)) expect(valid.has(lane)).toBe(true)
