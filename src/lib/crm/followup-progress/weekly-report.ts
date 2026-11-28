@@ -120,7 +120,7 @@ function plural(n: number, one: string, many: string): string {
 }
 
 export function buildWeeklySubject(r: WeeklyReport): string {
-  return `${r.clientName} · follow-up report ${r.day}: ${plural(r.newLeads.total, 'new lead', 'new leads')} to call, ${r.awaitingReply.total} waiting for a reply`
+  return `[Beta] ${r.clientName} · follow-up report ${r.day}: ${plural(r.newLeads.total, 'new lead', 'new leads')} to call, ${r.awaitingReply.total} waiting for a reply`
 }
 
 function changeText(n: number | null): string {
@@ -179,9 +179,16 @@ function renderUnknown(r: WeeklyReport): string {
   return `<p style="font-size:14px;margin:18px 0 0"><b>Also:</b> ${plural(n, 'sender', 'senders')} emailed without ever filling a form, and nobody has answered. Some are guests writing directly, others are suppliers or sales pitches. They are not listed here; a quick look in the CRM sorts them (mark the ones that are not guests as "非咨询").</p>`
 }
 
+/**
+ * Shown at the top of every edition while the report is in Beta (PM 2026-11-28: "标记清楚这是 Beta 功能").
+ * It says what Beta means for the reader: the numbers are only as complete as the CRM records, and who to tell.
+ */
+export const BETA_NOTICE = `<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;padding:10px 12px;margin:0 0 16px;font-size:13px;color:#78350f"><b>Beta.</b> This weekly report is a new feature from Magic Engine and is still being tuned. The names and numbers come from what is recorded in the CRM, so a call from a personal phone or a reply sent outside the CRM can be missing: please check before acting on a name. If something looks wrong or is missing, tell Magic Engine at hello@magicengine.cloud.</div>`
+
 export function buildWeeklyBody(r: WeeklyReport, timeZone: string): string {
   return `
     <div style="font-family:sans-serif;max-width:640px;margin:0 auto;padding:24px;color:#0f172a">
+      ${BETA_NOTICE}
       <p style="font-size:17px;font-weight:600;margin:0 0 4px">${esc(r.clientName)} — weekly follow-up report, ${esc(r.day)}</p>
       <p style="font-size:14px;color:#334155;margin:0 0 14px">${r.counts.inScope} open guests in the follow-up work. <a href="${esc(crmUrl(r.clientId, 'followup-progress'))}" style="color:#2563eb">See the live numbers</a>.</p>
       <p style="font-size:15px;font-weight:600;margin:0 0 6px">The last 7 days</p>
@@ -195,7 +202,7 @@ export function buildWeeklyBody(r: WeeklyReport, timeZone: string): string {
       <p style="margin-top:20px;font-size:11px;color:#94a3b8">
         "Called or emailed" counts calls, emails and WhatsApp recorded in the system (a call nobody answered still counts as called). Calls made from a personal phone and Facebook Messenger chats are not counted.
         Contact details are left out on purpose — open the CRM link to see them.
-        Sent automatically every Monday morning by Magic Engine.
+        Sent automatically every Monday morning by Magic Engine (Beta).
       </p>
     </div>`
 }

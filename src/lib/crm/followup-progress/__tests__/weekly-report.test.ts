@@ -121,8 +121,17 @@ describe('the weekly report', () => {
     expect(buildWeeklyBody(r, TZ)).toContain('last heard 28 Nov')
   })
 
+  it('is marked Beta in the subject and at the top of the body, before any guest name', () => {
+    const r = report(2)
+    expect(buildWeeklySubject(r).startsWith('[Beta] ')).toBe(true)
+    const html = buildWeeklyBody(r, TZ)
+    expect(html).toContain('<b>Beta.</b>')
+    expect(html.indexOf('<b>Beta.</b>')).toBeLessThan(html.indexOf('Guest n0'))
+    expect(html).toContain('hello@magicengine.cloud')
+  })
+
   it('the subject carries the two numbers staff act on', () => {
-    expect(buildWeeklySubject(report(1))).toBe('Acme <Tours> · follow-up report Mon 30 Nov: 1 new lead to call, 1 waiting for a reply')
+    expect(buildWeeklySubject(report(1))).toBe('[Beta] Acme <Tours> · follow-up report Mon 30 Nov: 1 new lead to call, 1 waiting for a reply')
   })
 
   it('every group has English wording, and every group row is in the body', () => {
