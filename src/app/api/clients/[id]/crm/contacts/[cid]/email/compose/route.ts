@@ -63,7 +63,8 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     })
     if (!linked.ok) {
       const refusal = LINK_REFUSAL[linked.reason]
-      return NextResponse.json({ error: refusal.message, reason: `ai_letter_${linked.reason}` }, { status: refusal.status })
+      // `final`: editing the letter cannot help — this draft belongs to another guest or was already sent; draft again.
+      return NextResponse.json({ error: refusal.message, reason: `ai_letter_${linked.reason}`, final: linked.reason !== 'write_failed' }, { status: refusal.status })
     }
   }
 

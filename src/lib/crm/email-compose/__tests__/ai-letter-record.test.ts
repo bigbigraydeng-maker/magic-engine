@@ -6,9 +6,9 @@ import { LINK_REFUSAL, linkAiLetterForSend, parseAiLetterId, parseSurface, recor
 type Row = Record<string, unknown>
 
 /** A tiny in-memory stand-in: insert / select-eq-neq-in-or-limit-maybeSingle / update, on two tables. */
-function fakeDb(rows: Row[], opts: { failInsert?: boolean; failUpdate?: boolean; receipts?: Row[] } = {}) {
+function fakeDb(rows: Row[], opts: { failInsert?: boolean; failUpdate?: boolean; receipts?: Row[]; log?: Row[] } = {}) {
   const writes: Array<{ op: string; values: Row }> = []
-  const tables: Record<string, Row[]> = { crm_ai_letters: rows, crm_email_send_receipts: opts.receipts ?? [] }
+  const tables: Record<string, Row[]> = { crm_ai_letters: rows, crm_email_send_receipts: opts.receipts ?? [], conversation_outbound_log: opts.log ?? [] }
   const db = {
     from(table: string) {
       const data = tables[table]
@@ -21,6 +21,7 @@ function fakeDb(rows: Row[], opts: { failInsert?: boolean; failUpdate?: boolean;
         update(values: Row) { pending = { op: 'update', values }; return q },
         select() { return q },
         limit() { return q },
+        like(k: string, pat: string) { const pre = pat.replace(/%$/, ''); tests.push((r) => String(r[k] ?? '').startsWith(pre)); return q },
         eq(k: string, v: unknown) { tests.push((r) => r[k] === v); return q },
         neq(k: string, v: unknown) { tests.push((r) => r[k] !== v); return q },
         in(k: string, vs: unknown[]) { tests.push((r) => vs.includes(r[k])); return q },
@@ -150,5 +151,17 @@ describe('linkAiLetterForSend', () => {
     }) as typeof realFrom
     expect(await linkAiLetterForSend(raced, link())).toEqual({ ok: false, reason: 'write_failed' })
     expect(f.rows[0].request_id).toBe('r-other')
+  })
+
+  it('the older letter\'s send started but left no receipt yet (in flight, or a client without receipts) → refused, nothing freed', async () => {
+    const f = fakeDb([{ ...base, id: 'OLD', request_id: 'r1' }, { ...base }], { log: [{ client_id: 'c1', meta_message_id: 'req:r1|msg:m', status: 'pending' }] })
+    expect(await linkAiLetterForSend(f.db, link())).toEqual({ ok: false, reason: 'other_send' })
+    expect(f.rows.find((r) => r.id === 'OLD')?.request_id).toBe('r1')
+  })
+
+  it('the older letter was released moments ago (its send may hold the lock with nothing written) → not freed, retry later', async () => {
+    const f = fakeDb([{ ...base, id: 'OLD', request_id: 'r1', released_at: new Date(NOW.getTime() - 60_000).toISOString() }, { ...base }])
+    expect(await linkAiLetterForSend(f.db, link())).toEqual({ ok: false, reason: 'write_failed' })
+    expect(f.rows.find((r) => r.id === 'OLD')?.request_id).toBe('r1')
   })
 })

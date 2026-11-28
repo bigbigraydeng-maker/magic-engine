@@ -72,17 +72,23 @@ export interface AiLetterLink {
 
 export type LinkResult = { ok: true; edited: boolean } | { ok: false; reason: 'not_found' | 'other_send' | 'write_failed' }
 
-/** A send attempt that went out, or whose outcome is not known yet, counts as used. */
+/** How long a send can hold its lock; a letter released more recently than this may still be on its way out. */
+const SEND_IN_FLIGHT_MS = 5 * 60_000
+
+/**
+ * A request id counts as used when the send path started it: the outbound log row it writes BEFORE calling the mail
+ * provider (pending or sent — the same rows `findPriorSend` reads), or a receipt that says sent / outcome unknown.
+ * The outbound log covers every client and a send still in flight; the receipts alone do not.
+ */
 async function requestWasSent(db: SupabaseClient, clientId: string, requestId: string): Promise<boolean | null> {
-  const { data, error } = await db
-    .from('crm_email_send_receipts')
-    .select('id')
-    .eq('client_id', clientId)
-    .eq('request_id', requestId)
-    .in('outcome', ['sent', 'unknown'])
-    .limit(1)
-  if (error) return null
-  return (data ?? []).length > 0
+  const [log, receipts] = await Promise.all([
+    db.from('conversation_outbound_log').select('id').eq('client_id', clientId)
+      .like('meta_message_id', `req:${requestId}%`).in('status', ['pending', 'sent']).limit(1),
+    db.from('crm_email_send_receipts').select('id').eq('client_id', clientId)
+      .eq('request_id', requestId).in('outcome', ['sent', 'unknown']).limit(1),
+  ])
+  if (log.error || receipts.error) return null
+  return (log.data ?? []).length > 0 || (receipts.data ?? []).length > 0
 }
 
 /**
@@ -92,13 +98,16 @@ async function requestWasSent(db: SupabaseClient, clientId: string, requestId: s
 async function freeRequestId(db: SupabaseClient, l: AiLetterLink): Promise<LinkResult | null> {
   const other = await db
     .from('crm_ai_letters')
-    .select('id')
+    .select('id, released_at')
     .eq('client_id', l.clientId)
     .eq('request_id', l.requestId)
     .neq('id', l.aiLetterId)
     .maybeSingle()
   if (other.error) return { ok: false, reason: 'write_failed' }
   if (other.data === null) return null
+  // Released moments ago: that send may be inside its lock right now with nothing written yet — never take its id.
+  const releasedAt = Date.parse(String((other.data as { released_at: string | null }).released_at ?? ''))
+  if (!Number.isNaN(releasedAt) && l.now.getTime() - releasedAt < SEND_IN_FLIGHT_MS) return { ok: false, reason: 'write_failed' }
   const sent = await requestWasSent(db, l.clientId, l.requestId)
   if (sent === null) return { ok: false, reason: 'write_failed' }
   if (sent) return { ok: false, reason: 'other_send' }
