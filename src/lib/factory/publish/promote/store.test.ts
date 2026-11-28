@@ -190,4 +190,24 @@ describe('writeOrderPublishedRef(乐观并发)', () => {
     results.content_work_orders = [{ data: null, error: { message: 'down' } }]
     await expect(createSupabasePromoteStore().writeOrderPublishedRef('wo-1', 'old', {})).rejects.toBeTruthy()
   })
+
+  it('转公开把状态写成 published,过滤仍是 published 或 platform_draft,不会写成 approved', async () => {
+    results.content_work_orders = [{ data: [{ id: 'wo-1' }], error: null }]
+    const ok = await createSupabasePromoteStore().writeOrderPublishedRef(
+      'wo-1', 'old', { video_state: 'PUBLISHED' }, { status: 'published' },
+    )
+    expect(ok).toBe(true)
+    const update = calls.find((c) => c.table === 'content_work_orders' && c.method === 'update')
+    expect(update?.args[0]).toMatchObject({ status: 'published', published_ref: { video_state: 'PUBLISHED' } })
+    expect(JSON.stringify(update?.args[0])).not.toContain('approved')
+    expect(has('content_work_orders', 'in', 'status', ['published', 'platform_draft'])).toBe(true)
+    expect(has('content_work_orders', 'eq', 'status', 'approved')).toBe(false)
+  })
+
+  it('只改回执时不带 status,避免把草稿提前标成已发布', async () => {
+    results.content_work_orders = [{ data: [{ id: 'wo-1' }], error: null }]
+    await createSupabasePromoteStore().writeOrderPublishedRef('wo-1', 'old', { video_state: 'DRAFT' })
+    const update = calls.find((c) => c.table === 'content_work_orders' && c.method === 'update')
+    expect(update?.args[0]).not.toHaveProperty('status')
+  })
 })

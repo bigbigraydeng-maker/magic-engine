@@ -9,7 +9,7 @@
  * 发布正文取分镜文案;CTA 与带追踪参数的落地页链接必须放在首评。
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
 vi.mock('@/lib/workflows/inngest-event', () => ({ sendInngestEvent: vi.fn(async () => ({ event_ids: ['evt-1'] })) }))
@@ -64,6 +64,8 @@ interface Scenario {
   externalNoConsent?: boolean
   /** Post copy (the only segment caption) for catalog fact re-check cases */
   segmentCaption?: string
+  /** First platform_draft receipt write is rejected by the status check. */
+  rejectPlatformDraft?: boolean
 }
 
 /** 记录所有对 content_work_orders 的 update payload,用来断言最终状态 */
@@ -87,6 +89,15 @@ function installMocks(s: Scenario) {
           woUpdates.push(ctx.payload ?? {})
           if (s.anchorWriteError && (ctx.payload?.published_ref as { provisional?: boolean } | undefined)?.provisional) {
             return { data: null, error: { message: 'db down' } }
+          }
+          if (s.rejectPlatformDraft && ctx.payload?.status === 'platform_draft') {
+            return {
+              data: null,
+              error: {
+                code: '23514',
+                message: 'new row for relation "content_work_orders" violates check constraint "content_work_orders_status_check"',
+              },
+            }
           }
           // claimOne 的条件 UPDATE:返回领到的工单整行
           if (ctx.payload?.status === 'publishing') {
@@ -434,5 +445,65 @@ describe('发布记录与失败原因', () => {
     expect(mockPublish).not.toHaveBeenCalled()
     expect(r.detail).toBe('interrupted_verify_manual')
     expect(String(finalStatus()!.reject_reason)).toContain('中断')
+  })
+})
+
+describe('platform draft receipt write', () => {
+  const KEY = 'FACTORY_WRITE_PLATFORM_DRAFT'
+  let previous: string | undefined
+
+  beforeEach(() => {
+    previous = process.env[KEY]
+    delete process.env[KEY]
+  })
+
+  afterEach(() => {
+    if (previous === undefined) delete process.env[KEY]
+    else process.env[KEY] = previous
+  })
+
+  it('flag off keeps the legacy published + DRAFT receipt and does not re-upload', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz' } })
+    const r = await run()
+    expect(r.result).toBe('drafted')
+    expect(mockPublish).toHaveBeenCalledTimes(1)
+    expect(finalStatus()).toMatchObject({ status: 'published' })
+    expect((finalStatus()!.published_ref as { video_state?: string }).video_state).toBe('DRAFT')
+    expect(woUpdates.some((u) => u.status === 'platform_draft')).toBe(false)
+    expect(woUpdates.some((u) => u.status === 'approved')).toBe(false)
+  })
+
+  it('flag on writes platform_draft and keeps video_state DRAFT', async () => {
+    process.env[KEY] = 'true'
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz' } })
+    const r = await run()
+    expect(r.result).toBe('drafted')
+    expect(mockPublish).toHaveBeenCalledTimes(1)
+    expect(finalStatus()).toMatchObject({ status: 'platform_draft' })
+    expect((finalStatus()!.published_ref as { video_state?: string }).video_state).toBe('DRAFT')
+    expect(sendInngestEvent).not.toHaveBeenCalled()
+  })
+
+  it('flag on falls back to published + DRAFT when the status check rejects platform_draft', async () => {
+    process.env[KEY] = 'true'
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz' }, rejectPlatformDraft: true })
+    const r = await run()
+    expect(r.result).toBe('drafted')
+    expect(mockPublish).toHaveBeenCalledTimes(1)
+    const drafts = woUpdates.filter((u) => u.status === 'platform_draft')
+    const legacy = woUpdates.filter((u) => u.status === 'published')
+    expect(drafts).toHaveLength(1)
+    expect((drafts[0].published_ref as { video_state?: string }).video_state).toBe('DRAFT')
+    expect(legacy).toHaveLength(1)
+    expect((legacy[0].published_ref as { video_state?: string }).video_state).toBe('DRAFT')
+    expect(finalStatus()!.status).toBe('published')
+  })
+
+  it('anything other than exact true stays on the legacy write', async () => {
+    process.env[KEY] = 'TRUE'
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz' } })
+    await run()
+    expect(finalStatus()!.status).toBe('published')
+    expect((finalStatus()!.published_ref as { video_state?: string }).video_state).toBe('DRAFT')
   })
 })

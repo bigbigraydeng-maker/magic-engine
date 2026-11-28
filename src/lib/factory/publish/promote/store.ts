@@ -119,10 +119,16 @@ async function writeOrderPublishedRef(
   id: string,
   expectedUpdatedAt: string,
   nextRef: Record<string, unknown>,
+  options?: { status?: 'published' },
 ): Promise<boolean> {
+  const patch: { published_ref: Record<string, unknown>; updated_at: string; status?: 'published' } = {
+    published_ref: nextRef,
+    updated_at: new Date().toISOString(),
+  }
+  if (options?.status === 'published') patch.status = 'published'
   const { data, error } = await supabaseAdmin
     .from('content_work_orders')
-    .update({ published_ref: nextRef, updated_at: new Date().toISOString() })
+    .update(patch)
     .eq('id', id)
     .eq('updated_at', expectedUpdatedAt)
     .in('status', [...ON_PLATFORM_ORDER_STATUSES])
