@@ -6,21 +6,16 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { loadContactNames } from '@/lib/crm/enquiry-daily-load'
 import { DEFAULT_PICKUP_CONFIG } from '@/lib/crm/ai-takeover/pickup'
-import { decideAll, latestEnquiries, loadInputs, pickupSwitches } from '@/lib/crm/ai-takeover/pickup-run'
+import { decideAll, latestEnquiries, loadInputs } from '@/lib/crm/ai-takeover/pickup-run'
 
 export { loadContactNames }
 
 /**
- * How many guests the AI pickup rules would take today, by the pickup page's own rules (never a second copy of them).
- * null = this client has not opted in to the AI pickup, so the report says nothing about it.
+ * How many guests match the AI pickup rules today, by the pickup's own rules (never a second copy of them).
+ * This is the pool, not what the release page offers in one day: the page takes a limited batch and drops guests
+ * it cannot email. The report words it that way.
  */
-export async function countAiReady(
-  sb: SupabaseClient,
-  clientId: string,
-  now: Date,
-  env: Record<string, string | undefined> = process.env,
-): Promise<number | null> {
-  if (!pickupSwitches(env).clients.includes(clientId)) return null
+export async function countAiReady(sb: SupabaseClient, clientId: string, now: Date): Promise<number> {
   const leads = await latestEnquiries(sb, clientId, now)
   if (leads.size === 0) return 0
   const inputs = await loadInputs(sb, clientId, [...leads.keys()])

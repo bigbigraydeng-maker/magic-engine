@@ -107,17 +107,20 @@ function isEngagement(t: TouchRow): boolean {
   return t.direction === 'inbound' && (engagementFromMetadata(t.metadata) !== null || t.source === 'mailchimp')
 }
 
-export interface Acc { staff: string | null; guest: string | null; enquiry: string | null; engaged: string | null; dnc: DncTouch[] }
+export interface Acc { staff: string | null; guest: string | null; guestChannel: string | null; enquiry: string | null; engaged: string | null; dnc: DncTouch[] }
 
 /** One pass over a guest's touchpoints → the dated facts the groups read. Exported for tests. */
 export function touchFacts(touches: readonly TouchRow[]): Acc {
-  const a: Acc = { staff: null, guest: null, enquiry: null, engaged: null, dnc: [] }
+  const a: Acc = { staff: null, guest: null, guestChannel: null, enquiry: null, engaged: null, dnc: [] }
   for (const t of touches) {
     const outcome = typeof t.metadata?.outcome === 'string' ? t.metadata.outcome : null
     a.dnc.push({ outcome, flagged: t.metadata?.do_not_contact === true, occurredAt: t.occurred_at })
     if (isEnquiry(t)) a.enquiry = later(a.enquiry, t.occurred_at)
     else if (isEngagement(t)) a.engaged = later(a.engaged, t.occurred_at)
-    else if (isGuestMessage(t)) a.guest = later(a.guest, t.occurred_at)
+    else if (isGuestMessage(t) && later(a.guest, t.occurred_at) === t.occurred_at) {
+      a.guest = t.occurred_at
+      a.guestChannel = t.channel
+    }
     // A call the guest made and we answered is both: the guest spoke and a person on our side took it.
     if (isHumanFollowup({ channel: t.channel, direction: t.direction, occurredAt: t.occurred_at, source: t.source, metadata: t.metadata })) {
       a.staff = later(a.staff, t.occurred_at)
@@ -205,12 +208,14 @@ function bookIndex(book: { stages: StageRow[]; bookings: Array<{ contact_id: str
 }
 
 /**
- * A sender that does not look like a guest enquiring (bulk mail, supplier notice, sales pitch, platform account),
- * and nobody has moved this contact on. Same two conditions as the "今天先联系" list (`demoteNonEnquirySender`):
- * once a person moves the contact to a later stage, the machine no longer second-guesses them.
+ * A sender that does not look like a guest enquiring (bulk mail, supplier notice, sales pitch, platform account).
+ * Only for a contact nobody has touched in any way: no person moved the stage on, the contact never filled a form,
+ * and we never called or wrote. That is the same narrow range as the "今天先联系" list's own rule
+ * (`demoteNonEnquirySender`, new-and-untouched only): a guest who enquired is never dropped for an odd address.
  */
-function looksLikeNonEnquiry(c: ContactRow): boolean {
-  return !hasHumanProgressed(c.stage) && senderShapeOf({ email: c.primary_email, displayName: c.display_name }) !== null
+export function looksLikeNonEnquiry(c: { stage: string | null; primary_email: string | null; display_name: string | null }, a: Pick<Acc, 'enquiry' | 'staff'>): boolean {
+  if (a.enquiry !== null || a.staff !== null || hasHumanProgressed(c.stage)) return false
+  return senderShapeOf({ email: c.primary_email, displayName: c.display_name }) !== null
 }
 
 function guestFacts(c: ContactRow, a: Acc, index: BookIndex, qualified: ReadonlySet<string>, now: Date): GuestFacts {
@@ -221,7 +226,7 @@ function guestFacts(c: ContactRow, a: Acc, index: BookIndex, qualified: Readonly
   return {
     doNotContact: isDoNotContact(c.do_not_contact === true, a.dnc),
     // Same judgement as the "今天先联系" list: by email domain, by system-account name, by the test-lead name.
-    notGuest: contactKindOf(emails, index.rules) !== 'retail' || isSystemAccountName(c.display_name) || isMeTestContact(c.display_name) || looksLikeNonEnquiry(c),
+    notGuest: contactKindOf(emails, index.rules) !== 'retail' || isSystemAccountName(c.display_name) || isMeTestContact(c.display_name) || looksLikeNonEnquiry(c, a),
     hasActiveBooking: index.booked.has(c.id),
     stage: c.stage,
     stageAction: st?.action ?? null,
@@ -233,6 +238,7 @@ function guestFacts(c: ContactRow, a: Acc, index: BookIndex, qualified: Readonly
     hasPhone: nonEmpty(c.primary_phone) || index.hasPhone.has(c.id),
     lastStaffAt: a.staff,
     lastGuestMessageAt: a.guest,
+    lastGuestMessageChannel: a.guestChannel,
     lastEnquiryAt: a.enquiry,
     lastEngagedAt: a.engaged,
   }
@@ -257,8 +263,12 @@ export async function loadFollowupProgress(
   const enquiryWeek = new Set<string>()
   for (const c of book.contacts) {
     const a = touchFacts(index.touchesOf.get(c.id) ?? [])
-    verdicts.set(c.id, groupOf(guestFacts(c, a, index, book.qualified, now), now, cfg))
+    const verdict = groupOf(guestFacts(c, a, index, book.qualified, now), now, cfg)
+    verdicts.set(c.id, verdict)
     dates.set(c.id, { lastEnquiryAt: a.enquiry, lastGuestMessageAt: a.guest })
+    // The week's numbers count guests: people in the follow-up work or already booked. Staff, trade partners,
+    // sales pitches and closed contacts are not "guests who wrote".
+    if (!verdict.inScope && verdict.why !== 'booked') continue
     if (a.staff !== null && Date.parse(a.staff) >= sinceMs) staffWeek.add(c.id)
     if (a.guest !== null && Date.parse(a.guest) >= sinceMs) repliedWeek.add(c.id)
     if (a.enquiry !== null && Date.parse(a.enquiry) >= sinceMs) enquiryWeek.add(c.id)

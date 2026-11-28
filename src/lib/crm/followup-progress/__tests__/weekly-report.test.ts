@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildWeeklyBody, buildWeeklyReport, buildWeeklySubject, GROUP_LABEL_EN, LIST_MAX, listedContactIds } from '../weekly-report'
+import { buildWeeklyBody, buildWeeklyReport, buildWeeklySubject, GROUP_LABEL_EN, LIST_MAX, listedContactIds, reportName } from '../weekly-report'
 import { emptyCounts, FOLLOWUP_GROUPS, type GroupVerdict } from '../groups'
 import type { FollowupProgressDetail } from '../load'
 
@@ -80,8 +80,8 @@ describe('the weekly report', () => {
   })
 
   it('says how many guests wait on the AI release page, and stays silent when the client does not use it', () => {
-    expect(buildWeeklyBody(report(1, 216), TZ)).toContain('216 guests are ready')
-    expect(buildWeeklyBody(report(1, 0), TZ)).toContain('nobody is waiting to be released')
+    expect(buildWeeklyBody(report(1, 216), TZ)).toContain('216 guests match the AI pickup rules')
+    expect(buildWeeklyBody(report(1, 0), TZ)).toContain('nobody matches the AI pickup rules today')
     expect(buildWeeklyBody(report(1, null), TZ)).not.toContain('AI follow-up:')
   })
 
@@ -92,9 +92,33 @@ describe('the weekly report', () => {
     const n = names(d)
     n.set('u1', 'Pushy Supplier')
     const html = buildWeeklyBody(buildWeeklyReport({ clientName: 'A', day: 'd', detail: d, history: [], names: n, aiReady: null, now: NOW }), TZ)
-    expect(html).toContain('1 sender wrote or rang without ever filling a form')
+    expect(html).toContain('1 sender emailed without ever filling a form')
     expect(html).not.toContain('Pushy Supplier')
     expect(listedContactIds(d)).not.toContain('u1')
+  })
+
+  it('a name that holds a phone number or an address is printed without them, in English', () => {
+    expect(reportName('Mary 021 555 1234')).toBe('Mary')
+    expect(reportName('Sue +6421987654')).not.toMatch(/\d{4}/)
+    expect(reportName('Bob <bob@x.com> 0275551234')).not.toMatch(/@|\d{4}/)
+    expect(reportName(null)).toBe('No name left')
+    expect(reportName('Jane Doe')).toBe('Jane Doe')
+    const d = detail(1)
+    const n = names(d)
+    n.set('n0', 'Mary 021 555 1234')
+    const html = buildWeeklyBody(buildWeeklyReport({ clientName: 'A', day: 'd', detail: d, history: [], names: n, aiReady: null, now: NOW }), TZ)
+    expect(html).not.toContain('555 1234')
+    expect(html).not.toContain('号码略')
+  })
+
+  it('the reply list is ordered by when the guest last wrote, newest first, shown as a local date', () => {
+    const d = detail(0)
+    d.verdicts.set('w2', { inScope: true, group: 'awaiting_reply' })
+    // 27 Nov 11:30 UTC is already 28 Nov in Auckland.
+    d.dates.set('w2', { lastEnquiryAt: '2026-11-01T00:00:00Z', lastGuestMessageAt: '2026-11-27T11:30:00Z' })
+    const r = buildWeeklyReport({ clientName: 'A', day: 'd', detail: d, history: [], names: names(d), aiReady: null, now: NOW })
+    expect(r.awaitingReply.shown.map((g) => g.contactId)).toEqual(['w2', 'w1'])
+    expect(buildWeeklyBody(r, TZ)).toContain('last heard 28 Nov')
   })
 
   it('the subject carries the two numbers staff act on', () => {

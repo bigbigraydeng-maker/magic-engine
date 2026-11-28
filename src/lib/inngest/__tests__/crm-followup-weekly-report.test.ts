@@ -16,6 +16,7 @@ import {
   createFollowupWeeklyReportFunction,
   runFollowupWeeklyReport,
   weeklyReportPaused,
+  weekKey,
   PAUSED_REASON,
   WEEKLY_REPORT_CRON,
   WEEKLY_REPORT_JOB,
@@ -125,7 +126,7 @@ describe('the run', () => {
     expect(send).toHaveBeenCalledTimes(1)
     const call = send.mock.calls[0][0]
     expect(call.recipients).toEqual(['hello@magicengine.cloud'])
-    expect(call.idempotencyKey).toBe(`${WEEKLY_REPORT_JOB}:${CTS}:2026-11-29T11:00:00.000Z`)
+    expect(call.idempotencyKey).toBe(`${WEEKLY_REPORT_JOB}:${CTS}:week-of-2026-11-30`)
     expect(receipt.results[0]).toMatchObject({ client_id: CTS, client_name: 'CTS Tours', in_scope: 3, new_leads: 2, awaiting_reply: 1, ai_ready: 216, sent: true, no_publish: false, provider_message_id: 'msg-1', recipients: ['hello@magicengine.cloud'] })
     expect(JSON.stringify(receipt)).not.toContain('Secret Guest')
     expect(finish).toHaveBeenCalledWith(expect.objectContaining({ processed: 1, completed: 1, failed: 0 }))
@@ -148,12 +149,21 @@ describe('the run', () => {
     expect(finish).toHaveBeenCalledWith(expect.objectContaining({ failed: 1 }))
   })
 
-  it('a send the mail service refused is a failure with its reason, and no_publish stays true', async () => {
-    const { step } = fakeStep()
-    const refuse = vi.fn(async (p: { recipients: string[] }) => ({ sent: false, reason: 'RESEND_API_KEY 未配置', recipients: p.recipients }))
+  it('a send that did not go out throws inside its step (so it is retried), then is recorded as failed with the reason', async () => {
+    let attempts = 0
+    const step: WeeklyReportStep = { run: async <T,>(_id: string, fn: () => Promise<T>): Promise<T> => JSON.parse(JSON.stringify(await fn())) as T }
+    const refuse = vi.fn(async (p: { recipients: string[] }) => { attempts += 1; return { sent: false, reason: 'mail service down', recipients: p.recipients } })
     const receipt = await runFollowupWeeklyReport(step, deps({ send: refuse as unknown as WeeklyReportDeps['send'] }), NOW)
-    expect(receipt.results[0]).toMatchObject({ sent: false, no_publish: true, reason: 'RESEND_API_KEY 未配置' })
+    expect(attempts).toBe(1)
+    expect(receipt.results[0]).toMatchObject({ sent: false, no_publish: true, reason: 'mail service down', new_leads: 2 })
     expect(finish).toHaveBeenCalledWith(expect.objectContaining({ completed: 0, failed: 1 }))
+  })
+
+  it('one key per client per week: the same on every day of the week, new the next Monday', () => {
+    const k = (iso: string) => weekKey(CTS, new Date(iso))
+    expect(k('2026-11-29T19:00:00Z')).toBe(k('2026-12-03T05:00:00Z')) // Mon 30 Nov 08:00 and Thu 3 Dec 18:00 NZDT
+    expect(k('2026-11-29T10:00:00Z')).toContain('week-of-2026-11-23') // still Sunday 29 Nov 23:00 NZDT
+    expect(k('2026-12-06T19:00:00Z')).toContain('week-of-2026-12-07')
   })
 
   it('the AI count failing to read does not lose the report: it is left out', async () => {

@@ -111,6 +111,20 @@ async function readClientName(sb: SupabaseClient, clientId: string): Promise<str
   return (data as { name?: string | null } | null)?.name ?? null
 }
 
+/**
+ * One key per client per week (the Monday of the client's week), so a retry or a second run on another day of the
+ * same week asks the mail service for the same send. The mail service remembers a key for about a day: a run later
+ * in the week would send again, and a same-day re-run with changed numbers is refused. Both are manual re-runs.
+ */
+export function weekKey(clientId: string, now: Date): string {
+  const dayStartMs = localDayStartMs(now, WEEKLY_REPORT_TZ)
+  const weekday = new Intl.DateTimeFormat('en-US', { timeZone: WEEKLY_REPORT_TZ, weekday: 'short' }).format(new Date(dayStartMs))
+  const back = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].indexOf(weekday)
+  // Noon of the day, minus whole days, read back as a local date: safe across a daylight-saving change.
+  const monday = new Intl.DateTimeFormat('en-CA', { timeZone: WEEKLY_REPORT_TZ }).format(new Date(dayStartMs + 12 * 3_600_000 - Math.max(back, 0) * 86_400_000))
+  return `${WEEKLY_REPORT_JOB}:${clientId}:week-of-${monday}`
+}
+
 /** Everything one client's report needs. The AI count failing does not lose the report: it is left out. */
 async function buildFor(deps: WeeklyReportDeps, clientId: string, day: string, now: Date): Promise<WeeklyReport> {
   const [clientName, detail, history] = await Promise.all([
@@ -119,7 +133,7 @@ async function buildFor(deps: WeeklyReportDeps, clientId: string, day: string, n
     deps.loadHistory(deps.supabase, clientId, now),
   ])
   const names = await deps.loadNames(deps.supabase, clientId, listedContactIds(detail))
-  const aiReady = await deps.countAiReady(deps.supabase, clientId, now, deps.env ?? process.env).catch(() => null)
+  const aiReady = await deps.countAiReady(deps.supabase, clientId, now).catch(() => null)
   return buildWeeklyReport({ clientName: clientName ?? 'This client', day, detail, history, names, aiReady, now })
 }
 
@@ -144,23 +158,17 @@ async function runForClient(step: WeeklyReportStep, deps: WeeklyReportDeps, clie
     ai_ready: report.aiReady,
   }
   if (paused) return { ...base, ...counts, sent: false, reason: PAUSED_REASON }
-  return step.run(`send-${clientId}`, async () => {
-    const r = await deps.send({
-      report,
-      timeZone: WEEKLY_REPORT_TZ,
-      recipients,
-      idempotencyKey: `${WEEKLY_REPORT_JOB}:${clientId}:${new Date(dayStartMs).toISOString()}`,
+  try {
+    return await step.run(`send-${clientId}`, async () => {
+      const r = await deps.send({ report, timeZone: WEEKLY_REPORT_TZ, recipients, idempotencyKey: weekKey(clientId, now) })
+      // Not sent = throw inside the step, so Inngest retries it (a mail service hiccup should not cost a week's
+      // report). The key makes a retry safe: the mail service accepts one send per key.
+      if (!r.sent) throw new Error(r.reason ?? '没发出去')
+      return { ...base, ...counts, sent: true, no_publish: false, ...(r.messageId ? { provider_message_id: r.messageId } : {}), recipients: r.recipients }
     })
-    return {
-      ...base,
-      ...counts,
-      sent: r.sent,
-      no_publish: !r.sent,
-      ...(r.reason ? { reason: r.reason } : {}),
-      ...(r.messageId ? { provider_message_id: r.messageId } : {}),
-      recipients: r.recipients,
-    }
-  })
+  } catch (err) {
+    return { ...base, ...counts, sent: false, reason: errText(err, '发信时出现未知错误') }
+  }
 }
 
 /** The run itself, apart from the Inngest wiring, so tests call it directly. */

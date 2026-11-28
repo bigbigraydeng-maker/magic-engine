@@ -9,8 +9,8 @@
  * address, no phone number. Lists are capped, and the cap is said out loud next to the full count.
  */
 
-import { contactUrl, digestName, esc, APP_BASE } from '@/lib/crm/digest-shared'
-import { FOLLOWUP_GROUPS, type FollowupGroup, type GroupCounts } from './groups'
+import { contactUrl, digestName, esc, scrubContactDetails, APP_BASE } from '@/lib/crm/digest-shared'
+import { DEFAULT_GROUP_CONFIG, FOLLOWUP_GROUPS, type FollowupGroup, type GroupCounts } from './groups'
 import { delta, pointDaysAgo, type DayPoint } from './history'
 import type { FollowupProgressDetail, WeekActivity } from './load'
 
@@ -19,14 +19,14 @@ export const LIST_MAX = 15
 
 /** English wording per group, for the report only. The CRM page keeps its own (Chinese) wording in `groups.ts`. */
 export const GROUP_LABEL_EN: Record<FollowupGroup, string> = {
-  awaiting_reply: 'Known guest wrote or rang, no reply on record',
-  unknown_sender: 'Wrote or rang out of the blue (no form, never contacted)',
-  new_lead: 'New form in the last 14 days, not contacted yet',
+  awaiting_reply: 'Guest wrote or rang, no reply on record',
+  unknown_sender: 'Emailed out of the blue (no form, never contacted)',
+  new_lead: `New form in the last ${DEFAULT_GROUP_CONFIG.newLeadDays} days, not contacted yet`,
   never_contacted: 'Filled a form earlier, never called or emailed',
   no_enquiry: 'No form on record, never contacted',
   qualified: 'High intent, not booked yet',
   warm: 'Called or emailed before, still opening our emails',
-  cold: 'Called or emailed before, quiet for 30 days',
+  cold: `Called or emailed before, quiet for ${DEFAULT_GROUP_CONFIG.warmDays} days`,
   later: 'Said "later", or snoozed by staff',
   ai: 'With the AI follow-up',
   no_contact_details: 'No email and no phone',
@@ -60,11 +60,22 @@ function ms(iso: string | null): number {
   return Number.isFinite(n) ? n : 0
 }
 
+const NO_NAME = 'No name left'
+
+/**
+ * How the report names a guest. A name field can hold an address or a number ("Mary 021 555 1234"): both are cut
+ * before it is printed, and what the shared helpers print in Chinese is put in English for this report.
+ */
+export function reportName(displayName: string | null | undefined): string {
+  const cleaned = scrubContactDetails(digestName(displayName)).replace(/（号码略）/g, ' ').replace(/\s+/g, ' ').trim()
+  return cleaned === '' || cleaned === '未留姓名' ? NO_NAME : cleaned
+}
+
 function members(detail: FollowupProgressDetail, group: FollowupGroup, by: 'lastEnquiryAt' | 'lastGuestMessageAt', names: ReadonlyMap<string, string | null>): { total: number; shown: ReportGuest[] } {
   const all: ReportGuest[] = []
   for (const [id, v] of detail.verdicts) {
     if (!v.inScope || v.group !== group) continue
-    all.push({ contactId: id, name: digestName(names.get(id)), at: detail.dates.get(id)?.[by] ?? null })
+    all.push({ contactId: id, name: reportName(names.get(id)), at: detail.dates.get(id)?.[by] ?? null })
   }
   // Newest first: the guest who just reached out is the one most worth a call today.
   all.sort((a, b) => ms(b.at) - ms(a.at) || a.contactId.localeCompare(b.contactId))
@@ -158,25 +169,25 @@ function renderGroups(r: WeeklyReport): string {
 function renderAi(r: WeeklyReport): string {
   if (r.aiReady === null) return ''
   const link = `<a href="${esc(crmUrl(r.clientId, 'ai-pickup'))}" style="color:#2563eb">Open the "交给 AI" page</a>`
-  if (r.aiReady === 0) return `<p style="font-size:14px;margin:18px 0 0"><b>AI follow-up:</b> nobody is waiting to be released today.</p>`
-  return `<p style="font-size:14px;margin:18px 0 0"><b>AI follow-up:</b> ${plural(r.aiReady, 'guest is', 'guests are')} ready for a first brochure email and waiting for someone to release them (not rung within 7 days, or rung and not reached). Each batch needs one click. ${link}. Handed over in the last 7 days: ${r.week.takenByAi}.</p>`
+  if (r.aiReady === 0) return `<p style="font-size:14px;margin:18px 0 0"><b>AI follow-up:</b> nobody matches the AI pickup rules today.</p>`
+  return `<p style="font-size:14px;margin:18px 0 0"><b>AI follow-up:</b> ${plural(r.aiReady, 'guest matches', 'guests match')} the AI pickup rules (not rung within 7 days, or rung and not reached). Someone has to release them: the page offers a limited batch each day and holds back anyone it cannot email. ${link}. Handed over in the last 7 days: ${r.week.takenByAi}.</p>`
 }
 
 function renderUnknown(r: WeeklyReport): string {
   const n = r.counts.groups.unknown_sender
   if (n === 0) return ''
-  return `<p style="font-size:14px;margin:18px 0 0"><b>Also:</b> ${plural(n, 'sender', 'senders')} wrote or rang without ever filling a form, and nobody has answered. Most are suppliers or sales pitches, some may be guests writing directly. They are not listed here; a quick look in the CRM sorts them (mark the ones that are not guests as "非咨询").</p>`
+  return `<p style="font-size:14px;margin:18px 0 0"><b>Also:</b> ${plural(n, 'sender', 'senders')} emailed without ever filling a form, and nobody has answered. Some are guests writing directly, others are suppliers or sales pitches. They are not listed here; a quick look in the CRM sorts them (mark the ones that are not guests as "非咨询").</p>`
 }
 
 export function buildWeeklyBody(r: WeeklyReport, timeZone: string): string {
   return `
     <div style="font-family:sans-serif;max-width:640px;margin:0 auto;padding:24px;color:#0f172a">
       <p style="font-size:17px;font-weight:600;margin:0 0 4px">${esc(r.clientName)} — weekly follow-up report, ${esc(r.day)}</p>
-      <p style="font-size:14px;color:#334155;margin:0 0 14px">${r.counts.inScope} open guests who can still be contacted. <a href="${esc(crmUrl(r.clientId, 'followup-progress'))}" style="color:#2563eb">See the live numbers</a>.</p>
+      <p style="font-size:14px;color:#334155;margin:0 0 14px">${r.counts.inScope} open guests in the follow-up work. <a href="${esc(crmUrl(r.clientId, 'followup-progress'))}" style="color:#2563eb">See the live numbers</a>.</p>
       <p style="font-size:15px;font-weight:600;margin:0 0 6px">The last 7 days</p>
       ${renderWeek(r.week)}
-      ${renderList('Call first: new leads', 'Filled a form in the last 14 days and nobody has called or emailed since. Newest first.', r.newLeads, r.clientId, timeZone, 'form on')}
-      ${renderList('Reply today: guests waiting for an answer', 'Guests who filled a form or whom we contacted before, who then wrote or rang, with no reply on record. Check the mailbox first: a reply sent from outside the CRM may not be recorded.', r.awaitingReply, r.clientId, timeZone, 'last heard')}
+      ${renderList('Call first: new leads', `Filled a form in the last ${DEFAULT_GROUP_CONFIG.newLeadDays} days and nobody has called or emailed since. Newest first.`, r.newLeads, r.clientId, timeZone, 'form on')}
+      ${renderList('Reply today: guests waiting for an answer', 'Wrote or rang, and there is no reply on record. Most recent first. Check the mailbox first: a reply sent from outside the CRM may not be recorded.', r.awaitingReply, r.clientId, timeZone, 'last heard')}
       ${renderUnknown(r)}
       ${renderAi(r)}
       <p style="font-size:15px;font-weight:600;margin:24px 0 6px">Every group today</p>

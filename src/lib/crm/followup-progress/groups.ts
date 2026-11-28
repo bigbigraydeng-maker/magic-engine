@@ -44,6 +44,8 @@ export interface GuestFacts {
   lastStaffAt: string | null
   /** Latest time the guest wrote or rang in their own words: reply email, WhatsApp, a call (answered or missed). */
   lastGuestMessageAt: string | null
+  /** The channel of that latest message (email, phone, whatsapp, sms); null when there is none. */
+  lastGuestMessageChannel: string | null
   /** Latest enquiry form. */
   lastEnquiryAt: string | null
   /** Latest open or click on a mail of ours. */
@@ -89,9 +91,11 @@ export function groupOf(f: GuestFacts, now: Date, cfg: GroupConfig = DEFAULT_GRO
   if (f.qualified) return { inScope: true, group: 'qualified' }
   if (!f.hasEmail && !f.hasPhone) return { inScope: true, group: 'no_contact_details' }
   const enquiry = ms(f.lastEnquiryAt)
-  // Wrote to us out of the blue: no form, and we never contacted them. Could be a guest emailing directly, more
-  // often a supplier or a sales pitch. Kept apart so the "waiting for a reply" list stays a list of guests.
-  if (waiting) return { inScope: true, group: enquiry === null && staff === null ? 'unknown_sender' : 'awaiting_reply' }
+  // Emailed us out of the blue: no form, and we never contacted them. Could be a guest emailing directly, or a
+  // supplier or a sales pitch. Kept apart so the "waiting for a reply" list stays a list of guests.
+  // Only for email: a phone call or a WhatsApp message from someone we do not know is almost always a guest.
+  const outOfTheBlue = enquiry === null && staff === null && f.lastGuestMessageChannel === 'email'
+  if (waiting) return { inScope: true, group: outOfTheBlue ? 'unknown_sender' : 'awaiting_reply' }
   if (f.snoozed) return { inScope: true, group: 'later' }
   if (within(enquiry, now, cfg.newLeadDays) && (staff === null || (enquiry as number) > staff)) return { inScope: true, group: 'new_lead' }
   if (f.stageAction === 'defer') return { inScope: true, group: 'later' }
@@ -120,8 +124,8 @@ export interface GroupMeta {
  */
 export function groupMeta(cfg: GroupConfig = DEFAULT_GROUP_CONFIG): Record<FollowupGroup, GroupMeta> {
   return {
-    awaiting_reply: { label: '填过表或联系过的客人来信来电，之后没记录有人回', howTo: '员工今天回。先看邮箱里是不是已经回过，系统里可能没记上。', owner: 'staff', page: 'all', needsEmailFeature: false },
-    unknown_sender: { label: '只来过信或来过电，没填过表，我们也没联系过', howTo: '多半是供应商或推销，也可能是直接来信咨询的客人。员工扫一眼：是客人就回，不是就标成「非咨询」。', owner: 'staff', page: 'all', needsEmailFeature: false },
+    awaiting_reply: { label: '客人来信或来电，之后没记录有人回', howTo: '员工今天回。先看邮箱里是不是已经回过，系统里可能没记上。', owner: 'staff', page: 'all', needsEmailFeature: false },
+    unknown_sender: { label: '只发过邮件来，没填过表，我们也没联系过', howTo: '可能是直接来信咨询的客人，也可能是供应商或推销。员工扫一眼：是客人就回，不是就标成「非咨询」。', owner: 'staff', page: 'all', needsEmailFeature: false },
     new_lead: { label: `近 ${cfg.newLeadDays} 天填了表，之后还没人联系`, howTo: '员工今天打电话，最新填表的先打。', owner: 'staff', page: 'all', needsEmailFeature: false },
     never_contacted: { label: '填过表，记录里没人打过电话或发过信', howTo: '久没人打的可以交给 AI 发第一封信：到「交给 AI」页放行。那一页按自己的规则再筛一遍，能放行的人数比这里少。', owner: 'ai', page: 'ai-pickup', needsEmailFeature: true },
     no_enquiry: { label: '没填过表，也没记录有人联系', howTo: '多半是来信或私信进来的，员工看一眼是不是真客人。', owner: 'staff', page: 'all', needsEmailFeature: false },
