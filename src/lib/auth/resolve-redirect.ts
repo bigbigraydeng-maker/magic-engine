@@ -2,6 +2,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { getUserPermissions } from '@/lib/auth/whitelist'
 import { grantSignupBonus } from '@/lib/mtc/grant-signup-bonus'
 import { resolveSelfServeLanding } from '@/lib/auth/self-serve-routing'
+import { clientPortalMembershipsForUser } from '@/lib/auth/client-portal-membership'
 
 /**
  * Sentinel returned when an invite specifies expectedClientId but the
@@ -19,7 +20,7 @@ export const INVITE_INVALID_REDIRECT = '__INVITE_INVALID__' as const
  */
 interface AuthCapableClient {
   auth: {
-    getUser: () => Promise<{ data: { user: { email?: string | null } | null } }>
+    getUser: () => Promise<{ data: { user: { id?: string; email?: string | null; phone?: string | null; phone_confirmed_at?: string | null } | null } }>
   }
 }
 
@@ -43,7 +44,7 @@ export async function resolveRedirectForSession(
 ): Promise<string> {
   const { data: { user } } = await supabase.auth.getUser()
 
-  if (!user?.email) {
+  if (!user) {
     // Directed invite whose second-read (this getUser) sees no identity
     // MUST fail closed. Falling through to safePath (`/dashboard` for the
     // invite-landing flow) would let /dashboard middleware pick whichever
@@ -55,7 +56,7 @@ export async function resolveRedirectForSession(
     return safePath
   }
 
-  const email = user.email.toLowerCase()
+  const email = user.email?.toLowerCase() ?? ''
 
   const adminPerms = getUserPermissions(email)
   if (adminPerms?.role === 'admin') {
@@ -63,17 +64,15 @@ export async function resolveRedirectForSession(
   }
 
   // Non-admin portal users take priority
-  const { data: accessRows } = await supabaseAdmin
-    .from('client_portal_users')
-    .select('client_id, access_type')
-    .eq('email', email)
+  const membershipResult = await clientPortalMembershipsForUser(user)
+  const accessRows = membershipResult.rows
 
   // A specific-client invite (e.g. /auth/invite-landing) must only land the
   // invitee in the client it actually invited them to — the same email can
   // hold rows for several clients ((email, client_id) is not unique per
   // email), so without this an invite to client B could land in client A.
   const candidateRows = expectedClientId
-    ? accessRows?.filter(row => row.client_id === expectedClientId)
+    ? accessRows.filter(row => row.client_id === expectedClientId)
     : accessRows
 
   // Fail closed for invites whose target membership is missing. The token
@@ -86,18 +85,25 @@ export async function resolveRedirectForSession(
     return INVITE_INVALID_REDIRECT
   }
 
-  const selfServeUser = candidateRows?.find(row => row.access_type === 'self_serve')
-  const portalUser = candidateRows?.find(row =>
+  // Phone linking is an authenticated account settings flow. Preserve this one
+  // exact destination so passwordless email sign-in reaches the page; the page
+  // itself re-checks customer eligibility before showing account data/actions.
+  if (safePath === '/account/phone') return safePath
+
+  const selfServeUser = candidateRows.find(row => row.access_type === 'self_serve')
+  const portalUser = candidateRows.find(row =>
     row.access_type === 'portal' || row.access_type === 'both'
   )
-  const dashboardUser = candidateRows?.find(row =>
+  const dashboardUser = candidateRows.find(row =>
     row.access_type === 'dashboard' || row.access_type === 'fde' || row.access_type === 'client'
   )
 
   if (selfServeUser?.client_id) {
     // Grant 500 MTC welcome bonus on first verification for self_serve clients.
     // Idempotent — safe across the magic-link, Google, and OTP paths.
-    const bonusGranted = await grantSignupBonus(selfServeUser.client_id).catch(() => false)
+    const bonusGranted = selfServeUser.email
+      ? await grantSignupBonus(selfServeUser.client_id).catch(() => false)
+      : false
     return resolveSelfServeLanding(selfServeUser.client_id, safePath, bonusGranted)
   }
 
@@ -123,6 +129,14 @@ export async function resolveRedirectForSession(
     return '/prospect'
   }
 
+  // A confirmed phone-only Auth user may have returned after verifying OTP
+  // but before finishing workspace setup. Route them back to the resumable
+  // registration form instead of sending them to middleware's deny page.
+  if (!email && user.phone_confirmed_at) {
+    const params = new URLSearchParams({ complete: '1', next: safePath })
+    return `/portal/register?${params.toString()}`
+  }
+
   // Meta Ads AI is an authenticated deep link. A user may also have an old
   // public scan, but that historical record must not override the page they
   // explicitly asked to return to after login. Portal/dashboard membership
@@ -132,6 +146,8 @@ export async function resolveRedirectForSession(
   }
 
   // Prospects: have a public_scan_jobs record but no portal/dashboard access
+  if (!email) return safePath
+
   const { data: scanJob } = await supabaseAdmin
     .from('public_scan_jobs')
     .select('id')

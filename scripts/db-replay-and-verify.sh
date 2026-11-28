@@ -60,6 +60,8 @@ create schema if not exists auth;
 create or replace function auth.uid()  returns uuid  language sql stable as $$ select null::uuid $$;
 create or replace function auth.jwt()  returns jsonb language sql stable as $$ select '{}'::jsonb $$;
 create or replace function auth.role() returns text  language sql stable as $$ select null::text $$;
+-- 真实 Supabase 自带 auth.users；migration 里有外键指向它（手机号登录 20260929134952 起），桩里不造会误判成 migration 失败
+create table if not exists auth.users(id uuid primary key default gen_random_uuid());
 
 -- 忠实还原 Supabase 的默认授权
 grant usage on schema public to anon, authenticated;

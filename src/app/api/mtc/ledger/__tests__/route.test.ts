@@ -119,7 +119,7 @@ describe('GET /api/mtc/ledger', () => {
     // Default: valid portal session
     mocks.requireSession.mockResolvedValue({
       ok: true,
-      user: { email: PORTAL_EMAIL },
+      user: { id: 'portal-user-1', email: PORTAL_EMAIL },
     })
 
     // Default: guardAdmin rejects (not admin)
@@ -129,7 +129,7 @@ describe('GET /api/mtc/ledger', () => {
 
     // Default: portal user owns CLIENT_ID
     mockPortalUsers.mockResolvedValue({
-      data: [{ client_id: CLIENT_ID }],
+      data: [{ client_id: CLIENT_ID, access_type: 'dashboard', scoped_admin: false }],
       error: null,
     })
 

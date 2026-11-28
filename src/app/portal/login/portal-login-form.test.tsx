@@ -3,6 +3,8 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 const mocks = vi.hoisted(() => ({
+  signInWithOtp: vi.fn(),
+  verifyOtp: vi.fn(),
   signInWithPassword: vi.fn(),
   createBrowserClient: vi.fn(),
 }))
@@ -32,9 +34,13 @@ function stubSessionRoute(redirect = '/portal') {
 
 describe('PortalLoginForm', () => {
   beforeEach(() => {
+    mocks.signInWithOtp.mockReset().mockResolvedValue({ error: null })
+    mocks.verifyOtp.mockReset().mockResolvedValue({ error: null })
     mocks.signInWithPassword.mockReset().mockResolvedValue({ error: null })
     mocks.createBrowserClient.mockReset().mockReturnValue({
       auth: {
+        signInWithOtp: mocks.signInWithOtp,
+        verifyOtp: mocks.verifyOtp,
         signInWithPassword: mocks.signInWithPassword,
       },
     })
@@ -42,14 +48,86 @@ describe('PortalLoginForm', () => {
     vi.stubEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY', 'anon-key')
   })
 
-  it('signs in with a password and hands the session to session-route', async () => {
+  it('uses Chinese phone OTP by default, prevents signup, and hands the session to session-route', async () => {
+    const fetchMock = stubSessionRoute('/dashboard/clients/client-a')
+    const user = userEvent.setup()
+    render(<PortalLoginForm next="/dashboard/clients/client-a" />)
+
+    await user.type(screen.getByLabelText(/中国大陆手机号/), '13800001380')
+    await user.click(screen.getByRole('button', { name: '发送验证码' }))
+    await waitFor(() => expect(mocks.signInWithOtp).toHaveBeenCalledWith({
+      phone: '+8613800001380',
+      options: { shouldCreateUser: false },
+    }))
+
+    await user.type(screen.getByLabelText(/短信验证码/), '123456')
+    await user.click(screen.getByRole('button', { name: '验证码登录' }))
+    await waitFor(() => expect(mocks.verifyOtp).toHaveBeenCalledWith({
+      phone: '+8613800001380',
+      token: '123456',
+      type: 'sms',
+    }))
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/auth/session-route?next=%2Fdashboard%2Fclients%2Fclient-a',
+      expect.objectContaining({ credentials: 'include' }),
+    )
+  })
+
+  it('shows a generic message when an SMS request fails', async () => {
+    stubSessionRoute()
+    mocks.signInWithOtp.mockResolvedValue({ error: { message: 'provider secret details' } })
+    const user = userEvent.setup()
+    render(<PortalLoginForm next="/dashboard" />)
+
+    await user.type(screen.getByLabelText(/中国大陆手机号/), '13800001380')
+    await user.click(screen.getByRole('button', { name: '发送验证码' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent(/如果手机号已注册/)
+    expect(screen.queryByText(/provider secret/i)).not.toBeInTheDocument()
+  })
+
+  it('signs in existing passwordless customers by email OTP and returns to the binding page', async () => {
+    const fetchMock = stubSessionRoute('/account/phone')
+    const user = userEvent.setup()
+    render(<PortalLoginForm next="/account/phone" emailCodeFirst />)
+
+    await user.type(screen.getByLabelText(/原账号邮箱/), 'Person@Example.com ')
+    await user.click(screen.getByRole('button', { name: '发送邮箱验证码' }))
+    await waitFor(() => expect(mocks.signInWithOtp).toHaveBeenCalledWith({
+      email: 'person@example.com',
+      options: { shouldCreateUser: false },
+    }))
+
+    await user.type(await screen.findByLabelText(/邮箱验证码/), '123456')
+    await user.click(screen.getByRole('button', { name: '邮箱验证码登录' }))
+    await waitFor(() => expect(mocks.verifyOtp).toHaveBeenCalledWith({
+      email: 'person@example.com',
+      token: '123456',
+      type: 'email',
+    }))
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/auth/session-route?next=%2Faccount%2Fphone',
+      expect.objectContaining({ credentials: 'include' }),
+    )
+  })
+
+  it('defaults to email OTP while phone login is not enabled', () => {
+    render(<PortalLoginForm next="/portal" phoneEnabled={false} />)
+
+    expect(screen.getByLabelText(/原账号邮箱/)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/中国大陆手机号/)).not.toBeInTheDocument()
+  })
+
+  it('keeps email and password available as a fallback', async () => {
     const fetchMock = stubSessionRoute('/portal/reports')
     const user = userEvent.setup()
     render(<PortalLoginForm next="/portal/reports" />)
 
-    await user.type(screen.getByLabelText(/email address/i), 'Person@Example.com ')
-    await user.type(screen.getByLabelText(/^password$/i), 'strong-password')
-    await user.click(screen.getByRole('button', { name: /sign in/i }))
+    await user.click(screen.getByRole('button', { name: '改用原邮箱验证码登录' }))
+    await user.click(screen.getByRole('button', { name: '改用邮箱和密码登录' }))
+    await user.type(screen.getByLabelText(/邮箱地址/), 'Person@Example.com ')
+    await user.type(screen.getByLabelText(/密码/), 'strong-password')
+    await user.click(screen.getByRole('button', { name: /邮箱和密码登录/i }))
 
     await waitFor(() => {
       expect(mocks.signInWithPassword).toHaveBeenCalledWith({
@@ -63,39 +141,16 @@ describe('PortalLoginForm', () => {
     )
   })
 
-  it('shows a generic error when the password is rejected', async () => {
-    stubSessionRoute()
-    mocks.signInWithPassword.mockResolvedValue({ error: { message: 'Invalid login credentials' } })
-    const user = userEvent.setup()
-    render(<PortalLoginForm next="/portal" />)
-
-    await user.type(screen.getByLabelText(/email address/i), 'person@example.com')
-    await user.type(screen.getByLabelText(/^password$/i), 'wrong-password')
-    await user.click(screen.getByRole('button', { name: /sign in/i }))
-
-    expect(await screen.findByText(/email or password is incorrect/i)).toBeInTheDocument()
-  })
-
-  it('offers no magic-link or one-time-code sign-in path', () => {
-    stubSessionRoute()
-    render(<PortalLoginForm next="/portal" />)
-
-    expect(screen.queryByRole('button', { name: /sign-in link/i })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /resend code/i })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /verify code/i })).not.toBeInTheDocument()
-    expect(screen.queryByLabelText(/6-digit code/i)).not.toBeInTheDocument()
-    expect(screen.queryByText(/magic link/i)).not.toBeInTheDocument()
-  })
-
-  it('rejects a non-relative redirect from session-route', async () => {
+  it('rejects a non-relative redirect from session-route after phone login', async () => {
     stubSessionRoute('https://evil.example/steal')
     const user = userEvent.setup()
     render(<PortalLoginForm next="/portal" />)
 
-    await user.type(screen.getByLabelText(/email address/i), 'person@example.com')
-    await user.type(screen.getByLabelText(/^password$/i), 'strong-password')
-    await user.click(screen.getByRole('button', { name: /sign in/i }))
+    await user.type(screen.getByLabelText(/中国大陆手机号/), '13800001380')
+    await user.click(screen.getByRole('button', { name: '发送验证码' }))
+    await user.type(await screen.findByLabelText(/短信验证码/), '123456')
+    await user.click(screen.getByRole('button', { name: '验证码登录' }))
 
-    expect(await screen.findByText(/sign in failed/i)).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent(/登录失败/)
   })
 })
