@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('@/lib/crm/email-templates/settings-store', () => ({ loadEmailSettings: vi.fn() }))
 
 import { loadEmailSettings } from '@/lib/crm/email-templates/settings-store'
-import { CLIENT, NOW, db, talked, world } from '@/lib/crm/ai-takeover/__tests__/pickup-db'
+import { CLIENT, NOW, db, talked, voicemail, world } from '@/lib/crm/ai-takeover/__tests__/pickup-db'
 import { DEFAULT_PICKUP_CONFIG } from '@/lib/crm/ai-takeover/pickup'
 import { decideAll, latestEnquiries, loadInputs } from '@/lib/crm/ai-takeover/pickup-run'
 import { buildAiPickupWaitingItems, defaultAiPickupWaitingDeps, pushAiPickupWaitingItems, QUIET_DAYS } from '../ai-pickup-waiting-items'
@@ -67,6 +67,33 @@ describe('defaultAiPickupWaitingDeps.load (same rule as the list page)', () => {
     tables.contact_touchpoints.push({ ...talked('nd', 'd', 120), source: 'me_manual', raw: 'please follow up 2027 brochure' })
     const after = await defaultAiPickupWaitingDeps.load(db(tables, []), CLIENT, NOW)
     expect(after?.waiting).toBe((before?.waiting ?? 0) + 1)
+  })
+
+  it('a guest the rules take AND whose note asks for the catalogue is counted once', async () => {
+    vi.mocked(loadEmailSettings).mockResolvedValue(settings())
+    const before = await defaultAiPickupWaitingDeps.load(db(world(), []), CLIENT, NOW)
+    const tables = world()
+    // a: rang, voicemail → the rules take them; the note changes nothing about how many wait.
+    tables.contact_touchpoints.push({ ...voicemail('na', 'a', 90), source: 'me_manual', raw: 'voice message, follow up brochure' })
+    const after = await defaultAiPickupWaitingDeps.load(db(tables, []), CLIENT, NOW)
+    expect(after?.waiting).toBe(before?.waiting)
+  })
+
+  it('a guest who already has the catalogue is not counted: the release page never offers them', async () => {
+    vi.mocked(loadEmailSettings).mockResolvedValue(settings())
+    const before = await defaultAiPickupWaitingDeps.load(db(world(), []), CLIENT, NOW)
+    const tables = world()
+    tables.crm_email_send_receipts = [{ id: 'r1', client_id: CLIENT, contact_id: 'c', request_id: 'q1', template_key: 'catalogue-send', outcome: 'sent', created_at: '2026-09-01T00:00:00.000Z' }]
+    const after = await defaultAiPickupWaitingDeps.load(db(tables, []), CLIENT, NOW)
+    expect(after?.waiting).toBe((before?.waiting ?? 0) - 1)
+  })
+
+  it('a catalogue actually sent counts as a release, even without an AI mark', async () => {
+    vi.mocked(loadEmailSettings).mockResolvedValue(settings())
+    const tables = world()
+    tables.contact_automation_events = [release(14)]
+    tables.crm_email_send_receipts = [{ id: 'r2', client_id: CLIENT, contact_id: 'someone-else', request_id: 'q2', template_key: 'catalogue-send', outcome: 'sent', created_at: new Date(NOW.getTime() - 2 * 86_400_000).toISOString() }]
+    expect((await defaultAiPickupWaitingDeps.load(db(tables, []), CLIENT, NOW))?.daysSinceRelease).toBe(2)
   })
 
   it('no release on record → null days', async () => {

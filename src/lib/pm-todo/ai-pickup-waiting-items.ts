@@ -14,6 +14,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { askAll } from '@/lib/crm/ai-takeover/catalogue-ask'
 import { DEFAULT_PICKUP_CONFIG } from '@/lib/crm/ai-takeover/pickup'
+import { guestsWithCatalogue } from '@/lib/crm/catalogue-line/prod'
+import { CATALOGUE_ONCE_DAYS } from '@/lib/crm/catalogue-line/send-catalogue'
 import { decideAll, latestEnquiries, loadInputs, PickupNotConfiguredError } from '@/lib/crm/ai-takeover/pickup-run'
 import { loadEmailSettings } from '@/lib/crm/email-templates/settings-store'
 import { APP_BASE } from './binding-request-items'
@@ -32,7 +34,7 @@ export type AiPickupWaitingItemKind =
 export const QUIET_DAYS = 5
 
 export interface AiPickupWaiting {
-  /** 符合 AI 接手规则、在等放行的客人数 */
+  /** 放行页上在等的客人数：规则接手的 + 员工留言要目录的，去掉已经有目录的 */
   waiting: number
   /** 距上一次放行过了几天；null = 从来没有人放行过 */
   daysSinceRelease: number | null
@@ -97,7 +99,14 @@ export const defaultAiPickupWaitingDeps: AiPickupWaitingDeps = {
     const picks = decideAll(inputs, leads, now, DEFAULT_PICKUP_CONFIG)
     const taken = new Set(decideAll(inputs, leads, now, { ...DEFAULT_PICKUP_CONFIG, afterLastCallMinutes: 0 }).map((p) => p.contactId))
     const asks = askAll(inputs, leads, now).filter((a) => !taken.has(a.contactId))
-    const waiting = picks.length + asks.length
+    // The release page never offers a guest who already has the catalogue (the send refuses a second copy): leave
+    // them out here too, or the number could never come down however many times staff release.
+    const ids = [...picks.map((p) => p.contactId), ...asks.map((a) => a.contactId)]
+    const has = ids.length === 0 ? new Set<string>() : await guestsWithCatalogue(supabase, {
+      clientId, templateKey: catalogue.templateKey, contactIds: ids,
+      sinceIso: new Date(now.getTime() - CATALOGUE_ONCE_DAYS * 86_400_000).toISOString(),
+    })
+    const waiting = ids.filter((id) => !has.has(id)).length
     const { data, error } = await supabase
       .from('contact_automation_events')
       .select('created_at')
@@ -107,7 +116,20 @@ export const defaultAiPickupWaitingDeps: AiPickupWaitingDeps = {
       .limit(1)
     if (error) throw new Error(error.message)
     const last = (data ?? [])[0] as { created_at?: string } | undefined
-    return { waiting, daysSinceRelease: daysSince(last?.created_at, now) }
+    // Releasing a "staff note asks for the catalogue" guest sends the catalogue without the AI mark: a catalogue
+    // actually sent counts as somebody releasing, too.
+    const sent = await supabase
+      .from('crm_email_send_receipts')
+      .select('created_at')
+      .eq('client_id', clientId)
+      .eq('template_key', catalogue.templateKey)
+      .eq('outcome', 'sent')
+      .order('created_at', { ascending: false })
+      .limit(1)
+    if (sent.error) throw new Error(sent.error.message)
+    const lastSent = (sent.data ?? [])[0] as { created_at?: string } | undefined
+    const latest = [last?.created_at, lastSent?.created_at].filter((v): v is string => typeof v === 'string').sort().pop()
+    return { waiting, daysSinceRelease: daysSince(latest, now) }
   },
 }
 

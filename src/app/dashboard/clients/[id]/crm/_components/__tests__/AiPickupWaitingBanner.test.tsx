@@ -30,11 +30,11 @@ afterEach(() => {
 
 describe('AI 放行等待提示条', () => {
   it('有 12 位在等、14 天没人放行 → 摆条、带数字和天数、链接指向放行页', async () => {
-    const f = stubFetch({ waiting: 12, daysSinceRelease: 14 })
+    const f = stubFetch({ waiting: 12, readyToday: 12, daysSinceRelease: 14 })
     render(<AiPickupWaitingBanner clientId={CLIENT} />)
 
     const banner = await screen.findByTestId('ai-pickup-waiting-banner')
-    expect(banner.textContent).toContain('有 12 位客人在等你放行给 AI')
+    expect(banner.textContent).toContain('今天有 12 位客人等你点发送 2027 目录')
     expect(banner.textContent).toContain('已经 14 天没有人放行了。')
 
     const link = banner.querySelector('a')
@@ -46,7 +46,7 @@ describe('AI 放行等待提示条', () => {
   })
 
   it('从来没有人放行过 → 尾巴是「还从来没有人放行过。」', async () => {
-    stubFetch({ waiting: 3, daysSinceRelease: null })
+    stubFetch({ waiting: 3, readyToday: 3, daysSinceRelease: null })
     render(<AiPickupWaitingBanner clientId={CLIENT} />)
 
     const banner = await screen.findByTestId('ai-pickup-waiting-banner')
@@ -54,19 +54,35 @@ describe('AI 放行等待提示条', () => {
   })
 
   it('今天刚放行过（0 天）→ 摆条，但不提「没有人放行」', async () => {
-    stubFetch({ waiting: 5, daysSinceRelease: 0 })
+    stubFetch({ waiting: 5, readyToday: 5, daysSinceRelease: 0 })
     render(<AiPickupWaitingBanner clientId={CLIENT} />)
 
     const banner = await screen.findByTestId('ai-pickup-waiting-banner')
-    expect(banner.textContent).toContain('有 5 位客人在等你放行给 AI')
+    expect(banner.textContent).toContain('今天有 5 位客人等你点发送 2027 目录')
     expect(banner.textContent).not.toContain('没有人放行')
   })
 
   it('waiting 为 0 → 什么都不摆', async () => {
-    const f = stubFetch({ waiting: 0, daysSinceRelease: null })
+    const f = stubFetch({ waiting: 0, readyToday: 0, daysSinceRelease: null })
     render(<AiPickupWaitingBanner clientId={CLIENT} />)
 
     await waitFor(() => expect(f).toHaveBeenCalled())
+    expect(screen.queryByTestId('ai-pickup-waiting-banner')).toBeNull()
+  })
+
+  it('排着 200 位、今天还能发 30 位 → 写今天的 30 位，并说后面还排着 170 位', async () => {
+    stubFetch({ waiting: 200, readyToday: 30, daysSinceRelease: 13 })
+    render(<AiPickupWaitingBanner clientId={CLIENT} />)
+    const banner = await screen.findByTestId('ai-pickup-waiting-banner')
+    expect(banner.textContent).toContain('今天有 30 位客人等你点发送 2027 目录')
+    expect(banner.textContent).toContain('后面还排着 170 位')
+  })
+
+  it('今天的名额已经发完（还有人排队）→ 不摆条：没有人现在能放行，摆着只会被无视', async () => {
+    const f = stubFetch({ waiting: 170, readyToday: 0, daysSinceRelease: 0 })
+    render(<AiPickupWaitingBanner clientId={CLIENT} />)
+    await waitFor(() => expect(f).toHaveBeenCalled())
+    await Promise.resolve()
     expect(screen.queryByTestId('ai-pickup-waiting-banner')).toBeNull()
   })
 

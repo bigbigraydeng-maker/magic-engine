@@ -11,8 +11,8 @@ import { loadClientTimeZone } from '@/lib/crm/email-templates/time-zone'
 import { previewCompose } from '@/lib/microsoft/mail-send-new'
 import { createMailNewDeps } from '@/lib/microsoft/mail-send-new-prod'
 import { loadPickupList } from '@/lib/crm/ai-takeover/pickup-list'
-import { todayInZone } from '@/lib/crm/email-templates/send-gates'
 import { pickupSwitches } from '@/lib/crm/ai-takeover/pickup-run'
+import { cataloguesSentToday } from '@/lib/crm/ai-takeover/sent-today'
 import { loadCatalogue } from '@/lib/crm/ai-takeover/view'
 import { guestsWithCatalogue } from '@/lib/crm/catalogue-line/prod'
 import { CATALOGUE_ONCE_DAYS } from '@/lib/crm/catalogue-line/send-catalogue'
@@ -30,15 +30,6 @@ async function loadNames(ids: string[]): Promise<Map<string, string>> {
   return out
 }
 
-/** Catalogue sends today (sent, or outcome not yet known), counted in the client's own day. */
-async function sentToday(clientId: string, timeZone: string, today: string): Promise<number> {
-  const { data, error } = await supabaseAdmin.from('crm_email_send_receipts').select('created_at')
-    .eq('client_id', clientId).like('template_key', 'catalogue%').in('outcome', ['sent', 'unknown'])
-    .gte('created_at', new Date(Date.now() - 36 * 3_600_000).toISOString()).limit(1000)
-  if (error) throw new Error(`crm_email_send_receipts: ${error.message}`)
-  return ((data ?? []) as Array<{ created_at: string }>).filter((r) => todayInZone(new Date(r.created_at), timeZone) === today).length
-}
-
 export async function GET(_req: Request, { params }: { params: { id: string } }): Promise<NextResponse> {
   const access = await requirePaidClientAccess(params.id)
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
@@ -49,7 +40,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     const rows = await loadPickupList(supabaseAdmin, params.id, {
       timeZone,
       loadNames,
-      sentToday: (today) => sentToday(params.id, timeZone, today),
+      sentToday: (today) => cataloguesSentToday(supabaseAdmin, params.id, timeZone, today),
       hasCatalogue: async (ids) => catalogue === null ? new Set<string>() : guestsWithCatalogue(supabaseAdmin, {
         clientId: params.id, templateKey: catalogue.templateKey, contactIds: ids,
         sinceIso: new Date(Date.now() - CATALOGUE_ONCE_DAYS * 86_400_000).toISOString(),

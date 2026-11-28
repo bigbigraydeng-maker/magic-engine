@@ -57,6 +57,22 @@ describe('交给 AI 跟进页 · 按组放行', () => {
     expect(screen.getByRole('button', { name: /给勾选的 2 位发 2027 目录/ })).toBeTruthy()
   })
 
+  it('已经发出去的那一位，「全选这一组」不会再把它算进要发的人数', async () => {
+    const f = vi.fn(async (url: string, init?: { method?: string }) => {
+      if (init?.method === 'POST') return { ok: true, status: 200, json: async () => ({ ok: true }) }
+      return { ok: true, status: 200, json: async () => ({ catalogue: { versionLabel: '2027', validUntil: '2027-12-31' }, dailyMax: 30, rows: [row('n1', 'not_reached'), row('a1', 'catalogue_asked')] }) }
+    })
+    vi.stubGlobal('fetch', f)
+    render(<CrmAiPickupPage params={{ id: CLIENT }} />)
+    const group = await screen.findByTestId('ready-group-not_reached')
+    fireEvent.click(screen.getByRole('button', { name: /给勾选的 1 位发 2027 目录/ }))
+    fireEvent.click(screen.getByRole('button', { name: '确认发送' }))
+    await screen.findByText(/目录已发出，已交给 AI 跟进/)
+    fireEvent.click(within(group).getByRole('button', { name: '全选这一组' }))
+    expect(within(group).getByRole('heading').textContent).toContain('已勾 0 位')
+    expect((screen.getByRole('button', { name: /给勾选的 0 位发 2027 目录/ }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
   it('某一组今天没人 → 这一组不出现', async () => {
     stub([row('n1', 'not_reached')])
     render(<CrmAiPickupPage params={{ id: CLIENT }} />)
