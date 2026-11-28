@@ -23,7 +23,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { computeDeltaPct, buildSparkline, bucketByGranularity } from '@/lib/flywheel/intelligence/timeseries'
-import { getMetricMeta, SPOTLIGHT_METRIC_KEYS } from '@/lib/flywheel/intelligence/metric-catalog'
+import {
+  getMetricMeta,
+  SPOTLIGHT_METRIC_KEYS,
+  OPTIONAL_SPOTLIGHT_METRIC_KEYS,
+  summaryTileKeys,
+} from '@/lib/flywheel/intelligence/metric-catalog'
 import type { MetricSummaryTile } from '@/lib/flywheel/intelligence/types'
 import type { FlywheelName } from '@/lib/flywheel/adapters/types'
 import { ADS_METRIC_KEY } from '@/lib/flywheel/vocabulary'
@@ -56,7 +61,7 @@ export async function GET(
     .from('flywheel_metrics')
     .select('metric_key, metric_value, measured_at, flywheel')
     .eq('client_id', clientId)
-    .in('metric_key', SPOTLIGHT_METRIC_KEYS)
+    .in('metric_key', [...SPOTLIGHT_METRIC_KEYS, ...OPTIONAL_SPOTLIGHT_METRIC_KEYS])
     .gte('measured_at', since)
     .order('measured_at', { ascending: true })
 
@@ -86,7 +91,9 @@ export async function GET(
 
   // ── Build summary tiles ────────────────────────────────────────────────────
   const now = new Date()
-  const tiles: MetricSummaryTile[] = SPOTLIGHT_METRIC_KEYS.map(key => {
+  // Optional tiles (Google Ads) only for clients that actually have rows.
+  const tileKeys = summaryTileKeys(new Set(grouped.keys()))
+  const tiles: MetricSummaryTile[] = tileKeys.map(key => {
     const rows     = grouped.get(key) ?? []
     const meta     = getMetricMeta(key)
     const flywheel = (rows[0]?.flywheel ?? inferFlywheel(key)) as FlywheelName
@@ -129,7 +136,8 @@ export async function GET(
       deltaPct28d,
       sparkline,
       currency:    moneyKeys.has(key) ? spendWindow.currency : null,
-      periodLabel: null,
+      // Google Ads rows are rolling 30-day account totals, not a daily figure.
+      periodLabel: OPTIONAL_SPOTLIGHT_METRIC_KEYS.includes(key) ? '近 30 天' : null,
     }
     if (key === ADS_METRIC_KEY.SPEND) return alignSpendTile(tile, spendWindow)
     return tile

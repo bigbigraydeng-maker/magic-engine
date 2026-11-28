@@ -13,7 +13,13 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { resolveCustomerId, loadGoogleAdsCredsForClient } from '../creds-loader'
+import {
+  resolveCustomerId,
+  loadGoogleAdsCredsForClient,
+  mergeGoogleAdsAccounts,
+  clientOwnsGoogleAdsAccount,
+} from '../creds-loader'
+import type { SupabaseClient } from '@supabase/supabase-js'
 
 const CLIENT_ID = 'client-uuid-123'
 
@@ -156,5 +162,99 @@ describe('loadGoogleAdsCredsForClient — combines resolver + env loader', () =>
       customerId:     '1234567890',
       managerCustomerId: undefined,
     })
+  })
+})
+
+describe('mergeGoogleAdsAccounts — batch form for the daily cron', () => {
+  it('lists a client that only has the settings-page id', () => {
+    expect(mergeGoogleAdsAccounts([{ id: 'c1', google_ads_customer_id: '1234567890' }], []))
+      .toEqual([{ client_id: 'c1', account_id: '1234567890' }])
+  })
+
+  it('lets the settings-page id win over an OAuth row for the same client', () => {
+    expect(mergeGoogleAdsAccounts(
+      [{ id: 'c1', google_ads_customer_id: '111' }],
+      [{ client_id: 'c1', account_id: '222' }, { client_id: 'c2', account_id: '333' }],
+    )).toEqual([
+      { client_id: 'c1', account_id: '111' },
+      { client_id: 'c2', account_id: '333' },
+    ])
+  })
+
+  it('drops an id claimed by two clients rather than guess whose it is', () => {
+    expect(mergeGoogleAdsAccounts(
+      [
+        { id: 'c1', google_ads_customer_id: '1234567890' },
+        { id: 'c2', google_ads_customer_id: '123-456-7890' },
+        { id: 'c3', google_ads_customer_id: '5555555555' },
+      ],
+      [],
+    )).toEqual([{ client_id: 'c3', account_id: '5555555555' }])
+  })
+
+  it('strips dashes and skips blank or missing ids', () => {
+    expect(mergeGoogleAdsAccounts(
+      [
+        { id: 'c1', google_ads_customer_id: '123-456-7890' },
+        { id: 'c2', google_ads_customer_id: '   ' },
+        { id: 'c3', google_ads_customer_id: null },
+        { id: 'c4' },
+        { id: 'c5', google_ads_customer_id: 'not-an-id' },
+      ],
+      [],
+    )).toEqual([{ client_id: 'c1', account_id: '1234567890' }])
+  })
+})
+
+describe('clientOwnsGoogleAdsAccount — tenant boundary for a shared credential', () => {
+  /** Stub for `.from('clients').select('id').eq('google_ads_customer_id', id)`. */
+  function clientsStub(result: { data: unknown; error: unknown } | Error) {
+    const eq = result instanceof Error
+      ? vi.fn().mockRejectedValue(result)
+      : vi.fn().mockResolvedValue(result)
+    const from = vi.fn().mockReturnValue({ select: vi.fn().mockReturnValue({ eq }) })
+    return { supabase: { from } as unknown as SupabaseClient, from, eq }
+  }
+
+  it('accepts the account when this client is its only holder, in either display form', async () => {
+    const { supabase, from, eq } = clientsStub({ data: [{ id: CLIENT_ID }], error: null })
+    expect(await clientOwnsGoogleAdsAccount(supabase, CLIENT_ID, '1234567890')).toBe(true)
+    expect(await clientOwnsGoogleAdsAccount(supabase, CLIENT_ID, '123-456-7890')).toBe(true)
+    expect(from).toHaveBeenCalledWith('clients')
+    // Always looked up in digits-only form, whatever the caller sent.
+    expect(eq).toHaveBeenNthCalledWith(1, 'google_ads_customer_id', '1234567890')
+    expect(eq).toHaveBeenNthCalledWith(2, 'google_ads_customer_id', '1234567890')
+  })
+
+  it("rejects an account registered to another client", async () => {
+    const { supabase } = clientsStub({ data: [{ id: 'someone-else' }], error: null })
+    expect(await clientOwnsGoogleAdsAccount(supabase, CLIENT_ID, '9999999999')).toBe(false)
+  })
+
+  it('rejects an account nobody has registered', async () => {
+    const { supabase } = clientsStub({ data: [], error: null })
+    expect(await clientOwnsGoogleAdsAccount(supabase, CLIENT_ID, '1234567890')).toBe(false)
+  })
+
+  it('rejects an account held by two clients, even when this client is one of them', async () => {
+    const { supabase } = clientsStub({ data: [{ id: CLIENT_ID }, { id: 'someone-else' }], error: null })
+    expect(await clientOwnsGoogleAdsAccount(supabase, CLIENT_ID, '1234567890')).toBe(false)
+  })
+
+  it('fails closed when the lookup errors, returns nothing, or throws', async () => {
+    const errored = clientsStub({ data: [{ id: CLIENT_ID }], error: { message: 'boom' } })
+    expect(await clientOwnsGoogleAdsAccount(errored.supabase, CLIENT_ID, '1234567890')).toBe(false)
+    const empty = clientsStub({ data: null, error: null })
+    expect(await clientOwnsGoogleAdsAccount(empty.supabase, CLIENT_ID, '1234567890')).toBe(false)
+    const thrown = clientsStub(new Error('network'))
+    expect(await clientOwnsGoogleAdsAccount(thrown.supabase, CLIENT_ID, '1234567890')).toBe(false)
+  })
+
+  it('rejects a malformed id without querying', async () => {
+    const { supabase, from } = clientsStub({ data: [{ id: CLIENT_ID }], error: null })
+    expect(await clientOwnsGoogleAdsAccount(supabase, CLIENT_ID, '')).toBe(false)
+    expect(await clientOwnsGoogleAdsAccount(supabase, CLIENT_ID, '12 OR 1=1')).toBe(false)
+    expect(await clientOwnsGoogleAdsAccount(supabase, CLIENT_ID, 1234567890)).toBe(false)
+    expect(from).not.toHaveBeenCalled()
   })
 })

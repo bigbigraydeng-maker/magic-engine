@@ -18,9 +18,10 @@
  *   - Ad Strategy Engine daily series (ad_daily_insights, health, digest):
  *                 ALL of the client's registered accounts —
  *                 `client_meta_ad_accounts` (2026-09-13, see note below)
- *   - Google Ads: platform_oauth_connections (provider='google_ads', status='active')
- *                 + GOOGLE_ADS_DEVELOPER_TOKEN / CLIENT_ID / CLIENT_SECRET /
- *                 REFRESH_TOKEN env
+ *   - Google Ads: clients.google_ads_customer_id (set in client settings; wins),
+ *                 else platform_oauth_connections (provider='google_ads',
+ *                 status='active') + GOOGLE_ADS_DEVELOPER_TOKEN / CLIENT_ID /
+ *                 CLIENT_SECRET / REFRESH_TOKEN env. Written under `ads.google.*`.
  *
  * 2026-09-13 multi-account fix: CTS runs a second Meta ad account
  * (act_2202695063810470, "CTStours 官方账户") that `meta_ad_account_id` never
@@ -53,7 +54,8 @@ import { fetchGscSnapshot } from '@/lib/gsc/client'
 import { gscSiteUrlFromConfig } from '@/lib/gsc/connected-clients'
 import { fetchGa4Snapshot, fetchGa4PaidSearchMetrics } from '@/lib/ga4/client'
 import { getAdAccountInsightsResult, getAdCampaignInsights, MetaAdsInsights } from '@/lib/meta/client'
-import { fetchAccountInsights, loadGoogleAdsCreds } from '@/lib/google-ads/client'
+import { fetchAccountInsightsResult, loadGoogleAdsCreds } from '@/lib/google-ads/client'
+import { mergeGoogleAdsAccounts } from '@/lib/google-ads/creds-loader'
 import { SEO_METRIC_KEY, GA4_METRIC_KEY, ADS_METRIC_KEY } from '@/lib/flywheel/vocabulary'
 import { adsMetricKeysWrittenBy } from '@/lib/flywheel/metric-registry'
 import { MetaAdsAdapter } from '@/lib/flywheel/adapters/MetaAdsAdapter'
@@ -104,7 +106,13 @@ interface ClientResult {
   /** Google Ads sync emits metrics straight into flywheel_metrics — no
    *  snapshot table yet, so `metrics_written` mirrors the spend/impressions
    *  count instead of a `snapshot_id`. */
-  google_ads?: { success: boolean; metrics_written?: number; error?: string }
+  google_ads?: {
+    success: boolean
+    metrics_written?: number
+    error?: string
+    /** Service-level setup gap, not a failure of this client's pull. */
+    skipped?: 'credentials_missing'
+  }
   /** P21.K.1 campaign-level daily series → ad_daily_insights. */
   ad_daily?:  { success: boolean; rows_written?: number; backfilled?: boolean; error?: string }
   /** P21.K.7 ad-level daily series → ad_daily_insights (level='ad'). */
@@ -203,6 +211,9 @@ function externalPullScope(ids: readonly string[]): { allowed: ReadonlySet<strin
   return { allowed: new Set(part.kept), skippedCount: part.skippedCount }
 }
 
+/** See syncGoogleAds: same-local-day re-runs replace, daily runs accumulate. */
+const GOOGLE_ADS_DEDUPE_WINDOW_MS = 20 * 60 * 60 * 1000
+
 // ─── Route ───────────────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
@@ -227,7 +238,7 @@ export async function GET(req: NextRequest) {
   const snapshotsReady = await snapshotTablesExist()
 
   // ── 1. Load connected Google connectors + Meta + Google Ads accounts in parallel
-  const [connResult, metaResult, googleAdsResult] = await Promise.all([
+  const [connResult, metaResult, googleAdsResult, googleAdsClientColResult] = await Promise.all([
     supabaseAdmin
       .from('client_connectors')
       .select('client_id, anchor, config')
@@ -237,15 +248,21 @@ export async function GET(req: NextRequest) {
       .from('clients')
       .select('id, name, domain, meta_ad_account_id')
       .not('meta_ad_account_id', 'is', null),
-    // Google Ads customer_id lives in platform_oauth_connections.account_id
-    // for now (PR #2 moves it to clients.google_ads_customer_id with a
-    // backwards-compatible fallback). Only 'active' connections sync.
+    // Legacy source of the Google Ads customer_id. Nothing writes
+    // provider='google_ads' rows today, so on its own this finds no one —
+    // kept as the fallback for any that do exist. Only 'active' rows sync.
     supabaseAdmin
       .from('platform_oauth_connections')
       .select('client_id, account_id')
       .eq('provider', 'google_ads')
       .eq('status', 'active')
       .not('account_id', 'is', null),
+    // Primary source: the number the FDE sets in client settings. Same
+    // precedence as resolveCustomerId() in lib/google-ads/creds-loader.ts.
+    supabaseAdmin
+      .from('clients')
+      .select('id, google_ads_customer_id')
+      .not('google_ads_customer_id', 'is', null),
   ])
 
   if (connResult.error) {
@@ -262,7 +279,16 @@ export async function GET(req: NextRequest) {
     domain: string | null
     meta_ad_account_id: string
   }>
-  const googleAdsRows = (googleAdsResult.data ?? []) as Array<{ client_id: string; account_id: string }>
+  if (googleAdsClientColResult.error) {
+    console.warn(
+      '[cron] clients.google_ads_customer_id lookup failed (non-fatal):',
+      googleAdsClientColResult.error.message,
+    )
+  }
+  const googleAdsRows = mergeGoogleAdsAccounts(
+    (googleAdsClientColResult.data ?? []) as Array<{ id?: string; google_ads_customer_id?: string | null }>,
+    (googleAdsResult.data ?? []) as Array<{ client_id: string; account_id: string }>,
+  )
   const pullScope = externalPullScope([
     ...((connResult.data ?? []) as Array<{ client_id: string }>).map((row) => row.client_id),
     ...metaRows.map((row) => row.id),
@@ -703,7 +729,8 @@ export async function GET(req: NextRequest) {
   const ga4Synced       = results.filter(r => r.ga4?.success).length
   const metaSynced      = results.filter(r => r.meta?.success && !r.meta.skipped).length
   const metaIdle        = results.filter(r => r.meta?.skipped === 'no_active_ads').length
-  const googleAdsSynced = results.filter(r => r.google_ads?.success).length
+  const googleAdsSynced = results.filter(r => r.google_ads?.success && !r.google_ads.skipped).length
+  const googleAdsUnconfigured = results.filter(r => r.google_ads?.skipped === 'credentials_missing').length
   const adDailySynced   = results.filter(r => r.ad_daily?.success).length
   const adDailyRows     = results.reduce((sum, r) => sum + (r.ad_daily?.rows_written ?? 0), 0)
   const adLevelSynced   = results.filter(r => r.ad_level?.success).length
@@ -729,11 +756,15 @@ export async function GET(req: NextRequest) {
   // Collect per-client errors so postmortem is possible without Render logs.
   // Diagnostic only — no behavior change.
   const errors = results.flatMap(r => {
-    const out: Array<{ client_id: string; source: 'gsc'|'ga4'|'meta'|'google_ads'|'ad_daily'|'ad_level'|'adset_level'|'ad_health'|'ad_digest'|'ad_diagnostics'|'ads_growth_state'|'ad_daily_secondary'|'ad_config'|'circuit_probe'|'circuit_breaker'|'creative_state'|'scale_fallback'; error: string }> = []
+    const out: Array<{ client_id: string; source: 'gsc'|'ga4'|'meta'|'google_ads'|'google_ads_unconfigured'|'ad_daily'|'ad_level'|'adset_level'|'ad_health'|'ad_digest'|'ad_diagnostics'|'ads_growth_state'|'ad_daily_secondary'|'ad_config'|'circuit_probe'|'circuit_breaker'|'creative_state'|'scale_fallback'; error: string }> = []
     if (r.gsc?.success === false && r.gsc.error)               out.push({ client_id: r.client_id, source: 'gsc',        error: r.gsc.error })
     if (r.ga4?.success === false && r.ga4.error)               out.push({ client_id: r.client_id, source: 'ga4',        error: r.ga4.error })
     if (r.meta?.success === false && r.meta.error)             out.push({ client_id: r.client_id, source: 'meta',       error: r.meta.error })
     if (r.google_ads?.success === false && r.google_ads.error) out.push({ client_id: r.client_id, source: 'google_ads', error: r.google_ads.error })
+    // Not a failure (the GOOGLE_ADS_* env vars are a one-off service setup, and
+    // counting it would email "failed" every day until someone sets them), but
+    // it must still be readable in the run log rather than vanish.
+    if (r.google_ads?.skipped && r.google_ads.error) out.push({ client_id: r.client_id, source: 'google_ads_unconfigured', error: r.google_ads.error })
     if (r.ad_daily?.success === false && r.ad_daily.error)     out.push({ client_id: r.client_id, source: 'ad_daily',   error: r.ad_daily.error })
     if (r.ad_level?.success === false && r.ad_level.error)     out.push({ client_id: r.client_id, source: 'ad_level',   error: r.ad_level.error })
     if (r.adset_level?.success === false && r.adset_level.error) out.push({ client_id: r.client_id, source: 'adset_level', error: r.adset_level.error })
@@ -788,7 +819,7 @@ export async function GET(req: NextRequest) {
   // 常年 meta 报错盖住、没人注意到（2026-09-25 事故）。
   const headlineError =
     errors.find(e => e.source === 'ad_config') ??
-    errors.find(e => e.source !== 'ad_level' && e.source !== 'adset_level' && e.source !== 'ad_daily_secondary' && e.source !== 'circuit_probe' && e.source !== 'circuit_breaker' && e.source !== 'creative_state' && e.source !== 'scale_fallback')
+    errors.find(e => e.source !== 'google_ads_unconfigured' && e.source !== 'ad_level' && e.source !== 'adset_level' && e.source !== 'ad_daily_secondary' && e.source !== 'circuit_probe' && e.source !== 'circuit_breaker' && e.source !== 'creative_state' && e.source !== 'scale_fallback')
   const errorMessage = failed > 0 && headlineError
     ? `${headlineError.source}: ${headlineError.error}${errors.length > 1 ? ` (+${errors.length - 1} more)` : ''}`
     : undefined
@@ -809,7 +840,7 @@ export async function GET(req: NextRequest) {
     completed: results.length - failed,
     error: errorMessage,
     failed,
-    summary: { gsc_synced: gscSynced, ga4_synced: ga4Synced, meta_synced: metaSynced, meta_idle: metaIdle, google_ads_synced: googleAdsSynced, ad_daily_synced: adDailySynced, ad_daily_rows: adDailyRows, ad_level_synced: adLevelSynced, ad_level_rows: adLevelRows, ad_health_synced: adHealthSynced, ad_health_alerts: adHealthAlerts, video_columns_written: withVideo, errors, circuit_probe: circuitProbes, creative_state_cards: results.reduce((sum, row) => sum + (row.creative_state?.cards ?? 0), 0), scale_fallback_cards: results.reduce((sum, row) => sum + (row.scale_fallback?.cards ?? 0), 0), skipped_by_allowlist: pullScope.skippedCount },
+    summary: { gsc_synced: gscSynced, ga4_synced: ga4Synced, meta_synced: metaSynced, meta_idle: metaIdle, google_ads_synced: googleAdsSynced, google_ads_unconfigured: googleAdsUnconfigured, ad_daily_synced: adDailySynced, ad_daily_rows: adDailyRows, ad_level_synced: adLevelSynced, ad_level_rows: adLevelRows, ad_health_synced: adHealthSynced, ad_health_alerts: adHealthAlerts, video_columns_written: withVideo, errors, circuit_probe: circuitProbes, creative_state_cards: results.reduce((sum, row) => sum + (row.creative_state?.cards ?? 0), 0), scale_fallback_cards: results.reduce((sum, row) => sum + (row.scale_fallback?.cards ?? 0), 0), skipped_by_allowlist: pullScope.skippedCount },
   })
   return NextResponse.json({
     success:           true,
@@ -819,6 +850,7 @@ export async function GET(req: NextRequest) {
     meta_synced:       metaSynced,
     meta_idle:         metaIdle,
     google_ads_synced: googleAdsSynced,
+    google_ads_unconfigured: googleAdsUnconfigured,
     ad_daily_synced:   adDailySynced,
     ad_daily_rows:     adDailyRows,
     ad_level_synced:   adLevelSynced,
@@ -1175,11 +1207,13 @@ async function writeMetaObjectiveMetrics(
 /**
  * Sync Google Ads account-level metrics for one client.
  *
- * Writes 30-day aggregates straight into flywheel_metrics under the shared
- * `ads.account.*` namespace, discriminating by `source='google_ads_pullback'`
- * so a client with both Meta + Google Ads stays distinguishable. No snapshot
- * table yet — we'll add one when the prescription engine wants per-campaign
- * history (separate PR; out of scope for the skeleton).
+ * Writes 30-day aggregates into flywheel_metrics under `ads.google.*`, its own
+ * namespace. It used to share `ads.account.*` with Meta and rely on
+ * `source='google_ads_pullback'` to tell the two apart, but no reader of
+ * `ads.account.*` filters `source` — the first Google row would have been
+ * blended into Meta's tiles, health score, anomaly rules and attribution
+ * verdicts. No snapshot table yet — we'll add one when the prescription
+ * engine wants per-campaign history (separate PR; out of scope here).
  *
  * Returns `success: false` (not a throw) so a missing/expired token or a
  * single broken account doesn't kill the rest of the cron run.
@@ -1187,54 +1221,64 @@ async function writeMetaObjectiveMetrics(
 async function syncGoogleAds(
   clientId: string,
   customerId: string,
-): Promise<{ success: boolean; metrics_written?: number; error?: string }> {
+): Promise<NonNullable<ClientResult['google_ads']>> {
   try {
     const creds = loadGoogleAdsCreds(customerId)
     if (!creds) {
+      // Service-level setup gap, identical for every client: reported as a
+      // skip (with the reason) so it does not mark the client failed each day.
       return {
-        success: false,
+        success: true,
+        skipped: 'credentials_missing',
         error:
           'GOOGLE_ADS_* env vars missing — set DEVELOPER_TOKEN, CLIENT_ID, CLIENT_SECRET, REFRESH_TOKEN in Render env',
       }
     }
 
-    const insights = await fetchAccountInsights(creds, 30)
-    if (!insights) {
+    const fetched = await fetchAccountInsightsResult(creds, 30)
+    if (!fetched.ok) {
       return {
         success: false,
-        error:
-          'fetchAccountInsights returned null — check developer token approval status and customer_id',
+        error: `Google Ads API ${fetched.status ?? 'no response'}: ${fetched.reason}`,
       }
     }
+    const insights = fetched.insights
 
-    // No unique constraint on (client_id, metric_key, measured_at) for the
-    // `ads.account.*` namespace, so delete today's google_ads_pullback rows
-    // first to avoid stale dupes accumulating across cron retries.
-    const today      = new Date().toISOString().slice(0, 10)
-    const todayStart = `${today}T00:00:00.000Z`
-    const todayEnd   = `${today}T23:59:59.999Z`
+    // Each row is a rolling 30-day total, so two rows for one day are the same
+    // figure twice — and day buckets SUM count/currency metrics, which would
+    // show double. No unique constraint exists to stop that, so clear this
+    // client's recent rows first. The window is rolling rather than "today in
+    // UTC" because readers bucket in the client's timezone: an 06:00 NZ
+    // scheduled run and an afternoon manual re-run fall on different UTC days
+    // but the same local day. 20h keeps yesterday's scheduled row (24h apart).
+    const dedupeSince = new Date(Date.now() - GOOGLE_ADS_DEDUPE_WINDOW_MS).toISOString()
     // Derived from the registry, not hand-listed: the same map the write gate
     // reads, so a key can never be pulled here without being declared there.
     const adsMetricKeys = adsMetricKeysWrittenBy('google_ads_pullback')
-    await supabaseAdmin
+    const { error: clearError } = await supabaseAdmin
       .from('flywheel_metrics')
       .delete()
       .eq('client_id', clientId)
       .eq('source', 'google_ads_pullback')
       .in('metric_key', adsMetricKeys)
-      .gte('measured_at', todayStart)
-      .lte('measured_at', todayEnd)
-      .then(() => {}, () => {})
+      .gte('measured_at', dedupeSince)
+    if (clearError) {
+      // Inserting anyway would be the doubled figure this delete exists to prevent.
+      return { success: false, error: `could not clear earlier Google Ads rows: ${clearError.message}` }
+    }
 
     const measuredAt = new Date().toISOString()
+    // A ratio with a zero denominator is "not measurable", not 0. Written as 0
+    // it is indistinguishable from a real zero, and a cost-per-conversion of 0
+    // reads as the best possible result for a lower-is-better metric.
     const rows = [
-      { metric_key: ADS_METRIC_KEY.SPEND,       metric_value: insights.spend },
-      { metric_key: ADS_METRIC_KEY.IMPRESSIONS, metric_value: insights.impressions },
-      { metric_key: ADS_METRIC_KEY.CLICKS,      metric_value: insights.clicks },
-      { metric_key: ADS_METRIC_KEY.CTR,         metric_value: insights.ctr },
-      { metric_key: ADS_METRIC_KEY.CPC,         metric_value: insights.cpc },
-      { metric_key: ADS_METRIC_KEY.CONVERSIONS, metric_value: insights.conversions },
-      { metric_key: ADS_METRIC_KEY.CPA,         metric_value: insights.cpa },
+      { metric_key: ADS_METRIC_KEY.GOOGLE_SPEND,       metric_value: insights.spend },
+      { metric_key: ADS_METRIC_KEY.GOOGLE_IMPRESSIONS, metric_value: insights.impressions },
+      { metric_key: ADS_METRIC_KEY.GOOGLE_CLICKS,      metric_value: insights.clicks },
+      { metric_key: ADS_METRIC_KEY.GOOGLE_CONVERSIONS, metric_value: insights.conversions },
+      ...(insights.impressions > 0 ? [{ metric_key: ADS_METRIC_KEY.GOOGLE_CTR, metric_value: insights.ctr }] : []),
+      ...(insights.clicks > 0      ? [{ metric_key: ADS_METRIC_KEY.GOOGLE_CPC, metric_value: insights.cpc }] : []),
+      ...(insights.conversions > 0 ? [{ metric_key: ADS_METRIC_KEY.GOOGLE_CPA, metric_value: insights.cpa }] : []),
     ].map(m => ({
       client_id:    clientId,
       flywheel:     'ads' as const,

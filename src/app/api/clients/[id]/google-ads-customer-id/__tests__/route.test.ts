@@ -3,12 +3,17 @@ import { NextRequest } from 'next/server'
 
 const mocks = vi.hoisted(() => ({
   requireDashboardClientAccess: vi.fn(),
+  requireGlobalAdmin: vi.fn(),
   resolveCustomerId: vi.fn(),
   from: vi.fn(),
 }))
 
 vi.mock('@/lib/auth/client-access', () => ({
   requireDashboardClientAccess: mocks.requireDashboardClientAccess,
+}))
+
+vi.mock('@/lib/auth/require-admin', () => ({
+  requireGlobalAdmin: mocks.requireGlobalAdmin,
 }))
 
 vi.mock('@/lib/google-ads/creds-loader', () => ({
@@ -46,6 +51,7 @@ function makePatchRequest(body: unknown) {
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.requireDashboardClientAccess.mockResolvedValue(adminAccess())
+  mocks.requireGlobalAdmin.mockResolvedValue({ ok: true, user: { email: 'staff@test.com' } })
 })
 
 describe('GET /api/clients/[id]/google-ads-customer-id', () => {
@@ -64,11 +70,55 @@ describe('GET /api/clients/[id]/google-ads-customer-id', () => {
   })
 })
 
+/**
+ * `clients` stub for PATCH: the duplicate lookup (`select().eq().neq()`) and the
+ * write (`update().eq()`).
+ */
+function clientsTable(opts: {
+  otherHolders?: Array<{ id: string }>
+  holdersError?: { message: string } | null
+  updateError?: { message: string } | null
+} = {}) {
+  const eq = vi.fn().mockResolvedValue({ error: opts.updateError ?? null })
+  const update = vi.fn().mockReturnValue({ eq })
+  const neq = vi.fn().mockResolvedValue({ data: opts.otherHolders ?? [], error: opts.holdersError ?? null })
+  const select = vi.fn().mockReturnValue({ eq: vi.fn().mockReturnValue({ neq }) })
+  mocks.from.mockReturnValue({ update, select })
+  return { update, eq, neq }
+}
+
 describe('PATCH /api/clients/[id]/google-ads-customer-id', () => {
   it('returns 401 when not authenticated', async () => {
-    mocks.requireDashboardClientAccess.mockResolvedValue({ ok: false, status: 401, error: 'Unauthenticated' })
+    mocks.requireGlobalAdmin.mockResolvedValue({ ok: false, status: 401, error: 'Unauthenticated' })
     const res = await PATCH(makePatchRequest({ customer_id: '1234567890' }), routeContext())
     expect(res.status).toBe(401)
+  })
+
+  it('is internal-staff-only: dashboard access to the client is not enough', async () => {
+    // The stored id is the tenant boundary for every Google Ads call. A client
+    // user, or a demo/scoped admin of this one client, passes the dashboard
+    // check and is still refused — requireGlobalAdmin is the gate.
+    mocks.requireDashboardClientAccess.mockResolvedValue(adminAccess())
+    mocks.requireGlobalAdmin.mockResolvedValue({ ok: false, status: 403, error: 'Forbidden' })
+    const res = await PATCH(makePatchRequest({ customer_id: '9999999999' }), routeContext())
+    expect(res.status).toBe(403)
+    expect((await res.json()).error).toContain('Magic Lab')
+    expect(mocks.from).not.toHaveBeenCalled()
+  })
+
+  it('refuses an account already registered to another client', async () => {
+    const { update, neq } = clientsTable({ otherHolders: [{ id: 'another-client' }] })
+    const res = await PATCH(makePatchRequest({ customer_id: '1234567890' }), routeContext())
+    expect(res.status).toBe(409)
+    expect(neq).toHaveBeenCalledWith('id', CLIENT_ID)
+    expect(update).not.toHaveBeenCalled()
+  })
+
+  it('does not write when the duplicate lookup fails', async () => {
+    const { update } = clientsTable({ holdersError: { message: 'lookup down' } })
+    const res = await PATCH(makePatchRequest({ customer_id: '1234567890' }), routeContext())
+    expect(res.status).toBe(500)
+    expect(update).not.toHaveBeenCalled()
   })
 
   it('rejects a customer_id that is not 10 digits', async () => {
@@ -112,8 +162,7 @@ describe('PATCH /api/clients/[id]/google-ads-customer-id', () => {
   })
 
   it('strips dashes/spaces before validating (accepts 123-456-7890 form)', async () => {
-    const eq = vi.fn().mockResolvedValue({ error: null })
-    mocks.from.mockReturnValue({ update: vi.fn().mockReturnValue({ eq }) })
+    clientsTable()
 
     const res = await PATCH(makePatchRequest({ customer_id: '123-456-7890' }), routeContext())
 
@@ -134,9 +183,7 @@ describe('PATCH /api/clients/[id]/google-ads-customer-id', () => {
   })
 
   it('writes the normalised value to clients.google_ads_customer_id', async () => {
-    const eq = vi.fn().mockResolvedValue({ error: null })
-    const update = vi.fn().mockReturnValue({ eq })
-    mocks.from.mockReturnValue({ update })
+    const { update, eq } = clientsTable()
 
     await PATCH(makePatchRequest({ customer_id: '1234567890' }), routeContext())
 
@@ -146,8 +193,7 @@ describe('PATCH /api/clients/[id]/google-ads-customer-id', () => {
   })
 
   it('returns 500 with a clear message when the DB write fails', async () => {
-    const eq = vi.fn().mockResolvedValue({ error: { message: 'db timeout' } })
-    mocks.from.mockReturnValue({ update: vi.fn().mockReturnValue({ eq }) })
+    clientsTable({ updateError: { message: 'db timeout' } })
 
     const res = await PATCH(makePatchRequest({ customer_id: '1234567890' }), routeContext())
 

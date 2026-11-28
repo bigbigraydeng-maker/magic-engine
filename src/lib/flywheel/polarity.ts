@@ -16,6 +16,8 @@ export const METRIC_POLARITY: Readonly<Record<string, MetricPolarity>> = {
   [ADS_METRIC_KEY.COST_PER_CONVERSATION]: 'lower_is_better',
   [ADS_METRIC_KEY.CPA]: 'lower_is_better',
   [ADS_METRIC_KEY.CPC]: 'lower_is_better',
+  [ADS_METRIC_KEY.GOOGLE_CPA]: 'lower_is_better',
+  [ADS_METRIC_KEY.GOOGLE_CPC]: 'lower_is_better',
   [GEO_METRIC_KEY.QUERY_AVG_RANK]: 'lower_is_better',
   [SEO_METRIC_KEY.GSC_AVG_POSITION]: 'lower_is_better',
   [SEO_METRIC_KEY.GSC_PAGE_AVG_POSITION]: 'lower_is_better',
@@ -24,6 +26,7 @@ export const METRIC_POLARITY: Readonly<Record<string, MetricPolarity>> = {
   // ── neutral ────────────────────────────────────────────────────────────────
   // Spending more is not good or bad by itself.
   [ADS_METRIC_KEY.SPEND]: 'neutral',
+  [ADS_METRIC_KEY.GOOGLE_SPEND]: 'neutral',
 }
 
 export function getMetricPolarity(metricKey: string): MetricPolarity {

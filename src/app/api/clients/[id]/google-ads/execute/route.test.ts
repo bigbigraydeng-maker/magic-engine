@@ -33,6 +33,13 @@ vi.mock('@/lib/google-ads/client', () => ({
   addCampaignNegativeKeyword:   (...args: unknown[]) => mockAddNegativeKw(...args),
 }))
 
+// ── Tenant boundary mock ──────────────────────────────────────────────────────
+
+const mockOwnsAccount = vi.fn()
+vi.mock('@/lib/google-ads/creds-loader', () => ({
+  clientOwnsGoogleAdsAccount: (...args: unknown[]) => mockOwnsAccount(...args),
+}))
+
 // ── Guardrails mock ───────────────────────────────────────────────────────────
 
 const mockCheckBudget  = vi.fn()
@@ -77,7 +84,11 @@ const MOCK_CAMPAIGN = {
   id:     CAMPAIGN_ID,
   name:   'Test Campaign AU',
   status: 'ENABLED' as const,
-  campaignBudget: { amountMicros: '5000000', deliveryMethod: 'STANDARD' },
+  campaignBudget: {
+    amountMicros: '5000000',
+    deliveryMethod: 'STANDARD',
+    resourceName: 'customers/123/campaignBudgets/456',
+  },
 }
 
 const ROUTE_CTX = { params: { id: CLIENT_ID } }
@@ -103,6 +114,8 @@ describe('POST /api/clients/[id]/google-ads/execute — P18.B', () => {
     mockRequireAccess.mockResolvedValue({ ok: true })
     // Default: creds configured
     mockLoadCreds.mockReturnValue(MOCK_CREDS)
+    // Default: the id is this client's registered account
+    mockOwnsAccount.mockResolvedValue(true)
     // Default: campaign fetched
     mockGetCampaign.mockResolvedValue(MOCK_CAMPAIGN)
     // Default: API calls succeed
@@ -176,6 +189,27 @@ describe('POST /api/clients/[id]/google-ads/execute — P18.B', () => {
     )
     const res = await POST(req, ROUTE_CTX)
     expect(res.status).toBe(400)
+  })
+
+  // ── Tenant boundary ───────────────────────────────────────────────────────
+
+  it("returns 403 and touches nothing when the account is not this client's", async () => {
+    // One shared manager credential serves every client; the caller-supplied id
+    // is the only thing that selects whose campaigns get changed.
+    mockOwnsAccount.mockResolvedValue(false)
+
+    const { POST } = await import('./route')
+    const res  = await POST(
+      makeRequest({ action_type: 'ads.pause_campaign', campaign_id: CAMPAIGN_ID, google_ads_customer_id: '9999999999' }),
+      ROUTE_CTX,
+    )
+    expect(res.status).toBe(403)
+    expect(mockOwnsAccount).toHaveBeenCalledWith(expect.anything(), CLIENT_ID, '9999999999')
+    expect(mockLoadCreds).not.toHaveBeenCalled()
+    expect(mockGetCampaign).not.toHaveBeenCalled()
+    expect(mockSetStatus).not.toHaveBeenCalled()
+    expect(mockSetBudget).not.toHaveBeenCalled()
+    expect(mockAddNegativeKw).not.toHaveBeenCalled()
   })
 
   // ── Credentials not configured ────────────────────────────────────────────
@@ -273,6 +307,48 @@ describe('POST /api/clients/[id]/google-ads/execute — P18.B', () => {
     expect(mockSetBudget).toHaveBeenCalledOnce()
     expect(mockSetBudget.mock.calls[0][2]).toBe(5_500_000)
     expect(json.after.budget_micros).toBe('5500000')
+  })
+
+  it("refuses a budget that is not this campaign's own, before the ±20% guard can be fooled", async () => {
+    // The guard compares against THIS campaign's budget; a different budget's
+    // resource name would be approved on the wrong amount and then changed.
+    const { POST } = await import('./route')
+    const res = await POST(
+      makeRequest({
+        action_type:            'ads.adjust_bid',
+        campaign_id:            CAMPAIGN_ID,
+        google_ads_customer_id: CUSTOMER_ID,
+        params: {
+          new_daily_budget_micros: 5_500_000,
+          budget_resource_name:    'customers/123/campaignBudgets/999',
+        },
+      }),
+      ROUTE_CTX,
+    )
+    expect(res.status).toBe(422)
+    expect(mockSetBudget).not.toHaveBeenCalled()
+  })
+
+  it('refuses a budget change when the campaign budget reference is unknown', async () => {
+    mockGetCampaign.mockResolvedValue({
+      ...MOCK_CAMPAIGN,
+      campaignBudget: { amountMicros: '5000000', deliveryMethod: 'STANDARD' },
+    })
+    const { POST } = await import('./route')
+    const res = await POST(
+      makeRequest({
+        action_type:            'ads.adjust_bid',
+        campaign_id:            CAMPAIGN_ID,
+        google_ads_customer_id: CUSTOMER_ID,
+        params: {
+          new_daily_budget_micros: 5_500_000,
+          budget_resource_name:    'customers/123/campaignBudgets/456',
+        },
+      }),
+      ROUTE_CTX,
+    )
+    expect(res.status).toBe(422)
+    expect(mockSetBudget).not.toHaveBeenCalled()
   })
 
   it('returns 400 when new_daily_budget_micros is missing for adjust_bid', async () => {

@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { fetchAccountInsights, type GoogleAdsCreds } from '../client'
+import { fetchAccountInsights, fetchAccountInsightsResult, type GoogleAdsCreds } from '../client'
 
 const CREDS: GoogleAdsCreds = {
   developerToken: 'dev-token',
@@ -122,5 +122,62 @@ describe('fetchAccountInsights', () => {
     const out = await fetchAccountInsights(CREDS, 30)
     expect(out).toBeNull()
     expect(consoleErr).toHaveBeenCalled()
+  })
+})
+
+describe('fetchAccountInsightsResult — failures keep their reason', () => {
+  beforeEach(() => { vi.restoreAllMocks() })
+  afterEach(() => { vi.restoreAllMocks() })
+
+  it('returns the HTTP status and the provider error text', async () => {
+    global.fetch = mockFetchSequence(
+      tokenOk,
+      () => new Response('{"error":{"code":403,"message":"developer token unapproved"}}', {
+        status: 403, headers: { 'content-type': 'application/json' },
+      }),
+    ) as unknown as typeof fetch
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const out = await fetchAccountInsightsResult(CREDS, 30)
+    expect(out.ok).toBe(false)
+    if (out.ok) return
+    expect(out.status).toBe(403)
+    expect(out.reason).toContain('developer token unapproved')
+  })
+
+  it('reports a failed token refresh without throwing', async () => {
+    global.fetch = mockFetchSequence(
+      () => new Response('{"error":"invalid_grant"}', { status: 400 }),
+    ) as unknown as typeof fetch
+
+    const out = await fetchAccountInsightsResult(CREDS, 30)
+    expect(out).toMatchObject({ ok: false, status: null })
+    if (out.ok) return
+    expect(out.reason).toContain('token refresh failed')
+    expect(out.reason).toContain('invalid_grant')
+  })
+
+  it('reports a network failure or timeout as no response, with the cause', async () => {
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(tokenOk())
+      .mockRejectedValueOnce(new DOMException('The operation was aborted due to timeout', 'TimeoutError')) as unknown as typeof fetch
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const out = await fetchAccountInsightsResult(CREDS, 30)
+    expect(out).toMatchObject({ ok: false, status: null })
+    if (out.ok) return
+    expect(out.reason).toContain('timeout')
+  })
+
+  it('gives both requests a time limit', async () => {
+    const fetchMock = mockFetchSequence(tokenOk, () => searchOk([]))
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    await fetchAccountInsightsResult(CREDS, 30)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    for (const call of fetchMock.mock.calls) {
+      expect((call[1] as RequestInit).signal).toBeInstanceOf(AbortSignal)
+    }
   })
 })

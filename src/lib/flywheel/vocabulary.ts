@@ -283,7 +283,7 @@ export const ADS_METRIC_KEY = {
 
   /** Cost per acquisition / purchase. Meta: cost_per_action_type action_type
    *  'purchase' (falls back to 'offsite_conversion.fb_pixel_purchase').
-   *  Google Ads: spend / conversions from the account insights query. */
+   *  Google Ads has its own key (GOOGLE_CPA) — see the block below. */
   CPA: 'ads.account.cpa',
 
   /** Cost per lead-form submission — the outcome unit of a lead-gen campaign.
@@ -306,6 +306,35 @@ export const ADS_METRIC_KEY = {
 
   /** Paid Search key events (conversions) from GA4 */
   GA4_PAID_CONVERSIONS: 'ads.ga4.paid_conversions',
+
+  // ── Google Ads account metrics ────────────────────────────────────────────
+  // Deliberately NOT under `ads.account.*`. Every reader of that namespace
+  // (dashboard tiles, health score, anomaly rules, the attribution job, the
+  // weekly report) selects by metric_key alone and never filters `source`, so
+  // a second platform writing the same keys would be averaged into the Meta
+  // numbers without any error. A separate key is the only isolation those
+  // readers actually honour. Values are rolling 30-day account aggregates.
+
+  /** Google Ads spend in account currency, rolling 30 days */
+  GOOGLE_SPEND: 'ads.google.spend',
+
+  /** Google Ads impressions, rolling 30 days */
+  GOOGLE_IMPRESSIONS: 'ads.google.impressions',
+
+  /** Google Ads clicks, rolling 30 days */
+  GOOGLE_CLICKS: 'ads.google.clicks',
+
+  /** Google Ads average cost per click (spend / clicks) */
+  GOOGLE_CPC: 'ads.google.cpc',
+
+  /** Google Ads click-through rate (clicks / impressions, 0–1) */
+  GOOGLE_CTR: 'ads.google.ctr',
+
+  /** Google Ads conversions as the account counts them, rolling 30 days */
+  GOOGLE_CONVERSIONS: 'ads.google.conversions',
+
+  /** Google Ads cost per conversion (spend / conversions) */
+  GOOGLE_CPA: 'ads.google.cpa',
 } as const
 
 export type AdsMetricKey = (typeof ADS_METRIC_KEY)[keyof typeof ADS_METRIC_KEY]

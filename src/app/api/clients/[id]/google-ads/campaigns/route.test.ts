@@ -25,6 +25,14 @@ vi.mock('@/lib/google-ads/client', () => ({
   listCampaigns:      (...args: unknown[]) => mockListCampaigns(...args),
 }))
 
+// ── Tenant boundary mock ──────────────────────────────────────────────────────
+
+const mockOwnsAccount = vi.fn()
+vi.mock('@/lib/google-ads/creds-loader', () => ({
+  clientOwnsGoogleAdsAccount: (...args: unknown[]) => mockOwnsAccount(...args),
+}))
+vi.mock('@/lib/supabase', () => ({ supabaseAdmin: {} }))
+
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
 const CLIENT_ID   = 'client-abc'
@@ -62,6 +70,8 @@ describe('GET /api/clients/[id]/google-ads/campaigns — P18.B.1', () => {
     vi.clearAllMocks()
     mockRequireAccess.mockResolvedValue({ ok: true })
     mockLoadCreds.mockReturnValue(MOCK_CREDS)
+    // Default: the id is this client's registered account
+    mockOwnsAccount.mockResolvedValue(true)
     mockListCampaigns.mockResolvedValue(MOCK_CAMPAIGNS)
   })
 
@@ -83,6 +93,19 @@ describe('GET /api/clients/[id]/google-ads/campaigns — P18.B.1', () => {
     const json = await res.json()
     expect(res.status).toBe(400)
     expect(json.error).toContain('google_ads_customer_id')
+  })
+
+  // ── Tenant boundary ───────────────────────────────────────────────────────
+
+  it("returns 403 and lists nothing when the account is not this client's", async () => {
+    mockOwnsAccount.mockResolvedValue(false)
+
+    const { GET } = await import('./route')
+    const res = await GET(makeRequest('9999999999'), ROUTE_CTX)
+    expect(res.status).toBe(403)
+    expect(mockOwnsAccount).toHaveBeenCalledWith(expect.anything(), CLIENT_ID, '9999999999')
+    expect(mockLoadCreds).not.toHaveBeenCalled()
+    expect(mockListCampaigns).not.toHaveBeenCalled()
   })
 
   // ── Credentials not configured ────────────────────────────────────────────

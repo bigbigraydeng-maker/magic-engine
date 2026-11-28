@@ -130,6 +130,43 @@ export const METRIC_CATALOG: Record<string, MetricMeta> = {
     direction: 'higher_is_better',
   },
 
+  // ── Ads — Google Ads (own keys; rolling 30-day account aggregates) ──────────
+  [ADS_METRIC_KEY.GOOGLE_SPEND]: {
+    label:     'Google Ads Spend',
+    unit:      'currency',
+    direction: 'lower_is_better',
+  },
+  [ADS_METRIC_KEY.GOOGLE_IMPRESSIONS]: {
+    label:     'Google Ads Impressions',
+    unit:      'count',
+    direction: 'higher_is_better',
+  },
+  [ADS_METRIC_KEY.GOOGLE_CLICKS]: {
+    label:     'Google Ads Clicks',
+    unit:      'count',
+    direction: 'higher_is_better',
+  },
+  [ADS_METRIC_KEY.GOOGLE_CPC]: {
+    label:     'Google Ads CPC',
+    unit:      'currency',
+    direction: 'lower_is_better',
+  },
+  [ADS_METRIC_KEY.GOOGLE_CTR]: {
+    label:     'Google Ads CTR',
+    unit:      'percent',
+    direction: 'higher_is_better',
+  },
+  [ADS_METRIC_KEY.GOOGLE_CONVERSIONS]: {
+    label:     'Google Ads Conversions',
+    unit:      'count',
+    direction: 'higher_is_better',
+  },
+  [ADS_METRIC_KEY.GOOGLE_CPA]: {
+    label:     'Google Ads Cost / Conversion',
+    unit:      'currency',
+    direction: 'lower_is_better',
+  },
+
   // ── GEO ──────────────────────────────────────────────────────────────────────
   [GEO_METRIC_KEY.QUERY_MENTION_RATE]: {
     label:     'AI Mention Rate',
@@ -186,3 +223,25 @@ export const SPOTLIGHT_METRIC_KEYS: string[] = [
   ADS_METRIC_KEY.SPEND,
   GEO_METRIC_KEY.QUERY_MENTION_RATE,
 ]
+
+/**
+ * Tiles appended after the spotlight grid ONLY for clients that have rows for
+ * them. Most clients run no Google Ads; an always-on tile would be a permanent
+ * "—" on their board, which reads as "broken" rather than "not applicable".
+ */
+export const OPTIONAL_SPOTLIGHT_METRIC_KEYS: string[] = [
+  ADS_METRIC_KEY.GOOGLE_SPEND,
+  ADS_METRIC_KEY.GOOGLE_CLICKS,
+  ADS_METRIC_KEY.GOOGLE_CONVERSIONS,
+]
+
+/**
+ * Tile keys for one client: the fixed spotlight grid, then each optional key
+ * the client has at least one row for.
+ */
+export function summaryTileKeys(keysWithRows: ReadonlySet<string>): string[] {
+  return [
+    ...SPOTLIGHT_METRIC_KEYS,
+    ...OPTIONAL_SPOTLIGHT_METRIC_KEYS.filter(key => keysWithRows.has(key)),
+  ]
+}

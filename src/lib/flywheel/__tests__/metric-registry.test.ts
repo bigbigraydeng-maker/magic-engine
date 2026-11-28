@@ -37,14 +37,26 @@ describe('ADS_METRIC_PULLERS registry', () => {
 
   it('registers exactly the seven keys the Google Ads arm writes', () => {
     expect(adsMetricKeysWrittenBy('google_ads_pullback').sort()).toEqual([
-      ADS_METRIC_KEY.CLICKS,
-      ADS_METRIC_KEY.CONVERSIONS,
-      ADS_METRIC_KEY.CPA,
-      ADS_METRIC_KEY.CPC,
-      ADS_METRIC_KEY.CTR,
-      ADS_METRIC_KEY.IMPRESSIONS,
-      ADS_METRIC_KEY.SPEND,
+      ADS_METRIC_KEY.GOOGLE_CLICKS,
+      ADS_METRIC_KEY.GOOGLE_CONVERSIONS,
+      ADS_METRIC_KEY.GOOGLE_CPA,
+      ADS_METRIC_KEY.GOOGLE_CPC,
+      ADS_METRIC_KEY.GOOGLE_CTR,
+      ADS_METRIC_KEY.GOOGLE_IMPRESSIONS,
+      ADS_METRIC_KEY.GOOGLE_SPEND,
     ].sort())
+  })
+
+  it('never lets Google Ads share a metric key with a Meta puller', () => {
+    // Readers of ads.account.* select by metric_key and ignore `source`, so a
+    // shared key blends two platforms into one number with no error anywhere.
+    const metaKeys = new Set([
+      ...adsMetricKeysWrittenBy('meta_ads'),
+      ...adsMetricKeysWrittenBy('meta_ads_pullback'),
+    ])
+    const googleKeys = adsMetricKeysWrittenBy('google_ads_pullback')
+    expect(googleKeys.filter(key => metaKeys.has(key))).toEqual([])
+    for (const key of googleKeys) expect(key.startsWith('ads.google.')).toBe(true)
   })
 })
 
