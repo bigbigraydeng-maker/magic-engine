@@ -5,6 +5,7 @@
 import { WEEK_DAYS, type FollowupProgress } from '@/lib/crm/followup-progress/load'
 import { delta, pointDaysAgo, SNAPSHOT_TIME_LABEL, type DayPoint } from '@/lib/crm/followup-progress/history'
 import { FOLLOWUP_GROUPS, groupMeta, OUT_OF_SCOPE, OUT_OF_SCOPE_LABEL, type FollowupGroup } from '@/lib/crm/followup-progress/groups'
+import Link from 'next/link'
 import { GroupLink } from './GroupLink'
 
 const OWNER_LABEL = { staff: '员工', ai: 'AI（人点了才发）', none: '暂不处理' } as const
@@ -23,7 +24,9 @@ function GroupRow({ clientId, group, progress, day, week }: { clientId: string; 
         <div className="font-medium text-me-charcoal">{meta.label}</div>
         <div className="mt-0.5 text-[12.5px] leading-snug text-me-charcoal/70">{meta.howTo}</div>
       </td>
-      <td className="py-3 pr-4 text-right text-lg font-semibold tabular-nums text-me-charcoal">{progress.counts.groups[group]}</td>
+      <td className="py-3 pr-4 text-right text-lg font-semibold tabular-nums text-me-charcoal">
+        <Link className="underline decoration-me-charcoal/30 underline-offset-4" href={`/dashboard/clients/${clientId}/crm/followup-progress?group=${group}`} title="看这一组是哪些客人">{progress.counts.groups[group]}</Link>
+      </td>
       <td className="py-3 pr-4 text-sm"><Change value={delta(progress.counts, day, group)} /></td>
       <td className="py-3 pr-4 text-sm"><Change value={delta(progress.counts, week, group)} /></td>
       <td className="py-3 pr-4 text-sm text-me-charcoal/80">{OWNER_LABEL[meta.owner]}</td>
@@ -63,7 +66,7 @@ export function ProgressView({ clientId, progress, history, now }: { clientId: s
     <>
       <h1 className="text-lg font-semibold text-me-charcoal">跟进进度</h1>
       <p className="mb-5 mt-1 text-sm text-me-charcoal/70">
-        还没成交、可以联系的客人一共 <strong className="tabular-nums">{progress.counts.inScope}</strong> 位，分成下面几组。数字是打开这一页时现算的；「比昨天」「比上周」来自{SNAPSHOT_TIME_LABEL}自动记下的数{history.length === 0 ? '，现在还没有记过（第一次记数之后才有对比；近期没有新咨询的客户不记）' : ''}。
+        还没成交、可以联系的客人一共 <strong className="tabular-nums">{progress.counts.inScope}</strong> 位，分成下面几组，点人数能看到这一组是哪些客人。数字是打开这一页时现算的；「比昨天」「比上周」来自{SNAPSHOT_TIME_LABEL}自动记下的数{history.length === 0 ? '，现在还没有记过（第一次记数之后才有对比；近期没有新咨询的客户不记）' : ''}。
       </p>
 
       <h2 className="mb-2 text-sm font-semibold text-me-charcoal">最近 {WEEK_DAYS} 天发生了什么</h2>

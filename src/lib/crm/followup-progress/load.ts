@@ -77,8 +77,8 @@ export interface FollowupProgress {
 /** Contact id → the verdict, for callers that need names per group later. */
 export interface FollowupProgressDetail extends FollowupProgress {
   verdicts: Map<string, GroupVerdict>
-  /** Contact id → when the guest last filled a form / last spoke, for callers that list a group in order. */
-  dates: Map<string, { lastEnquiryAt: string | null; lastGuestMessageAt: string | null }>
+  /** Contact id → when the guest last filled a form / last spoke / was last called or written to, for callers that list a group. */
+  dates: Map<string, { lastEnquiryAt: string | null; lastGuestMessageAt: string | null; lastStaffAt: string | null }>
 }
 
 function later(a: string | null, b: string): string {
@@ -265,7 +265,7 @@ export async function loadFollowupProgress(
     const a = touchFacts(index.touchesOf.get(c.id) ?? [])
     const verdict = groupOf(guestFacts(c, a, index, book.qualified, now), now, cfg)
     verdicts.set(c.id, verdict)
-    dates.set(c.id, { lastEnquiryAt: a.enquiry, lastGuestMessageAt: a.guest })
+    dates.set(c.id, { lastEnquiryAt: a.enquiry, lastGuestMessageAt: a.guest, lastStaffAt: a.staff })
     // The week's numbers count guests: people in the follow-up work or already booked. Staff, trade partners,
     // sales pitches and closed contacts are not "guests who wrote".
     if (!verdict.inScope && verdict.why !== 'booked') continue
