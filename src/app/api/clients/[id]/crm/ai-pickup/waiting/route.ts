@@ -11,7 +11,8 @@
  * guests the mail check refuses, and those are only known by running the mail check per guest. The bar therefore shows
  * only while `readyToday > 0`, and says "today".
  *
- * The answer is kept for a few minutes per client: the read walks every recent enquiry, and the bar is on every CRM page.
+ * The answer is kept for one minute per client (long enough to cover a burst of page opens, short enough that the bar
+ * follows a release): the read walks every recent enquiry, and the bar is on every CRM page.
  */
 
 import { NextResponse } from 'next/server'
@@ -28,7 +29,7 @@ export const maxDuration = 60
 
 interface Answer { waiting: number; readyToday: number; dailyMax: number; daysSinceRelease: number | null }
 
-const KEEP_MS = 5 * 60_000
+const KEEP_MS = 60_000
 const kept = new Map<string, { at: number; answer: Answer }>()
 
 /** Tests only. */

@@ -128,7 +128,10 @@ export const defaultAiPickupWaitingDeps: AiPickupWaitingDeps = {
       .limit(1)
     if (sent.error) throw new Error(sent.error.message)
     const lastSent = (sent.data ?? [])[0] as { created_at?: string } | undefined
-    const latest = [last?.created_at, lastSent?.created_at].filter((v): v is string => typeof v === 'string').sort().pop()
+    const latest = [last?.created_at, lastSent?.created_at]
+      .filter((v): v is string => typeof v === 'string' && !Number.isNaN(Date.parse(v)))
+      .sort((x, y) => Date.parse(x) - Date.parse(y))
+      .pop()
     return { waiting, daysSinceRelease: daysSince(latest, now) }
   },
 }

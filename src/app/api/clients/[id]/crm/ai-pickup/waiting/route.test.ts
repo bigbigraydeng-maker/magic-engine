@@ -53,7 +53,7 @@ describe('GET ai-pickup/waiting', () => {
     expect(await (await call()).json()).toEqual({ waiting: 0, readyToday: 0, dailyMax: 30, daysSinceRelease: null })
   })
 
-  it('the answer is kept per client for a few minutes; another client is read on its own; access is still checked every time', async () => {
+  it('the answer is kept per client for a minute; another client is read on its own; access is still checked every time', async () => {
     vi.mocked(defaultAiPickupWaitingDeps.load).mockResolvedValue({ waiting: 5, daysSinceRelease: 1 })
     await call(); await call()
     expect(defaultAiPickupWaitingDeps.load).toHaveBeenCalledTimes(1)
