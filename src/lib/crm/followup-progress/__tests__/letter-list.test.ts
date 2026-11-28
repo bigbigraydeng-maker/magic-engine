@@ -18,12 +18,11 @@ describe('letterStatus — who the AI may draft for', () => {
 
   it('a quiet guest the staff list would hand to a letter: due', () => {
     expect(st({})).toBe('due')
-    expect(st({ segment: 'retry_channel' })).toBe('due')
     expect(st({ segment: 'handoff_sop' })).toBe('due')
   })
 
   it('anyone the staff list gives to staff today is staff\'s, whatever else is true', () => {
-    for (const segment of ['replied', 'callback_due', 'new_untouched', 'reading_site', 'clicked_link'] as const) expect(st({ segment }), segment).toBe('staff_today')
+    for (const segment of ['replied', 'callback_due', 'new_untouched', 'reading_site', 'clicked_link', 'retry_channel'] as const) expect(st({ segment }), segment).toBe('staff_today')
   })
 
   it('anyone that list has parked or excluded is nobody\'s to write to', () => {

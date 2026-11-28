@@ -710,6 +710,27 @@ function systemUrlsFor(ctx: WriterContext, tours: readonly PublishedTourFact[]):
   return Array.from(urls)
 }
 
+/**
+ * A whole letter minus what the system itself puts around the writing: the greeting line built from the client's
+ * config and the guest's first name, the sign-off from the config, and the link lines the system builds.
+ * Only exact matches are removed: a greeting or sign-off a person rewrote stays in and is checked like any text.
+ */
+export function withoutSystemFraming(letter: string, a: { firstName: string | null; config: FollowUpWriterConfig; systemUrls: readonly string[] }): string {
+  const framed = composeFollowUpLetter({ firstName: a.firstName, config: a.config, aiBody: '\u0000', links: [] })
+  const [greeting = '', signature = ''] = framed.split('\u0000').map((part) => part.trim())
+  let text = letter.replace(/\r\n/g, '\n').trim()
+  if (greeting !== '' && text.startsWith(greeting)) text = text.slice(greeting.length).trim()
+  if (signature !== '' && text.endsWith(signature)) text = text.slice(0, text.length - signature.length).trim()
+  const urls = new Set(a.systemUrls)
+  const lines = text.split('\n').filter((line) => {
+    const t = line.trim()
+    if (t === LINK_LEAD_MANY || t === LINK_LEAD_ONE) return false
+    const url = t.match(/(https?:\/\/\S+)$/)?.[1]
+    return !(url !== undefined && urls.has(url) && /^[^:]{1,80}:\s+https?:\/\/\S+$/.test(t))
+  })
+  return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
 export type LetterCheckResult = { ok: true; checks: CheckLine[] } | { ok: false; reason: FollowUpFailure; message: string }
 
 /**
@@ -722,5 +743,9 @@ export async function checkFollowUpLetter(clientId: string, contactId: string, t
   const catalogue = await loadCatalogue(clientId, ctx.today)
   if (!catalogue.readable) return { ok: false, reason: 'facts_unreadable', message: '暂时读不到团目录，没法检查这封信。稍后再试。' }
   const picks = picksFor(ctx, catalogue.tours, (ctx.settings.providers.publishedTours ?? null) !== null)
-  return { ok: true, checks: checksForLetter(ctx, catalogue, picks, { subject: text.subject, aiBody: text.body, letter: text.body, strippedFraming: false, systemUrls: systemUrlsFor(ctx, catalogue.tours) }) }
+  const systemUrls = systemUrlsFor(ctx, catalogue.tours)
+  // The body checks (spelling, length, "we spoke", off-sale tours…) read what was written, not what the system put
+  // around it: a guest's name in the greeting may be in any script, and the sign-off is the client's own.
+  const aiBody = withoutSystemFraming(text.body, { firstName: resolveFirstName(ctx.person.display_name), config: ctx.config, systemUrls })
+  return { ok: true, checks: checksForLetter(ctx, catalogue, picks, { subject: text.subject, aiBody, letter: text.body, strippedFraming: false, systemUrls }) }
 }

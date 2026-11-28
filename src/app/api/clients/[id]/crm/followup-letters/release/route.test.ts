@@ -78,7 +78,7 @@ describe('POST followup-letters/release', () => {
     still.mockResolvedValue({ ok: false, reason: 'recent_activity', message: '名单打开之后有人联系过他，这封没有发。' })
     const res = await post(good)
     expect(res.status).toBe(409)
-    expect(await res.json()).toEqual({ error: '名单打开之后有人联系过他，这封没有发。', reason: 'recent_activity' })
+    expect(await res.json()).toEqual({ error: '名单打开之后有人联系过他，这封没有发。', reason: 'recent_activity', final: true })
     expect(checks).not.toHaveBeenCalled()
     expect(send).not.toHaveBeenCalled()
   })

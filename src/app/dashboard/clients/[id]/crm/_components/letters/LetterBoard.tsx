@@ -18,7 +18,7 @@ type CardState =
   | { kind: 'empty' } | { kind: 'drafting' } | { kind: 'draft_failed'; message: string }
   | { kind: 'drafted'; draft: Draft; ticked: boolean }
   | { kind: 'sending'; draft: Draft } | { kind: 'sent'; duplicate: boolean }
-  | { kind: 'send_failed'; draft: Draft; message: string; unknown: boolean }
+  | { kind: 'send_failed'; draft: Draft; message: string; unknown: boolean; final: boolean }
 
 const CHECK_ICON: Record<CheckLine['status'], string> = { pass: '✓', warn: '⚠', fail: '✗' }
 const CHECK_TONE: Record<CheckLine['status'], string> = { pass: 'text-green-700', warn: 'text-amber-700', fail: 'text-red-700' }
@@ -55,7 +55,8 @@ async function requestChecks(clientId: string, contactId: string, d: Draft): Pro
   }
 }
 
-type SendOutcome = { ok: true; duplicate: boolean } | { ok: false; message: string; unknown: boolean; checks?: CheckLine[] }
+/** `final` = the refusal is about the guest, not the text: editing and sending again cannot help. */
+type SendOutcome = { ok: true; duplicate: boolean } | { ok: false; message: string; unknown: boolean; final: boolean; checks?: CheckLine[] }
 
 async function sendOne(url: string, row: LetterBoardRow, draft: Draft): Promise<SendOutcome> {
   try {
@@ -63,13 +64,13 @@ async function sendOne(url: string, row: LetterBoardRow, draft: Draft): Promise<
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ contactId: row.contactId, subject: draft.subject, body: draft.body, requestId: row.requestId, expectedRecipient: row.recipient }),
     })
-    const json = (await res.json().catch(() => ({}))) as { error?: string; reason?: string; duplicate?: boolean; checks?: CheckLine[] }
+    const json = (await res.json().catch(() => ({}))) as { error?: string; reason?: string; duplicate?: boolean; final?: boolean; checks?: CheckLine[] }
     if (res.ok) return { ok: true, duplicate: json.duplicate === true }
     // 502 / 503 or "the same letter is still being sent": the outcome is not known — never invite a resend.
     const unknown = res.status === 502 || res.status === 503 || json.reason === 'duplicate_unfinished' || json.reason === 'send_unknown'
-    return { ok: false, message: json.error ?? '发送失败，稍后再试。', unknown, ...(json.checks ? { checks: json.checks } : {}) }
+    return { ok: false, message: json.error ?? '发送失败，稍后再试。', unknown, final: json.final === true, ...(json.checks ? { checks: json.checks } : {}) }
   } catch {
-    return { ok: false, message: '网络出错，这封有没有发出去还不确定。先别重发，看客人的往来记录。', unknown: true }
+    return { ok: false, message: '网络出错，这封有没有发出去还不确定。先别重发，看客人的往来记录。', unknown: true, final: false }
   }
 }
 
@@ -145,7 +146,7 @@ export function LetterBoard({ clientId, listUrl, toBoard, title, intro, back, dr
       const out = await sendOne(url, r, c.draft)
       // A refusal that comes with fresh checks (the text was checked again at release) shows those checks.
       const failedDraft = out.ok || !out.checks ? c.draft : { ...c.draft, checks: out.checks, stale: false }
-      set(r.contactId, out.ok ? { kind: 'sent', duplicate: out.duplicate } : { kind: 'send_failed', draft: failedDraft, message: out.message, unknown: out.unknown })
+      set(r.contactId, out.ok ? { kind: 'sent', duplicate: out.duplicate } : { kind: 'send_failed', draft: failedDraft, message: out.message, unknown: out.unknown, final: out.final })
     }
     setBusy(false)
   }
@@ -173,7 +174,7 @@ export function LetterBoard({ clientId, listUrl, toBoard, title, intro, back, dr
   // A refused letter (not an unknown outcome) can be fixed and ticked again; the request id stays the same.
   const retry = (id: string) => {
     const c = latest(id)
-    if (!busy && c.kind === 'send_failed' && !c.unknown) set(id, { kind: 'drafted', draft: c.draft, ticked: false })
+    if (!busy && c.kind === 'send_failed' && !c.unknown && !c.final) set(id, { kind: 'drafted', draft: c.draft, ticked: false })
   }
 
   return (
@@ -221,7 +222,7 @@ function Card({ row, state, clientId, locked, onEdit, onToggle, onRetry, onReche
       {state.kind === 'send_failed' && (
         <p className={`mt-2 text-sm ${state.unknown ? 'text-amber-700' : 'text-red-700'}`}>
           {state.message}{state.unknown ? ' 先别重发：看客人的往来记录，明天这一页会按实际情况更新。' : ''}
-          {!state.unknown && <button disabled={locked} onClick={() => onRetry(row.contactId)} className="ml-2 underline">改好再发</button>}
+          {!state.unknown && !state.final && <button disabled={locked} onClick={() => onRetry(row.contactId)} className="ml-2 underline">改好再发</button>}
         </p>
       )}
       {draft && (

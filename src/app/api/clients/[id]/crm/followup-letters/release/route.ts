@@ -15,7 +15,7 @@
  * send path already writes its receipts (`crm_email_send_receipts`, `conversation_outbound_log`). If releasing is
  * ever made automatic, it must move to Inngest with receipts for the draft and the review as well.
  *
- * Responses: 200 { ok, duplicate? } / 400 / 401 / 403 / 409 { error, reason, checks? } / 502 / 503
+ * Responses: 200 { ok, duplicate? } / 400 / 401 / 403 / 409 { error, reason, final?, checks? } / 502 / 503
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -53,7 +53,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   try {
     const now = new Date()
     const still = await checkLetterRelease(await createLetterListDeps(supabaseAdmin, params.id, now), { contactId, requestId }, now)
-    if (!still.ok) return NextResponse.json({ error: still.message, reason: still.reason }, { status: 409 })
+    // `final`: editing the letter cannot change this answer, so the page does not offer "fix and send again".
+    if (!still.ok) return NextResponse.json({ error: still.message, reason: still.reason, final: still.reason !== 'mail_check' }, { status: 409 })
     const checked = await checkFollowUpLetter(params.id, contactId, { subject, body })
     if (!checked.ok) return NextResponse.json({ error: `这封信现在没法检查，没有发：${checked.message}`, reason: checked.reason }, { status: 409 })
     const failed = checked.checks.filter((c) => c.status === 'fail')

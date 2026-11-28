@@ -9,7 +9,10 @@
  * The staff's own list decides first. Every guest is put through the same judgement as "今天先联系" (`segmentContact`):
  * a guest that list gives to staff today — replied, a callback due, a new lead, clicked a link, reading the site —
  * is staff's, and so is a guest it has parked or excluded (says "later", said no, bad number). The AI may draft only
- * for the quiet ones that list itself would hand to a letter: a conversation that went silent, a call nobody answered.
+ * for the quiet ones: a conversation that went silent, and guests that list has handed to "the system keeps in touch".
+ * (On the quiet conversations the staff list still says "pick the longest-waiting and write a line": staff may do
+ * that too. Whoever moves first wins — a staff contact takes the guest off this page, a released letter greys the
+ * guest on theirs.)
  *
  * On top of that, the AI stays out when:
  *   a callback is set (in the future, or in the last `quietDays` days: the staff member is on it);
@@ -25,13 +28,16 @@
  * Back to staff — the moment the guest answers, the grouping moves them to "waiting for a reply": staff's list.
  *
  * The list is only a snapshot. `checkLetterRelease` runs the whole judgement again for the one guest at the moment
- * of release, so a call made an hour after the page was opened stops the letter.
+ * of release, so a call made an hour after the page was opened stops the letter. What it cannot see: a mail written
+ * in the mailbox itself that has not been synced in yet, and a second send started in the same few seconds (the send
+ * path's own lock and weekly cap are the backstop there; the daily cap can be passed by one in that window).
  *
  * Every read throws on error: this list decides who is written to, so a half read is no list at all.
  */
 
 import type { ComposePreview } from '@/lib/microsoft/mail-send-new'
 import { buildContactModel, type ContactRowLike, type StageMetaLike, type TouchpointRowLike } from '@/lib/crm/contact-model'
+import { localDayStartMs } from '@/lib/crm/day-list'
 import { contactCardTitle } from '@/lib/crm/display-name'
 import { segmentContact, type Segment, type SiteReading, type TouchpointLike } from '@/lib/crm/segments'
 import { uuidFromSeed } from '@/lib/crm/stable-uuid'
@@ -58,8 +64,12 @@ export type LetterStatus =
   | 'no_reply_stop'
   | 'weekly_limit'
 
-/** Segments of the staff's list where the next step is a letter, not a person: the only ones the AI may draft for. */
-const AI_MAY_WRITE: ReadonlySet<Segment> = new Set<Segment>(['stale_conversation', 'retry_channel', 'handoff_sop'])
+/**
+ * Segments of the staff's list where nobody is expected to ring today: a conversation that went quiet, and a guest
+ * the list has handed to "the system keeps in touch". The only ones the AI may draft for. "Rang once, no answer"
+ * is not here: that list asks staff to ring again.
+ */
+const AI_MAY_WRITE: ReadonlySet<Segment> = new Set<Segment>(['stale_conversation', 'handoff_sop'])
 /** Segments that list has set aside: nobody acts now, the AI included. */
 const PARKED: ReadonlySet<Segment> = new Set<Segment>(['nurture_future', 'excluded', 'not_enquiry_suspect'])
 const NEGATIVE_OUTCOMES: ReadonlySet<string> = new Set(['not_interested', 'not_interested_now'])
@@ -168,16 +178,7 @@ interface Evaluated {
 }
 
 function startOfLocalDay(now: Date, timeZone: string): string {
-  const day = new Intl.DateTimeFormat('en-CA', { timeZone }).format(now)
-  // Walk back from now to the first instant that is still "today" in the client's time zone (hour steps are enough
-  // for the cap; a zone on a half-hour offset counts at most half an hour of yesterday).
-  let t = now.getTime()
-  for (let i = 0; i < 26; i++) {
-    const prev = t - 3_600_000
-    if (new Intl.DateTimeFormat('en-CA', { timeZone }).format(new Date(prev)) !== day) break
-    t = prev
-  }
-  return new Date(t - (t % 3_600_000)).toISOString()
+  return new Date(localDayStartMs(now, timeZone)).toISOString()
 }
 
 function rulesFor(deps: LetterListDeps, rules: LetterRules): LetterRules {

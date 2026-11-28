@@ -129,12 +129,14 @@ describe('LetterBoard', () => {
   it('a page with its own release route posts there, and shows that route\'s refusal with its fresh checks', async () => {
     install([row('a')])
     sendStatus = 409
-    sendBody = { error: '名单打开之后有人联系过他，这封没有发。', reason: 'recent_activity' }
+    sendBody = { error: '名单打开之后有人联系过他，这封没有发。', reason: 'recent_activity', final: true }
     board(() => '/release')
     await drafted()
     fireEvent.click(tick())
     fireEvent.click(release())
     await screen.findByText(/名单打开之后有人联系过他/)
+    // The refusal is about the guest, not the text: no "fix and send again".
+    expect(screen.queryByText('改好再发')).toBeNull()
     expect(sends()[0].url).toBe('/release')
     expect(sends()[0].body).toMatchObject({ contactId: 'a', requestId: 'req-a' })
 

@@ -32,7 +32,9 @@ import {
   composeFollowUpLetter,
   generateFollowUpDraft,
   checkFollowUpLetter,
+  withoutSystemFraming,
   NO_CONVERSATION_NOTE,
+  LINK_LEAD_MANY,
   pickFeaturedTours,
   runFollowUpChecks,
   spokeWithGuest,
@@ -389,6 +391,29 @@ describe('generateFollowUpDraft', () => {
       expect(links?.status).toBe('fail')
       expect(links?.detail).toContain('somewhere-else')
       expect(links?.detail).not.toContain('AI 自己写了')
+    })
+
+    it('a guest whose name is not in Latin script: the untouched draft still passes at release (the greeting is ours, not the writing)', async () => {
+      noCall()
+      tables.contacts = { display_name: '王小明', do_not_contact: false }
+      const drafted = await generateFollowUpDraft('c1', 'p1', { now: () => new Date('2026-11-10T00:00:00Z') })
+      if (!drafted.ok) throw new Error(drafted.message)
+      expect(drafted.draft.body).toContain('王小明')
+      const again = await checkFollowUpLetter('c1', 'p1', { subject: drafted.draft.subject, body: drafted.draft.body }, { now: () => new Date('2026-11-10T00:00:00Z') })
+      if (!again.ok) throw new Error(again.message)
+      expect(again.checks.filter((c) => c.status === 'fail')).toEqual([])
+      // Chinese written into the body by a person is still caught.
+      const edited = await checkFollowUpLetter('c1', 'p1', { subject: drafted.draft.subject, body: drafted.draft.body.replace('I hope our information reached you.', '希望您收到了我们的资料。') }, { now: () => new Date('2026-11-10T00:00:00Z') })
+      if (!edited.ok) throw new Error(edited.message)
+      expect(edited.checks.find((c) => c.id === 'spelling')?.status).toBe('fail')
+    })
+
+    it('withoutSystemFraming removes only what the system put there: its greeting, its sign-off, its link lines', () => {
+      const letter = `Kia ora 王,\n\nFirst paragraph.\n\n${LINK_LEAD_MANY}\nBest of China: https://www.example.com/t/best\nAll our tours: https://www.example.com/tours/china\n\nSee https://evil.example.org/x too.\n\nWarm regards,\nAlex\nAcme Tours`
+      const out = withoutSystemFraming(letter, { firstName: '王', config: cfg, systemUrls: ['https://www.example.com/t/best', 'https://www.example.com/tours/china'] })
+      expect(out).toBe('First paragraph.\n\nSee https://evil.example.org/x too.')
+      // A greeting a person rewrote is not ours any more: it stays and is checked.
+      expect(withoutSystemFraming('Dear 王先生,\n\nBody.\n\nWarm regards,\nAlex\nAcme Tours', { firstName: '王', config: cfg, systemUrls: [] })).toBe('Dear 王先生,\n\nBody.')
     })
 
     it('the same letter without the claim passes that check', async () => {
