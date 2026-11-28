@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { touchFacts, type TouchRow } from '../load'
+import { looksLikeNonEnquiry, touchFacts, type TouchRow } from '../load'
 import { delta, pointDaysAgo, pointFromSummary, FOLLOWUP_PROGRESS_JOB_NAME, SNAPSHOT_TIME_LABEL, type DayPoint } from '../history'
 import { emptyCounts } from '../groups'
 import { FOLLOWUP_PROGRESS_CRON, FOLLOWUP_PROGRESS_JOB } from '@/lib/inngest/functions/crm-followup-progress-daily'
@@ -66,6 +66,32 @@ describe('touchFacts', () => {
     const a = touchFacts([touch({ channel: 'meta_lead_form', source: 'meta_lead_form', direction: 'inbound' })])
     expect(a.enquiry).toBe('2026-11-20T00:00:00Z')
     expect(a.guest).toBeNull()
+  })
+})
+
+describe('looksLikeNonEnquiry', () => {
+  const bulk = { stage: 'new', primary_email: 'noreply@mailer.example.com', display_name: 'Example Newsletter' }
+  it('an untouched contact with a machine-looking sender is not a guest', () => {
+    expect(looksLikeNonEnquiry(bulk, { enquiry: null, staff: null })).toBe(true)
+  })
+  it('never drops someone who filled a form, whom we contacted, or whom a person moved on', () => {
+    expect(looksLikeNonEnquiry(bulk, { enquiry: '2026-11-20T00:00:00Z', staff: null })).toBe(false)
+    expect(looksLikeNonEnquiry(bulk, { enquiry: null, staff: '2026-11-20T00:00:00Z' })).toBe(false)
+    expect(looksLikeNonEnquiry({ ...bulk, stage: 'contacted' }, { enquiry: null, staff: null })).toBe(false)
+  })
+  it('an ordinary address is a guest', () => {
+    expect(looksLikeNonEnquiry({ stage: 'new', primary_email: 'mary.smith@gmail.com', display_name: 'Mary Smith' }, { enquiry: null, staff: null })).toBe(false)
+  })
+})
+
+describe('the channel of the latest guest message', () => {
+  it('follows the latest message, not the last row read', () => {
+    const a = touchFacts([
+      touch({ direction: 'inbound', channel: 'phone', source: 'twilio', occurred_at: '2026-11-25T00:00:00Z', metadata: { outcome: 'missed_inbound' } }),
+      touch({ direction: 'inbound', occurred_at: '2026-11-21T00:00:00Z' }),
+    ])
+    expect(a.guest).toBe('2026-11-25T00:00:00Z')
+    expect(a.guestChannel).toBe('phone')
   })
 })
 

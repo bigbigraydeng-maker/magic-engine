@@ -16,6 +16,8 @@ import { ENQUIRY_FORM_CHANNELS, isMeTestContact } from '@/lib/crm/enquiry-daily-
 import { isAutomatedTouch } from '@/lib/crm/automated-touch'
 import { contactKindOf, isSystemAccountName, readDomainRules, type DomainRules } from '@/lib/crm/contact-kind'
 import { isAutoReply } from '@/lib/microsoft/auto-reply'
+import { hasHumanProgressed } from '@/lib/crm/contact-list-view'
+import { senderShapeOf } from '@/lib/crm/enquiry-screen/sender-shape'
 import { countGroups, groupOf, type GroupConfig, type GroupCounts, type GroupVerdict, type GuestFacts, DEFAULT_GROUP_CONFIG } from './groups'
 
 const DAY_MS = 86_400_000
@@ -75,6 +77,8 @@ export interface FollowupProgress {
 /** Contact id → the verdict, for callers that need names per group later. */
 export interface FollowupProgressDetail extends FollowupProgress {
   verdicts: Map<string, GroupVerdict>
+  /** Contact id → when the guest last filled a form / last spoke, for callers that list a group in order. */
+  dates: Map<string, { lastEnquiryAt: string | null; lastGuestMessageAt: string | null }>
 }
 
 function later(a: string | null, b: string): string {
@@ -103,17 +107,20 @@ function isEngagement(t: TouchRow): boolean {
   return t.direction === 'inbound' && (engagementFromMetadata(t.metadata) !== null || t.source === 'mailchimp')
 }
 
-export interface Acc { staff: string | null; guest: string | null; enquiry: string | null; engaged: string | null; dnc: DncTouch[] }
+export interface Acc { staff: string | null; guest: string | null; guestChannel: string | null; enquiry: string | null; engaged: string | null; dnc: DncTouch[] }
 
 /** One pass over a guest's touchpoints → the dated facts the groups read. Exported for tests. */
 export function touchFacts(touches: readonly TouchRow[]): Acc {
-  const a: Acc = { staff: null, guest: null, enquiry: null, engaged: null, dnc: [] }
+  const a: Acc = { staff: null, guest: null, guestChannel: null, enquiry: null, engaged: null, dnc: [] }
   for (const t of touches) {
     const outcome = typeof t.metadata?.outcome === 'string' ? t.metadata.outcome : null
     a.dnc.push({ outcome, flagged: t.metadata?.do_not_contact === true, occurredAt: t.occurred_at })
     if (isEnquiry(t)) a.enquiry = later(a.enquiry, t.occurred_at)
     else if (isEngagement(t)) a.engaged = later(a.engaged, t.occurred_at)
-    else if (isGuestMessage(t)) a.guest = later(a.guest, t.occurred_at)
+    else if (isGuestMessage(t) && later(a.guest, t.occurred_at) === t.occurred_at) {
+      a.guest = t.occurred_at
+      a.guestChannel = t.channel
+    }
     // A call the guest made and we answered is both: the guest spoke and a person on our side took it.
     if (isHumanFollowup({ channel: t.channel, direction: t.direction, occurredAt: t.occurred_at, source: t.source, metadata: t.metadata })) {
       a.staff = later(a.staff, t.occurred_at)
@@ -200,6 +207,17 @@ function bookIndex(book: { stages: StageRow[]; bookings: Array<{ contact_id: str
   return { stageOf, booked: new Set(book.bookings.map((b) => b.contact_id)), touchesOf, emailsOf, hasPhone, rules: book.rules }
 }
 
+/**
+ * A sender that does not look like a guest enquiring (bulk mail, supplier notice, sales pitch, platform account).
+ * Only for a contact nobody has touched in any way: no person moved the stage on, the contact never filled a form,
+ * and we never called or wrote. That is the same narrow range as the "今天先联系" list's own rule
+ * (`demoteNonEnquirySender`, new-and-untouched only): a guest who enquired is never dropped for an odd address.
+ */
+export function looksLikeNonEnquiry(c: { stage: string | null; primary_email: string | null; display_name: string | null }, a: Pick<Acc, 'enquiry' | 'staff'>): boolean {
+  if (a.enquiry !== null || a.staff !== null || hasHumanProgressed(c.stage)) return false
+  return senderShapeOf({ email: c.primary_email, displayName: c.display_name }) !== null
+}
+
 function guestFacts(c: ContactRow, a: Acc, index: BookIndex, qualified: ReadonlySet<string>, now: Date): GuestFacts {
   const st = c.stage === null ? undefined : index.stageOf.get(c.stage)
   const emails = [...(index.emailsOf.get(c.id) ?? [])]
@@ -208,7 +226,7 @@ function guestFacts(c: ContactRow, a: Acc, index: BookIndex, qualified: Readonly
   return {
     doNotContact: isDoNotContact(c.do_not_contact === true, a.dnc),
     // Same judgement as the "今天先联系" list: by email domain, by system-account name, by the test-lead name.
-    notGuest: contactKindOf(emails, index.rules) !== 'retail' || isSystemAccountName(c.display_name) || isMeTestContact(c.display_name),
+    notGuest: contactKindOf(emails, index.rules) !== 'retail' || isSystemAccountName(c.display_name) || isMeTestContact(c.display_name) || looksLikeNonEnquiry(c, a),
     hasActiveBooking: index.booked.has(c.id),
     stage: c.stage,
     stageAction: st?.action ?? null,
@@ -220,6 +238,7 @@ function guestFacts(c: ContactRow, a: Acc, index: BookIndex, qualified: Readonly
     hasPhone: nonEmpty(c.primary_phone) || index.hasPhone.has(c.id),
     lastStaffAt: a.staff,
     lastGuestMessageAt: a.guest,
+    lastGuestMessageChannel: a.guestChannel,
     lastEnquiryAt: a.enquiry,
     lastEngagedAt: a.engaged,
   }
@@ -238,12 +257,18 @@ export async function loadFollowupProgress(
 
   const index = bookIndex(book)
   const verdicts = new Map<string, GroupVerdict>()
+  const dates: FollowupProgressDetail['dates'] = new Map()
   const staffWeek = new Set<string>()
   const repliedWeek = new Set<string>()
   const enquiryWeek = new Set<string>()
   for (const c of book.contacts) {
     const a = touchFacts(index.touchesOf.get(c.id) ?? [])
-    verdicts.set(c.id, groupOf(guestFacts(c, a, index, book.qualified, now), now, cfg))
+    const verdict = groupOf(guestFacts(c, a, index, book.qualified, now), now, cfg)
+    verdicts.set(c.id, verdict)
+    dates.set(c.id, { lastEnquiryAt: a.enquiry, lastGuestMessageAt: a.guest })
+    // The week's numbers count guests: people in the follow-up work or already booked. Staff, trade partners,
+    // sales pitches and closed contacts are not "guests who wrote".
+    if (!verdict.inScope && verdict.why !== 'booked') continue
     if (a.staff !== null && Date.parse(a.staff) >= sinceMs) staffWeek.add(c.id)
     if (a.guest !== null && Date.parse(a.guest) >= sinceMs) repliedWeek.add(c.id)
     if (a.enquiry !== null && Date.parse(a.enquiry) >= sinceMs) enquiryWeek.add(c.id)
@@ -264,5 +289,6 @@ export async function loadFollowupProgress(
       takenByAi: new Set(weekEvents.takeovers.map((t) => t.contact_id)).size,
     },
     verdicts,
+    dates,
   }
 }

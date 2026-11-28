@@ -32,6 +32,7 @@ import { adsServicePauseNotify } from './ads-service-pause-notify'
 import { crmLeadFollowupDigest } from './crm-lead-followup-digest'
 import { crmEnquiryDailyDigest } from './crm-enquiry-daily-digest'
 import { crmFollowupProgressDaily } from './crm-followup-progress-daily'
+import { crmFollowupWeeklyReport } from './crm-followup-weekly-report'
 import { adsAutonomySyncFunction } from './ads-autonomy-sync'
 import { adsCampaignBudgetDecrease } from './ads-campaign-budget'
 import { adsO1BudgetScale } from './ads-o1-budget-scale'
@@ -108,6 +109,7 @@ export const cloudFunctions = [
   crmLeadFollowupDigest,
   crmEnquiryDailyDigest,
   crmFollowupProgressDaily,
+  crmFollowupWeeklyReport,
   adsAutonomySyncFunction,
   adsCampaignBudgetDecrease,
   adsO1BudgetScale,
